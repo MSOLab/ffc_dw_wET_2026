@@ -19,19 +19,19 @@ from ffc_ddw_sum_et.solution.ffc_schedule import (
     validate_schedule as new_validate_schedule,
 )
 
-from .reference_impl.schedule_lite import (
+from ..reference_impl.schedule_lite import (
     HybridFlowshopLiteSchedule,
 )
-from .reference_impl.schedule_lite import (
+from ..reference_impl.schedule_lite import (
     get_bottleneck_stage_job_sequence as old_get_bottleneck_stage_job_sequence,
 )
-from .reference_impl.schedule_lite import (
+from ..reference_impl.schedule_lite import (
     get_first_stage_start_sequence as old_get_first_stage_start_sequence,
 )
-from .reference_impl.schedule_lite import (
+from ..reference_impl.schedule_lite import (
     get_midpoint_sequence as old_get_midpoint_sequence,
 )
-from .reference_impl.schedule_lite import (
+from ..reference_impl.schedule_lite import (
     validate_schedule as old_validate_schedule,
 )
 

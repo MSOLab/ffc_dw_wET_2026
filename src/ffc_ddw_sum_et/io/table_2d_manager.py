@@ -3,8 +3,8 @@ from typing import Hashable, Self, TextIO, Type
 
 import pandas as pd
 
-from ..type_defs import ScalarTV
 from .df_manager import DfManager
+from .typing import ScalarTV
 
 
 class Table2DManager(DfManager):

@@ -1,6 +1,6 @@
 from typing import TextIO, Type
 
-from ..type_defs import ScalarTV
+from .typing import ScalarTV
 
 
 class TextDataParser:

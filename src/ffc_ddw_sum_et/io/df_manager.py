@@ -1,10 +1,11 @@
+from os import PathLike
 from pathlib import Path
 from typing import Self, TextIO, Type, cast
 
 import pandas as pd
 
-from ..type_defs import ScalarTV, scalar_type_set
 from .text_data_parser import TextDataParser
+from .typing import ScalarTV, scalar_type_set
 
 
 class DfManager:
@@ -57,6 +58,7 @@ class DfManager:
     def col_count(self) -> int:
         return len(self.df.columns)
 
-    def to_csv(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.df.to_csv(path, index=False)
+    def to_csv(self, path: PathLike[str] | str) -> None:
+        normalized_path = Path(path)
+        normalized_path.parent.mkdir(parents=True, exist_ok=True)
+        self.df.to_csv(normalized_path, index=False)

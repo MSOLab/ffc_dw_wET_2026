@@ -4,8 +4,7 @@ from typing import Generic, Self, TextIO, Type
 
 import pandas as pd
 
-from ...io import Table2DManager
-from ...type_defs import NumericTV, ScalarTV, numeric_type_set
+from ...io import NumericTV, ScalarTV, Table2DManager, numeric_type_set
 
 
 class JobStageProcessingTimeManager(Table2DManager, Generic[NumericTV]):
