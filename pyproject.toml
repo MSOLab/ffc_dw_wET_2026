@@ -9,20 +9,13 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["setuptools>=69", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.11.2,<0.12"]
+build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
 ]
-
-[tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["ffc_ddw_sum_et*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
