@@ -24,7 +24,6 @@ class DfManager:
         self._on_df_updated()
 
     def _on_df_updated(self) -> None:
-        """Hook for subclasses to clear/rebuild derived caches after df replacement."""
         return None
 
     def __repr__(self) -> str:
@@ -40,19 +39,6 @@ class DfManager:
         name: str = "DfManager",
         transpose: bool = False,
     ) -> Self:
-        """Create a DfManager instance from a text stream.
-
-        Args:
-            stream (TextIO): Input text stream.
-            row_count (int): Number of rows to read from the stream.
-            dtype (Type[ScalarTV], optional): Data type to cast the values to. Defaults to int.
-            sep (str | None, optional): Column separator. Defaults to any whitespace.
-            name (str): The name of the table. Defaults to "DfManager".
-            transpose (bool): Whether to transpose the DataFrame after reading. Defaults to False.
-
-        Returns:
-            DfManager: instance with parsed table.
-        """
         _dtype = dtype or int
         if _dtype not in scalar_type_set:
             raise TypeError(f"Expected dtype to be a scalar type, got '{_dtype}'")

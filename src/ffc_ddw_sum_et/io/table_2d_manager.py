@@ -36,12 +36,6 @@ class Table2DManager(DfManager):
 
     @cached_property
     def col_idx_2_row_idx_2_value_map(self) -> dict[int, dict[Hashable, ScalarTV]]:
-        """
-        Create a mapping from column index to row index and value.
-
-        Returns:
-            dict: Column index -> row index -> value.
-        """
         return {
             col_idx: col_series.to_dict()
             for col_idx, (_, col_series) in enumerate(self.df.items())
@@ -51,12 +45,6 @@ class Table2DManager(DfManager):
     def col_name_2_row_idx_2_value_map(
         self,
     ) -> dict[Hashable, dict[Hashable, ScalarTV]]:
-        """
-        Create a mapping from column name to row index and value.
-
-        Returns:
-            dict: Column name -> row index -> value.
-        """
         return {
             col_name: col_series.to_dict() for col_name, col_series in self.df.items()
         }

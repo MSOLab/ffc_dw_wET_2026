@@ -13,16 +13,12 @@ class TextDataParser:
             raise EOFError("Unexpected end of file while reading data.")
         return line.strip()
 
-    # Line as a value
-
     @staticmethod
     def strip_a_typed_value(stream: TextIO, dtype: Type[ScalarTV]) -> ScalarTV:
         try:
             return dtype(TextDataParser.strip_a_line(stream))
         except ValueError as e:
             raise ValueError(f"Failed to convert line to {dtype.__name__}: {e}") from e
-
-    # Line as a list
 
     @staticmethod
     def strip_a_list(stream: TextIO, sep: str | None = None) -> list[str]:
@@ -33,8 +29,6 @@ class TextDataParser:
         stream: TextIO, dtype: Type[ScalarTV], sep: str | None = None
     ) -> list[ScalarTV]:
         return [dtype(x) for x in TextDataParser.strip_a_list(stream, sep=sep)]
-
-    # Multiple lines as a list of lists
 
     @staticmethod
     def strip_list_of_a_typed_list(

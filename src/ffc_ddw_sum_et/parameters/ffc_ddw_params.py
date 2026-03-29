@@ -1,6 +1,6 @@
 from typing import TextIO
 
-from src.io import TextDataParser
+from ..io import TextDataParser
 
 from .base.job_stage_p import JobStageProcessingTimeManager
 from .ffc_params import FFcParameters
