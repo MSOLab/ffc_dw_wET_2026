@@ -7,12 +7,22 @@ can pick up the same architectural intent.
 
 - IO extraction and import rules:
   `docs/architecture/io-principles.md`
+- Algorithm execution contract rules:
+  `docs/architecture/algorithm-principles.md`
 
 ## Working Agreement
 
 - If a change touches `src/ffc_ddw_sum_et/io/` or code that imports from it,
   read `docs/architecture/io-principles.md` first.
+- If a change touches `src/ffc_ddw_sum_et/algorithm/` or code that imports from
+  it, read `docs/architecture/algorithm-principles.md` first.
 - Treat the IO subtree as an extractable package candidate. Avoid introducing
   new dependencies from `io` into parent or sibling domain packages.
+- Treat the algorithm boundary as a stable execution contract candidate. Avoid
+  introducing `Launcher`, `Reporter`, or report-orchestration concerns into
+  `Algorithm`, `AlgSpec`, or `AlgRecord` code before those contracts are
+  defined.
 - Prefer changing public imports through `ffc_ddw_sum_et.io` instead of
   importing deep internal modules from outside the IO subtree.
+- Prefer changing public imports through `ffc_ddw_sum_et.algorithm` instead of
+  importing deep internal modules from outside the algorithm subtree.
