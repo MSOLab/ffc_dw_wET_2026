@@ -26,12 +26,11 @@ Inside `src/ffc_ddw_sum_et/io/`, imports should only point to:
 - third-party packages that are truly IO-related, such as `pandas`,
 - other modules inside `src/ffc_ddw_sum_et/io/`.
 
-Do not introduce new imports from `io` into:
+Inside `io`, do not import from:
 
-- `ffc_ddw_sum_et.type_defs`,
 - `ffc_ddw_sum_et.parameters`,
-- `ffc_ddw_sum_et.solution`,
 - `ffc_ddw_sum_et.algorithm`,
+- `ffc_ddw_sum_et.solution`,
 - any other parent or sibling domain package.
 
 If `io` needs a concept from another layer, that is a design smell. Prefer
@@ -171,7 +170,7 @@ be treated as an intentional tradeoff.
 
 When editing or adding IO code:
 
-- do not add new imports from `io` to parent or sibling packages,
+- do not add imports of parent or sibling packages inside `io`,
 - prefer adding new shared IO types to `io/typing.py` rather than the project
   root,
 - keep runtime validation helpers near the implementation that uses them,
@@ -183,8 +182,9 @@ When editing or adding domain code:
 - importing from `ffc_ddw_sum_et.io` is acceptable,
 - importing from deep IO internals should be avoided,
 - domain typing should stay in the domain layer,
-- domain interpretation should not be pushed down into IO helpers unless reuse
-  outside this project is still plausible.
+- domain interpretation should not be pushed down into IO helpers; if something
+feels reusable across projects, check first whether it is truly generic or just
+happens to recur in scheduling contexts.
 
 ## Migration Heuristic
 

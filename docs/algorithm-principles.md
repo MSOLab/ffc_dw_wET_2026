@@ -348,7 +348,7 @@ Preferred dependency direction:
 - reporting depends on `AlgRecord`,
 - not the reverse.
 
-### Rule 14: outside code should prefer the public algorithm API
+### Rule 17: outside code should prefer the public algorithm API
 
 When this contract becomes code, outside packages should prefer imports from
 the public algorithm package surface, such as `ffc_ddw_sum_et.algorithm`,
@@ -357,7 +357,7 @@ instead of reaching into deep internal modules.
 This keeps future refactors possible without forcing repository-wide import
 rewrites.
 
-### Rule 15: do not let reporting concerns leak into algorithm internals
+### Rule 18: do not let reporting concerns leak into algorithm internals
 
 Avoid adding fields, callbacks, or dependencies to algorithm code just because
 they make one report easier to build.
