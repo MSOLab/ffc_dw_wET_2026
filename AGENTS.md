@@ -3,6 +3,13 @@
 This repository keeps long-lived coding rules in Markdown so future conversations
 can pick up the same architectural intent.
 
+## Working conventions
+
+- Prefer `uv run ...` for Python execution.
+  - Use `uv run python` instead of `python3` or just `python`.
+- Run `uv run ruff check` after code changes.
+- Run `uv run ruff format` when formatting is needed.
+
 ## Architecture Docs
 
 - IO extraction and import rules:
