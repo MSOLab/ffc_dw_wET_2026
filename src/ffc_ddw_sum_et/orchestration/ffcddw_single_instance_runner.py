@@ -59,28 +59,6 @@ class FFcDDWSingleInstanceRunner(
     def run(self):
         self._run_error: str | None = None
 
-        # TODO: remove this temporary debug prints
-        logger.info("Running instance %s", self.ins_name)
-        logger.info("Job count: %d", len(self.instance.job_id_list))
-        logger.info("Stage count: %d", len(self.instance.stage_id_list))
-        logger.info("Machine count: %d", sum(self.instance.machine_count_per_stage))
-        logger.info("Processing time:")
-        for job in self.instance.job_id_list:
-            times = [
-                int(self.instance.job_2_stage_2_p_map[job][stage])
-                for stage in self.instance.stage_id_list
-            ]
-            logger.info("  Job %s: %s", job, times)
-        logger.info("Earliness and tardiness weights:")
-        for job in self.instance.job_id_list:
-            ewt = self.instance.job_2_ewt_map[job]
-            twt = self.instance.job_2_twt_map[job]
-            logger.info("  Job %s: %d, %d", job, ewt, twt)
-        logger.info("Due date windows:")
-        for job in self.instance.job_id_list:
-            window = self.instance.job_2_due_window_map[job]
-            logger.info("  Job %s: %d, %d", job, window[0], window[1])
-
         try:
             if self.mode == RunMode.FULL_RUN:
                 self.ctrlr = self.get_controller()

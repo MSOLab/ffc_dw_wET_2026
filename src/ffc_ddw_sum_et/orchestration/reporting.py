@@ -21,8 +21,8 @@ from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceR
 logger = logging.getLogger(__name__)
 
 
-def _first_line(text: str | None) -> str | None:
-    """Return the trailing non-empty line, or None when text is empty."""
+def _last_non_empty_line(text: str | None) -> str | None:
+    """Return the last non-empty line, or None when text is empty."""
     if not text:
         return None
     lines = [line for line in text.strip().splitlines() if line.strip()]
@@ -69,19 +69,19 @@ class FFcDDWMultiScenarioRunner(
                 if i < len(self.scenario_names)
                 else f"scenario_{i + 1}"
             )
-            logging.info(
-                f"--- Starting Scenario {i + 1}/{runner_cnt}: {scenario_name} ---"
+            logger.info(
+                "--- Starting Scenario %d/%d: %s ---", i + 1, runner_cnt, scenario_name
             )
             try:
                 result = multi_instance_runner.run()
                 self.results.append(result)
             except Exception:
-                logging.error(
-                    f"Error in scenario {i + 1}: {scenario_name}", exc_info=True
+                logger.error(
+                    "Error in scenario %d: %s", i + 1, scenario_name, exc_info=True
                 )
                 self.results.append(None)
-            logging.info(
-                f"--- Finished Scenario {i + 1}/{runner_cnt}: {scenario_name} ---"
+            logger.info(
+                "--- Finished Scenario %d/%d: %s ---", i + 1, runner_cnt, scenario_name
             )
         return self.post_run_process()
 
@@ -164,7 +164,7 @@ class FFcDDWReporter:
                             "has_incumbent": ir.has_incumbent,
                             "report_count": ir.report_count,
                             "method_call_counts": json.dumps(ir.method_call_counts),
-                            "error": _first_line(ir.error),
+                            "error": _last_non_empty_line(ir.error),
                         }
                     )
         logger.info("Summary CSV written to %s", path)
