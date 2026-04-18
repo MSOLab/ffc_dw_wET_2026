@@ -227,8 +227,8 @@ def test_average_time_between_start_and_completion() -> None:
 
 def test_none_for_unscheduled_job() -> None:
     """Verify None is returned for jobs with no flow (edge case)."""
-    # Build a real solver, solve it, then manually clear the flow data
-    # to simulate unscheduled jobs.
+    # Build a real solver, solve it, then clear the arc index so the
+    # extraction methods see no flow for any job.
     solver = ParallelMachinePreemptionMcf.from_instance(
         _make_instance(
             jobs=["j0", "j1"],
@@ -243,38 +243,20 @@ def test_none_for_unscheduled_job() -> None:
     solver.solve()
     assert solver.is_optimal()
 
-    # Clear all flow to simulate unscheduled jobs
     solver.arc_index_job_time = {}
 
-    # Now call the map methods directly by reading the x_val logic
-    x_val: dict[str, dict[int, int]] = {j: {} for j in solver.calJ}
-    for (j, t), arc_idx in solver.arc_index_job_time.items():
-        assert solver.mcf is not None
-        flow = solver.mcf.flow(arc_idx)
-        if flow > 0:
-            x_val[j][t] = flow
+    assert solver.get_variable_value_dict() == {"j0": {}, "j1": {}}
+    assert solver.get_job_2_start_time_map() == {"j0": None, "j1": None}
+    assert solver.get_job_2_completion_time_map() == {"j0": None, "j1": None}
+    assert solver.get_job_2_average_time_map() == {"j0": None, "j1": None}
 
-    assert x_val == {"j0": {}, "j1": {}}
 
-    # Verify the None-return logic works for empty x_val
-    starts: dict[str, int | None] = {}
-    for j in solver.calJ:
-        starts[j] = min(x_val[j].keys()) if x_val[j] else None
-    assert starts["j0"] is None
-    assert starts["j1"] is None
+def test_get_variable_value_dict_requires_optimal() -> None:
+    solver = ParallelMachinePreemptionMcf()
+    solver.status_optimal = False
 
-    completions: dict[str, int | None] = {}
-    for j in solver.calJ:
-        completions[j] = max(x_val[j].keys()) if x_val[j] else None
-    assert completions["j0"] is None
-    assert completions["j1"] is None
-
-    avgs: dict[str, float | None] = {}
-    for j in solver.calJ:
-        times = list(x_val[j].keys())
-        avgs[j] = sum(times) / len(times) if times else None
-    assert avgs["j0"] is None
-    assert avgs["j1"] is None
+    with pytest.raises(AssertionError, match="solve\\(\\) must succeed"):
+        solver.get_variable_value_dict()
 
 
 # --- Machine capacity ---

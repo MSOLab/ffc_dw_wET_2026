@@ -107,10 +107,6 @@ class ParallelMachinePreemptionMcf:
     def _build_mcf(self) -> None:
         mcf = SimpleMinCostFlow()
 
-        # Nodes
-        self.source_id = 0
-        self.sink_id = 1
-
         # Job nodes
         self.job_node_id = {j: 2 + i for i, j in enumerate(self.calJ)}
         # Time nodes
@@ -166,6 +162,9 @@ class ParallelMachinePreemptionMcf:
 
     def get_variable_value_dict(self) -> dict[str, dict[int, int]]:
         """Get a dict of variable values: x[j][t] = flow on arc (j,t)."""
+        assert self.status_optimal, (
+            "solve() must succeed before get_variable_value_dict()"
+        )
         assert self.mcf is not None
         x_val: dict[str, dict[int, int]] = {j: {} for j in self.calJ}
         for (j, t), arc_idx in self.arc_index_job_time.items():
