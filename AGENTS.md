@@ -33,3 +33,13 @@ can pick up the same architectural intent.
   importing deep internal modules from outside the IO subtree.
 - Prefer changing public imports through `ffc_ddw_sum_et.algorithm` instead of
   importing deep internal modules from outside the algorithm subtree.
+
+## Deferred Design Notes
+
+- `docs/TODO.md` collects refactor ideas that are deliberately deferred
+  (YAGNI today but worth capturing so the reasoning isn't re-derived).
+- Before proposing a refactor, check `docs/TODO.md` to see if it has
+  already been considered — respect the "When to act" condition.
+- When a design idea is agreed to be deferred rather than acted on,
+  append it to `docs/TODO.md` with **Why** and **When to act** fields.
+- Do not execute TODO items autonomously — they are deferred by intent.

@@ -79,8 +79,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             raise RuntimeError(f"MCF not optimal for instance {self.instance.name}")
 
         elapsed = self.timer.elapsed_sec - start_elapsed
-        return SubroutineReport(
+        report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=None,
             obj_bound=float(mcf.get_obj_value()),
         )
+        self.solution_manager.register(report, None)
+        return report
