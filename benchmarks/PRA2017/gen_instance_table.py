@@ -70,7 +70,7 @@ def main() -> None:
 
     rows = []
     for row in match_rows:
-        ins_index = f"{int(row['ins_index']):04d}"
+        ins_index = f"{int(row[COLHEAD_INS_INDEX]):04d}"
         name = row["ffc_ddw_sum_et_filename"]
         n, c, total_mc_count, T, R, W = _parse_filename(name)
         bks = _read_bks(BEST_SEQ_DIR / name)

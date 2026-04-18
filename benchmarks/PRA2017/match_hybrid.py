@@ -58,7 +58,7 @@ if __name__ == "__main__":
     print("Building hybridflowshop index…")
     index = build_hybrid_index(hybrid_dir)
 
-    rows: list[tuple[int, str, str]] = []
+    rows: list[tuple[str, str, str]] = []
     unmatched: list[str] = []
     for pra_file in sorted(pra_dir.iterdir()):
         if pra_file.suffix != ".txt":
@@ -67,7 +67,7 @@ if __name__ == "__main__":
         if num is None:
             unmatched.append(pra_file.name)
         else:
-            rows.append((num - 1, pra_file.name, f"{num}.txt"))
+            rows.append((f"{num - 1:04d}", pra_file.name, f"{num}.txt"))
 
     ins_indices = [r[0] for r in rows]
     if len(ins_indices) != len(set(ins_indices)):
