@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pandas>=3.0.1",
+    "routix>=0.0.16",
 ]
 
 [build-system]
