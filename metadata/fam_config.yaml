@@ -4,11 +4,13 @@
 run_mode: FULL_RUN        # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [0, 1, 2]  # Optional: restrict to specific indices (omit for all)
 
 output_dir: output
 
 # Number of parallel workers for instance execution (ProcessPoolExecutor)
-instance_worker_cnt: 4
+# instance_worker_cnt: 4
 
 scenarios:
   - name: fam_default

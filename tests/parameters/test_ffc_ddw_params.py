@@ -45,6 +45,15 @@ def test_from_pra_2017_data_parses_large_instance() -> None:
     }
     assert params.job_2_due_window_map["j00"] == (704, 762)
     assert params.job_2_due_window_map["j49"] == (606, 740)
+    gp = params.generation_params
+    assert gp is not None
+    assert gp.n == 50
+    assert gp.c == 5
+    assert gp.m == 3
+    assert gp.T_factor == 0.2
+    assert gp.R_factor == 0.2
+    assert gp.W_factor == 10
+    assert gp.rep == 0
 
 
 def test_from_pra_2017_data_parses_large_calibration_instance() -> None:
@@ -105,6 +114,7 @@ def test_from_pra_2017_data_parses_large_calibration_instance() -> None:
     }
     assert params.job_2_due_window_map["j00"] == (643, 771)
     assert params.job_2_due_window_map["j49"] == (835, 941)
+    assert params.generation_params is None  # non-standard filename
 
 
 def test_from_pra_2017_data_rejects_invalid_marker() -> None:

@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from routix.report import SubroutineReport, SubroutineReportStatistics
 from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
@@ -20,6 +19,14 @@ from ..parameters.ffc_ddw_params import FFcDueDateWindowParameters
 from .fam_single_instance_runner import FAMSingleInstanceRunner, InstanceResult
 
 logger = logging.getLogger(__name__)
+
+
+def _first_line(text: str | None) -> str | None:
+    """Return the trailing non-empty line, or None when text is empty."""
+    if not text:
+        return None
+    lines = [line for line in text.strip().splitlines() if line.strip()]
+    return lines[-1] if lines else None
 
 
 @dataclass
@@ -127,6 +134,7 @@ class FAMReporter:
         fieldnames = [
             "scenario_name",
             "instance_name",
+            "first_obj_value",
             "obj_value",
             "obj_bound",
             "elapsed_time",
@@ -134,6 +142,7 @@ class FAMReporter:
             "has_incumbent",
             "report_count",
             "method_call_counts",
+            "error",
         ]
         with open(path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -144,6 +153,7 @@ class FAMReporter:
                         {
                             "scenario_name": sc.name,
                             "instance_name": ir.instance_name,
+                            "first_obj_value": ir.first_obj_value,
                             "obj_value": ir.obj_value,
                             "obj_bound": ir.obj_bound,
                             "elapsed_time": round(ir.elapsed_time, 3),
@@ -151,62 +161,74 @@ class FAMReporter:
                             "has_incumbent": ir.has_incumbent,
                             "report_count": ir.report_count,
                             "method_call_counts": json.dumps(ir.method_call_counts),
+                            "error": _first_line(ir.error),
                         }
                     )
         logger.info("Summary CSV written to %s", path)
 
+    def _aggregate_scenario(self, sc: ScenarioResult) -> dict[str, Any]:
+        """Aggregate across instances within one scenario.
+
+        Intentionally does NOT call ``SubroutineReportStatistics`` on the per-
+        instance finals — that class expects one instance's trajectory, so its
+        ``improvementRatio`` output is meaningless across independent instances.
+        """
+        completed = [ir for ir in sc.instance_results if ir.obj_value is not None]
+        errored = [ir for ir in sc.instance_results if ir.error is not None]
+        obj_values = [float(ir.obj_value) for ir in completed]
+
+        improvement_ratios: list[float] = []
+        for ir in completed:
+            first = ir.first_obj_value
+            if first is None or first == 0:
+                continue
+            improvement_ratios.append((first - ir.obj_value) / first)
+
+        method_counts: dict[str, int] = defaultdict(int)
+        for ir in sc.instance_results:
+            for k, v in ir.method_call_counts.items():
+                method_counts[k] += v
+
+        return {
+            "scenarioName": sc.name,
+            "instanceCount": len(sc.instance_results),
+            "completedCount": len(completed),
+            "erroredCount": len(errored),
+            "totalElapsedTime": sum(ir.elapsed_time for ir in sc.instance_results),
+            "meanObjValue": sum(obj_values) / len(obj_values) if obj_values else None,
+            "minObjValue": min(obj_values) if obj_values else None,
+            "maxObjValue": max(obj_values) if obj_values else None,
+            "meanImprovementRatio": (
+                sum(improvement_ratios) / len(improvement_ratios)
+                if improvement_ratios
+                else None
+            ),
+            "methodCallCounts": dict(method_counts),
+        }
+
     def _write_statistics_json(self) -> None:
-        """Write per-scenario statistics as JSON."""
+        """Write per-scenario cross-instance aggregates as JSON."""
         for sc in self.scenario_results:
             if not sc.instance_results:
                 continue
-            reports = []
-            method_counts: dict[str, int] = defaultdict(int)
-            for ir in sc.instance_results:
-                reports.append(
-                    SubroutineReport(
-                        elapsed_time=ir.elapsed_time,
-                        obj_value=ir.obj_value,
-                        obj_bound=ir.obj_bound,
-                    )
-                )
-                for k, v in ir.method_call_counts.items():
-                    method_counts[k] += v
-
-            stats = SubroutineReportStatistics(
-                name=sc.name,
-                reports=reports,
-                method_call_counts=dict(method_counts),
-            )
+            data = self._aggregate_scenario(sc)
             path = self.output_dir / f"{sc.name}_statistics.json"
-            stats.to_json(path, is_maximize=False)
+            path.write_text(json.dumps(data, indent=2))
             logger.info("Statistics JSON written to %s", path)
 
     def _write_statistics_yaml(self) -> None:
-        """Write per-scenario statistics as YAML."""
+        """Write per-scenario cross-instance aggregates as YAML."""
+        try:
+            from routix.io import dump_yaml
+        except ImportError:
+            logger.warning("routix.io.dump_yaml not available, skipping YAML stats")
+            return
         for sc in self.scenario_results:
             if not sc.instance_results:
                 continue
-            reports = []
-            method_counts: dict[str, int] = defaultdict(int)
-            for ir in sc.instance_results:
-                reports.append(
-                    SubroutineReport(
-                        elapsed_time=ir.elapsed_time,
-                        obj_value=ir.obj_value,
-                        obj_bound=ir.obj_bound,
-                    )
-                )
-                for k, v in ir.method_call_counts.items():
-                    method_counts[k] += v
-
-            stats = SubroutineReportStatistics(
-                name=sc.name,
-                reports=reports,
-                method_call_counts=dict(method_counts),
-            )
+            data = self._aggregate_scenario(sc)
             path = self.output_dir / f"{sc.name}_statistics.yaml"
-            stats.to_yaml(path, is_maximize=False)
+            dump_yaml(data, path)
             logger.info("Statistics YAML written to %s", path)
 
     def _generate_gantt_charts(self) -> None:
@@ -304,12 +326,12 @@ class FAMReporter:
                 ax.set_title(f"Gantt Chart - {ir.instance_name} ({sc.name})")
                 ax.grid(True, axis="x", linestyle="--", alpha=0.3)
                 ax.invert_yaxis()
-                plt.tight_layout()
+                fig.subplots_adjust(left=0.1, right=0.98, top=0.92, bottom=0.1)
 
                 gantt_path = (
                     Path(ir.solution_path).parent / f"{ir.instance_name}_gantt.png"
                 )
-                fig.savefig(gantt_path, bbox_inches="tight", dpi=150)
+                fig.savefig(gantt_path, dpi=120)
                 plt.close(fig)
 
     def _write_excel_report(self) -> None:
@@ -384,25 +406,25 @@ class FAMReporter:
 
         row = 2
         for sc in self.scenario_results:
-            first_objs = [
-                ir.obj_value for ir in sc.instance_results if ir.obj_value is not None
-            ]
             for ir in sc.instance_results:
                 if ir.obj_value is None:
                     continue
+                first_obj = ir.first_obj_value
                 improvement = None
-                if first_objs and ir.obj_value != first_objs[0] and first_objs[0] != 0:
-                    improvement = round(
-                        (first_objs[0] - ir.obj_value) / first_objs[0] * 100, 2
-                    )
+                if (
+                    first_obj is not None
+                    and first_obj != 0
+                    and ir.obj_value != first_obj
+                ):
+                    improvement = round((first_obj - ir.obj_value) / first_obj * 100, 2)
                 stats_sheet.write_row(
                     f"A{row}",
                     [
                         ir.instance_name,
                         ir.obj_value,
-                        first_objs[0] if first_objs else None,
+                        first_obj,
                         ir.obj_bound,
-                        None,  # FAM doesn't produce bounds
+                        ir.first_obj_bound,
                         improvement,
                         round(ir.elapsed_time, 3),
                         ir.report_count,

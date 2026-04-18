@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from io import StringIO
 from typing import TextIO
 
@@ -8,10 +10,33 @@ from .base.job_stage_p import JobStageProcessingTimeManager
 from .ffc_params import FFcParameters
 
 
+@dataclass(frozen=True, kw_only=True)
+class InstanceParams:
+    """Generation parameters parsed from PRA2017 instance filename."""
+
+    n: int  # number of jobs
+    c: int  # number of stages
+    m: int  # machines per stage
+    T_factor: float  # due-date tightness factor (T)
+    R_factor: float  # due-date range factor (R)
+    W_factor: int  # due window width factor (W)
+    rep: int  # replication index
+
+
+# Matches: Instance_{n}_{c}_{m}_{beta1}_{beta2}_{cv}_Rep{rep}.txt
+# beta1/beta2 use comma as decimal separator (e.g. "0,2" → 0.2)
+_INSTANCE_NAME_RE = re.compile(
+    r"^Instance_(\d+)_(\d+)_(\d+)_(\d+,\d+)_(\d+,\d+)_(\d+)_Rep(\d+)\.txt$"
+)
+
+
 class FFcDueDateWindowParameters(FFcParameters):
     """Parsed parameters for the FFC with due date window constraints."""
 
     _job_2_due_window_map: dict[str, tuple[int, int]]
+    _job_2_ewt_map: dict[str, int]
+    _job_2_twt_map: dict[str, int]
+    _generation_params: InstanceParams | None
 
     def __init__(
         self,
@@ -21,16 +46,37 @@ class FFcDueDateWindowParameters(FFcParameters):
         stage_2_machines_map: dict[str, list[str]],
         p_manager: JobStageProcessingTimeManager[int],
         job_2_due_window_map: dict[str, tuple[int, int]],
+        job_2_ewt_map: dict[str, int] | None = None,
+        job_2_twt_map: dict[str, int] | None = None,
+        generation_params: InstanceParams | None = None,
     ) -> None:
         super().__init__(
             name, job_id_list, stage_id_list, stage_2_machines_map, p_manager
         )
         self._job_2_due_window_map = job_2_due_window_map.copy()
+        self._job_2_ewt_map = job_2_ewt_map.copy() if job_2_ewt_map else {}
+        self._job_2_twt_map = job_2_twt_map.copy() if job_2_twt_map else {}
+        self._generation_params = generation_params
 
     @property
     def job_2_due_window_map(self) -> dict[str, tuple[int, int]]:
         """Get a copy of the per-job due date window bounds."""
         return self._job_2_due_window_map.copy()
+
+    @property
+    def job_2_ewt_map(self) -> dict[str, int]:
+        """Get a copy of the per-job earliness weights (w^{-}_j)."""
+        return self._job_2_ewt_map.copy()
+
+    @property
+    def job_2_twt_map(self) -> dict[str, int]:
+        """Get a copy of the per-job tardiness weights (w^{+}_j)."""
+        return self._job_2_twt_map.copy()
+
+    @property
+    def generation_params(self) -> InstanceParams | None:
+        """Get the generation parameters parsed from the instance filename."""
+        return self._generation_params
 
     @classmethod
     def from_pra_data(cls, name: str, stream: TextIO) -> FFcDueDateWindowParameters:
@@ -132,13 +178,17 @@ class FFcDueDateWindowParameters(FFcParameters):
             raise ValueError(
                 f"Expected 'RELDUE' section after LBCmax, got '{rel_due_marker}'."
             )
-        for job_idx in range(job_count):
+        job_2_ewt_map: dict[str, int] = {}
+        job_2_twt_map: dict[str, int] = {}
+        for job_idx, job_id in enumerate(job_id_list):
             rel_due_row = TextDataParser.strip_a_typed_list(stream, int)
             if len(rel_due_row) != 4:
                 raise ValueError(
                     f"Expected 4 integers in RELDUE row {job_idx}, "
                     f"got {len(rel_due_row)}."
                 )
+            job_2_ewt_map[job_id] = rel_due_row[2]  # earliness weight
+            job_2_twt_map[job_id] = rel_due_row[3]  # tardiness weight
 
         ddw_marker = TextDataParser.strip_a_line(stream)
         if ddw_marker != "DDW":
@@ -154,14 +204,17 @@ class FFcDueDateWindowParameters(FFcParameters):
                     f"Expected 2 integers in DDW row {job_idx}, "
                     f"got {len(due_window_row)}."
                 )
-            window_start, window_end = due_window_row
-            if window_start > window_end:
+            d_lower, d_upper = due_window_row
+            if d_lower > d_upper:
                 raise ValueError(
-                    f"Expected DDW row {job_idx} to satisfy start <= end, "
-                    f"got {due_window_row}."
+                    "Expected DDW row "
+                    + str(job_idx)
+                    + " to satisfy d^{-}_j <= d^{+}_j, got "
+                    + str(due_window_row)
                 )
-            job_2_due_window_map[job_id] = (window_start, window_end)
+            job_2_due_window_map[job_id] = (d_lower, d_upper)
 
+        gen_params = cls._parse_instance_name(name)
         return cls(
             name,
             job_id_list,
@@ -169,4 +222,25 @@ class FFcDueDateWindowParameters(FFcParameters):
             stage_2_machines_map,
             processing_times,
             job_2_due_window_map,
+            job_2_ewt_map,
+            job_2_twt_map,
+            gen_params,
+        )
+
+    @staticmethod
+    def _parse_instance_name(name: str) -> InstanceParams | None:
+        """Parse generation parameters from a PRA2017 instance filename."""
+        match = _INSTANCE_NAME_RE.match(name)
+        if not match:
+            return None
+        n, c, m = (int(v) for v in match.groups()[:3])
+        beta1_str, beta2_str, cv_str, rep_str = match.groups()[3:7]
+        return InstanceParams(
+            n=n,
+            c=c,
+            m=m,
+            T_factor=float(beta1_str.replace(",", ".")),
+            R_factor=float(beta2_str.replace(",", ".")),
+            W_factor=int(cv_str),
+            rep=int(rep_str),
         )

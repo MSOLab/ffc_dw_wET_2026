@@ -217,8 +217,10 @@ class FAMDispatcher:
         for job_id in instance.job_id_list:
             completion_time = schedule.get_job_end_time(last_stage_id, job_id)
             due_lower, due_upper = instance.job_2_due_window_map[job_id]
-            sum_earliness += max(due_lower - completion_time, 0)
-            sum_tardiness += max(completion_time - due_upper, 0)
+            ewt = instance.job_2_ewt_map[job_id]
+            twt = instance.job_2_twt_map[job_id]
+            sum_earliness += ewt * max(due_lower - completion_time, 0)
+            sum_tardiness += twt * max(completion_time - due_upper, 0)
         return sum_earliness, sum_tardiness
 
     def _debug(self, spec: AlgSpec, msg: str, *args: object) -> None:

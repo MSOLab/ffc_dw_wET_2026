@@ -55,14 +55,20 @@ class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineR
         self.instance = instance
         self.solution_manager = FAMSolutionManager()
 
-    def run_fam(self, job_sequence: str | None = None) -> SubroutineReport:
-        """Step method: run FAMDispatcher and return a SubroutineReport."""
+    def run_fam(self, job_sequence: Sequence[str] | None = None) -> SubroutineReport:
+        """Step method: run FAMDispatcher and return a SubroutineReport.
+
+        Args:
+            job_sequence: Full permutation of instance job IDs. Must include every
+                instance job exactly once. When omitted, the instance's native
+                ``job_id_list`` order is used.
+        """
         start_elapsed = self.timer.elapsed_sec
 
-        if job_sequence is not None:
-            option = FAMOption(job_sequence=(job_sequence,))
-        else:
+        if job_sequence is None:
             option = FAMOption()
+        else:
+            option = FAMOption(job_sequence=tuple(job_sequence))
 
         spec = AlgSpec(
             instance=self.instance,
@@ -74,8 +80,12 @@ class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineR
         elapsed = self.timer.elapsed_sec - start_elapsed
 
         result = record.result
-        obj_value = result.obj_value if result else None
-        obj_bound = result.obj_bound if result else None
+        obj_value = (
+            float(result.obj_value) if result and result.obj_value is not None else None
+        )
+        obj_bound = (
+            float(result.obj_bound) if result and result.obj_bound is not None else None
+        )
 
         report = SubroutineReport(
             elapsed_time=elapsed,

@@ -2,12 +2,14 @@
 
 from .benchmark_loader import BenchmarkLoader
 from .controller import FAMSubroutineController
+from .fam_multi_instance_runner import FAMMultiInstanceRunner
 from .fam_single_instance_runner import FAMSingleInstanceRunner, InstanceResult
 from .reporting import FAMMultiScenarioRunner, FAMReporter, FinalResult, ScenarioResult
 from .solution_manager import FAMSolution, FAMSolutionManager
 
 __all__ = [
     "BenchmarkLoader",
+    "FAMMultiInstanceRunner",
     "FAMMultiScenarioRunner",
     "FAMReporter",
     "FAMSingleInstanceRunner",

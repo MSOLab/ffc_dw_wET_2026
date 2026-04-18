@@ -8,14 +8,12 @@ from pathlib import Path
 
 from routix.type_defs import RunMode
 
-from src.ffc_ddw_sum_et.orchestration.benchmark_loader import BenchmarkLoader
-from src.ffc_ddw_sum_et.orchestration.fam_multi_instance_runner import (
+from ffc_ddw_sum_et.orchestration import (
+    BenchmarkLoader,
     FAMMultiInstanceRunner,
-)
-from src.ffc_ddw_sum_et.orchestration.fam_single_instance_runner import (
+    FAMMultiScenarioRunner,
     FAMSingleInstanceRunner,
 )
-from src.ffc_ddw_sum_et.orchestration.reporting import FAMMultiScenarioRunner
 
 CONFIG_PATH = Path("metadata/fam_config.yaml")
 
@@ -29,12 +27,17 @@ def main() -> None:
 
     config = _load_config(CONFIG_PATH)
     mode = _parse_run_mode(config.get("run_mode", "FULL_RUN"))
-    instance_worker_cnt = config.get("instance_worker_cnt", 2)
+    instance_worker_cnt = config.get("instance_worker_cnt", 1)
 
     benchmark_dir = Path(config["benchmark_dir"])
+    ins_index_source = config.get("ins_index_source")
+    if ins_index_source:
+        ins_index_source = Path(ins_index_source)
     logger = logging.getLogger("ffc_ddw_sum_et.main")
     logger.info("Loading instances from %s", benchmark_dir)
-    instances = BenchmarkLoader(benchmark_dir).load_all()
+    loader = BenchmarkLoader(benchmark_dir, ins_index_source=ins_index_source)
+    ins_index_filter = config.get("ins_index")
+    instances = loader.load_all(ins_index=ins_index_filter)
     logger.info("Loaded %d instances", len(instances))
 
     scenario_configs = []
