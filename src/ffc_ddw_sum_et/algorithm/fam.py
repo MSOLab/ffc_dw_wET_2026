@@ -213,8 +213,8 @@ class FAMDispatcher:
         for job_id in instance.job_id_list:
             completion_time = schedule.get_job_end_time(last_stage_id, job_id)
             due_lower, due_upper = instance.job_2_due_window_map[job_id]
-            ewt = instance.job_2_ewt_map[job_id]
-            twt = instance.job_2_twt_map[job_id]
+            ewt = instance.job_2_ewt_map.get(job_id, 1)
+            twt = instance.job_2_twt_map.get(job_id, 1)
             sum_earliness += ewt * max(due_lower - completion_time, 0)
             sum_tardiness += twt * max(completion_time - due_upper, 0)
         return sum_earliness, sum_tardiness
