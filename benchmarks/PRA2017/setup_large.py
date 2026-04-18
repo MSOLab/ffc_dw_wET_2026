@@ -10,9 +10,16 @@ Usage:
 
 import re
 import sys
-from pathlib import Path
 
-HERE = Path(__file__).parent
+try:
+    from .metadata import COLHEAD_INS_INDEX, HERE
+except ImportError:
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from metadata import COLHEAD_INS_INDEX, HERE
+
 LARGE_DIR = HERE / "large"
 BEST_SEQ_FILE = HERE / "bestSeq_Large.txt"
 INSTANCE_NAME_FILE = HERE / "InstanceNameLarge.txt"
@@ -54,10 +61,14 @@ def create_instance_names() -> None:
         for expected_index in range(1440):
             header = f.readline()
             if not header:
-                raise RuntimeError(f"bestSeq_Large.txt ended early at index {expected_index}")
+                raise RuntimeError(
+                    f"bestSeq_Large.txt ended early at index {expected_index}"
+                )
             parsed = _parse_header(header)
             if parsed is None:
-                raise RuntimeError(f"Unrecognised header at index {expected_index}: {header!r}")
+                raise RuntimeError(
+                    f"Unrecognised header at index {expected_index}: {header!r}"
+                )
             seq_index, num_jobs, num_stages = parsed
             if seq_index != expected_index:
                 raise RuntimeError(
@@ -77,14 +88,32 @@ def create_instance_names() -> None:
     print(f"Verified 1440 entries. Written {INSTANCE_NAME_FILE.name}")
 
 
+def _load_ins_index_map() -> dict[str, int]:
+    import csv
+
+    csv_path = HERE / "pra2017_hybrid_match.csv"
+    if not csv_path.exists():
+        raise RuntimeError(
+            "pra2017_hybrid_match.csv not found — run match_hybrid.py first"
+        )
+    with csv_path.open(newline="") as f:
+        return {
+            row["ffc_ddw_sum_et_filename"]: int(row[COLHEAD_INS_INDEX])
+            for row in csv.DictReader(f)
+        }
+
+
 def split_best_seq() -> None:
     if not INSTANCE_NAME_FILE.exists():
         raise RuntimeError("InstanceNameLarge.txt not found — run 'create' first")
 
     names = INSTANCE_NAME_FILE.read_text().splitlines()
     if len(names) != 1440:
-        raise RuntimeError(f"InstanceNameLarge.txt has {len(names)} lines, expected 1440")
+        raise RuntimeError(
+            f"InstanceNameLarge.txt has {len(names)} lines, expected 1440"
+        )
 
+    ins_index_map = _load_ins_index_map()
     OUTPUT_DIR.mkdir(exist_ok=True)
 
     count = 0
@@ -98,8 +127,14 @@ def split_best_seq() -> None:
                 raise RuntimeError(f"Unrecognised header: {header!r}")
             index, _, num_stages = parsed
             seq_lines = [f.readline() for _ in range(num_stages)]
-            out_path = OUTPUT_DIR / names[index]
-            out_path.write_text(header + "".join(seq_lines))
+            filename = names[index]
+            ins_index = ins_index_map[filename]
+            m = _HEADER_RE.match(header)
+            corrected_header = (
+                header[: m.start(1)] + str(ins_index) + header[m.end(1) :]
+            )
+            out_path = OUTPUT_DIR / filename
+            out_path.write_text(corrected_header + "".join(seq_lines))
             count += 1
 
     print(f"Split {count} solution files to {OUTPUT_DIR.name}/")
