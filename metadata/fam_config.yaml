@@ -1,0 +1,18 @@
+# FAM experiment orchestration configuration
+# Ref: hybridflowshop/main.py orchestration pattern
+
+run_mode: FULL_RUN        # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+
+output_dir: output
+
+# Number of parallel workers for instance execution (ProcessPoolExecutor)
+instance_worker_cnt: 4
+
+scenarios:
+  - name: fam_default
+    timelimit: 300.0       # 5 minutes per instance
+    output_subdir: fam_default
+    subroutine_flow:
+      - method: run_fam
