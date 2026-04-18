@@ -9,6 +9,10 @@ ins_index: [0, 1, 2]  # Optional: restrict to specific indices (omit for all)
 
 output_dir: output
 
+# POST_PROCESS_ONLY target (pick one; full path wins if both are set):
+# analysis_dir_path: output/20260418T231308_268427
+# analysis_timestamp: 20260418T231308_268427
+
 # Number of parallel workers for instance execution (ProcessPoolExecutor)
 # instance_worker_cnt: 4
 

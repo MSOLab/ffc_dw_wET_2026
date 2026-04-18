@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+from routix.io.path import init_timestamped_working_dir
 from routix.type_defs import RunMode
 
 from ffc_ddw_sum_et.orchestration import (
@@ -52,7 +55,14 @@ def main() -> None:
         )
         scenario_names.append(sc.get("name", f"scenario_{len(scenario_configs)}"))
 
-    output_dir = Path(config.get("output_dir", "output"))
+    base_output_dir = Path(config.get("output_dir", "output"))
+    if mode == RunMode.POST_PROCESS_ONLY:
+        output_dir = _resolve_post_process_dir(config, base_output_dir)
+        logger.info("Post-processing existing output directory: %s", output_dir)
+    else:
+        output_dir = init_timestamped_working_dir(base_output_dir=base_output_dir)
+        logger.info("Run output directory: %s", output_dir)
+        shutil.copy2(CONFIG_PATH, output_dir / CONFIG_PATH.name)
     output_metadata = {"start_dt": datetime.now()}
 
     runner = FAMMultiScenarioRunner(
@@ -93,6 +103,36 @@ def _parse_run_mode(mode_str: str) -> RunMode:
         raise ValueError(
             f"Invalid run_mode: {mode_str}. Must be FULL_RUN, RESUME, or POST_PROCESS_ONLY"
         )
+
+
+def _resolve_post_process_dir(config: dict[str, Any], base_output_dir: Path) -> Path:
+    """Resolve the prior timestamped output directory for POST_PROCESS_ONLY.
+
+    Accepts either ``analysis_dir_path`` (full path) or ``analysis_timestamp``
+    (joined under ``output_dir``). Mirrors the pattern in
+    ``../hybridflowshop/main.py``.
+    """
+    analysis_dir_path = config.get("analysis_dir_path")
+    if analysis_dir_path:
+        path = Path(analysis_dir_path).expanduser()
+        if not path.is_dir():
+            raise FileNotFoundError(f"analysis_dir_path does not exist: {path}")
+        return path
+
+    analysis_timestamp = config.get("analysis_timestamp")
+    if analysis_timestamp:
+        path = base_output_dir / analysis_timestamp
+        if not path.is_dir():
+            raise FileNotFoundError(
+                f"analysis_timestamp not found under {base_output_dir}: "
+                f"{analysis_timestamp}"
+            )
+        return path
+
+    raise ValueError(
+        "POST_PROCESS_ONLY requires 'analysis_dir_path' or 'analysis_timestamp' "
+        "in the config YAML."
+    )
 
 
 if __name__ == "__main__":

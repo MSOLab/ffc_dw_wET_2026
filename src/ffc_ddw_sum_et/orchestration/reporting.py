@@ -128,9 +128,12 @@ class FAMReporter:
         self._generate_gantt_charts()
         self._write_excel_report()
 
+    def generate_summary_filename(self, extension: str) -> str:
+        return f"{self.output_dir.name}_summary.{extension}"
+
     def _write_summary_csv(self) -> None:
         """Write master summary CSV with all instance results."""
-        path = self.output_dir / "summary.csv"
+        path = self.output_dir / self.generate_summary_filename("csv")
         fieldnames = [
             "scenario_name",
             "instance_name",
@@ -334,6 +337,9 @@ class FAMReporter:
                 fig.savefig(gantt_path, dpi=120)
                 plt.close(fig)
 
+    def generate_report_filename(self, extension: str) -> str:
+        return f"{self.output_dir.name}_report.{extension}"
+
     def _write_excel_report(self) -> None:
         """Write Excel report with dashboard and raw data."""
         try:
@@ -342,7 +348,7 @@ class FAMReporter:
             logger.warning("xlsxwriter not available, skipping Excel report")
             return
 
-        path = self.output_dir / "report.xlsx"
+        path = self.output_dir / self.generate_report_filename("xlsx")
         workbook = xlsxwriter.Workbook(str(path))
 
         # Dashboard sheet
