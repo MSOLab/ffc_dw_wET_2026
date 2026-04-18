@@ -113,6 +113,33 @@ def test_empty_calT_raises() -> None:
         ParallelMachinePreemptionMcf.from_instance(instance)
 
 
+def test_partial_ewt_map_raises() -> None:
+    """A non-empty ewt map missing some jobs must raise, not silently default."""
+    instance = _make_instance(
+        ewt={"j0": 2},  # missing j1, j2
+        twt={"j0": 3, "j1": 3, "j2": 3},
+    )
+    with pytest.raises(ValueError, match="ewt weight map is partial"):
+        ParallelMachinePreemptionMcf.from_instance(instance)
+
+
+def test_partial_twt_map_raises() -> None:
+    instance = _make_instance(
+        ewt={"j0": 2, "j1": 2, "j2": 2},
+        twt={"j0": 3},  # missing j1, j2
+    )
+    with pytest.raises(ValueError, match="twt weight map is partial"):
+        ParallelMachinePreemptionMcf.from_instance(instance)
+
+
+def test_empty_weight_maps_default_to_one() -> None:
+    """Empty ewt/twt maps (e.g. from test fixtures) default to weight 1."""
+    instance = _make_instance(ewt={}, twt={})
+    solver = ParallelMachinePreemptionMcf.from_instance(instance)
+    solver.solve()
+    assert solver.is_optimal()
+
+
 # --- Solving ---
 
 

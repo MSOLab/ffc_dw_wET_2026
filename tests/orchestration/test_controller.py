@@ -78,3 +78,26 @@ def test_numpy_float_conversion() -> None:
     incumbent = controller.solution_manager.get_incumbent()
     assert incumbent is not None
     assert type(incumbent.obj_value) is float
+
+
+def test_run_mcf_lb_returns_bound_only_report() -> None:
+    controller = _make_controller(_make_instance())
+
+    report = controller.run_mcf_lb()
+
+    assert report.obj_value is None
+    assert report.obj_bound is not None
+    assert report.obj_bound >= 0
+    assert report.elapsed_time >= 0
+
+
+def test_run_mcf_lb_not_greater_than_fam() -> None:
+    """LB from MCF should be ≤ feasible FAM objective for the same instance."""
+    controller = _make_controller(_make_instance())
+
+    lb_report = controller.run_mcf_lb()
+    fam_report = controller.run_fam()
+
+    assert lb_report.obj_bound is not None
+    assert fam_report.obj_value is not None
+    assert lb_report.obj_bound <= fam_report.obj_value

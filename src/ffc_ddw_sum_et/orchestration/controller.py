@@ -9,6 +9,7 @@ from routix.report import SubroutineReport
 
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
+from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
 
 from .controller_core import FFcDDWSubroutineControllerCore
 from .solution_manager import FFcDDWSolution
@@ -62,3 +63,24 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self.solution_manager.register(report, fam_solution)
 
         return report
+
+    def run_mcf_lb(self) -> SubroutineReport:
+        """Step method: compute preemptive last-stage LB via min-cost flow.
+
+        Solves the Pm | r_j, pmtn | sum C_{jt} x_{jt} relaxation as a min-cost
+        flow problem; the optimal cost is a valid lower bound on the original
+        FFcDDW objective.
+        """
+        start_elapsed = self.timer.elapsed_sec
+
+        mcf = ParallelMachinePreemptionMcf.from_instance(self.instance)
+        mcf.solve()
+        if not mcf.is_optimal():
+            raise RuntimeError(f"MCF not optimal for instance {self.instance.name}")
+
+        elapsed = self.timer.elapsed_sec - start_elapsed
+        return SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=None,
+            obj_bound=float(mcf.get_obj_value()),
+        )

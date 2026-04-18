@@ -7,6 +7,26 @@ from ortools.graph.python.min_cost_flow import SimpleMinCostFlow
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
 
+def _resolve_weight_map(
+    raw: dict[str, int], jobs: list[str], kind: str
+) -> dict[str, int]:
+    """Return a weight map with an entry for every job.
+
+    An empty input map defaults every weight to 1 (matches FAM behavior).
+    A partial map is rejected — silently defaulting missing jobs would
+    produce an incorrect (still valid but loose) LB without the caller noticing.
+    """
+    if not raw:
+        return dict.fromkeys(jobs, 1)
+    missing = [j for j in jobs if j not in raw]
+    if missing:
+        raise ValueError(
+            f"{kind} weight map is partial; missing jobs: {missing[:5]}"
+            + ("..." if len(missing) > 5 else "")
+        )
+    return raw
+
+
 class ParallelMachinePreemptionMcf:
     """
     Pm | r_j, pmtn | sum{C_jt x_jt} as a min cost flow problem.
@@ -80,8 +100,8 @@ class ParallelMachinePreemptionMcf:
         self.p = instance.get_job_2_p_map_for_stage(instance.stage_id_list[-1])
         self.r = instance.get_job_2_p_sum_except_last_stage()
         ddw = instance.job_2_due_window_map
-        w_minus = instance.job_2_ewt_map
-        w_plus = instance.job_2_twt_map
+        w_minus = _resolve_weight_map(instance.job_2_ewt_map, self.calJ, "ewt")
+        w_plus = _resolve_weight_map(instance.job_2_twt_map, self.calJ, "twt")
         self.mc_count = instance.machine_count_per_stage[-1]
 
         # T = max r_j + sum p_j
