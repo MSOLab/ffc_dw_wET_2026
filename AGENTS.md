@@ -13,9 +13,9 @@ can pick up the same architectural intent.
 ## Architecture Docs
 
 - IO extraction and import rules:
-  `docs/architecture/io-principles.md`
+  `docs/io-principles.md`
 - Algorithm execution contract rules:
-  `docs/architecture/algorithm-principles.md`
+  `docs/algorithm-principles.md`
 
 ## Working Agreement
 

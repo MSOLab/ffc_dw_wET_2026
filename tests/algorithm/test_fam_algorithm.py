@@ -13,7 +13,7 @@ from ffc_ddw_sum_et.algorithm import (
     WorkStatus,
 )
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
-from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDueDateWindowParameters
+from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.ffc_params import FFcParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 
@@ -24,7 +24,7 @@ def make_ddw_instance(
     stage_2_machine_count: tuple[int, ...] = (2, 1),
     processing_rows: list[list[int]] | None = None,
     job_2_due_window_map: dict[str, tuple[int, int]] | None = None,
-) -> FFcDueDateWindowParameters:
+) -> FFcDDWParameters:
     if processing_rows is None:
         processing_rows = [[2, 3], [2, 2], [2, 1]]
 
@@ -37,7 +37,7 @@ def make_ddw_instance(
     if job_2_due_window_map is None:
         job_2_due_window_map = {job_id: (0, 10) for job_id in job_id_list}
 
-    return FFcDueDateWindowParameters(
+    return FFcDDWParameters(
         name=name,
         job_id_list=job_id_list,
         stage_id_list=stage_id_list,
@@ -218,7 +218,7 @@ def test_fam_uses_spec_logger_when_present() -> None:
 def test_fam_raises_for_non_ddw_instance() -> None:
     algorithm = FAMDispatcher()
 
-    with pytest.raises(TypeError, match="FFcDueDateWindowParameters"):
+    with pytest.raises(TypeError, match="FFcDDWParameters"):
         algorithm.run(AlgSpec(instance=make_plain_instance(), option=FAMOption()))
 
 

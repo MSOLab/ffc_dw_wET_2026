@@ -146,7 +146,7 @@ def split_best_seq() -> None:
 #
 # Algorithm:
 #   1. Read best_seq_large/<name>.txt → parse header (index, obj_value) + sequences
-#   2. Load large/<name>.txt via FFcDueDateWindowParameters.from_pra_2017_data()
+#   2. Load large/<name>.txt via FFcDDWParameters.from_pra_2017_data()
 #   3. Map integer job indices from bestSeq → string job IDs (f"j{k:0{d}d}")
 #      where d = len(str(num_jobs - 1))
 #   4. Run FAMDispatcher with FAMOption(job_sequence=first_stage_seq_as_job_ids)
