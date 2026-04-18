@@ -1,21 +1,26 @@
 """Experiment orchestration package for FAM scheduling."""
 
 from .benchmark_loader import BenchmarkLoader
-from .controller import FAMSubroutineController
-from .fam_multi_instance_runner import FAMMultiInstanceRunner
-from .fam_single_instance_runner import FAMSingleInstanceRunner, InstanceResult
-from .reporting import FAMMultiScenarioRunner, FAMReporter, FinalResult, ScenarioResult
-from .solution_manager import FAMSolution, FAMSolutionManager
+from .controller import FFcDDWSubroutineController
+from .ffcddw_multi_instance_runner import FFcDDWMultiInstanceRunner
+from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
+from .reporting import (
+    FFcDDWMultiScenarioRunner,
+    FFcDDWReporter,
+    FinalResult,
+    ScenarioResult,
+)
+from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
 
 __all__ = [
     "BenchmarkLoader",
-    "FAMMultiInstanceRunner",
-    "FAMMultiScenarioRunner",
-    "FAMReporter",
-    "FAMSingleInstanceRunner",
-    "FAMSolution",
-    "FAMSolutionManager",
-    "FAMSubroutineController",
+    "FFcDDWMultiInstanceRunner",
+    "FFcDDWMultiScenarioRunner",
+    "FFcDDWReporter",
+    "FFcDDWSingleInstanceRunner",
+    "FFcDDWSolution",
+    "FFcDDWSolutionManager",
+    "FFcDDWSubroutineController",
     "FinalResult",
     "InstanceResult",
     "ScenarioResult",

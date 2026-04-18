@@ -6,7 +6,7 @@ import csv
 import logging
 from pathlib import Path
 
-from ..parameters.ffc_ddw_params import FFcDueDateWindowParameters
+from ..parameters.ffc_ddw_params import FFcDDWParameters
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class BenchmarkLoader:
         file_pattern: str | None = None,
         instance_names: list[str] | None = None,
         ins_index: int | list[int] | None = None,
-    ) -> list[FFcDueDateWindowParameters]:
+    ) -> list[FFcDDWParameters]:
         """Load instances from the benchmark directory.
 
         Args:
@@ -49,7 +49,7 @@ class BenchmarkLoader:
                 loaded. When omitted, all ``.txt`` files are loaded.
 
         Returns:
-            List of parsed FFcDueDateWindowParameters instances.
+            List of parsed FFcDDWParameters instances.
         """
         index_map = self._load_index_map()
 
@@ -84,16 +84,14 @@ class BenchmarkLoader:
                     "Ensure the benchmark directory contains PRA2017 format files."
                 )
 
-        instances: list[FFcDueDateWindowParameters] = []
+        instances: list[FFcDDWParameters] = []
         for filepath in files:
             name = filepath.stem
             if instance_names is not None and name not in instance_names:
                 continue
             try:
                 with open(filepath, "r") as stream:
-                    instance = FFcDueDateWindowParameters.from_pra_2017_data(
-                        name, stream
-                    )
+                    instance = FFcDDWParameters.from_pra_2017_data(name, stream)
                 instances.append(instance)
             except Exception:
                 logger.exception("Failed to parse %s, skipping", name)

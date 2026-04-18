@@ -8,25 +8,25 @@ ffc_ddw_sum_et의 main.py는 현재 단순 stub(`print("Hello")`)이다. hybridf
 
 | hybridflowshop | ffc_ddw_sum_et (new) |
 |---|---|
-| `HybridFlowshopParameters` (schore) | `FFcDueDateWindowParameters` (existing) |
-| `HybridFlowShopCpLnsController` (mbls) | `FAMSubroutineController` (new, extends routix) |
+| `HybridFlowshopParameters` (schore) | `FFcDDWParameters` (existing) |
+| `HybridFlowShopCpLnsController` (mbls) | `FFcDDWSubroutineController` (new, extends routix) |
 | `CpSubroutineController` (mbls) | `routix.SubroutineController` (use directly) |
 | `CustomCpModel` (mbls) | 없음 — FAM은 greedy decoder |
 | `SolutionManager` (custom) | `routix.SolutionManager` (use directly) |
-| `HfsSingleInstanceRunner` | `FAMSingleInstanceRunner` (new) |
+| `HfsSingleInstanceRunner` | `FFcDDWSingleInstanceRunner` (new) |
 | `HfsMultiInstanceRunner` | `routix.MultiInstanceConcurrentRunner` (use directly) |
-| `HfsMultiScenarioRunner` | `FAMMultiScenarioRunner` (new) |
+| `HfsMultiScenarioRunner` | `FFcDDWMultiScenarioRunner` (new) |
 
 ## Files to CREATE
 
 | # | Path | Purpose |
 |---|---|---|
 | 1 | `src/ffc_ddw_sum_et/orchestration/__init__.py` | Package init |
-| 2 | `src/ffc_ddw_sum_et/orchestration/controller.py` | `FAMSubroutineController` — wraps `FAMDispatcher` as routix step methods |
-| 3 | `src/ffc_ddw_sum_et/orchestration/fam_single_instance_runner.py` | `FAMSingleInstanceRunner` — runs one instance, saves results |
-| 4 | `src/ffc_ddw_sum_et/orchestration/solution_manager.py` | `FAMSolutionManager` — tracks incumbent best |
-| 5 | `src/ffc_ddw_sum_et/orchestration/benchmark_loader.py` | Loads PRA2017 `.txt` files into `FFcDueDateWindowParameters` |
-| 6 | `src/ffc_ddw_sum_et/orchestration/reporting.py` | `FAMReporter` — aggregates results, writes CSV/JSON/YAML, generates Gantt |
+| 2 | `src/ffc_ddw_sum_et/orchestration/controller.py` | `FFcDDWSubroutineController` — wraps `FAMDispatcher` as routix step methods |
+| 3 | `src/ffc_ddw_sum_et/orchestration/ffcddw_single_instance_runner.py` | `FFcDDWSingleInstanceRunner` — runs one instance, saves results |
+| 4 | `src/ffc_ddw_sum_et/orchestration/solution_manager.py` | `FFcDDWSolutionManager` — tracks incumbent best |
+| 5 | `src/ffc_ddw_sum_et/orchestration/benchmark_loader.py` | Loads PRA2017 `.txt` files into `FFcDDWParameters` |
+| 6 | `src/ffc_ddw_sum_et/orchestration/reporting.py` | `FFcDDWReporter` — aggregates results, writes CSV/JSON/YAML, generates Gantt |
 | 7 | `metadata/fam_config.yaml` | 실험 메타데이터: scenarios, flow, timelimit, output config |
 
 ## Files to MODIFY
@@ -38,17 +38,17 @@ ffc_ddw_sum_et의 main.py는 현재 단순 stub(`print("Hello")`)이다. hybridf
 
 ## Key Class Designs
 
-### 1. `FAMSubroutineController` (controller.py)
+### 1. `FFcDDWSubroutineController` (controller.py)
 
 `routix.SubroutineController[StoppingCriteria, SubroutineReport]` 상속.
 
 ```python
-class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineReport]):
-    def __init__(self, instance: FFcDueDateWindowParameters, subroutine_flow, stopping_criteria)
+class FFcDDWSubroutineController(SubroutineController[StoppingCriteria, SubroutineReport]):
+    def __init__(self, instance: FFcDDWParameters, subroutine_flow, stopping_criteria)
     def run_fam(self, job_sequence: str | None = None) -> SubroutineReport
         # FAMDispatcher().run(AlgSpec(instance, FAMOption(job_sequence=...)))
         # → SubroutineReport(elapsed_time, obj_value, obj_bound)
-        # → solution_manager.register(report, FAMSolution(schedule, obj_value))
+        # → solution_manager.register(report, FFcDDWSolution(schedule, obj_value))
     def is_stopping_condition(self, **kwargs) -> bool
         # return self.timer.time_over(self.stopping_criteria.timelimit)
     def post_run_process(self)
@@ -56,6 +56,7 @@ class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineR
 ```
 
 Flow YAML은 여러 permutation을 지원:
+
 ```yaml
 subroutine_flow:
   - method: run_fam
@@ -64,42 +65,44 @@ subroutine_flow:
     params: { job_sequence: "EDD" }
   - method: run_fam
 ```
+
 `SolutionManager`가 best tracking을 담당.
 
-### 2. `FAMSolution` + `FAMSolutionManager` (solution_manager.py)
+### 2. `FFcDDWSolution` + `FFcDDWSolutionManager` (solution_manager.py)
 
 `FFcSchedule`는 obj_value를 직접 저장하지 않으므로 wrapper 필요:
 
 ```python
 @dataclass(frozen=True, slots=True, kw_only=True)
-class FAMSolution:
+class FFcDDWSolution:
     schedule: FFcSchedule
     obj_value: float | None = None
     obj_bound: float | None = None
 
-class FAMSolutionManager(SolutionManager[SubroutineReport, FAMSolution]):
+class FFcDDWSolutionManager(SolutionManager[SubroutineReport, FFcDDWSolution]):
     def _get_obj_value(self, solution) -> float
     def _a_is_better_obj_value(self, a, b) -> bool  # minimization: lower is better
     def _a_is_better_obj_bound(self, a, b) -> bool  # FAM은 bound 없음 → 항상 False
 ```
 
-### 3. `FAMSingleInstanceRunner` (fam_single_instance_runner.py)
+### 3. `FFcDDWSingleInstanceRunner` (ffcddw_single_instance_runner.py)
 
-`routix.SingleInstanceRunner[FFcDueDateWindowParameters, FAMSubroutineController]` 상속.
+`routix.SingleInstanceRunner[FFcDDWParameters, FFcDDWSubroutineController]` 상속.
 
 ```python
-class FAMSingleInstanceRunner(SingleInstanceRunner[...]):
-    def get_controller(self) -> FAMSubroutineController
+class FFcDDWSingleInstanceRunner(SingleInstanceRunner[...]):
+    def get_controller(self) -> FFcDDWSubroutineController
     def post_run_process(self) -> InstanceResult
         # controller.solution_manager에서 best 추출
         # working_dir에 summary CSV row, solution JSON, obj_log YAML 저장
         return InstanceResult(instance_name, elapsed_time, obj_value, ...)
 ```
 
-### 4. `FAMMultiScenarioRunner` (reporting.py)
+### 4. `FFcDDWMultiScenarioRunner` (reporting.py)
 
-`routix.MultiScenarioRunner[FFcDueDateWindowParameters, FAMSingleInstanceRunner, MultiInstanceConcurrentRunner]` 상속.
+`routix.MultiScenarioRunner[FFcDDWParameters, FFcDDWSingleInstanceRunner, MultiInstanceConcurrentRunner]` 상속.
 `post_run_process()`에서:
+
 - 전역 summary CSV (모든 시나리오 + 모든 인스턴스)
 - 시나리오별 statistics YAML/JSON
 - Gantt 차트 PNG (best solutions에서)
@@ -109,8 +112,8 @@ class FAMSingleInstanceRunner(SingleInstanceRunner[...]):
 
 ```python
 class BenchmarkLoader:
-    def load_all(self, directory: Path, file_pattern: str | None = None) -> list[FFcDueDateWindowParameters]
-    # 각 .txt 파일을 open → FFcDueDateWindowParameters.from_pra_2017_data(path, stream)
+    def load_all(self, directory: Path, file_pattern: str | None = None) -> list[FFcDDWParameters]
+    # 각 .txt 파일을 open → FFcDDWParameters.from_pra_2017_data(path, stream)
 ```
 
 ### 6. `main.py` (revised)
@@ -123,9 +126,9 @@ def main():
 
     scenario_configs = [...]  # YAML에서 파싱
 
-    runner = FAMMultiScenarioRunner(
+    runner = FFcDDWMultiScenarioRunner(
         m_i_runner_class=MultiInstanceConcurrentRunner,
-        s_i_runner_class=FAMSingleInstanceRunner,
+        s_i_runner_class=FFcDDWSingleInstanceRunner,
         instances=instances,
         shared_param_dict={},
         scenario_configs=scenario_configs,
@@ -141,17 +144,17 @@ def main():
 ```
 main.py
   → load_yaml(metadata/fam_config.yaml)
-  → BenchmarkLoader.load_all() → list[FFcDueDateWindowParameters]
-  → FAMMultiScenarioRunner
+  → BenchmarkLoader.load_all() → list[FFcDDWParameters]
+  → FFcDDWMultiScenarioRunner
        → for each scenario:
             MultiInstanceConcurrentRunner (ProcessPoolExecutor)
                → for each instance:
-                    FAMSingleInstanceRunner.run()
-                      → FAMSubroutineController.run()
+                    FFcDDWSingleInstanceRunner.run()
+                      → FFcDDWSubroutineController.run()
                          → _run_flow over subroutine_flow
                             → for each step: is_stopping_condition() → run_fam()
                                → FAMDispatcher().run(AlgSpec(...))
-                               → solution_manager.register(report, FAMSolution)
+                               → solution_manager.register(report, FFcDDWSolution)
                       → post_run_process() → save instance results
                → post_run_process() → aggregate scenario results
        → post_run_process() → aggregate all, write Excel, Gantt
@@ -159,11 +162,11 @@ main.py
 
 ## Implementation Steps
 
-1. **orchestration package skeleton** — `__init__.py`, `FAMSolution`, `FAMSolutionManager`
-2. **FAMSubroutineController** — `run_fam()`, `is_stopping_condition()`, `post_run_process()`
-3. **FAMSingleInstanceRunner** — `get_controller()`, `post_run_process()` (instance-level file I/O)
+1. **orchestration package skeleton** — `__init__.py`, `FFcDDWSolution`, `FFcDDWSolutionManager`
+2. **FFcDDWSubroutineController** — `run_fam()`, `is_stopping_condition()`, `post_run_process()`
+3. **FFcDDWSingleInstanceRunner** — `get_controller()`, `post_run_process()` (instance-level file I/O)
 4. **BenchmarkLoader** — PRA2017 파일 파싱
-5. **FAMMultiScenarioRunner + FAMReporter** — 시나리오 aggregation, CSV/JSON/YAML, Gantt, Excel
+5. **FFcDDWMultiScenarioRunner + FFcDDWReporter** — 시나리오 aggregation, CSV/JSON/YAML, Gantt, Excel
 6. **metadata/fam_config.yaml** — 실험 설정
 7. **main.py rewrite** — orchestration entry point
 8. **pyproject.toml** — `matplotlib` 의존성 추가

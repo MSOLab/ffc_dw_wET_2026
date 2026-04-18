@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import NamedTuple
 
 try:
-    from .metadata import BEST_SEQ_DIR, COLHEAD_INS_INDEX, COLHEAD_TOTAL_MC_COUNT, MATCH_CSV, OUT_CSV
+    from .metadata import (
+        BEST_SEQ_DIR,
+        COLHEAD_INS_INDEX,
+        COLHEAD_TOTAL_MC_COUNT,
+        MATCH_CSV,
+        OUT_CSV,
+    )
 except ImportError:
     import sys
     from pathlib import Path

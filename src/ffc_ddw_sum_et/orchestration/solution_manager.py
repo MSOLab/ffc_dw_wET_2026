@@ -11,7 +11,7 @@ from ..solution.ffc_schedule import FFcSchedule
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class FAMSolution:
+class FFcDDWSolution:
     """Wrapper that pairs a schedule with its objective value."""
 
     schedule: FFcSchedule
@@ -19,13 +19,13 @@ class FAMSolution:
     obj_bound: float | None = None
 
 
-class FAMSolutionManager(SolutionManager[SubroutineReport, FAMSolution]):
+class FFcDDWSolutionManager(SolutionManager[SubroutineReport, FFcDDWSolution]):
     """Tracks the incumbent best solution across multiple FAM runs."""
 
-    def _get_obj_value(self, solution: FAMSolution) -> float:
+    def _get_obj_value(self, solution: FFcDDWSolution) -> float:
         if solution.obj_value is None:
             raise ValueError(
-                "Cannot extract objective from FAMSolution without obj_value"
+                "Cannot extract objective from FFcDDWSolution without obj_value"
             )
         return float(solution.obj_value)
 

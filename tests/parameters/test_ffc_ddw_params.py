@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDueDateWindowParameters
+from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,9 +18,7 @@ def test_from_pra_2017_data_parses_large_instance() -> None:
     )
 
     with instance_path.open() as stream:
-        params = FFcDueDateWindowParameters.from_pra_2017_data(
-            instance_path.name, stream
-        )
+        params = FFcDDWParameters.from_pra_2017_data(instance_path.name, stream)
 
     assert params.name == instance_path.name
     assert params.job_count == 50
@@ -66,9 +64,7 @@ def test_from_pra_2017_data_parses_large_calibration_instance() -> None:
     )
 
     with instance_path.open() as stream:
-        params = FFcDueDateWindowParameters.from_pra_2017_data(
-            instance_path.name, stream
-        )
+        params = FFcDDWParameters.from_pra_2017_data(instance_path.name, stream)
 
     assert params.name == instance_path.name
     assert params.job_count == 50
@@ -119,9 +115,7 @@ def test_from_pra_2017_data_parses_large_calibration_instance() -> None:
 
 def test_from_pra_2017_data_rejects_invalid_marker() -> None:
     with pytest.raises(ValueError, match="Expected 'HFSDDW' marker"):
-        FFcDueDateWindowParameters.from_pra_2017_data(
-            "invalid.txt", StringIO("HFSPRA\n")
-        )
+        FFcDDWParameters.from_pra_2017_data("invalid.txt", StringIO("HFSPRA\n"))
 
 
 def test_from_pra_2017_data_rejects_malformed_ddw_row() -> None:
@@ -141,11 +135,9 @@ def test_from_pra_2017_data_rejects_malformed_ddw_row() -> None:
     )
 
     with pytest.raises(ValueError, match="Expected 2 integers in DDW row 0"):
-        FFcDueDateWindowParameters.from_pra_2017_data(
-            "invalid_ddw.txt", malformed_stream
-        )
+        FFcDDWParameters.from_pra_2017_data("invalid_ddw.txt", malformed_stream)
 
 
 def test_from_pra_data_raises_guidance_error() -> None:
     with pytest.raises(NotImplementedError, match="from_pra_2017_data"):
-        FFcDueDateWindowParameters.from_pra_data("legacy.txt", StringIO(""))
+        FFcDDWParameters.from_pra_data("legacy.txt", StringIO(""))

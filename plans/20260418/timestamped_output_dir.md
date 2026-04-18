@@ -8,7 +8,7 @@ Scope for this change: **FULL_RUN only** — generate a fresh timestamped subdir
 
 ## Approach
 
-Reuse the existing routix helper `init_timestamped_working_dir` (same helper `../hybridflowshop/main.py` already uses) and insert one call in `main.py` so the timestamped path is what gets handed to `FAMMultiScenarioRunner`. Downstream scenario/instance directory creation works unchanged because the rest of the chain simply takes `output_dir` as given.
+Reuse the existing routix helper `init_timestamped_working_dir` (same helper `../hybridflowshop/main.py` already uses) and insert one call in `main.py` so the timestamped path is what gets handed to `FFcDDWMultiScenarioRunner`. Downstream scenario/instance directory creation works unchanged because the rest of the chain simply takes `output_dir` as given.
 
 ### The helper
 
@@ -41,13 +41,13 @@ output_dir = init_timestamped_working_dir(base_output_dir=base_output_dir)
 logger.info("Run output directory: %s", output_dir)
 ```
 
-Then pass `output_dir` (the timestamped path) to `FAMMultiScenarioRunner` exactly where `output_dir` is currently passed.
+Then pass `output_dir` (the timestamped path) to `FFcDDWMultiScenarioRunner` exactly where `output_dir` is currently passed.
 
 ## What does NOT change
 
 - `metadata/fam_config.yaml` — `output_dir: output` stays the base directory.
-- `src/ffc_ddw_sum_et/orchestration/reporting.py` (`FAMMultiScenarioRunner`, `FAMReporter`) — they already accept an `output_dir` and build scenario subdirs beneath it. No edits needed.
-- `fam_single_instance_runner.py` / `controller.py` — untouched.
+- `src/ffc_ddw_sum_et/orchestration/reporting.py` (`FFcDDWMultiScenarioRunner`, `FFcDDWReporter`) — they already accept an `output_dir` and build scenario subdirs beneath it. No edits needed.
+- `ffcddw_single_instance_runner.py` / `controller.py` — untouched.
 - `.gitignore` — `output/` is already ignored, so new `output/<timestamp>/` folders are covered.
 
 ## Out of scope (flagged for follow-up)

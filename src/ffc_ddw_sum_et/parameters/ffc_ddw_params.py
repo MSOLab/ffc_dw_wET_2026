@@ -30,7 +30,7 @@ _INSTANCE_NAME_RE = re.compile(
 )
 
 
-class FFcDueDateWindowParameters(FFcParameters):
+class FFcDDWParameters(FFcParameters):
     """Parsed parameters for the FFC with due date window constraints."""
 
     _job_2_due_window_map: dict[str, tuple[int, int]]
@@ -79,16 +79,14 @@ class FFcDueDateWindowParameters(FFcParameters):
         return self._generation_params
 
     @classmethod
-    def from_pra_data(cls, name: str, stream: TextIO) -> FFcDueDateWindowParameters:
+    def from_pra_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:
         raise NotImplementedError(
-            "FFcDueDateWindowParameters.from_pra_data() is not supported. "
-            "Use FFcDueDateWindowParameters.from_pra_2017_data() instead."
+            "FFcDDWParameters.from_pra_data() is not supported. "
+            "Use FFcDDWParameters.from_pra_2017_data() instead."
         )
 
     @classmethod
-    def from_pra_2017_data(
-        cls, name: str, stream: TextIO
-    ) -> FFcDueDateWindowParameters:
+    def from_pra_2017_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:
         marker = TextDataParser.strip_a_line(stream)
         if marker != "HFSDDW":
             raise ValueError(

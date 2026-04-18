@@ -13,9 +13,9 @@ from routix.runner.single_instance_runner import (
 )
 from routix.type_defs import RunMode
 
-from ..parameters.ffc_ddw_params import FFcDueDateWindowParameters
-from .controller import FAMSubroutineController
-from .solution_manager import FAMSolution
+from ..parameters.ffc_ddw_params import FFcDDWParameters
+from .controller import FFcDDWSubroutineController
+from .solution_manager import FFcDDWSolution
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +51,10 @@ class InstanceResult:
     error: str | None = None
 
 
-class FAMSingleInstanceRunner(
-    SingleInstanceRunner[FFcDueDateWindowParameters, FAMSubroutineController]
+class FFcDDWSingleInstanceRunner(
+    SingleInstanceRunner[FFcDDWParameters, FFcDDWSubroutineController]
 ):
-    """Runs FAM on one instance and saves results."""
+    """Runs on one FFcDDW instance and saves results."""
 
     def run(self):
         self._run_error: str | None = None
@@ -92,8 +92,8 @@ class FAMSingleInstanceRunner(
         finally:
             return self.post_run_process()
 
-    def get_controller(self) -> FAMSubroutineController:
-        return FAMSubroutineController(
+    def get_controller(self) -> FFcDDWSubroutineController:
+        return FFcDDWSubroutineController(
             instance=self.instance,
             subroutine_flow=self.subroutine_flow,
             stopping_criteria=self.stopping_criteria,
@@ -207,7 +207,7 @@ class FAMSingleInstanceRunner(
             error=getattr(self, "_run_error", None),
         )
 
-    def _save_solution(self, solution: FAMSolution) -> str:
+    def _save_solution(self, solution: FFcDDWSolution) -> str:
         """Save best solution as JSON."""
         schedule = solution.schedule
         data = {

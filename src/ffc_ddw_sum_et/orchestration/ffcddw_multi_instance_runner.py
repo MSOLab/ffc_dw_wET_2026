@@ -8,12 +8,12 @@ from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
 
-from ..parameters.ffc_ddw_params import FFcDueDateWindowParameters
-from .fam_single_instance_runner import FAMSingleInstanceRunner
+from ..parameters.ffc_ddw_params import FFcDDWParameters
+from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner
 
 
-class FAMMultiInstanceRunner(
-    MultiInstanceConcurrentRunner[FFcDueDateWindowParameters, FAMSingleInstanceRunner]
+class FFcDDWMultiInstanceRunner(
+    MultiInstanceConcurrentRunner[FFcDDWParameters, FFcDDWSingleInstanceRunner]
 ):
     """Runs instances concurrently for one scenario."""
 

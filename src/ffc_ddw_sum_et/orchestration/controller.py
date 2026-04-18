@@ -11,11 +11,11 @@ from routix.report import SubroutineReport
 from routix.stopping_criteria import StoppingCriteria
 from routix.subroutine_controller import SubroutineController
 
-from ..algorithm.fam import FAMDispatcher, FAMOption
 from ..algorithm.base.alg_record import WorkStatus
 from ..algorithm.base.alg_spec import AlgSpec
-from ..parameters.ffc_ddw_params import FFcDueDateWindowParameters
-from .solution_manager import FAMSolution, FAMSolutionManager
+from ..algorithm.fam import FAMDispatcher, FAMOption
+from ..parameters.ffc_ddw_params import FFcDDWParameters
+from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
 
 
 def _to_ddo(data: Any) -> Any:
@@ -29,12 +29,14 @@ def _to_ddo(data: Any) -> Any:
     return data
 
 
-class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineReport]):
-    """Runs the FAM decoder as a routix subroutine controller."""
+class FFcDDWSubroutineController(
+    SubroutineController[StoppingCriteria, SubroutineReport]
+):
+    """Routix subroutine controller for Flexible Flow Shop with Due Date Windows"""
 
     def __init__(
         self,
-        instance: FFcDueDateWindowParameters,
+        instance: FFcDDWParameters,
         subroutine_flow: Sequence[DynamicDataObject]
         | DynamicDataObject
         | Sequence[dict]
@@ -53,7 +55,7 @@ class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineR
             stopping_criteria=converted_stopping,
         )
         self.instance = instance
-        self.solution_manager = FAMSolutionManager()
+        self.solution_manager = FFcDDWSolutionManager()
 
     def run_fam(self, job_sequence: Sequence[str] | None = None) -> SubroutineReport:
         """Step method: run FAMDispatcher and return a SubroutineReport.
@@ -94,7 +96,7 @@ class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineR
         )
 
         if result is not None and result.schedule is not None:
-            fam_solution = FAMSolution(
+            fam_solution = FFcDDWSolution(
                 schedule=result.schedule,
                 obj_value=obj_value,
                 obj_bound=obj_bound,
@@ -111,7 +113,7 @@ class FAMSubroutineController(SubroutineController[StoppingCriteria, SubroutineR
         """Nothing to do at the controller level — the runner handles file I/O."""
 
     @property
-    def best_solution(self) -> FAMSolution | None:
+    def best_solution(self) -> FFcDDWSolution | None:
         return self.solution_manager.get_incumbent()
 
     @property

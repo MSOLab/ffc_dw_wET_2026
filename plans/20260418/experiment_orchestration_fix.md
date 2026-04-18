@@ -7,7 +7,7 @@
 `docs/algorithm-principles.md` 경계 유지.
 
 계획 평가 당시 routix의 `MultiInstanceRunner`, `MultiScenarioRunner`가 abstract base class라는 점이
-드러나, 초안이 이미 만든 얇은 구체 subclass(`FAMMultiInstanceRunner`)는 유지한다.
+드러나, 초안이 이미 만든 얇은 구체 subclass(`FFcDDWMultiInstanceRunner`)는 유지한다.
 
 ## Scope
 
@@ -23,7 +23,7 @@
   `src/`를 package 루트로 두므로, 설치 후 `ffc_ddw_sum_et` 최상위로 import해야 함. 현재 경로는
   CWD에 `src/`가 보이는 개발 환경에서만 동작, `uv run python -m ffc_ddw_sum_et` 등에서는 실패.
 - **수정**: `ffc_ddw_sum_et.orchestration`의 public surface를 통해 import.
-  `FAMMultiInstanceRunner`를 `orchestration/__init__.py` 공개 export에 추가.
+  `FFcDDWMultiInstanceRunner`를 `orchestration/__init__.py` 공개 export에 추가.
 
 ### 2. `run_fam(job_sequence: str)` 타입 혼동 (중대)
 
@@ -48,7 +48,7 @@
 
 ### 4. 실패 traceability 손실
 
-- **문제**: `FAMSingleInstanceRunner.run()`이 예외를 `except Exception: logger.exception(...)` + `finally: return post_run_process()` 로 silent swallow. post-process 단계에서 실패 사실을
+- **문제**: `FFcDDWSingleInstanceRunner.run()`이 예외를 `except Exception: logger.exception(...)` + `finally: return post_run_process()` 로 silent swallow. post-process 단계에서 실패 사실을
   알 길이 없어 `InstanceResult`에 "정상적으로 None이 나온 실패"로 기록됨. `docs/algorithm-principles.md`
   Rule 15("errors belong in the record") 위반 여지.
 - **수정**:
@@ -74,7 +74,7 @@
   `improvementRatio = (first_instance.obj - best_instance.obj) / first_instance.obj`라는
   **의미가 전혀 없는** cross-instance 비교를 반환함.
 - **수정**:
-  - per-instance 통계는 runner가 담당 — `FAMSingleInstanceRunner._save_statistics`에서
+  - per-instance 통계는 runner가 담당 — `FFcDDWSingleInstanceRunner._save_statistics`에서
     각 instance의 실제 trajectory로 `SubroutineReportStatistics`를 만들어 `{ins_name}_statistics.{json,yaml}` 저장.
     `improvementRatio`가 instance 내 (first vs best) 정확한 의미를 가짐.
   - scenario 레벨에서는 `SubroutineReportStatistics` 대신 직접 `_aggregate_scenario()`로
@@ -104,14 +104,17 @@
 ## Verification
 
 ### End-to-end smoke
+
 - `main.py` + 1-instance tiny config: 정상 완료, summary CSV/stats JSON+YAML/Gantt PNG/Excel 모두 생성, 전체 <1초.
 
 ### Error injection
+
 - 잘못된 permutation(`job_sequence=["j00", "j01"]`, 100 jobs 중 2개만)을 `params`로 넘김 →
   `FAMOption.resolve_initial_job_sequence`가 `ValueError`, traceback이 `InstanceResult.error`에 캡처됨,
   scenario는 중단되지 않고 계속 진행.
 
 ### Regression
+
 - `uv run pytest` → 53/53 PASS.
 - `uv run ruff check src/ffc_ddw_sum_et/ main.py` → clean.
 - `uv run ruff format --check ...` → clean.
@@ -121,9 +124,9 @@
 | Path | Change |
 |---|---|
 | `main.py` | import 경로 수정, public surface 사용 |
-| `src/ffc_ddw_sum_et/orchestration/__init__.py` | `FAMMultiInstanceRunner`를 공개 export에 추가 |
+| `src/ffc_ddw_sum_et/orchestration/__init__.py` | `FFcDDWMultiInstanceRunner`를 공개 export에 추가 |
 | `src/ffc_ddw_sum_et/orchestration/controller.py` | `run_fam` 시그니처 수정, `float()` 경계 변환 |
-| `src/ffc_ddw_sum_et/orchestration/fam_single_instance_runner.py` | `InstanceResult` 필드 추가 (`error`, `first_obj_value`, `first_obj_bound`), `run()` traceback 캡처, `_save_statistics` 신설 |
+| `src/ffc_ddw_sum_et/orchestration/ffcddw_single_instance_runner.py` | `InstanceResult` 필드 추가 (`error`, `first_obj_value`, `first_obj_bound`), `run()` traceback 캡처, `_save_statistics` 신설 |
 | `src/ffc_ddw_sum_et/orchestration/reporting.py` | summary CSV 확장, scenario stats 재설계, Excel improvement 수정, Gantt 저장 최적화 |
 
 ## Rationale / Principles Applied
@@ -133,7 +136,7 @@
 - **Rule 15**: 실패한 run은 record에 명시적으로 나타나야 함. `InstanceResult.error`가 이 역할.
 - **Rule 16**: 알고리즘 → orchestration의 단방향 의존성 유지. `np.int64` 문제는 orchestration 경계에서 흡수.
 - **Rule 18**: reporting 목적이 algorithm 내부를 오염시키지 않도록, obj 타입 정규화를 controller 쪽에만 둠.
-- **SSOT**: per-instance 통계의 원본(obj history)은 `FAMSolutionManager`가 단일 출처. reporter는
+- **SSOT**: per-instance 통계의 원본(obj history)은 `FFcDDWSolutionManager`가 단일 출처. reporter는
   요약본만 소비하고 원본을 재조합하지 않음.
 
 ## Out Of Scope (Future Work)

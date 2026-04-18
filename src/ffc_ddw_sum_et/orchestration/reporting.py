@@ -15,8 +15,8 @@ from routix.runner.multi_instance_concurrent_runner import (
 )
 from routix.runner.multi_scenario_runner import MultiScenarioRunner
 
-from ..parameters.ffc_ddw_params import FFcDueDateWindowParameters
-from .fam_single_instance_runner import FAMSingleInstanceRunner, InstanceResult
+from ..parameters.ffc_ddw_params import FFcDDWParameters
+from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +45,10 @@ class FinalResult:
     scenario_results: list[ScenarioResult] = field(default_factory=list)
 
 
-class FAMMultiScenarioRunner(
+class FFcDDWMultiScenarioRunner(
     MultiScenarioRunner[
-        FFcDueDateWindowParameters,
-        FAMSingleInstanceRunner,
+        FFcDDWParameters,
+        FFcDDWSingleInstanceRunner,
         MultiInstanceConcurrentRunner,
     ]
 ):
@@ -106,12 +106,12 @@ class FAMMultiScenarioRunner(
             scenario_results.append(scenario_result)
             all_instance_results.extend(instance_results)
 
-        FAMReporter(self.output_dir, scenario_results).generate()
+        FFcDDWReporter(self.output_dir, scenario_results).generate()
 
         return FinalResult(scenario_results=scenario_results)
 
 
-class FAMReporter:
+class FFcDDWReporter:
     """Generates summary reports: CSV, JSON, YAML, Gantt charts, Excel."""
 
     def __init__(self, output_dir: Path | None, scenario_results: list[ScenarioResult]):

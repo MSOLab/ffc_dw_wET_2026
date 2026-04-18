@@ -22,4 +22,3 @@ class AlgSpec:
     ref_solution: FFcSchedule | None = None
     alg_root: PathLike[str] | str | None = None
     logger: logging.Logger | None = None
-

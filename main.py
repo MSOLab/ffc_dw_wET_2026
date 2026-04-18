@@ -13,12 +13,12 @@ from routix.type_defs import RunMode
 
 from ffc_ddw_sum_et.orchestration import (
     BenchmarkLoader,
-    FAMMultiInstanceRunner,
-    FAMMultiScenarioRunner,
-    FAMSingleInstanceRunner,
+    FFcDDWMultiInstanceRunner,
+    FFcDDWMultiScenarioRunner,
+    FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/fam_config.yaml")
+CONFIG_PATH = Path("metadata/cplns_config.yaml")
 
 
 def main() -> None:
@@ -65,9 +65,9 @@ def main() -> None:
         shutil.copy2(CONFIG_PATH, output_dir / CONFIG_PATH.name)
     output_metadata = {"start_dt": datetime.now()}
 
-    runner = FAMMultiScenarioRunner(
-        m_i_runner_class=FAMMultiInstanceRunner,
-        s_i_runner_class=FAMSingleInstanceRunner,
+    runner = FFcDDWMultiScenarioRunner(
+        m_i_runner_class=FFcDDWMultiInstanceRunner,
+        s_i_runner_class=FFcDDWSingleInstanceRunner,
         instances=instances,
         shared_param_dict={},
         scenario_configs=scenario_configs,

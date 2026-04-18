@@ -6,7 +6,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ..parameters.ffc_ddw_params import FFcDueDateWindowParameters
+from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
 from .base.alg_option import AlgOption
 from .base.alg_record import AlgRecord, AlgResult, TerminationReason, WorkStatus
@@ -23,7 +23,7 @@ class FAMOption(AlgOption):
     job_2_release_t: Mapping[str, int] | None = None
 
     def resolve_initial_job_sequence(
-        self, instance: FFcDueDateWindowParameters
+        self, instance: FFcDDWParameters
     ) -> tuple[str, ...]:
         """Return the initial permutation for the decoder."""
         if self.job_sequence is None:
@@ -42,9 +42,7 @@ class FAMOption(AlgOption):
             raise ValueError("FAM job_sequence must not contain duplicate jobs.")
         return self.job_sequence
 
-    def resolve_job_2_release_t(
-        self, instance: FFcDueDateWindowParameters
-    ) -> dict[str, int]:
+    def resolve_job_2_release_t(self, instance: FFcDDWParameters) -> dict[str, int]:
         """Return the effective job release times for the decoder."""
         if self.job_2_release_t is None:
             return {job_id: 0 for job_id in instance.job_id_list}
@@ -158,11 +156,9 @@ class FAMDispatcher:
             termination_reason=TerminationReason.COMPLETED,
         )
 
-    def _validate_instance(self, spec: AlgSpec) -> FFcDueDateWindowParameters:
-        if not isinstance(spec.instance, FFcDueDateWindowParameters):
-            raise TypeError(
-                "FAMAlgorithm requires FFcDueDateWindowParameters as spec.instance."
-            )
+    def _validate_instance(self, spec: AlgSpec) -> FFcDDWParameters:
+        if not isinstance(spec.instance, FFcDDWParameters):
+            raise TypeError("FAMAlgorithm requires FFcDDWParameters as spec.instance.")
         return spec.instance
 
     def _resolve_option(self, spec: AlgSpec) -> FAMOption:
@@ -175,7 +171,7 @@ class FAMDispatcher:
     def _build_stage_job_sequence(
         self,
         schedule: FFcSchedule,
-        instance: FFcDueDateWindowParameters,
+        instance: FFcDDWParameters,
         prev_stage_id: str,
         initial_job_2_pos: Mapping[str, int],
     ) -> tuple[str, ...]:
@@ -209,7 +205,7 @@ class FAMDispatcher:
     def _calculate_window_et(
         self,
         schedule: FFcSchedule,
-        instance: FFcDueDateWindowParameters,
+        instance: FFcDDWParameters,
     ) -> tuple[int, int]:
         last_stage_id = instance.stage_id_list[-1]
         sum_earliness = 0
