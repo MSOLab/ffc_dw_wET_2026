@@ -14,6 +14,9 @@ def _bare_runner(tmp_path: Path) -> FFcDDWMultiScenarioRunner:
     runner = FFcDDWMultiScenarioRunner.__new__(FFcDDWMultiScenarioRunner)
     runner.output_dir = tmp_path
     runner.results = []
+    runner.draw_gantt = False
+    runner.painter_thread_cnt = 1
+    runner.ins_index_source = None
     return runner
 
 

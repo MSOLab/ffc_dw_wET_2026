@@ -31,6 +31,8 @@ def main() -> None:
     config = _load_config(CONFIG_PATH)
     mode = _parse_run_mode(config.get("run_mode", "FULL_RUN"))
     instance_worker_cnt = config.get("instance_worker_cnt", 1)
+    draw_gantt = bool(config.get("draw_gantt", True))
+    painter_thread_cnt = int(config.get("painter_thread_cnt", 1))
 
     benchmark_dir = Path(config["benchmark_dir"])
     ins_index_source = config.get("ins_index_source")
@@ -76,6 +78,9 @@ def main() -> None:
         mode=mode,
         scenario_names=scenario_names,
         instance_worker_cnt=instance_worker_cnt,
+        draw_gantt=draw_gantt,
+        painter_thread_cnt=painter_thread_cnt,
+        ins_index_source=ins_index_source,
     )
 
     logger.info(
