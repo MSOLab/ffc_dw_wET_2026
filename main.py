@@ -18,7 +18,7 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/20260419_lb_init_config.yaml")
+CONFIG_PATH = Path("metadata/20260420_profile_fixed_ns_config.yaml")
 
 
 def main() -> None:
