@@ -123,6 +123,50 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
+    def initialize_by_edd(
+        self, criteria: Literal["weighted_et", "makespan"] = "weighted_et"
+    ) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in EDD order.
+
+        With due-date windows ``[d^-_j, d^+_j]``, EDD uses ``d^+_j`` (the
+        latest on-time moment) so tight deadlines go first and slack jobs
+        drop to the tail. Ties on ``d^+`` break by native ``job_id_list``
+        order for determinism, matching the tie-break rule used by
+        :meth:`run_mcf_lb`.
+        """
+        start_elapsed = self.timer.elapsed_sec
+
+        due_window_map = self.instance.job_2_due_window_map
+        job_2_pos = {j: i for i, j in enumerate(self.instance.job_id_list)}
+        job_sequence = sorted(
+            self.instance.job_id_list,
+            key=lambda j: (due_window_map[j][1], job_2_pos[j]),
+        )
+
+        dispatcher = MixedDispatcher(self.instance)
+        schedule = dispatcher.get_best_mixed_schedule_by_sequence(
+            job_sequence, criteria=criteria
+        )
+        if schedule is None:
+            raise RuntimeError(
+                f"MixedDispatcher produced no schedule for {self.instance.name}"
+            )
+
+        sum_e, sum_t = compute_window_et(schedule, self.instance)
+        obj_value = float(sum_e + sum_t)
+
+        elapsed = self.timer.elapsed_sec - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        self.solution_manager.register(
+            report,
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
+        )
+        return report
+
     def run_profile_fixed_ns(
         self,
         computational_time: float,
