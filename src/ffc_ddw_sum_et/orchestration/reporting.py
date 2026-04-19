@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 from collections import defaultdict
@@ -17,6 +16,7 @@ from routix.runner.multi_scenario_runner import MultiScenarioRunner
 
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
+from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
 
 logger = logging.getLogger(__name__)
 
@@ -132,41 +132,50 @@ class FFcDDWReporter:
         return f"{self.output_dir.name}_summary.{extension}"
 
     def _write_summary_csv(self) -> None:
-        """Write master summary CSV with all instance results."""
+        """Write master summary CSV, one row per (scenario, instance).
+
+        Uses the ``FFcDDWSummary`` append-per-row layout shaped after
+        ``hybridflowshop/hfs_summary.py`` so downstream analysis scripts
+        line up across projects.
+        """
         path = self.output_dir / self.generate_summary_filename("csv")
-        fieldnames = [
-            "scenario_name",
-            "instance_name",
-            "first_obj_value",
-            "obj_value",
-            "obj_bound",
-            "elapsed_time",
-            "work_status",
-            "has_incumbent",
-            "report_count",
-            "method_call_counts",
-            "error",
-        ]
-        with open(path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for sc in self.scenario_results:
-                for ir in sc.instance_results:
-                    writer.writerow(
-                        {
-                            "scenario_name": sc.name,
-                            "instance_name": ir.instance_name,
-                            "first_obj_value": ir.first_obj_value,
-                            "obj_value": ir.obj_value,
-                            "obj_bound": ir.obj_bound,
-                            "elapsed_time": round(ir.elapsed_time, 3),
-                            "work_status": ir.work_status,
-                            "has_incumbent": ir.has_incumbent,
-                            "report_count": ir.report_count,
-                            "method_call_counts": json.dumps(ir.method_call_counts),
-                            "error": _last_non_empty_line(ir.error),
-                        }
-                    )
+        if path.exists():
+            path.unlink()
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                improvement = None
+                if (
+                    ir.first_obj_value is not None
+                    and ir.first_obj_value != 0
+                    and ir.obj_value is not None
+                ):
+                    improvement = (
+                        ir.first_obj_value - ir.obj_value
+                    ) / ir.first_obj_value
+                summary = FFcDDWSummary(
+                    inputs=FFcDDWInputSummary(
+                        name=ir.instance_name,
+                        job_count=ir.job_count or 0,
+                        stage_count=ir.stage_count or 0,
+                        machines_per_stage=ir.machines_per_stage or 0,
+                        timelimit=ir.timelimit or 0.0,
+                    ),
+                    outputs=FFcDDWOutputSummary(
+                        scenario_name=sc.name,
+                        work_status=ir.work_status,
+                        init_obj=ir.first_obj_value,
+                        init_bound=ir.first_obj_bound,
+                        best_obj=ir.obj_value,
+                        best_bound=ir.obj_bound,
+                        elapsed_time=float(ir.elapsed_time),
+                        improvement_ratio=improvement,
+                        has_incumbent=ir.has_incumbent,
+                        report_count=ir.report_count,
+                        method_call_counts=json.dumps(ir.method_call_counts),
+                    ),
+                    extra_outputs={"error": _last_non_empty_line(ir.error) or ""},
+                )
+                summary.save(path)
         logger.info("Summary CSV written to %s", path)
 
     def _aggregate_scenario(self, sc: ScenarioResult) -> dict[str, Any]:
@@ -235,107 +244,53 @@ class FFcDDWReporter:
             logger.info("Statistics YAML written to %s", path)
 
     def _generate_gantt_charts(self) -> None:
-        """Generate Gantt chart PNGs for best solutions."""
+        """Render Gantt PNGs from every `*_schedule.yaml` under output_dir.
+
+        matplotlib is imported lazily so the algorithm path can skip it entirely.
+        """
         try:
             import matplotlib
 
             matplotlib.use("Agg")
-            import matplotlib.patches as patches
-            import matplotlib.pyplot as plt
+            from ..io import load_schedule_yaml
+            from ..io.gantt import GanttPlotter
         except ImportError:
             logger.warning("matplotlib not available, skipping Gantt charts")
             return
 
-        cmap = plt.get_cmap("tab20")
+        for yaml_path in sorted(self.output_dir.rglob("*_schedule.yaml")):
+            try:
+                data = load_schedule_yaml(yaml_path)
+            except Exception:
+                logger.exception("Failed to load schedule yaml %s", yaml_path)
+                continue
 
-        for sc in self.scenario_results:
-            for ir in sc.instance_results:
-                if not ir.has_incumbent or not ir.solution_path:
-                    continue
+            operations = data.get("operations") or []
+            if not operations:
+                continue
 
-                try:
-                    solution_data = json.loads(Path(ir.solution_path).read_text())
-                except Exception:
-                    continue
+            start_map: dict[tuple[str, str, str], int] = {}
+            end_map: dict[tuple[str, str, str], int] = {}
+            for op in operations:
+                key = (op["job"], op["stage"], op["machine"])
+                start_map[key] = int(op["start"])
+                end_map[key] = int(op["end"])
 
-                operations = solution_data.get("operations", [])
-                if not operations:
-                    continue
-
-                start_map: dict[tuple[str, str, str], int] = {}
-                end_map: dict[tuple[str, str, str], int] = {}
-                for op in operations:
-                    key = (op["job"], op["stage"], op["machine"])
-                    start_map[key] = op["start"]
-                    end_map[key] = op["end"]
-
-                machines_per_stage = solution_data.get("machines_per_stage", {})
-                job_list = solution_data.get("jobs", [])
-                stage_list = solution_data.get("stages", [])
-
-                fig, ax = plt.subplots(figsize=(14, 6))
-
-                # Machine lanes
-                machine_lanes: list[tuple[str, str]] = []
-                machine_labels: list[str] = []
-                for stage in stage_list:
-                    machines = sorted(machines_per_stage.get(stage, []))
-                    for mc in machines:
-                        machine_lanes.append((stage, mc))
-                        machine_labels.append(f"{stage}-{mc}")
-
-                machine_to_y = {mc: 1.0 * idx for idx, mc in enumerate(machine_lanes)}
-
-                # Color map
-                n_jobs = max(len(job_list) - 1, 1)
-                job_to_color = {
-                    job: cmap(i / n_jobs) for i, job in enumerate(sorted(job_list))
-                }
-
-                # Draw bars
-                for (job, stage, machine), s_time in sorted(start_map.items()):
-                    e_time = end_map.get((job, stage, machine), s_time)
-                    y = machine_to_y.get((stage, machine))
-                    if y is None:
-                        continue
-                    duration = e_time - s_time
-                    color = job_to_color.get(job, (0.5, 0.5, 0.5, 0.5))
-
-                    ax.add_patch(
-                        patches.Rectangle(
-                            (s_time, y),
-                            duration,
-                            0.8,
-                            edgecolor="black",
-                            facecolor=color,
-                            alpha=0.5,
-                            linewidth=1.0,
-                        )
-                    )
-                    ax.text(
-                        (s_time + e_time) / 2,
-                        y + 0.4,
-                        job,
-                        ha="center",
-                        va="center",
-                        color="black",
-                        fontsize=7,
-                    )
-
-                ax.set_yticks([y + 0.4 for y in range(len(machine_lanes))])
-                ax.set_yticklabels(machine_labels)
-                ax.set_ylim(-0.5, len(machine_lanes) + 0.5)
-                ax.set_xlabel("Time")
-                ax.set_title(f"Gantt Chart - {ir.instance_name} ({sc.name})")
-                ax.grid(True, axis="x", linestyle="--", alpha=0.3)
-                ax.invert_yaxis()
-                fig.subplots_adjust(left=0.1, right=0.98, top=0.92, bottom=0.1)
-
-                gantt_path = (
-                    Path(ir.solution_path).parent / f"{ir.instance_name}_gantt.png"
+            png_path = yaml_path.with_name(
+                yaml_path.stem.replace("_schedule", "_gantt") + ".png"
+            )
+            try:
+                GanttPlotter().export(
+                    png_path,
+                    start_map,
+                    end_map,
+                    job_list=data.get("jobs"),
+                    stage_list=data.get("stages"),
+                    machine_list_per_stage=data.get("machinesPerStage"),
+                    all_job_list=data.get("jobs"),
                 )
-                fig.savefig(gantt_path, dpi=120)
-                plt.close(fig)
+            except Exception:
+                logger.exception("Failed to render Gantt for %s", yaml_path)
 
     def generate_report_filename(self, extension: str) -> str:
         return f"{self.output_dir.name}_report.{extension}"

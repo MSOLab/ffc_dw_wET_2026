@@ -80,15 +80,25 @@ def test_numpy_float_conversion() -> None:
     assert type(incumbent.obj_value) is float
 
 
-def test_run_mcf_lb_returns_bound_only_report() -> None:
+def test_run_mcf_lb_registers_dispatch_incumbent() -> None:
+    """run_mcf_lb now seeds a feasible incumbent via MixedDispatcher and
+    reports its ET as obj_value while keeping the MCF cost as obj_bound.
+    """
     controller = _make_controller(_make_instance())
 
     report = controller.run_mcf_lb()
 
-    assert report.obj_value is None
+    assert report.obj_value is not None
     assert report.obj_bound is not None
     assert report.obj_bound >= 0
     assert report.elapsed_time >= 0
+    # Feasible obj must dominate the LB.
+    assert report.obj_value >= report.obj_bound
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+    assert incumbent.obj_bound == report.obj_bound
 
 
 def test_run_mcf_lb_not_greater_than_fam() -> None:

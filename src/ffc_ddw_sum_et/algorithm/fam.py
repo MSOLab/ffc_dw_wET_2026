@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
+from ..solution.objectives import compute_window_et
 from .base.alg_option import AlgOption
 from .base.alg_record import AlgRecord, AlgResult, TerminationReason, WorkStatus
 from .base.alg_spec import AlgSpec
@@ -128,7 +129,7 @@ class FAMDispatcher:
                 stage_job_sequence,
             )
 
-        sum_earliness, sum_tardiness = self._calculate_window_et(schedule, instance)
+        sum_earliness, sum_tardiness = compute_window_et(schedule, instance)
         obj_value = sum_earliness + sum_tardiness
         self._debug(
             spec,
@@ -201,23 +202,6 @@ class FAMDispatcher:
     ) -> int:
         completion_time = schedule.get_job_end_time(prev_stage_id, job_id)
         return due_upper[job_id] - completion_time
-
-    def _calculate_window_et(
-        self,
-        schedule: FFcSchedule,
-        instance: FFcDDWParameters,
-    ) -> tuple[int, int]:
-        last_stage_id = instance.stage_id_list[-1]
-        sum_earliness = 0
-        sum_tardiness = 0
-        for job_id in instance.job_id_list:
-            completion_time = schedule.get_job_end_time(last_stage_id, job_id)
-            due_lower, due_upper = instance.job_2_due_window_map[job_id]
-            ewt = instance.job_2_ewt_map.get(job_id, 1)
-            twt = instance.job_2_twt_map.get(job_id, 1)
-            sum_earliness += ewt * max(due_lower - completion_time, 0)
-            sum_tardiness += twt * max(completion_time - due_upper, 0)
-        return sum_earliness, sum_tardiness
 
     def _debug(self, spec: AlgSpec, msg: str, *args: object) -> None:
         if spec.logger is not None:

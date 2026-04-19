@@ -160,9 +160,10 @@ def test_write_summary_csv(tmp_path: Path) -> None:
     with csv_path.open() as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 2
-    assert rows[0]["scenario_name"] == "s1"
-    assert rows[0]["instance_name"] == "a"
-    assert rows[1]["method_call_counts"] == json.dumps({"run_fam": 2})
+    # hfs_summary-style header: scenarioName lives in the outputs block.
+    assert rows[0]["scenarioName"] == "s1"
+    assert rows[0]["instanceName"] == "a"
+    assert rows[1]["methodCallCounts"] == json.dumps({"run_fam": 2})
 
 
 def test_write_statistics_json(tmp_path: Path) -> None:
