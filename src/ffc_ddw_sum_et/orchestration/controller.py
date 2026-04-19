@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Literal
 
 from ortools.sat.python import cp_model
 from routix.report import SubroutineReport
@@ -70,7 +71,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         return report
 
-    def run_mcf_lb(self) -> SubroutineReport:
+    def run_mcf_lb(
+        self, criteria: Literal["weighted_et", "makespan"] = "weighted_et"
+    ) -> SubroutineReport:
         """Step method: compute preemptive last-stage LB via min-cost flow,
         then seed an incumbent schedule by dispatching jobs in order of
         ascending MCF start time.
@@ -96,7 +99,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         dispatcher = MixedDispatcher(self.instance)
-        schedule = dispatcher.get_best_mixed_schedule_by_sequence(job_sequence)
+        schedule = dispatcher.get_best_mixed_schedule_by_sequence(
+            job_sequence, criteria=criteria
+        )
         if schedule is None:
             raise RuntimeError(
                 f"MixedDispatcher produced no schedule for {self.instance.name}"

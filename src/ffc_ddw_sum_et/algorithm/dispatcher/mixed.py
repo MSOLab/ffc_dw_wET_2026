@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from typing import Literal
 
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.objectives import compute_window_et
@@ -18,7 +19,8 @@ from .utils import from_job_sequence_get_schedule_mixed
 
 
 class MixedDispatcher(BaseDispatcher):
-    """Mixed dispatch with head/tail concept, scored by weighted ET."""
+    """Mixed dispatch with head/tail concept, scored by weighted ET (default)
+    or makespan (when ``criteria="makespan"``)."""
 
     def _get_np_candidates(self) -> list[int]:
         np = self.job_count
@@ -38,6 +40,7 @@ class MixedDispatcher(BaseDispatcher):
         machine_then_job: bool = False,
         head_for_all_stages: bool = False,
         use_palmer_index: bool = False,
+        criteria: Literal["weighted_et", "makespan"] = "weighted_et",
     ) -> FFcSchedule | None:
         best_obj: float | None = None
         best_sch: FFcSchedule | None = None
@@ -77,8 +80,11 @@ class MixedDispatcher(BaseDispatcher):
             except ValueError:
                 continue
 
-            sum_e, sum_t = compute_window_et(_schedule, self.instance)
-            obj = sum_e + sum_t
+            if criteria == "makespan":
+                obj = _schedule.makespan
+            else:
+                sum_e, sum_t = compute_window_et(_schedule, self.instance)
+                obj = sum_e + sum_t
             if best_obj is None or obj < best_obj:
                 best_obj = obj
                 best_sch = _schedule
