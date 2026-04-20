@@ -8,6 +8,7 @@ matplotlib.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -56,4 +57,53 @@ def dump_schedule_yaml(
 
 
 def load_schedule_yaml(path: Path) -> dict[str, Any]:
+    return load_yaml(path)
+
+
+def dump_preemptive_schedule_yaml(
+    path: Path,
+    *,
+    instance_name: str,
+    stage_id: str,
+    machines: Sequence[str],
+    jobs: Sequence[str],
+    segments: Sequence[tuple[str, str, str, int, int]],
+    all_jobs: Sequence[str] | None = None,
+    obj_value: float | None = None,
+    obj_bound: float | None = None,
+) -> None:
+    """Write a preemptive schedule as YAML.
+
+    ``segments`` is a flat list of ``(job, stage, machine, start, end)``
+    tuples. A single ``(job, stage, machine)`` triple may appear in
+    multiple segments (preemption); each becomes its own record.
+    """
+    segment_records: list[dict[str, Any]] = []
+    for job_id, stage_i, mc_id, start_time, end_time in sorted(
+        segments, key=lambda seg: (seg[1], seg[2], seg[3], seg[0])
+    ):
+        segment_records.append(
+            {
+                "job": job_id,
+                "stage": stage_i,
+                "machine": mc_id,
+                "start": int(start_time),
+                "end": int(end_time),
+            }
+        )
+    data = {
+        "instanceName": instance_name,
+        "objValue": None if obj_value is None else float(obj_value),
+        "objBound": None if obj_bound is None else float(obj_bound),
+        "stageId": stage_id,
+        "jobs": list(jobs),
+        "allJobs": list(all_jobs) if all_jobs is not None else list(jobs),
+        "machinesPerStage": {stage_id: list(machines)},
+        "segments": segment_records,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dump_yaml(data, path)
+
+
+def load_preemptive_schedule_yaml(path: Path) -> dict[str, Any]:
     return load_yaml(path)

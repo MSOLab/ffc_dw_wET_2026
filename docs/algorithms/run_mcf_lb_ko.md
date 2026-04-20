@@ -50,12 +50,12 @@ def run_mcf_lb(
     여기서 `r_j_map = instance.get_job_2_p_sum_except_last_stage()`.
   - `obj_lb=mcf_lb`는 `sum(et_terms) >= ceil(mcf_lb)` 컷을 추가.
 - `FFcSchedule.dispatch_stage_by_jobs(last_stage_id, …, job_2_release=r_j_map)`로
-  `mcf_job_sequence`를 마지막 스테이지에 디스패치해 `ls_init_schedule`을
+  `mcf_job_sequence`를 마지막 스테이지에 디스패치해 `last_stage_only_init_schedule`을
   구성 (마지막 스테이지만 채워진 상태).
 
 ### Step 1-3 — 마지막 스테이지 전용 CP-SAT warm-start 및 solve
 
-- `BaseModelBuilder.apply_{start,end}_hints_from_*_map`로 `ls_init_schedule`의
+- `BaseModelBuilder.apply_{start,end}_hints_from_*_map`로 `last_stage_only_init_schedule`의
   start/end 값을 CP-SAT 힌트로 적용.
 - `last_stage_only_timelimit` 아래에서 solve.
 - `OPTIMAL`/`FEASIBLE` 둘 다 아니면: warning 로그 후
@@ -63,12 +63,12 @@ def run_mcf_lb(
   등록되지 않음.
 - 그 외에는 마지막 스테이지의 `(j, last_stage_id) → start/end`를 추출하고,
   `_build_schedule_from_op_starts(..., stages=[last_stage_id])`로 부분
-  스케줄 `last_stage_schedule`을 만든 뒤
+  스케줄 `last_stage_only_schedule`을 만든 뒤
   `self.last_stage_cp_sat_solution: FFcDDWSolution`에 저장.
 
 ### Step 2-1 — 마지막 스테이지 고정 역방향 디스패치
 
-`c == 1`이면 `dispatched_schedule = last_stage_schedule`로 단축. 그 외:
+`c == 1`이면 `dispatched_schedule = last_stage_only_schedule`로 단축. 그 외:
 
 - CP-SAT 마지막 스테이지 종료 시각 내림차순으로 job 정렬, 동률은 native
   순서로 타이브레이크.

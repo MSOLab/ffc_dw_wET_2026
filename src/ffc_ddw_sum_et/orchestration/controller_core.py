@@ -13,7 +13,11 @@ from routix.subroutine_controller import SubroutineController
 
 from ..algorithm.base.alg_record import WorkStatus
 from ..parameters.ffc_ddw_params import FFcDDWParameters
+from ..solution.ffc_schedule import FFcSchedule
+from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
+
+MCFLBPhaseSchedule = FFcSchedule | MCFPreemptiveSchedule
 
 
 def _to_ddo(data: Any) -> Any:
@@ -56,6 +60,12 @@ class FFcDDWSubroutineControllerCore(
         self.instance = instance
         self.solution_manager = FFcDDWSolutionManager()
         self.last_stage_cp_sat_solution: FFcDDWSolution | None = None
+        self.mcf_preemptive_schedule: MCFPreemptiveSchedule | None = None
+        # Ordered (name, schedule) pairs per MCF-LB phase, used by the
+        # runner to emit numbered progress artifacts (1_mcf_preemptive,
+        # 2_last_stage_only_init, ..., 7_final). Only populated entries
+        # are appended so early returns retain partial progress.
+        self.mcf_lb_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
 
     def is_stopping_condition(self, **kwargs: Any) -> bool:
         """Stop when the timelimit is exceeded."""

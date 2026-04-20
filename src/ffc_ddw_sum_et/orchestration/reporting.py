@@ -109,6 +109,62 @@ def _render_gantt_from_yaml(yaml_path: Path) -> None:
         logger.exception("Failed to render Gantt for %s", yaml_path)
 
 
+def _render_preemptive_gantt_from_yaml(yaml_path: Path) -> None:
+    """Render a preemptive Gantt PNG from one MCF-preemptive schedule YAML."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        from ..io import load_preemptive_schedule_yaml
+        from ..io.gantt import PreemptiveGanttPlotter
+    except ImportError:
+        logger.warning("matplotlib not available, skipping %s", yaml_path)
+        return
+
+    try:
+        data = load_preemptive_schedule_yaml(yaml_path)
+    except Exception:
+        logger.exception("Failed to load preemptive schedule yaml %s", yaml_path)
+        return
+
+    segment_records = data.get("segments") or []
+    if not segment_records:
+        return
+
+    segments: list[tuple[str, str, str, int, int]] = [
+        (
+            seg["job"],
+            seg["stage"],
+            seg["machine"],
+            int(seg["start"]),
+            int(seg["end"]),
+        )
+        for seg in segment_records
+    ]
+
+    stage_id = data.get("stageId")
+    machines_per_stage = data.get("machinesPerStage") or {}
+    machines = machines_per_stage.get(stage_id, []) if stage_id else []
+    jobs = data.get("jobs")
+    all_jobs = data.get("allJobs") or jobs
+
+    png_path = yaml_path.with_name(
+        yaml_path.stem.replace("_mcf_preemptive_schedule", "_mcf_preemptive_gantt")
+        + ".png"
+    )
+    try:
+        PreemptiveGanttPlotter().export(
+            png_path,
+            segments,
+            stage_id=stage_id,
+            machines=machines,
+            jobs=jobs,
+            all_jobs=all_jobs,
+        )
+    except Exception:
+        logger.exception("Failed to render preemptive Gantt for %s", yaml_path)
+
+
 @dataclass
 class ScenarioResult:
     """Aggregated result for one scenario."""
@@ -458,9 +514,7 @@ class FFcDDWReporter:
         """
         for sc in self.scenario_results:
             rows = [
-                ir
-                for ir in sc.instance_results
-                if ir.mcf_lb_diagnostic is not None
+                ir for ir in sc.instance_results if ir.mcf_lb_diagnostic is not None
             ]
             if not rows:
                 continue
@@ -531,30 +585,44 @@ class FFcDDWReporter:
         Gated by ``draw_gantt``. When enabled, rendering fans out across a
         ``ProcessPoolExecutor`` sized by ``painter_thread_cnt``; matplotlib is
         imported inside the worker so the algorithm path still pays nothing.
+
+        Preemptive schedule YAMLs (``*_mcf_preemptive_schedule.yaml``) use a
+        different schema and a dedicated renderer.
         """
         if not self.draw_gantt:
             logger.info("draw_gantt=False; skipping Gantt chart rendering")
             return
 
-        yaml_paths = sorted(self.output_dir.rglob("*_schedule.yaml"))
-        if not yaml_paths:
+        all_yaml_paths = sorted(self.output_dir.rglob("*_schedule.yaml"))
+        preemptive_paths = [
+            p
+            for p in all_yaml_paths
+            if p.name.endswith("_mcf_preemptive_schedule.yaml")
+        ]
+        regular_paths = [p for p in all_yaml_paths if p not in preemptive_paths]
+
+        jobs: list[tuple[Path, Any]] = [
+            (p, _render_gantt_from_yaml) for p in regular_paths
+        ] + [(p, _render_preemptive_gantt_from_yaml) for p in preemptive_paths]
+        if not jobs:
             return
 
-        worker_cnt = max(1, min(self.painter_thread_cnt, len(yaml_paths)))
+        worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
         logger.info(
-            "Rendering %d Gantt charts with %d worker(s)",
-            len(yaml_paths),
+            "Rendering %d Gantt charts (%d regular, %d preemptive) with %d worker(s)",
+            len(jobs),
+            len(regular_paths),
+            len(preemptive_paths),
             worker_cnt,
         )
         if worker_cnt == 1:
-            for yaml_path in yaml_paths:
-                _render_gantt_from_yaml(yaml_path)
+            for yaml_path, render_fn in jobs:
+                render_fn(yaml_path)
             return
 
         with ProcessPoolExecutor(max_workers=worker_cnt) as executor:
             futures = [
-                executor.submit(_render_gantt_from_yaml, yaml_path)
-                for yaml_path in yaml_paths
+                executor.submit(render_fn, yaml_path) for yaml_path, render_fn in jobs
             ]
             for future in futures:
                 try:

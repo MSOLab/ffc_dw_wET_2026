@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Literal
 
 from ortools.sat.python import cp_model
@@ -13,37 +12,20 @@ from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
 from ffc_ddw_sum_et.algorithm.dispatcher import MixedDispatcher
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
+from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import run_phase1
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
-from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 from ffc_ddw_sum_et.solution.objectives import compute_window_et
+from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
 from .controller_core import FFcDDWSubroutineControllerCore
 from .solution_manager import FFcDDWSolution
 
-
-@dataclass(slots=True)
-class MCFLBDiagnostic:
-    """Per-phase value/time diagnostic for ``run_mcf_lb``.
-
-    Populated incrementally as the pipeline progresses, so partial data
-    survives an early return on infeasibility.
-    """
-
-    mcf_lb: float | None = None
-    last_stage_only_obj: float | None = None
-    last_stage_only_bound: float | None = None
-    dispatched_obj: float | None = None
-    profile_fix_obj: float | None = None
-    profile_fix_bound: float | None = None
-    mcf_solve_sec: float | None = None
-    last_stage_cp_sat_sec: float | None = None
-    dispatch_sec: float | None = None
-    profile_fix_cp_sat_sec: float | None = None
-    reached_phase: str = "init"
-    ls_status: str | None = None
-    pf_status: str | None = None
-    single_stage: bool = False
+__all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic"]
 
 
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
@@ -126,183 +108,68 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # Expose up-front so early returns retain whatever has been filled so far.
         self.mcf_lb_diagnostic = diag
         instance = self.instance
-        n = instance.job_count
-        c = instance.stage_count
-        last_stage_id = instance.stage_id_list[-1]
         solver_thread_cnt = 1
 
-        # ----- Step 1: MCF LB + last-stage-only CP-SAT -----
-        # Step 1-1: Priority score from min cost flow
-        t_mcf = self.timer.elapsed_sec
-        mcf = ParallelMachinePreemptionMcf.from_instance(instance)
-        mcf.solve()
-        if not mcf.is_optimal():
-            raise RuntimeError(f"MCF not optimal for instance {instance.name}")
-        mcf_lb = float(mcf.get_obj_value())
-        diag.mcf_solve_sec = self.timer.elapsed_sec - t_mcf
-        diag.mcf_lb = mcf_lb
-        diag.reached_phase = "mcf"
-        # Step 1-1 done
-        job_2_priority_score_map = (
-            mcf.get_job_2_avg_time_minus_half_processing_time_sum_map()
-        )
+        # ----- Phase 1: MCF LB + last-stage-only CP-SAT model build -----
+        phase1 = run_phase1(instance, diag, logger=self.logger)
+        mcf_lb = phase1.mcf_lb
+        horizon = phase1.horizon
+        self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
+        self.mcf_lb_phase_schedules = [
+            ("1_mcf_preemptive_schedule", phase1.mcf_preemptive_schedule),
+            ("2_last_stage_only_init_schedule", phase1.last_stage_only_init_schedule),
+        ]
 
-        # Step 1-2: Initialize last-stage only schedule by dispatching jobs with priority score from MCF
-        job_2_pos = {j: i for i, j in enumerate(instance.job_id_list)}
-        mcf_job_sequence = sorted(
-            instance.job_id_list,
-            key=lambda j: (
-                job_2_priority_score_map[j] is None,
-                job_2_priority_score_map[j]
-                if job_2_priority_score_map[j] is not None
-                else 0,
-                job_2_pos[j],
-            ),
+        # ----- Phase 2: last-stage-only CP-SAT warm-start + solve -----
+        phase2 = run_phase2(
+            phase1,
+            instance,
+            diag,
+            last_stage_only_timelimit=last_stage_only_timelimit,
+            solver_thread_cnt=solver_thread_cnt,
+            logger=self.logger,
         )
-        job_2_release_map = instance.get_job_2_p_sum_except_last_stage()
-        duration_map = instance.get_job_2_p_map_for_stage(last_stage_id)
-
-        params_for_horizon = BaseModelBuilder.make_params(instance)
-        horizon = sum(params_for_horizon.p.values())
-
-        ls_builder = BaseModelBuilder()
-        ls_mdl, ls_params, ls_ops_vars, _ls_obj_vars = ls_builder.build(
-            instance=instance,
-            horizon=horizon,
-            last_stage_only=True,
-            job_2_release=job_2_release_map,
-            obj_lb=mcf_lb,
-        )
-
-        ls_init_schedule = FFcSchedule(
-            jobs=instance.job_id_list,
-            stages=instance.stage_id_list,
-            machines_per_stage=instance.stage_2_machines_map,
-        )
-        # Step 1-2 done
-        ls_init_schedule.dispatch_stage_by_jobs(
-            last_stage_id,
-            mcf_job_sequence,
-            duration_map,
-            job_2_release=job_2_release_map,
-        )
-        # Step 1-3: CP-SAT last stage only, warm-started from dispatch
-        BaseModelBuilder.apply_start_hints_from_start_time_map(
-            ls_mdl,
-            ls_params,
-            ls_ops_vars,
-            ls_init_schedule.get_jik_2_start_time_map(),
-        )
-        BaseModelBuilder.apply_end_hints_from_end_time_map(
-            ls_mdl, ls_params, ls_ops_vars, ls_init_schedule.get_jik_2_end_time_map()
-        )
-
-        ls_budget = _parse_nc_timelimit(last_stage_only_timelimit, n, c)
-        ls_solver = cp_model.CpSolver()
-        if ls_budget is not None:
-            ls_solver.parameters.max_time_in_seconds = float(ls_budget)
-        ls_solver.parameters.num_search_workers = int(solver_thread_cnt)
-        t_ls = self.timer.elapsed_sec
-        ls_status = ls_solver.Solve(ls_mdl)
-        diag.last_stage_cp_sat_sec = self.timer.elapsed_sec - t_ls
-        diag.ls_status = ls_solver.StatusName(ls_status)
-
-        if ls_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            self.logger.warning(
-                "run_mcf_lb step 1c: last-stage CP-SAT no feasible solution "
-                "(status=%s)",
-                ls_solver.StatusName(ls_status),
-            )
+        if phase2 is None:
             elapsed = self.timer.elapsed_sec - start_elapsed
             return SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
             )
 
-        ls_j_i_2_start = {
-            (j, last_stage_id): int(
-                ls_solver.Value(ls_ops_vars.op_start[j, last_stage_id])
-            )
-            for j in ls_params.j_list
-        }
-        ls_j_i_2_end = {
-            (j, last_stage_id): int(
-                ls_solver.Value(ls_ops_vars.op_end[j, last_stage_id])
-            )
-            for j in ls_params.j_list
-        }
-        last_stage_schedule = _build_schedule_from_op_starts(
-            instance, ls_j_i_2_start, ls_j_i_2_end, stages=[last_stage_id]
-        )
-        last_stage_only_schedule_makespan = max(ls_j_i_2_end.values())
         self.last_stage_cp_sat_solution = FFcDDWSolution(
-            schedule=last_stage_schedule,
-            obj_value=float(ls_solver.objective_value),
+            schedule=phase2.last_stage_only_schedule,
+            obj_value=phase2.last_stage_only_obj,
             obj_bound=mcf_lb,
         )
-        diag.last_stage_only_obj = float(ls_solver.objective_value)
-        diag.last_stage_only_bound = float(ls_solver.best_objective_bound)
-        diag.reached_phase = "last_stage"
-        # Step 1-3 done
+        self.mcf_lb_phase_schedules.append(
+            ("3_last_stage_only_schedule", phase2.last_stage_only_schedule)
+        )
 
-        # ----- Step 2-1 + 2-2: reverse-dispatch, unflip, align, right-shift -----
-        t_disp = self.timer.elapsed_sec
-        diag.single_stage = c == 1
-        if c == 1:
-            # Single-stage instance: last_stage_schedule is already the full
-            # schedule; no reverse-dispatch needed.
-            dispatched_schedule = last_stage_schedule
-        else:
-            # Step 2-1: reverse-dispatch with last-stage pinned as seed
-            # Sort jobs by last-stage end time (latest first)
-            last_stage_end_map = {
-                j: ls_j_i_2_end[j, last_stage_id] for j in instance.job_id_list
-            }
-            rev_job_sequence = sorted(
-                instance.job_id_list,
-                key=lambda j: (-last_stage_end_map[j], job_2_pos[j]),
+        # ----- Phase 3: reverse-dispatch + unflip -----
+        phase3 = run_phase3(phase1, phase2, instance, diag, logger=self.logger)
+        if phase3 is None:
+            elapsed = self.timer.elapsed_sec - start_elapsed
+            return SubroutineReport(
+                elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
             )
-
-            reversed_instance = FFcDDWParameters.reverse_stages(instance)
-            reversed_seed = FFcSchedule(
-                jobs=reversed_instance.job_id_list,
-                stages=reversed_instance.stage_id_list,
-                machines_per_stage=reversed_instance.stage_2_machines_map,
+        dispatched_schedule = phase3.dispatched_schedule
+        step2_obj = phase3.dispatched_obj
+        if phase3.last_stage_only_schedule_flipped is not None:
+            self.mcf_lb_phase_schedules.append(
+                (
+                    "4_last_stage_only_schedule_flipped",
+                    phase3.last_stage_only_schedule_flipped,
+                )
             )
-            for mc_id, s, e, j in last_stage_schedule.iter_operations_on_stage(
-                last_stage_id
-            ):
-                reversed_seed.add_ops_times_2_mc(
-                    stage_id=last_stage_id,
-                    mc_id=mc_id,
-                    job_id=j,
-                    start_time=last_stage_only_schedule_makespan - e,
-                    end_time=last_stage_only_schedule_makespan - s,
+        if phase3.dispatched_schedule_before_unflipping is not None:
+            self.mcf_lb_phase_schedules.append(
+                (
+                    "5_dispatched_schedule_before_unflipping",
+                    phase3.dispatched_schedule_before_unflipping,
                 )
-
-            rev_dispatcher = MixedDispatcher(reversed_instance)
-            reversed_full = rev_dispatcher.get_best_mixed_schedule_by_sequence(
-                rev_job_sequence,
-                schedule=reversed_seed,
-                from_stage=reversed_instance.stage_id_list[1],
-                criteria="makespan",
             )
-            if reversed_full is None:
-                self.logger.warning(
-                    "run_mcf_lb step 2-1: reversed MixedDispatcher produced no schedule"
-                )
-                elapsed = self.timer.elapsed_sec - start_elapsed
-                return SubroutineReport(
-                    elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
-                )
-
-            # Step 2-1 done
-            dispatched_schedule = reversed_full.as_reversed()
-
-        sum_e, sum_t = compute_window_et(dispatched_schedule, instance)
-        step2_obj = float(sum_e + sum_t)
-        diag.dispatch_sec = self.timer.elapsed_sec - t_disp
-        diag.dispatched_obj = step2_obj
-        diag.reached_phase = "dispatched"
+        self.mcf_lb_phase_schedules.append(
+            ("6_dispatched_schedule", phase3.dispatched_schedule)
+        )
         self.solution_manager.register(
             SubroutineReport(
                 elapsed_time=self.timer.elapsed_sec - start_elapsed,
@@ -372,7 +239,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             for j in pf_params.j_list
             for i in pf_params.i_list
         }
-        final_schedule = _build_schedule_from_op_starts(
+        final_schedule = build_schedule_from_op_starts(
             instance, final_j_i_2_start, final_j_i_2_end
         )
 
@@ -388,6 +255,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         diag.profile_fix_obj = final_obj
         diag.reached_phase = "profile_fix"
+        self.mcf_lb_phase_schedules.append(("7_final_schedule", final_schedule))
 
         elapsed = self.timer.elapsed_sec - start_elapsed
         report = SubroutineReport(
@@ -401,6 +269,132 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 schedule=final_schedule,
                 obj_value=final_obj,
                 obj_bound=obj_bound_final,
+            ),
+        )
+        return report
+
+    def run_mcf_lb_4(
+        self,
+        last_stage_only_timelimit: float | str | None = None,
+        profile_fix_by_machine: bool = False,
+        machine_precedence_stride: int = 1,
+    ) -> SubroutineReport:
+        """Step method: full MCF-LB pipeline composed of four extracted phases.
+
+        Behavior-equivalent alternative to :meth:`run_mcf_lb`, built as a thin
+        wrapper around ``run_phase1`` / ``run_phase2`` / ``run_phase3`` /
+        ``run_phase4`` in :mod:`ffc_ddw_sum_et.algorithm.mcf_lb`. Kept
+        side-by-side with ``run_mcf_lb`` for parity verification before the
+        inline version is retired.
+        """
+        start_elapsed = self.timer.elapsed_sec
+        diag = MCFLBDiagnostic()
+        self.mcf_lb_diagnostic = diag
+        instance = self.instance
+        solver_thread_cnt = 1
+
+        # Phase 1: MCF LB + last-stage-only CP-SAT model build.
+        phase1 = run_phase1(instance, diag, logger=self.logger)
+        mcf_lb = phase1.mcf_lb
+        self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
+        self.mcf_lb_phase_schedules = [
+            ("1_mcf_preemptive_schedule", phase1.mcf_preemptive_schedule),
+            ("2_last_stage_only_init_schedule", phase1.last_stage_only_init_schedule),
+        ]
+
+        # Phase 2: last-stage-only CP-SAT warm-start + solve.
+        phase2 = run_phase2(
+            phase1,
+            instance,
+            diag,
+            last_stage_only_timelimit=last_stage_only_timelimit,
+            solver_thread_cnt=solver_thread_cnt,
+            logger=self.logger,
+        )
+        if phase2 is None:
+            elapsed = self.timer.elapsed_sec - start_elapsed
+            return SubroutineReport(
+                elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
+            )
+        self.last_stage_cp_sat_solution = FFcDDWSolution(
+            schedule=phase2.last_stage_only_schedule,
+            obj_value=phase2.last_stage_only_obj,
+            obj_bound=mcf_lb,
+        )
+        self.mcf_lb_phase_schedules.append(
+            ("3_last_stage_only_schedule", phase2.last_stage_only_schedule)
+        )
+
+        # Phase 3: reverse-dispatch + unflip.
+        phase3 = run_phase3(phase1, phase2, instance, diag, logger=self.logger)
+        if phase3 is None:
+            elapsed = self.timer.elapsed_sec - start_elapsed
+            return SubroutineReport(
+                elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
+            )
+        if phase3.last_stage_only_schedule_flipped is not None:
+            self.mcf_lb_phase_schedules.append(
+                (
+                    "4_last_stage_only_schedule_flipped",
+                    phase3.last_stage_only_schedule_flipped,
+                )
+            )
+        if phase3.dispatched_schedule_before_unflipping is not None:
+            self.mcf_lb_phase_schedules.append(
+                (
+                    "5_dispatched_schedule_before_unflipping",
+                    phase3.dispatched_schedule_before_unflipping,
+                )
+            )
+        self.mcf_lb_phase_schedules.append(
+            ("6_dispatched_schedule", phase3.dispatched_schedule)
+        )
+        self.solution_manager.register(
+            SubroutineReport(
+                elapsed_time=self.timer.elapsed_sec - start_elapsed,
+                obj_value=phase3.dispatched_obj,
+                obj_bound=mcf_lb,
+            ),
+            FFcDDWSolution(
+                schedule=phase3.dispatched_schedule,
+                obj_value=phase3.dispatched_obj,
+                obj_bound=mcf_lb,
+            ),
+        )
+
+        # Phase 4: profile-fix CP-SAT full solve.
+        phase4 = run_phase4(
+            phase1,
+            phase3,
+            instance,
+            diag,
+            profile_fix_by_machine=profile_fix_by_machine,
+            machine_precedence_stride=machine_precedence_stride,
+            solver_thread_cnt=solver_thread_cnt,
+            logger=self.logger,
+        )
+
+        elapsed = self.timer.elapsed_sec - start_elapsed
+        if phase4.final_schedule is None:
+            # Infeasible profile-fix: keep the phase-3 incumbent, bound upgraded.
+            return SubroutineReport(
+                elapsed_time=elapsed,
+                obj_value=phase3.dispatched_obj,
+                obj_bound=phase4.obj_bound_final,
+            )
+        self.mcf_lb_phase_schedules.append(("7_final_schedule", phase4.final_schedule))
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=phase4.final_obj,
+            obj_bound=phase4.obj_bound_final,
+        )
+        self.solution_manager.register(
+            report,
+            FFcDDWSolution(
+                schedule=phase4.final_schedule,
+                obj_value=phase4.final_obj,
+                obj_bound=phase4.obj_bound_final,
             ),
         )
         return report
@@ -532,7 +526,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             (j, last_stage_id): int(solver.Value(pm_ops_vars.op_end[j, last_stage_id]))
             for j in pm_params.j_list
         }
-        out_schedule = _build_schedule_from_op_starts(
+        out_schedule = build_schedule_from_op_starts(
             self.instance, j_i_2_start, j_i_2_end, stages=[last_stage_id]
         )
 
@@ -698,7 +692,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             for j in params.j_list
             for i in params.i_list
         }
-        schedule = _build_schedule_from_op_starts(instance, j_i_2_start, j_i_2_end)
+        schedule = build_schedule_from_op_starts(instance, j_i_2_start, j_i_2_end)
 
         sum_e, sum_t = compute_window_et(schedule, instance)
         obj_value = float(sum_e + sum_t)
@@ -722,60 +716,3 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=obj_bound),
         )
         return report
-
-
-def _parse_nc_timelimit(value: float | str | None, n: int, c: int) -> float | None:
-    """Parse a timelimit spec into seconds.
-
-    - ``None`` -> ``None`` (no limit).
-    - ``float``/``int`` -> seconds as-is.
-    - ``"<x>nc"`` -> ``float(x) * n * c`` seconds.
-    """
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    s = value.strip()
-    if s.endswith("nc"):
-        return float(s[:-2]) * n * c
-    raise ValueError(
-        f"Invalid timelimit spec: {value!r}; expected float or '<x>nc' string"
-    )
-
-
-def _build_schedule_from_op_starts(
-    instance: FFcDDWParameters,
-    j_i_2_start: dict[tuple[str, str], int],
-    j_i_2_end: dict[tuple[str, str], int],
-    stages: Sequence[str] | None = None,
-) -> FFcSchedule:
-    """Greedy interval-graph coloring to assign machines from CP-SAT starts.
-
-    The cumulative constraint at each stage caps concurrent intervals at
-    ``|M_i|``, so a free machine is always available at any operation's
-    start time. ``stages`` restricts the loop to a subset of stages; other
-    stages remain empty in the returned schedule.
-    """
-    schedule = FFcSchedule(
-        jobs=instance.job_id_list,
-        stages=instance.stage_id_list,
-        machines_per_stage=instance.stage_2_machines_map,
-    )
-    for i in stages if stages is not None else instance.stage_id_list:
-        machines = list(instance.stage_2_machines_map[i])
-        machine_end: dict[str, int] = {k: 0 for k in machines}
-        ordered_jobs = sorted(
-            instance.job_id_list,
-            key=lambda j: (j_i_2_start[j, i], j_i_2_end[j, i], j),
-        )
-        for j in ordered_jobs:
-            s = j_i_2_start[j, i]
-            e = j_i_2_end[j, i]
-            picked = next((k for k in machines if machine_end[k] <= s), None)
-            if picked is None:
-                raise RuntimeError(
-                    f"No free machine at stage {i} for job {j} start={s}"
-                )
-            schedule.add_ops_times_2_mc(i, picked, j, s, e)
-            machine_end[picked] = e
-    return schedule

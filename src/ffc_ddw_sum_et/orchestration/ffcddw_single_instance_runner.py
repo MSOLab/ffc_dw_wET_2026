@@ -15,8 +15,9 @@ from routix.runner.single_instance_runner import (
 )
 from routix.type_defs import RunMode
 
-from ..io import dump_schedule_yaml
+from ..io import dump_preemptive_schedule_yaml, dump_schedule_yaml
 from ..parameters.ffc_ddw_params import FFcDDWParameters
+from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
 
@@ -188,6 +189,32 @@ class FFcDDWSingleInstanceRunner(
                     "Error saving last_stage_cp_sat schedule yaml for %s",
                     self.ins_name,
                 )
+
+        phase_schedules = getattr(controller, "mcf_lb_phase_schedules", None) or []
+        if phase_schedules and self.working_dir is not None:
+            for name, sched in phase_schedules:
+                if sched is None:
+                    continue
+                yaml_path = self.working_dir / f"{self.ins_name}_{name}.yaml"
+                try:
+                    if isinstance(sched, MCFPreemptiveSchedule):
+                        dump_preemptive_schedule_yaml(
+                            yaml_path,
+                            instance_name=f"{self.ins_name}_{name}",
+                            stage_id=sched.stage_id,
+                            machines=sched.machines,
+                            jobs=self.instance.job_id_list,
+                            segments=sched.to_gantt_segments(),
+                            all_jobs=self.instance.job_id_list,
+                        )
+                    else:
+                        dump_schedule_yaml(
+                            sched,
+                            yaml_path,
+                            instance_name=f"{self.ins_name}_{name}",
+                        )
+                except Exception:
+                    logger.exception("Error saving %s yaml for %s", name, self.ins_name)
 
         diag = getattr(controller, "mcf_lb_diagnostic", None)
         diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None

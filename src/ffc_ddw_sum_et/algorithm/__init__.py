@@ -10,6 +10,7 @@ from .base.alg_record import (
 from .base.alg_spec import AlgSpec
 from .base.algorithm import Algorithm
 from .fam import FAMDispatcher, FAMOption
+from .mcf_lb import MCFLBDiagnostic, MCFLBOption, MCFLBResult
 from .options.dispatch_stages_option import DispatchStagesOption
 
 __all__ = [
@@ -21,6 +22,9 @@ __all__ = [
     "DispatchStagesOption",
     "FAMDispatcher",
     "FAMOption",
+    "MCFLBDiagnostic",
+    "MCFLBOption",
+    "MCFLBResult",
     "ProgressLogEntry",
     "TerminationReason",
     "TimingInfo",

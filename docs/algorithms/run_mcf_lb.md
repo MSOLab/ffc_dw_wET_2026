@@ -51,24 +51,24 @@ Let `n = instance.job_count`, `c = instance.stage_count`,
   - `obj_lb=mcf_lb` adds `sum(et_terms) >= ceil(mcf_lb)` as a cut.
 - Dispatch `mcf_job_sequence` onto the last stage via
   `FFcSchedule.dispatch_stage_by_jobs(last_stage_id, …, job_2_release=r_j_map)`
-  to produce `ls_init_schedule` (only the last stage is filled).
+  to produce `last_stage_only_init_schedule` (only the last stage is filled).
 
 ### Step 1-3 — last-stage-only CP-SAT warm-start & solve
 
-- Apply `ls_init_schedule` start/end values as CP-SAT hints via
+- Apply `last_stage_only_init_schedule` start/end values as CP-SAT hints via
   `BaseModelBuilder.apply_{start,end}_hints_from_*_map`.
 - Solve under `last_stage_only_timelimit`.
 - If the solver returns neither `OPTIMAL` nor `FEASIBLE`: log a warning and
   return `SubroutineReport(obj_value=None, obj_bound=mcf_lb)` — no incumbent
   is registered.
 - Otherwise extract last-stage `(j, last_stage_id) → start/end`, build a
-  partial `last_stage_schedule` via `_build_schedule_from_op_starts(..., stages=[last_stage_id])`,
+  partial `last_stage_only_schedule` via `_build_schedule_from_op_starts(..., stages=[last_stage_id])`,
   and store the result on
   `self.last_stage_cp_sat_solution: FFcDDWSolution`.
 
 ### Step 2-1 — reverse-dispatch with last stage pinned
 
-`c == 1` short-circuits to `dispatched_schedule = last_stage_schedule`. Otherwise:
+`c == 1` short-circuits to `dispatched_schedule = last_stage_only_schedule`. Otherwise:
 
 - Sort jobs descending by CP-SAT last-stage end time, tie-break by native order.
 - Build `reversed_instance = FFcDDWParameters.reverse_stages(instance)` and an
