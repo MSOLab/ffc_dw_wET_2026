@@ -236,9 +236,9 @@ class ParallelMachinePreemptionMcf:
         job_2_avg_minus_p_sum: dict[str, float | None] = {}
         for j in self.calJ:
             times = list(x_val[j].keys())
-            avg_time = sum(times) / len(times) if times else None
-            if avg_time is not None:
-                job_2_avg_minus_p_sum[j] = avg_time - (self.r[j] + self.p[j]) / 2
-            else:
-                job_2_avg_minus_p_sum[j] = None
+            if not times:
+                raise ValueError(
+                    f"Job {j} has no start times; cannot compute avg_time_minus_half_p"
+                )
+            job_2_avg_minus_p_sum[j] = sum(times) / len(times) - (self.p[j] / 2)
         return job_2_avg_minus_p_sum
