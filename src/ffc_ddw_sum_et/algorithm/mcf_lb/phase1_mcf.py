@@ -23,7 +23,14 @@ from .diagnostic import MCFLBDiagnostic
 __all__ = ["LastStageSeed", "Phase1State", "SeedTag", "run_phase1"]
 
 
-SeedTag = Literal["avg_time", "start_time", "completion_time"]
+SeedTag = Literal[
+    "avg_time",
+    "start_time",
+    "completion_time",
+    "due_date_plus",
+    "due_date_star",
+    "due_date_star_minus_half_p",
+]
 
 # Fixed emission order across artifacts (diagnostic, gantt, CSV).
 
@@ -92,6 +99,9 @@ def run_phase1(
         "avg_time": mcf.get_job_priority_by_avg_time(),
         "start_time": mcf.get_job_2_start_time_map(),
         "completion_time": mcf.get_job_2_completion_time_map(),
+        "due_date_plus": instance.get_job_2_due_date_plus_map(),
+        "due_date_star": instance.get_job_2_due_date_star_map(),
+        "due_date_star_minus_half_p": instance.get_job_2_due_date_star_minus_half_p_map(),
     }
     if last_stage_only_priority_tags is None:
         last_stage_only_priority_tags = ["avg_time"]
