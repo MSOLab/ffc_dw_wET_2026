@@ -278,10 +278,10 @@ class FFcDDWReporter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._write_summary_csv()
-        self._write_statistics_json()
+        self._write_mcf_lb_analysis_csv()
         self._write_statistics_yaml()
-        self._generate_gantt_charts()
         self._write_excel_report()
+        self._generate_gantt_charts()
 
     def generate_summary_filename(self, extension: str) -> str:
         return f"{self.output_dir.name}_summary.{extension}"
@@ -307,6 +307,7 @@ class FFcDDWReporter:
                     improvement = (
                         ir.first_obj_value - ir.obj_value
                     ) / ir.first_obj_value
+                mcf_extras = self._build_mcf_lb_extras(ir)
                 summary = FFcDDWSummary(
                     inputs=FFcDDWInputSummary(
                         name=ir.instance_name,
@@ -328,10 +329,63 @@ class FFcDDWReporter:
                         report_count=ir.report_count,
                         method_call_counts=json.dumps(ir.method_call_counts),
                     ),
-                    extra_outputs={"error": _last_non_empty_line(ir.error) or ""},
+                    extra_outputs={
+                        **mcf_extras,
+                        "error": _last_non_empty_line(ir.error) or "",
+                    },
                 )
                 summary.save(path)
         logger.info("Summary CSV written to %s", path)
+
+    def _build_mcf_lb_extras(self, ir: InstanceResult) -> dict[str, Any]:
+        """Flatten the controller's MCF-LB diagnostic + BKS into summary columns."""
+        diag = ir.mcf_lb_diagnostic or {}
+
+        ins_index = self._resolve_ins_index(ir.instance_name)
+        bks = (
+            self._index_to_meta.get(ins_index, {}).get("BKS")
+            if ins_index is not None
+            else None
+        )
+
+        # Mirrors controller.py: obj_bound_final = max(mcf_lb, pf_bound).
+        reported_obj_bound: float | None = None
+        if diag.get("mcf_lb") is not None:
+            reported_obj_bound = diag["mcf_lb"]
+            if diag.get("profile_fix_bound") is not None:
+                reported_obj_bound = max(reported_obj_bound, diag["profile_fix_bound"])
+
+        def _gap(a_key: str, b_key: str) -> float | None:
+            a, b = diag.get(a_key), diag.get(b_key)
+            return a - b if a is not None and b is not None else None
+
+        pf_vs_bks = (
+            diag["profile_fix_obj"] - bks
+            if diag.get("profile_fix_obj") is not None and bks is not None
+            else None
+        )
+
+        return {
+            "mcfLb": diag.get("mcf_lb"),
+            "lastStageOnlyBound": diag.get("last_stage_only_bound"),
+            "lastStageOnlyObj": diag.get("last_stage_only_obj"),
+            "bks": bks,
+            "dispatchedObj": diag.get("dispatched_obj"),
+            "profileFixObj": diag.get("profile_fix_obj"),
+            "profileFixBound": diag.get("profile_fix_bound"),
+            "reportedObjBound": reported_obj_bound,
+            "lastStageBoundMinusMcfGap": _gap("last_stage_only_bound", "mcf_lb"),
+            "lastStagePrimalMinusBoundGap": _gap(
+                "last_stage_only_obj", "last_stage_only_bound"
+            ),
+            "dispatchedMinusProfileFixGap": _gap("dispatched_obj", "profile_fix_obj"),
+            "profileFixMinusBksGap": pf_vs_bks,
+            "mcfSolveSec": diag.get("mcf_solve_sec"),
+            "lastStageCpSatSec": diag.get("last_stage_cp_sat_sec"),
+            "dispatchSec": diag.get("dispatch_sec"),
+            "profileFixCpSatSec": diag.get("profile_fix_cp_sat_sec"),
+            "mcfLbReachedPhase": diag.get("reached_phase") or "",
+        }
 
     def _aggregate_scenario(self, sc: ScenarioResult) -> dict[str, Any]:
         """Aggregate across instances within one scenario.
@@ -373,15 +427,88 @@ class FFcDDWReporter:
             "methodCallCounts": dict(method_counts),
         }
 
-    def _write_statistics_json(self) -> None:
-        """Write per-scenario cross-instance aggregates as JSON."""
+    _MCF_LB_ANALYSIS_COLUMNS: tuple[str, ...] = (
+        "insIndex",
+        "error",
+        "n",
+        "c",
+        "totalMcCount",
+        "T",
+        "R",
+        "W",
+        "mcfLb",
+        "lastStageOnlyBound",
+        "lastStageOnlyObj",
+        "bks",
+        "dispatchedObj",
+        "profileFixObj",
+        "profileFixBound",
+        "mcfSolveSec",
+        "lastStageCpSatSec",
+        "dispatchSec",
+        "profileFixCpSatSec",
+    )
+
+    def _write_mcf_lb_analysis_csv(self) -> None:
+        """Per-instance lower-bound analysis table.
+
+        One CSV per scenario that ran ``run_mcf_lb`` at least once. Rows are
+        sorted by ``insIndex``; instances not in the PRA2017 instance table
+        still appear with empty benchmark-meta columns.
+        """
         for sc in self.scenario_results:
-            if not sc.instance_results:
+            rows = [
+                ir
+                for ir in sc.instance_results
+                if ir.mcf_lb_diagnostic is not None
+            ]
+            if not rows:
                 continue
-            data = self._aggregate_scenario(sc)
-            path = self.output_dir / f"{sc.name}_statistics.json"
-            path.write_text(json.dumps(data, indent=2))
-            logger.info("Statistics JSON written to %s", path)
+            path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(self._MCF_LB_ANALYSIS_COLUMNS)
+                rows.sort(
+                    key=lambda ir: (
+                        self._resolve_ins_index(ir.instance_name)
+                        if self._resolve_ins_index(ir.instance_name) is not None
+                        else -1
+                    )
+                )
+                for ir in rows:
+                    writer.writerow(self._mcf_lb_analysis_row(ir))
+            logger.info("MCF-LB analysis CSV written to %s", path)
+
+    def _mcf_lb_analysis_row(self, ir: InstanceResult) -> list[str]:
+        diag = ir.mcf_lb_diagnostic or {}
+        ins_index = self._resolve_ins_index(ir.instance_name)
+        meta = self._index_to_meta.get(ins_index, {}) if ins_index is not None else {}
+
+        def _s(v: Any) -> str:
+            return "" if v is None else str(v)
+
+        values: dict[str, Any] = {
+            "insIndex": ins_index,
+            "error": _last_non_empty_line(ir.error) or "",
+            "n": meta.get("n"),
+            "c": meta.get("c"),
+            "totalMcCount": meta.get("totalMcCount"),
+            "T": meta.get("T"),
+            "R": meta.get("R"),
+            "W": meta.get("W"),
+            "mcfLb": diag.get("mcf_lb"),
+            "lastStageOnlyBound": diag.get("last_stage_only_bound"),
+            "lastStageOnlyObj": diag.get("last_stage_only_obj"),
+            "bks": meta.get("BKS"),
+            "dispatchedObj": diag.get("dispatched_obj"),
+            "profileFixObj": diag.get("profile_fix_obj"),
+            "mcfSolveSec": diag.get("mcf_solve_sec"),
+            "lastStageCpSatSec": diag.get("last_stage_cp_sat_sec"),
+            "dispatchSec": diag.get("dispatch_sec"),
+            "profileFixCpSatSec": diag.get("profile_fix_cp_sat_sec"),
+            "profileFixBound": diag.get("profile_fix_bound"),
+        }
+        return [_s(values[col]) for col in self._MCF_LB_ANALYSIS_COLUMNS]
 
     def _write_statistics_yaml(self) -> None:
         """Write per-scenario cross-instance aggregates as YAML."""

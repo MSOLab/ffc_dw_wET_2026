@@ -166,21 +166,6 @@ def test_write_summary_csv(tmp_path: Path) -> None:
     assert rows[1]["methodCallCounts"] == json.dumps({"run_fam": 2})
 
 
-def test_write_statistics_json(tmp_path: Path) -> None:
-    sc = ScenarioResult(
-        name="s1",
-        instance_results=[_make_ir("a", obj_value=10.0, first_obj_value=20.0)],
-    )
-    reporter = FFcDDWReporter(tmp_path, [sc])
-
-    reporter._write_statistics_json()
-
-    stats_path = tmp_path / "s1_statistics.json"
-    assert stats_path.exists()
-    data = json.loads(stats_path.read_text())
-    assert data == reporter._aggregate_scenario(sc)
-
-
 def test_generate_summary_filename(tmp_path: Path) -> None:
     out_dir = tmp_path / "run_42"
     out_dir.mkdir()

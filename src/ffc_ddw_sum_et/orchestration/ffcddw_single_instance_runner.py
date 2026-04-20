@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
+from routix.io import dump_yaml
 from routix.report import SubroutineReportStatistics
 from routix.runner.single_instance_runner import (
     SingleInstanceRunner,
@@ -54,6 +56,7 @@ class InstanceResult:
     stage_count: int | None = None
     machines_per_stage: int | None = None
     timelimit: float | None = None
+    mcf_lb_diagnostic: dict[str, Any] | None = None
 
 
 class FFcDDWSingleInstanceRunner(
@@ -186,6 +189,19 @@ class FFcDDWSingleInstanceRunner(
                     self.ins_name,
                 )
 
+        diag = getattr(controller, "mcf_lb_diagnostic", None)
+        diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None
+        if diag_dict is not None and self.working_dir is not None:
+            try:
+                dump_yaml(
+                    diag_dict,
+                    self.working_dir / f"{self.ins_name}_mcf_lb_diagnostic.yaml",
+                )
+            except Exception:
+                logger.exception(
+                    "Error saving mcf_lb_diagnostic yaml for %s", self.ins_name
+                )
+
         if self.working_dir is not None and last_report is not None:
             try:
                 self._save_obj_log(solution_manager.history)
@@ -227,6 +243,7 @@ class FFcDDWSingleInstanceRunner(
             stage_count=len(self.instance.stage_id_list),
             machines_per_stage=mps,
             timelimit=timelimit,
+            mcf_lb_diagnostic=diag_dict,
         )
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Literal
 
 from ortools.sat.python import cp_model
@@ -19,6 +20,30 @@ from ffc_ddw_sum_et.solution.objectives import compute_window_et
 
 from .controller_core import FFcDDWSubroutineControllerCore
 from .solution_manager import FFcDDWSolution
+
+
+@dataclass(slots=True)
+class MCFLBDiagnostic:
+    """Per-phase value/time diagnostic for ``run_mcf_lb``.
+
+    Populated incrementally as the pipeline progresses, so partial data
+    survives an early return on infeasibility.
+    """
+
+    mcf_lb: float | None = None
+    last_stage_only_obj: float | None = None
+    last_stage_only_bound: float | None = None
+    dispatched_obj: float | None = None
+    profile_fix_obj: float | None = None
+    profile_fix_bound: float | None = None
+    mcf_solve_sec: float | None = None
+    last_stage_cp_sat_sec: float | None = None
+    dispatch_sec: float | None = None
+    profile_fix_cp_sat_sec: float | None = None
+    reached_phase: str = "init"
+    ls_status: str | None = None
+    pf_status: str | None = None
+    single_stage: bool = False
 
 
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
@@ -97,6 +122,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 (step 2-3) runs without an explicit time limit.
         """
         start_elapsed = self.timer.elapsed_sec
+        diag = MCFLBDiagnostic()
+        # Expose up-front so early returns retain whatever has been filled so far.
+        self.mcf_lb_diagnostic = diag
         instance = self.instance
         n = instance.job_count
         c = instance.stage_count
@@ -105,11 +133,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         # ----- Step 1: MCF LB + last-stage-only CP-SAT -----
         # Step 1-1: Priority score from min cost flow
+        t_mcf = self.timer.elapsed_sec
         mcf = ParallelMachinePreemptionMcf.from_instance(instance)
         mcf.solve()
         if not mcf.is_optimal():
             raise RuntimeError(f"MCF not optimal for instance {instance.name}")
         mcf_lb = float(mcf.get_obj_value())
+        diag.mcf_solve_sec = self.timer.elapsed_sec - t_mcf
+        diag.mcf_lb = mcf_lb
+        diag.reached_phase = "mcf"
         # Step 1-1 done
         job_2_priority_score_map = (
             mcf.get_job_2_avg_time_minus_half_processing_time_sum_map()
@@ -170,7 +202,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if ls_budget is not None:
             ls_solver.parameters.max_time_in_seconds = float(ls_budget)
         ls_solver.parameters.num_search_workers = int(solver_thread_cnt)
+        t_ls = self.timer.elapsed_sec
         ls_status = ls_solver.Solve(ls_mdl)
+        diag.last_stage_cp_sat_sec = self.timer.elapsed_sec - t_ls
+        diag.ls_status = ls_solver.StatusName(ls_status)
 
         if ls_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             self.logger.warning(
@@ -204,9 +239,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=float(ls_solver.objective_value),
             obj_bound=mcf_lb,
         )
+        diag.last_stage_only_obj = float(ls_solver.objective_value)
+        diag.last_stage_only_bound = float(ls_solver.best_objective_bound)
+        diag.reached_phase = "last_stage"
         # Step 1-3 done
 
         # ----- Step 2-1 + 2-2: reverse-dispatch, unflip, align, right-shift -----
+        t_disp = self.timer.elapsed_sec
+        diag.single_stage = c == 1
         if c == 1:
             # Single-stage instance: last_stage_schedule is already the full
             # schedule; no reverse-dispatch needed.
@@ -260,6 +300,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         sum_e, sum_t = compute_window_et(dispatched_schedule, instance)
         step2_obj = float(sum_e + sum_t)
+        diag.dispatch_sec = self.timer.elapsed_sec - t_disp
+        diag.dispatched_obj = step2_obj
+        diag.reached_phase = "dispatched"
         self.solution_manager.register(
             SubroutineReport(
                 elapsed_time=self.timer.elapsed_sec - start_elapsed,
@@ -271,7 +314,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ),
         )
 
-        # ----- Step 2-2: profile-fix CP-SAT full solve -----
+        # ----- Step 2-3: profile-fix CP-SAT full solve -----
         pf_builder = BaseModelBuilder()
         pf_mdl, pf_params, pf_op_vars, _pf_et_vars = pf_builder.build(
             instance, horizon=horizon
@@ -296,12 +339,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         pf_solver = cp_model.CpSolver()
         pf_solver.parameters.num_search_workers = int(solver_thread_cnt)
+        t_pf = self.timer.elapsed_sec
         pf_status = pf_solver.Solve(pf_mdl)
+        diag.profile_fix_cp_sat_sec = self.timer.elapsed_sec - t_pf
+        diag.pf_status = pf_solver.StatusName(pf_status)
 
         try:
             pf_bound = float(pf_solver.best_objective_bound)
         except Exception:
             pf_bound = mcf_lb
+        diag.profile_fix_bound = pf_bound
         obj_bound_final = max(mcf_lb, pf_bound)
 
         if pf_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -339,6 +386,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 final_obj,
                 cp_obj,
             )
+        diag.profile_fix_obj = final_obj
+        diag.reached_phase = "profile_fix"
 
         elapsed = self.timer.elapsed_sec - start_elapsed
         report = SubroutineReport(
