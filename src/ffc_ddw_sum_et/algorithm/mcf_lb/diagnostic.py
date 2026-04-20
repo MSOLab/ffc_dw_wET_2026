@@ -18,6 +18,9 @@ class MCFLBDiagnostic:
     mcf_lb: float | None = None
     # Aggregate last-stage fields reflect the *chosen* seed candidate.
     last_stage_only_obj: float | None = None
+    # CP-SAT best_objective_bound from the last-stage-only model.
+    # Valid as a global LB only if not profile-fixed by any means.
+    # At the moment, the bound is not a global LB since profile-fixing is applied
     last_stage_only_bound: float | None = None
     dispatched_obj: float | None = None
     profile_fix_obj: float | None = None

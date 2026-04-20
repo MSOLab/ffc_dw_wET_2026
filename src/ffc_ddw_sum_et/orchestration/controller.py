@@ -326,6 +326,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
         obj_value: float | None = solver.objective_value
         obj_bound: float | None = None
+        # is a valid global LB since no profile-fixing is applied in this model
         try:
             obj_bound = float(solver.best_objective_bound)
             self.logger.info(

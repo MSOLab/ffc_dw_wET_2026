@@ -32,6 +32,9 @@ class LastStageCandidate:
     last_stage_only_schedule: FFcSchedule
     last_stage_only_schedule_makespan: int
     last_stage_only_obj: float
+    # CP-SAT best_objective_bound from the last-stage-only model.
+    # Valid as a global LB only if not profile-fixed by any means.
+    # At the moment, the bound is not a global LB since profile-fixing is applied
     last_stage_only_bound: float
     ls_status: str
     ls_j_i_2_end: dict[tuple[str, str], int]
