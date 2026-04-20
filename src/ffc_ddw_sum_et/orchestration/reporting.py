@@ -55,7 +55,7 @@ def _compute_rpdf(obj: float | None, bks: float | None) -> float | None:
         return None
     denom = (obj + bks) / 2
     if denom == 0:
-        return None
+        return 0
     return (obj - bks) / denom
 
 
