@@ -77,6 +77,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         return report
 
+    # TODO: remove; use run_mcf_lb_4 instead
     def run_mcf_lb(
         self,
         last_stage_only_timelimit: float | str | None = None,
