@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any
 
 
-INPUT_HEADERS = ("instanceName", "jobCount", "stageCount", "machinesPerStage", "timelimit")
+INPUT_HEADERS = (
+    "instanceName",
+    "jobCount",
+    "stageCount",
+    "machinesPerStage",
+    "timelimit",
+)
 
 
 @dataclass

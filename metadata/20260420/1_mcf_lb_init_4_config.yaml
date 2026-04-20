@@ -5,7 +5,7 @@ run_mode: FULL_RUN        # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-# ins_index: [0, 1439]
+# ins_index: [0, 1, 1439]
 
 output_dir: output
 
@@ -22,6 +22,5 @@ scenarios:
     output_subdir: mcf_lb_init_4
     subroutine_flow:
       - method: run_mcf_lb_4
-        # last_stage_only_timelimit: "0.32nc"
         profile_fix_by_machine: true
         machine_precedence_stride: 1

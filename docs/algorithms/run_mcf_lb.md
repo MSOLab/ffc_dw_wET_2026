@@ -10,22 +10,20 @@ Defined at [controller.py](../../src/ffc_ddw_sum_et/orchestration/controller.py)
 ```python
 def run_mcf_lb(
     self,
-    last_stage_only_timelimit: float | str | None = None,
     profile_fix_by_machine: bool = False,
     machine_precedence_stride: int = 1,
 ) -> SubroutineReport: ...
 ```
 
-- `last_stage_only_timelimit` — time budget for the step-1 CP-SAT solver.
-  Parsed by `_parse_nc_timelimit`:
-  - `None` → no explicit limit,
-  - `float`/`int` → seconds,
-  - `"<x>nc"` → `float(x) * n * c` seconds (e.g. `"0.01nc"`).
 - `profile_fix_by_machine`, `machine_precedence_stride` — passed through to
   `BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule`
-  in step 2-3.
-- The step-2-3 CP-SAT solver currently runs **without** an explicit time limit.
-- `num_search_workers` is hard-coded to `1` for both CP-SAT solves.
+  in **both** the step-1-3 per-seed last-stage CP-SAT solve and the step-2-3
+  profile-fix full solve.
+- Step 1-3 builds one CP-SAT model per MCF-derived seed
+  (`avg_time`, `start_time`, `completion_time`) and picks the best-obj
+  feasible solution.
+- All CP-SAT solves run without an explicit time limit.
+- `num_search_workers` is hard-coded to `1`.
 
 ## Pipeline
 
@@ -37,34 +35,47 @@ Let `n = instance.job_count`, `c = instance.stage_count`,
 - Build and solve `ParallelMachinePreemptionMcf.from_instance(instance)`.
 - Abort with `RuntimeError` if the flow is not optimal.
 - Record `mcf_lb = mcf.get_obj_value()` (used as `obj_bound` throughout) and
-  the priority score
-  `mcf.get_job_2_avg_time_minus_half_processing_time_sum_map()` (average flow
-  midpoint minus `(r_j + p_j)/2`; jobs with no flow carry `None`).
+  three MCF-derived priority maps over jobs (jobs with no flow carry `None`):
+  - `avg_time` — `get_job_priority_by_avg_time()` (average flow midpoint
+    minus `p_j/2 - 0.5`).
+  - `start_time` — `get_job_2_start_time_map()`.
+  - `completion_time` — `get_job_2_completion_time_map()`.
 
-### Step 1-2 — last-stage-only dispatch seed
+### Step 1-2 — last-stage-only dispatch seeds (one per priority map)
 
-- Sort jobs by priority score ascending; ties broken by native
-  `job_id_list` order; `None` scores sink to the tail.
-- Build a last-stage-only CP-SAT model:
-  - `BaseModelBuilder.build(..., last_stage_only=True, job_2_release=r_j_map, obj_lb=mcf_lb)`
-    where `r_j_map = instance.get_job_2_p_sum_except_last_stage()`.
-  - `obj_lb=mcf_lb` adds `sum(et_terms) >= ceil(mcf_lb)` as a cut.
-- Dispatch `mcf_job_sequence` onto the last stage via
-  `FFcSchedule.dispatch_stage_by_jobs(last_stage_id, …, job_2_release=r_j_map)`
-  to produce `last_stage_only_init_schedule` (only the last stage is filled).
+For each priority map above:
 
-### Step 1-3 — last-stage-only CP-SAT warm-start & solve
+- Sort jobs by the map ascending; ties broken by native `job_id_list` order;
+  `None` values sink to the tail.
+- Dispatch the sorted sequence onto the last stage via
+  `FFcSchedule.dispatch_stage_by_jobs(last_stage_id, …, job_2_release=r_j_map,
+  force_job_id_seq_as_priority=True)` where
+  `r_j_map = instance.get_job_2_p_sum_except_last_stage()`, yielding a
+  seed `init_schedule` tagged with the priority map name.
 
-- Apply `last_stage_only_init_schedule` start/end values as CP-SAT hints via
-  `BaseModelBuilder.apply_{start,end}_hints_from_*_map`.
-- Solve under `last_stage_only_timelimit`.
-- If the solver returns neither `OPTIMAL` nor `FEASIBLE`: log a warning and
-  return `SubroutineReport(obj_value=None, obj_bound=mcf_lb)` — no incumbent
-  is registered.
-- Otherwise extract last-stage `(j, last_stage_id) → start/end`, build a
-  partial `last_stage_only_schedule` via `_build_schedule_from_op_starts(..., stages=[last_stage_id])`,
-  and store the result on
-  `self.last_stage_cp_sat_solution: FFcDDWSolution`.
+### Step 1-3 — last-stage-only CP-SAT warm-start & solve (per seed)
+
+For each seed:
+
+- Build a fresh last-stage-only CP-SAT model via
+  `BaseModelBuilder.build(..., last_stage_only=True, job_2_release=r_j_map,
+  obj_lb=mcf_lb)` with `horizon = init_schedule.makespan * 2`. `obj_lb=mcf_lb`
+  adds `sum(et_terms) >= ceil(mcf_lb)` as a cut.
+- Apply `add_stage_ops_precedence_constraints_after_dispatch_from_schedule`
+  against the seed's `init_schedule` using the caller-supplied
+  `profile_fix_by_machine` / `machine_precedence_stride`.
+- Apply start/end hints from the seed's `init_schedule`.
+- Solve without an explicit time limit.
+- `INFEASIBLE` → `RuntimeError` (the MCF LB should be consistent with the
+  last-stage-only model).
+- Seeds that return neither `OPTIMAL` nor `FEASIBLE` within the solver's
+  effort budget are dropped with a warning.
+
+If no seed produces a feasible solution, return
+`SubroutineReport(obj_value=None, obj_bound=mcf_lb)` — no incumbent is
+registered. Otherwise pick the candidate with the minimum `objective_value`,
+store it on `self.last_stage_cp_sat_solution: FFcDDWSolution`, and carry it
+into step 2.
 
 ### Step 2-1 — reverse-dispatch with last stage pinned
 

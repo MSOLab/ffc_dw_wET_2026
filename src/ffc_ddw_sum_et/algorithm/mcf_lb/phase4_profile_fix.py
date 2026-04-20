@@ -59,10 +59,11 @@ def run_phase4(
     incumbent, using ``obj_bound_final`` as the bound.
     """
     dispatched_schedule = phase3.dispatched_schedule
+    horizon = int(dispatched_schedule.makespan * 2)
 
     pf_builder = BaseModelBuilder()
     pf_mdl, pf_params, pf_op_vars, _pf_et_vars = pf_builder.build(
-        instance, horizon=phase1.horizon
+        instance, horizon=horizon
     )
     BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
         pf_mdl,

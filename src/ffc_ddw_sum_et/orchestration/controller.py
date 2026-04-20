@@ -13,7 +13,7 @@ from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
 from ffc_ddw_sum_et.algorithm.dispatcher import MixedDispatcher
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import run_phase1
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
@@ -80,203 +80,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     # TODO: remove; use run_mcf_lb_4 instead
     def run_mcf_lb(
         self,
-        last_stage_only_timelimit: float | str | None = None,
         profile_fix_by_machine: bool = False,
         machine_precedence_stride: int = 1,
     ) -> SubroutineReport:
-        """Step method: full MCF-LB pipeline (step 1 + step 2).
+        """Legacy entrypoint delegating to :meth:`run_mcf_lb_4`.
 
-        1) MCF preemptive LB + last-stage-only CP-SAT warm-started from MCF.
-        2-1) Reverse-dispatch with last-stage pinned as seed: flip the
-             last-stage CP-SAT schedule around its makespan, insert it into
-             a reversed-instance schedule, then fill earlier reversed stages
-             with ``MixedDispatcher(reversed).get_best_mixed_schedule_by_sequence``
-             under ``criteria="makespan"``; unflip via ``as_reversed``.
-        2-2) Align last stage back to CP-SAT times via ``right_shift``, then
-             right-shift again if any op now starts before 0.
-        2-3) Profile-fix CP-SAT full solve warm-started from step 2-2.
-
-        Args:
-            last_stage_only_timelimit: Time limit for the last-stage-only
-                CP-SAT solver (step 1). Accepts either a float (seconds) or
-                a string of the form ``"<x>nc"`` which is parsed as
-                ``x * n * c`` seconds. ``None`` leaves the solver unbounded.
-                Only applies to ``ls_solver``; the profile-fix solver
-                (step 2-3) runs without an explicit time limit.
+        Kept to avoid breaking configs that still reference ``run_mcf_lb``
+        by name. New configs should call :meth:`run_mcf_lb_4` directly.
         """
-        start_elapsed = self.timer.elapsed_sec
-        diag = MCFLBDiagnostic()
-        # Expose up-front so early returns retain whatever has been filled so far.
-        self.mcf_lb_diagnostic = diag
-        instance = self.instance
-        solver_thread_cnt = 1
-
-        # ----- Phase 1: MCF LB + last-stage-only CP-SAT model build -----
-        phase1 = run_phase1(instance, diag, logger=self.logger)
-        mcf_lb = phase1.mcf_lb
-        horizon = phase1.horizon
-        self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
-        self.mcf_lb_phase_schedules = [
-            ("1_mcf_preemptive_schedule", phase1.mcf_preemptive_schedule),
-            ("2_last_stage_only_init_schedule", phase1.last_stage_only_init_schedule),
-        ]
-
-        # ----- Phase 2: last-stage-only CP-SAT warm-start + solve -----
-        phase2 = run_phase2(
-            phase1,
-            instance,
-            diag,
-            last_stage_only_timelimit=last_stage_only_timelimit,
-            solver_thread_cnt=solver_thread_cnt,
-            logger=self.logger,
-        )
-        if phase2 is None:
-            elapsed = self.timer.elapsed_sec - start_elapsed
-            return SubroutineReport(
-                elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
-            )
-
-        self.last_stage_cp_sat_solution = FFcDDWSolution(
-            schedule=phase2.last_stage_only_schedule,
-            obj_value=phase2.last_stage_only_obj,
-            obj_bound=mcf_lb,
-        )
-        self.mcf_lb_phase_schedules.append(
-            ("3_last_stage_only_schedule", phase2.last_stage_only_schedule)
-        )
-
-        # ----- Phase 3: reverse-dispatch + unflip -----
-        phase3 = run_phase3(phase1, phase2, instance, diag, logger=self.logger)
-        if phase3 is None:
-            elapsed = self.timer.elapsed_sec - start_elapsed
-            return SubroutineReport(
-                elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
-            )
-        dispatched_schedule = phase3.dispatched_schedule
-        step2_obj = phase3.dispatched_obj
-        if phase3.last_stage_only_schedule_flipped is not None:
-            self.mcf_lb_phase_schedules.append(
-                (
-                    "4_last_stage_only_schedule_flipped",
-                    phase3.last_stage_only_schedule_flipped,
-                )
-            )
-        if phase3.dispatched_schedule_before_unflipping is not None:
-            self.mcf_lb_phase_schedules.append(
-                (
-                    "5_dispatched_schedule_before_unflipping",
-                    phase3.dispatched_schedule_before_unflipping,
-                )
-            )
-        self.mcf_lb_phase_schedules.append(
-            ("6_dispatched_schedule", phase3.dispatched_schedule)
-        )
-        self.solution_manager.register(
-            SubroutineReport(
-                elapsed_time=self.timer.elapsed_sec - start_elapsed,
-                obj_value=step2_obj,
-                obj_bound=mcf_lb,
-            ),
-            FFcDDWSolution(
-                schedule=dispatched_schedule, obj_value=step2_obj, obj_bound=mcf_lb
-            ),
-        )
-
-        # ----- Step 2-3: profile-fix CP-SAT full solve -----
-        pf_builder = BaseModelBuilder()
-        pf_mdl, pf_params, pf_op_vars, _pf_et_vars = pf_builder.build(
-            instance, horizon=horizon
-        )
-        BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
-            pf_mdl,
-            pf_params,
-            pf_op_vars,
-            dispatched_schedule,
+        return self.run_mcf_lb_4(
             profile_fix_by_machine=profile_fix_by_machine,
             machine_precedence_stride=machine_precedence_stride,
         )
-        BaseModelBuilder.apply_start_hints_from_start_time_map(
-            pf_mdl,
-            pf_params,
-            pf_op_vars,
-            dispatched_schedule.get_jik_2_start_time_map(),
-        )
-        BaseModelBuilder.apply_end_hints_from_end_time_map(
-            pf_mdl, pf_params, pf_op_vars, dispatched_schedule.get_jik_2_end_time_map()
-        )
-
-        pf_solver = cp_model.CpSolver()
-        pf_solver.parameters.num_search_workers = int(solver_thread_cnt)
-        t_pf = self.timer.elapsed_sec
-        pf_status = pf_solver.Solve(pf_mdl)
-        diag.profile_fix_cp_sat_sec = self.timer.elapsed_sec - t_pf
-        diag.pf_status = pf_solver.StatusName(pf_status)
-
-        try:
-            pf_bound = float(pf_solver.best_objective_bound)
-        except Exception:
-            pf_bound = mcf_lb
-        diag.profile_fix_bound = pf_bound
-        obj_bound_final = max(mcf_lb, pf_bound)
-
-        if pf_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            self.logger.warning(
-                "run_mcf_lb step 2-2: profile-fix CP-SAT no feasible solution "
-                "(status=%s); returning step-2-2 incumbent",
-                pf_solver.StatusName(pf_status),
-            )
-            elapsed = self.timer.elapsed_sec - start_elapsed
-            return SubroutineReport(
-                elapsed_time=elapsed, obj_value=step2_obj, obj_bound=obj_bound_final
-            )
-
-        final_j_i_2_start = {
-            (j, i): int(pf_solver.Value(pf_op_vars.op_start[j, i]))
-            for j in pf_params.j_list
-            for i in pf_params.i_list
-        }
-        final_j_i_2_end = {
-            (j, i): int(pf_solver.Value(pf_op_vars.op_end[j, i]))
-            for j in pf_params.j_list
-            for i in pf_params.i_list
-        }
-        final_schedule = build_schedule_from_op_starts(
-            instance, final_j_i_2_start, final_j_i_2_end
-        )
-
-        sum_e, sum_t = compute_window_et(final_schedule, instance)
-        final_obj = float(sum_e + sum_t)
-        cp_obj = float(pf_solver.objective_value)
-        if final_obj != cp_obj:
-            self.logger.warning(
-                "run_mcf_lb step 2-3: post-build objective %.3f != CP-SAT "
-                "objective %.3f",
-                final_obj,
-                cp_obj,
-            )
-        diag.profile_fix_obj = final_obj
-        diag.reached_phase = "profile_fix"
-        self.mcf_lb_phase_schedules.append(("7_final_schedule", final_schedule))
-
-        elapsed = self.timer.elapsed_sec - start_elapsed
-        report = SubroutineReport(
-            elapsed_time=elapsed,
-            obj_value=final_obj,
-            obj_bound=obj_bound_final,
-        )
-        self.solution_manager.register(
-            report,
-            FFcDDWSolution(
-                schedule=final_schedule,
-                obj_value=final_obj,
-                obj_bound=obj_bound_final,
-            ),
-        )
-        return report
 
     def run_mcf_lb_4(
         self,
-        last_stage_only_timelimit: float | str | None = None,
+        last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
         profile_fix_by_machine: bool = False,
         machine_precedence_stride: int = 1,
     ) -> SubroutineReport:
@@ -287,6 +106,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``run_phase4`` in :mod:`ffc_ddw_sum_et.algorithm.mcf_lb`. Kept
         side-by-side with ``run_mcf_lb`` for parity verification before the
         inline version is retired.
+
+        ``profile_fix_by_machine`` and ``machine_precedence_stride`` are
+        applied to both the Phase 2 last-stage CP-SAT solve (per seed) and
+        the Phase 4 profile-fix full solve.
         """
         start_elapsed = self.timer.elapsed_sec
         diag = MCFLBDiagnostic()
@@ -294,21 +117,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         instance = self.instance
         solver_thread_cnt = 1
 
-        # Phase 1: MCF LB + last-stage-only CP-SAT model build.
-        phase1 = run_phase1(instance, diag, logger=self.logger)
+        # Phase 1: MCF LB + one last-stage dispatch seed per MCF priority map.
+        phase1 = run_phase1(
+            instance, diag, logger=self.logger, last_stage_only_priority_tags=last_stage_only_priority_tags
+        )
         mcf_lb = phase1.mcf_lb
         self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
-        self.mcf_lb_phase_schedules = [
-            ("1_mcf_preemptive_schedule", phase1.mcf_preemptive_schedule),
-            ("2_last_stage_only_init_schedule", phase1.last_stage_only_init_schedule),
-        ]
+        self.mcf_lb_phase_schedules.clear()
+        self.mcf_lb_phase_schedules.append(
+            ("1_mcf_preemptive_schedule", phase1.mcf_preemptive_schedule)
+        )
+        for seed in phase1.last_stage_seeds:
+            self.mcf_lb_phase_schedules.append(
+                (f"2_last_stage_only_init_schedule__{seed.tag}", seed.init_schedule)
+            )
 
-        # Phase 2: last-stage-only CP-SAT warm-start + solve.
+        # Phase 2: solve the last-stage CP-SAT model for each seed, pick best.
         phase2 = run_phase2(
             phase1,
             instance,
             diag,
-            last_stage_only_timelimit=last_stage_only_timelimit,
+            profile_fix_by_machine=profile_fix_by_machine,
+            machine_precedence_stride=machine_precedence_stride,
             solver_thread_cnt=solver_thread_cnt,
             logger=self.logger,
         )
@@ -322,8 +152,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=phase2.last_stage_only_obj,
             obj_bound=mcf_lb,
         )
+        for candidate in phase2.candidates:
+            self.mcf_lb_phase_schedules.append(
+                (
+                    f"3_last_stage_only_schedule__{candidate.tag}",
+                    candidate.last_stage_only_schedule,
+                )
+            )
         self.mcf_lb_phase_schedules.append(
-            ("3_last_stage_only_schedule", phase2.last_stage_only_schedule)
+            ("3_last_stage_only_schedule_chosen", phase2.last_stage_only_schedule)
         )
 
         # Phase 3: reverse-dispatch + unflip.

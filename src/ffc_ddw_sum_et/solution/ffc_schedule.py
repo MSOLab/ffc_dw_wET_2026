@@ -516,8 +516,8 @@ class FFcSchedule:
             job_priority_queue = list(job_id_seq)
         else:
             job_priority_queue = self.get_job_priority_queue_for_stage_dispatch(
-            stage_id, job_id_seq, job_2_release=job_2_release
-        )
+                stage_id, job_id_seq, job_2_release=job_2_release
+            )
         for job_id in job_priority_queue:
             if job_id not in job_2_duration:
                 raise ValueError(f"Duration for job ID {job_id} not provided")

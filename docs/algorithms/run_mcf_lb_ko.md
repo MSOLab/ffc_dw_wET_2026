@@ -10,22 +10,20 @@ FFcDDW 풀 스케줄 인컴번트를 만들어내는 엔드투엔드 파이프�
 ```python
 def run_mcf_lb(
     self,
-    last_stage_only_timelimit: float | str | None = None,
     profile_fix_by_machine: bool = False,
     machine_precedence_stride: int = 1,
 ) -> SubroutineReport: ...
 ```
 
-- `last_stage_only_timelimit` — Step 1 CP-SAT 솔버의 시간 예산.
-  `_parse_nc_timelimit`로 파싱:
-  - `None` → 제한 없음,
-  - `float`/`int` → 초,
-  - `"<x>nc"` → `float(x) * n * c` 초 (예: `"0.01nc"`).
-- `profile_fix_by_machine`, `machine_precedence_stride` — Step 2-3에서
+- `profile_fix_by_machine`, `machine_precedence_stride` — Step 1-3 (per-seed
+  last-stage 솔브)와 Step 2-3 (profile-fix 풀 솔브) **양쪽**에서
   `BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule`에
   그대로 전달.
-- Step 2-3 CP-SAT 솔버는 현재 **시간 제한 없이** 실행됨.
-- 두 CP-SAT 솔브 모두 `num_search_workers = 1`로 고정.
+- Step 1-3은 MCF 우선순위 맵별로(`avg_time`, `start_time`,
+  `completion_time`) 독립적인 CP-SAT 모델을 빌드/솔브해 best-obj feasible
+  해를 채택.
+- 모든 CP-SAT 솔브는 시간 제한 없이 실행.
+- `num_search_workers = 1`로 고정.
 
 ## 파이프라인
 
@@ -36,35 +34,46 @@ def run_mcf_lb(
 
 - `ParallelMachinePreemptionMcf.from_instance(instance)`를 만들고 solve.
 - optimal 아니면 `RuntimeError`.
-- `mcf_lb = mcf.get_obj_value()` 저장 (전체 과정의 `obj_bound`로 사용) 및
-  우선순위 점수
-  `mcf.get_job_2_avg_time_minus_half_processing_time_sum_map()` 계산
-  (평균 flow 중점 − `(r_j + p_j)/2`; flow가 없는 job은 `None`).
+- `mcf_lb = mcf.get_obj_value()` 저장 (전체 과정의 `obj_bound`로 사용).
+- 세 가지 MCF 기반 우선순위 맵 추출 (flow가 없는 job은 `None`):
+  - `avg_time` — `get_job_priority_by_avg_time()` (평균 flow 중점 −
+    `p_j/2 - 0.5`).
+  - `start_time` — `get_job_2_start_time_map()`.
+  - `completion_time` — `get_job_2_completion_time_map()`.
 
-### Step 1-2 — 마지막 스테이지 전용 디스패치 시드
+### Step 1-2 — 마지막 스테이지 전용 디스패치 시드 (맵별로 1개씩)
 
-- 우선순위 점수 오름차순으로 job 정렬; 동률은 native `job_id_list` 순서로
-  타이브레이크; `None` 점수는 뒤로 밀림.
-- 마지막 스테이지 전용 CP-SAT 모델 빌드:
-  - `BaseModelBuilder.build(..., last_stage_only=True, job_2_release=r_j_map, obj_lb=mcf_lb)`,
-    여기서 `r_j_map = instance.get_job_2_p_sum_except_last_stage()`.
-  - `obj_lb=mcf_lb`는 `sum(et_terms) >= ceil(mcf_lb)` 컷을 추가.
-- `FFcSchedule.dispatch_stage_by_jobs(last_stage_id, …, job_2_release=r_j_map)`로
-  `mcf_job_sequence`를 마지막 스테이지에 디스패치해 `last_stage_only_init_schedule`을
-  구성 (마지막 스테이지만 채워진 상태).
+각 우선순위 맵에 대해:
 
-### Step 1-3 — 마지막 스테이지 전용 CP-SAT warm-start 및 solve
+- 맵 값 오름차순으로 job 정렬; 동률은 native `job_id_list` 순서로
+  타이브레이크; `None` 값은 뒤로 밀림.
+- `FFcSchedule.dispatch_stage_by_jobs(last_stage_id, …, job_2_release=r_j_map,
+  force_job_id_seq_as_priority=True)`로 마지막 스테이지에 디스패치
+  (`r_j_map = instance.get_job_2_p_sum_except_last_stage()`). 결과는
+  맵 이름으로 태깅된 `init_schedule`.
 
-- `BaseModelBuilder.apply_{start,end}_hints_from_*_map`로 `last_stage_only_init_schedule`의
-  start/end 값을 CP-SAT 힌트로 적용.
-- `last_stage_only_timelimit` 아래에서 solve.
-- `OPTIMAL`/`FEASIBLE` 둘 다 아니면: warning 로그 후
-  `SubroutineReport(obj_value=None, obj_bound=mcf_lb)` 반환 — 인컴번트는
-  등록되지 않음.
-- 그 외에는 마지막 스테이지의 `(j, last_stage_id) → start/end`를 추출하고,
-  `_build_schedule_from_op_starts(..., stages=[last_stage_id])`로 부분
-  스케줄 `last_stage_only_schedule`을 만든 뒤
-  `self.last_stage_cp_sat_solution: FFcDDWSolution`에 저장.
+### Step 1-3 — 마지막 스테이지 전용 CP-SAT warm-start 및 solve (시드별)
+
+각 시드에 대해:
+
+- 시드 전용 CP-SAT 모델을
+  `BaseModelBuilder.build(..., last_stage_only=True, job_2_release=r_j_map,
+  obj_lb=mcf_lb)`로 빌드 (`horizon = init_schedule.makespan * 2`).
+  `obj_lb=mcf_lb`는 `sum(et_terms) >= ceil(mcf_lb)` 컷을 추가.
+- 시드 `init_schedule`로
+  `add_stage_ops_precedence_constraints_after_dispatch_from_schedule`을
+  호출 (호출자 인자 `profile_fix_by_machine` / `machine_precedence_stride`
+  사용).
+- 시드 `init_schedule`에서 start/end 힌트를 적용.
+- 시간 제한 없이 solve.
+- `INFEASIBLE` → `RuntimeError` (MCF LB와 일관해야 함).
+- `OPTIMAL`/`FEASIBLE` 둘 다 아니면 warning 로그 후 해당 시드를 스킵.
+
+feasible 시드가 하나도 없으면
+`SubroutineReport(obj_value=None, obj_bound=mcf_lb)`를 반환하고 인컴번트
+미등록. 있으면 `objective_value` 최소인 후보를 채택해
+`self.last_stage_cp_sat_solution: FFcDDWSolution`에 저장하고 Step 2로
+넘김.
 
 ### Step 2-1 — 마지막 스테이지 고정 역방향 디스패치
 
