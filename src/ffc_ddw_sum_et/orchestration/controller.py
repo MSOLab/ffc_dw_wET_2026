@@ -124,7 +124,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return report
 
     def initialize_by_edd(
-        self, criteria: Literal["weighted_et", "makespan"] = "weighted_et"
+        self,
+        dispatcher: Literal["mixed", "fam"] = "mixed",
+        criteria: Literal["weighted_et", "makespan"] = "weighted_et",
     ) -> SubroutineReport:
         """Step method: seed an incumbent by dispatching jobs in EDD order.
 
@@ -133,6 +135,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         drop to the tail. Ties on ``d^+`` break by native ``job_id_list``
         order for determinism, matching the tie-break rule used by
         :meth:`run_mcf_lb`.
+
+        ``dispatcher`` selects the decoder that turns the EDD permutation
+        into a schedule: ``"mixed"`` uses :class:`MixedDispatcher` (with
+        ``criteria`` for its internal selection rule); ``"fam"`` uses
+        :class:`FAMDispatcher` and ignores ``criteria``.
         """
         start_elapsed = self.timer.elapsed_sec
 
@@ -143,17 +150,37 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             key=lambda j: (due_window_map[j][1], job_2_pos[j]),
         )
 
-        dispatcher = MixedDispatcher(self.instance)
-        schedule = dispatcher.get_best_mixed_schedule_by_sequence(
-            job_sequence, criteria=criteria
-        )
-        if schedule is None:
-            raise RuntimeError(
-                f"MixedDispatcher produced no schedule for {self.instance.name}"
+        if dispatcher == "mixed":
+            mixed = MixedDispatcher(self.instance)
+            schedule = mixed.get_best_mixed_schedule_by_sequence(
+                job_sequence, criteria=criteria
             )
-
-        sum_e, sum_t = compute_window_et(schedule, self.instance)
-        obj_value = float(sum_e + sum_t)
+            if schedule is None:
+                raise RuntimeError(
+                    f"MixedDispatcher produced no schedule for {self.instance.name}"
+                )
+            sum_e, sum_t = compute_window_et(schedule, self.instance)
+            obj_value = float(sum_e + sum_t)
+        elif dispatcher == "fam":
+            spec = AlgSpec(
+                instance=self.instance,
+                option=FAMOption(job_sequence=tuple(job_sequence)),
+                logger=logging.getLogger(f"ffc_ddw_sum_et.{self._instance_name}"),
+            )
+            record = FAMDispatcher().run(spec)
+            result = record.result
+            if result is None or result.schedule is None:
+                raise RuntimeError(
+                    f"FAMDispatcher produced no schedule for {self.instance.name}"
+                )
+            schedule = result.schedule
+            obj_value = (
+                float(result.obj_value) if result.obj_value is not None else None
+            )
+        else:
+            raise ValueError(
+                f"Unknown dispatcher {dispatcher!r}; expected 'mixed' or 'fam'."
+            )
 
         elapsed = self.timer.elapsed_sec - start_elapsed
         report = SubroutineReport(
