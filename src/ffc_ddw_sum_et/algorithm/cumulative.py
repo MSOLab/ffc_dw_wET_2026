@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from bisect import bisect_left
 from dataclasses import dataclass
 from typing import Mapping
@@ -79,11 +80,18 @@ class BaseModelBuilder:
         tighten_ranges: bool = False,
         link_job_completion: bool = False,
         use_max_equality_for_obj: bool = True,
+        last_stage_only: bool = False,
+        job_2_release: dict[str, int] | None = None,
+        obj_lb: float | None = None,
     ) -> tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]:
         mdl = CpModel()
-        params: Params = self.make_params(instance)
+        params: Params = self.make_params(instance, last_stage_only=last_stage_only)
         ops_vars: OperationVars = self._make_vars(
-            mdl, params, horizon, tighten_ranges=tighten_ranges
+            mdl,
+            params,
+            horizon,
+            tighten_ranges=tighten_ranges,
+            job_2_release=job_2_release,
         )
         self._add_structural_constraints(mdl, params, ops_vars)
         if link_job_completion:
@@ -95,17 +103,24 @@ class BaseModelBuilder:
             ops_vars,
             horizon=horizon,
             use_max_equality=use_max_equality_for_obj,
+            obj_lb=obj_lb,
         )
 
         return mdl, params, ops_vars, obj_vars
 
     @staticmethod
-    def make_params(instance: FFcDDWParameters) -> Params:
+    def make_params(
+        instance: FFcDDWParameters, last_stage_only: bool = False
+    ) -> Params:
         i_list = instance.stage_id_list
         M_of = instance.stage_2_machines_map
         j_list = instance.job_id_list
         _p = instance.p_manager.job_stage_2_value_map(j_list, i_list)
         p = {(j, i): int(float(_p[j, i])) for j in j_list for i in i_list}
+        if last_stage_only:
+            i_list = [i_list[-1]]
+            M_of = {i_list[0]: M_of[i_list[-1]]}
+            p = {(j, i_list[0]): p[j, i_list[-1]] for j in j_list}
         due_window = instance.job_2_due_window_map
         ewt = instance.job_2_ewt_map
         twt = instance.job_2_twt_map
@@ -148,7 +163,11 @@ class BaseModelBuilder:
 
     @staticmethod
     def _make_vars(
-        mdl: CpModel, params: Params, horizon: int, tighten_ranges: bool = False
+        mdl: CpModel,
+        params: Params,
+        horizon: int,
+        tighten_ranges: bool = False,
+        job_2_release: dict[str, int] | None = None,
     ) -> OperationVars:
         op_start: dict[tuple[str, str], IntVar] = {}
         op_end: dict[tuple[str, str], IntVar] = {}
@@ -168,11 +187,20 @@ class BaseModelBuilder:
                 assert j_i_2_head[j, i] <= horizon - j_i_2_tail[j, i] - p
                 assert j_i_2_head[j, i] + p <= horizon - j_i_2_tail[j, i]
 
+                if (
+                    i == params.i_list[0]
+                    and job_2_release is not None
+                    and j in job_2_release
+                ):
+                    release_t = max(job_2_release[j], j_i_2_head[j, i])
+                else:
+                    release_t = j_i_2_head[j, i]
+
                 start_var = mdl.new_int_var(
-                    j_i_2_head[j, i], horizon - j_i_2_tail[j, i] - p, f"start_{j}_{i}"
+                    release_t, horizon - j_i_2_tail[j, i] - p, f"start_{j}_{i}"
                 )
                 end_var = mdl.new_int_var(
-                    j_i_2_head[j, i] + p, horizon - j_i_2_tail[j, i], f"end_{j}_{i}"
+                    release_t + p, horizon - j_i_2_tail[j, i], f"end_{j}_{i}"
                 )
                 interval_var = mdl.new_interval_var(
                     start_var, p, end_var, f"interval_{j}_{i}"
@@ -280,6 +308,7 @@ class BaseModelBuilder:
         variables: OperationVars,
         horizon: int = 0,
         use_max_equality: bool = True,
+        obj_lb: float | None = None,
     ) -> EarlinessTardinessVars:
         """Define the weighted earliness/tardiness objective with due date window.
 
@@ -339,6 +368,8 @@ class BaseModelBuilder:
                 et_terms.append(params.w_e[j] * E_j)
             if params.w_t[j]:
                 et_terms.append(params.w_t[j] * T_j)
+        if obj_lb is not None:
+            mdl.add(sum(et_terms) >= math.ceil(obj_lb))
         mdl.minimize(sum(et_terms))
         return EarlinessTardinessVars(E=E, T=T)
 

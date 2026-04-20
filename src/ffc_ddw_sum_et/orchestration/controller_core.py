@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -41,6 +42,7 @@ class FFcDDWSubroutineControllerCore(
         stopping_criteria: StoppingCriteria | dict,
     ):
         self._instance_name = instance.name
+        self.logger = logging.getLogger(f"ffc_ddw_sum_et.{self._instance_name}")
         converted_flow = _to_ddo(subroutine_flow)
         if isinstance(stopping_criteria, dict):
             converted_stopping = StoppingCriteria(stopping_criteria)
@@ -53,6 +55,7 @@ class FFcDDWSubroutineControllerCore(
         )
         self.instance = instance
         self.solution_manager = FFcDDWSolutionManager()
+        self.last_stage_cp_sat_solution: FFcDDWSolution | None = None
 
     def is_stopping_condition(self, **kwargs: Any) -> bool:
         """Stop when the timelimit is exceeded."""

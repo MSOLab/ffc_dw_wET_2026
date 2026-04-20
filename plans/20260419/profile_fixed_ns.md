@@ -102,8 +102,8 @@ Steps:
      (see §2 below).
    - `obj_value = float(sum_e + sum_t)` from
      `compute_window_et(schedule, self.instance)` (sanity-check
-     against `solver.ObjectiveValue()`; log a warning on mismatch).
-   - `obj_bound = float(solver.BestObjectiveBound())`.
+     against `solver.objective_value`; log a warning on mismatch).
+   - `obj_bound = float(solver.best_objective_bound)`.
    - Register: `self.solution_manager.register(report,
      FFcDDWSolution(...))`.
 9. If status is `INFEASIBLE` / `MODEL_INVALID` / `UNKNOWN` with no
@@ -174,6 +174,6 @@ parameter syntax against existing usage before finalizing kwargs key.
 4. Sanity check:
    - `obj_value` after `run_profile_fixed_ns` is `<=` obj_value after
      `run_mcf_lb` (CP-SAT cannot regress under fixed profile + hint).
-   - CP-SAT-reported `solver.ObjectiveValue()` matches
+   - CP-SAT-reported `solver.objective_value` matches
      `compute_window_et` post-build (a mismatch indicates the greedy
      machine assignment changed completion times — it must not).

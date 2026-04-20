@@ -169,6 +169,23 @@ class FFcDDWSingleInstanceRunner(
             except Exception:
                 logger.exception("Error saving schedule yaml for %s", self.ins_name)
 
+        last_stage_cp_sat = getattr(controller, "last_stage_cp_sat_solution", None)
+        if last_stage_cp_sat is not None and self.working_dir is not None:
+            try:
+                dump_schedule_yaml(
+                    last_stage_cp_sat.schedule,
+                    self.working_dir
+                    / f"{self.ins_name}_last_stage_cp_sat_schedule.yaml",
+                    instance_name=f"{self.ins_name}_last_stage_cp_sat",
+                    obj_value=last_stage_cp_sat.obj_value,
+                    obj_bound=last_stage_cp_sat.obj_bound,
+                )
+            except Exception:
+                logger.exception(
+                    "Error saving last_stage_cp_sat schedule yaml for %s",
+                    self.ins_name,
+                )
+
         if self.working_dir is not None and last_report is not None:
             try:
                 self._save_obj_log(solution_manager.history)

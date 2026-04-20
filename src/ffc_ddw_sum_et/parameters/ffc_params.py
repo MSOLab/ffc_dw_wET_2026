@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import cached_property
-from typing import TextIO
+from typing import Self, TextIO
 
 from ffc_ddw_sum_et.io import TextDataParser
 
@@ -184,3 +184,28 @@ class FFcParameters:
             for job_id in self.job_id_list:
                 job_2_p_sum[job_id] += self.stage_2_job_2_p_map[stage_id][job_id]
         return job_2_p_sum
+
+    @classmethod
+    def reverse_stages(cls, instance: FFcParameters) -> Self:
+        """Create a new instance of FFcParameters with the order of stages reversed.
+
+        Args:
+            instance (FFcParameters): Original parameters instance.
+
+        Returns:
+            FFcParameters: New parameters instance with reversed stage order.
+        """
+        new_stage_ids = instance.stage_id_list[::-1]
+        new_processing_times = instance.p_manager.as_stage_reversed()
+        new_stage_2_machines_map = {
+            stage_id: list(instance.stage_2_machines_map[stage_id])
+            for stage_id in new_stage_ids
+        }
+
+        return cls(
+            instance.name + "_reversed",
+            instance.job_id_list,
+            new_stage_ids,
+            new_stage_2_machines_map,
+            new_processing_times,
+        )

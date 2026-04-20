@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from io import StringIO
-from typing import TextIO
+from typing import Self, TextIO
 
 from ..io import TextDataParser
 from .base.job_stage_p import JobStageProcessingTimeManager
@@ -77,6 +77,39 @@ class FFcDDWParameters(FFcParameters):
     def generation_params(self) -> InstanceParams | None:
         """Get the generation parameters parsed from the instance filename."""
         return self._generation_params
+
+    @classmethod
+    def reverse_stages(cls, instance: FFcParameters) -> Self:
+        """Create a new instance of FFcDDWParameters with the order of stages reversed.
+
+        Args:
+            instance (FFcParameters): Original parameters instance.
+                Should be an FFcDDWParameters instance, but we use FFcParameters as the
+                type hint to allow calling this method from the base class.
+
+        Raises:
+            TypeError: If the input instance is not an FFcDDWParameters.
+
+        Returns:
+            Self: A new FFcDDWParameters instance with stages reversed.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.reverse_stages requires FFcDDWParameters, "
+                f"got {type(instance).__name__}"
+            )
+        base = FFcParameters.reverse_stages(instance)
+        return cls(
+            base.name,
+            base.job_id_list,
+            base.stage_id_list,
+            base.stage_2_machines_map,
+            base.p_manager,
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+            instance.generation_params,
+        )
 
     @classmethod
     def from_pra_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:

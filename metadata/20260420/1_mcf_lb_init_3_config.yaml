@@ -1,0 +1,27 @@
+# LB-init experiment config: sort jobs by MCF start time, then dispatch.
+# Ref: plans/20260419/mcf_lb_init_dispatch.md
+
+run_mode: FULL_RUN        # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [0, 1439]
+
+output_dir: output
+
+# Parallel workers for throughput-oriented experimentation.
+instance_worker_cnt: 48
+
+# Gantt chart rendering. Post-run only; set false to skip entirely.
+draw_gantt: true
+painter_thread_cnt: 16
+
+scenarios:
+  - name: mcf_lb_init
+    timelimit: 300.0
+    output_subdir: mcf_lb_init
+    subroutine_flow:
+      - method: run_mcf_lb
+        last_stage_only_timelimit: "0.01nc"
+        profile_fix_by_machine: false
+        machine_precedence_stride: 1
