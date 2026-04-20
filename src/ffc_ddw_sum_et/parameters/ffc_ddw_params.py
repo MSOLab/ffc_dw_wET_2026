@@ -280,7 +280,7 @@ class FFcDDWParameters(FFcParameters):
     # Job → priority score maps
     # -------------------------
 
-    def get_job_2_due_date_plus_map(self) -> dict[str, int]:
+    def get_job_2_due_date_ub_map(self) -> dict[str, int]:
         """Get a mapping from job ID to due date upper bound (d^{+}_j)."""
         return {
             job_id: due_window[1]
@@ -316,5 +316,35 @@ class FFcDDWParameters(FFcParameters):
         return {
             job_id: job_2_due_date_star_map[job_id]
             - 0.5 * sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_plus_half_p_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star plus half processing time
+        (d^{*}_j + 0.5 * sum_i p_{ij}).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_star_map[job_id]
+            + 0.5 * sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_plus_p_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star plus processing time
+        (d^{*}_j + sum_i p_{ij}).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_star_map[job_id]
+            + sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }

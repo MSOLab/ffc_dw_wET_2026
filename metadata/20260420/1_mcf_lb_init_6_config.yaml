@@ -17,52 +17,28 @@ draw_gantt: false
 painter_thread_cnt: 48
 
 scenarios:
-  - name: mcf_lb_init_avg_time
+  - name: mcf_lb_init_avg_time_minus_half_p
     timelimit: 300.0
-    output_subdir: mcf_lb_init_avg_time
+    output_subdir: mcf_lb_init_avg_time_minus_half_p
     subroutine_flow:
       - method: run_mcf_lb_4
-        last_stage_only_priority_tags: ["avg_time"]
+        last_stage_only_priority_tags: ["avg_time_minus_half_p"]
         profile_fix_by_machine: true
         machine_precedence_stride: 1
-  - name: mcf_lb_init_start_time
+  - name: mcf_lb_init_due_date_star_plus_half_p
     timelimit: 300.0
-    output_subdir: mcf_lb_init_start_time
+    output_subdir: mcf_lb_init_due_date_star_plus_half_p
     subroutine_flow:
       - method: run_mcf_lb_4
-        last_stage_only_priority_tags: ["start_time"]
+        last_stage_only_priority_tags: ["due_date_star_plus_half_p"]
         profile_fix_by_machine: true
         machine_precedence_stride: 1
-  - name: mcf_lb_init_completion_time
+  - name: mcf_lb_init_due_date_star_plus_p
     timelimit: 300.0
-    output_subdir: mcf_lb_init_completion_time
+    output_subdir: mcf_lb_init_due_date_star_plus_p
     subroutine_flow:
       - method: run_mcf_lb_4
-        last_stage_only_priority_tags: ["completion_time"]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
-  - name: mcf_lb_init_due_date_ub
-    timelimit: 300.0
-    output_subdir: mcf_lb_init_due_date_ub
-    subroutine_flow:
-      - method: run_mcf_lb_4
-        last_stage_only_priority_tags: ["due_date_ub"]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
-  - name: mcf_lb_init_due_date_star
-    timelimit: 300.0
-    output_subdir: mcf_lb_init_due_date_star
-    subroutine_flow:
-      - method: run_mcf_lb_4
-        last_stage_only_priority_tags: ["due_date_star"]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
-  - name: mcf_lb_init_due_date_star_minus_half_p
-    timelimit: 300.0
-    output_subdir: mcf_lb_init_due_date_star_minus_half_p
-    subroutine_flow:
-      - method: run_mcf_lb_4
-        last_stage_only_priority_tags: ["due_date_star_minus_half_p"]
+        last_stage_only_priority_tags: ["due_date_star_plus_p"]
         profile_fix_by_machine: true
         machine_precedence_stride: 1
   - name: mcf_lb_init_all
@@ -72,10 +48,13 @@ scenarios:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags:
           - avg_time
+          - avg_time_minus_half_p
           - start_time
           - completion_time
           - due_date_ub
           - due_date_star
           - due_date_star_minus_half_p
+          - due_date_star_plus_half_p
+          - due_date_star_plus_p
         profile_fix_by_machine: true
         machine_precedence_stride: 1

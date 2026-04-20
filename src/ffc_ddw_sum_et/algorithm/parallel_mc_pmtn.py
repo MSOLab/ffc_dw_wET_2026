@@ -219,21 +219,6 @@ class ParallelMachinePreemptionMcf:
             job_2_average_time[j] = sum(times) / len(times) if times else None
         return job_2_average_time
 
-    # TODO: remove
-    def get_job_2_avg_time_minus_half_processing_time_sum_map(
-        self,
-    ) -> dict[str, float | None]:
-        x_val = self.get_variable_value_dict()
-        job_2_avg_minus_p_sum: dict[str, float | None] = {}
-        for j in self.calJ:
-            times = list(x_val[j].keys())
-            avg_time = sum(times) / len(times) if times else None
-            if avg_time is not None:
-                job_2_avg_minus_p_sum[j] = avg_time - (self.r[j] + self.p[j]) / 2
-            else:
-                job_2_avg_minus_p_sum[j] = None
-        return job_2_avg_minus_p_sum
-
     def get_job_priority_by_avg_time(self) -> dict[str, float | None]:
         x_val = self.get_variable_value_dict()
         job_2_priority: dict[str, float | None] = {}
@@ -245,3 +230,15 @@ class ParallelMachinePreemptionMcf:
             else:
                 job_2_priority[j] = None
         return job_2_priority
+
+    def get_job_priority_by_avg_time_minus_half_p(self) -> dict[str, float | None]:
+        x_val = self.get_variable_value_dict()
+        job_2_avg_minus_p_sum: dict[str, float | None] = {}
+        for j in self.calJ:
+            times = list(x_val[j].keys())
+            avg_time = sum(times) / len(times) if times else None
+            if avg_time is not None:
+                job_2_avg_minus_p_sum[j] = avg_time - (self.r[j] + self.p[j]) / 2
+            else:
+                job_2_avg_minus_p_sum[j] = None
+        return job_2_avg_minus_p_sum
