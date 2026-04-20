@@ -7,12 +7,13 @@ subsequent call, matching the hybridflowshop pattern.
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 
-INPUT_HEADER = "instanceName,jobCount,stageCount,machinesPerStage,timelimit"
+INPUT_HEADERS = ("instanceName", "jobCount", "stageCount", "machinesPerStage", "timelimit")
 
 
 @dataclass
@@ -23,15 +24,18 @@ class FFcDDWInputSummary:
     machines_per_stage: int
     timelimit: float
 
-    def comma_separated_values(self) -> str:
-        return (
-            f"{self.name},{self.job_count},{self.stage_count},"
-            f"{self.machines_per_stage},{self.timelimit}"
-        )
+    def values_list(self) -> list[str]:
+        return [
+            self.name,
+            str(self.job_count),
+            str(self.stage_count),
+            str(self.machines_per_stage),
+            str(self.timelimit),
+        ]
 
     @staticmethod
-    def header() -> str:
-        return INPUT_HEADER
+    def headers_list() -> list[str]:
+        return list(INPUT_HEADERS)
 
 
 @dataclass
@@ -82,22 +86,17 @@ class FFcDDWSummary:
         )
         return out
 
-    def header_row(self) -> str:
-        input_header = self.inputs.header()
-        output_headers = ",".join(self._stringified_outputs().keys())
-        return f"{input_header},{output_headers}"
+    def header_row_list(self) -> list[str]:
+        return self.inputs.headers_list() + list(self._stringified_outputs().keys())
 
-    def value_row(self) -> str:
-        input_values = self.inputs.comma_separated_values()
-        output_values = ",".join(self._stringified_outputs().values())
-        return f"{input_values},{output_values}"
+    def value_row_list(self) -> list[str]:
+        return self.inputs.values_list() + list(self._stringified_outputs().values())
 
     def save(self, output_path: Path, encoding: str = "utf-8") -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        if output_path.exists():
-            with open(output_path, "a", encoding=encoding) as f:
-                f.write("\n" + self.value_row())
-        else:
-            with open(output_path, "w", encoding=encoding) as f:
-                f.write(self.header_row())
-                f.write("\n" + self.value_row())
+        write_header = not output_path.exists()
+        with open(output_path, "a", encoding=encoding, newline="") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(self.header_row_list())
+            writer.writerow(self.value_row_list())
