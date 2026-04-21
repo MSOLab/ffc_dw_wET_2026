@@ -112,6 +112,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``profile_fix_by_machine`` and ``machine_precedence_stride`` are
         applied to both the Phase 2 last-stage CP-SAT solve (per seed) and
         the Phase 4 profile-fix full solve.
+
+        ``repeat_pf_cp_while_improving`` controls *both* the Phase 2
+        last-stage solve and the Phase 4 full profile-fix solve: each
+        loops on its own model, feeding the solved schedule back as the
+        new profile-fix reference until the CP-SAT objective stops
+        improving.
         """
         start_elapsed = self.timer.elapsed_sec
         diag = MCFLBDiagnostic()
@@ -223,6 +229,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             machine_precedence_stride=machine_precedence_stride,
             solver_thread_cnt=solver_thread_cnt,
             logger=self.logger,
+            repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
         )
 
         elapsed = self.timer.elapsed_sec - start_elapsed

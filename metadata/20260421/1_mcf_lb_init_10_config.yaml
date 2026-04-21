@@ -1,5 +1,8 @@
 # LB-init experiment config: sort jobs by MCF start time, then dispatch.
 # Ref: plans/20260419/mcf_lb_init_dispatch.md
+# `repeat_pf_cp_while_improving: true` now drives BOTH the Phase 2
+# last-stage solve and the Phase 4 full profile-fix solve loops.
+# Ref: plans/20260421/phase4-repeat-pf-cp-loop.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 # POST_PROCESS_ONLY target (pick one; full path wins if both are set):
@@ -80,15 +83,6 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_lb_minus_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
-        repeat_pf_cp_while_improving: true
-  - name: due_date_ub
-    timelimit: 300.0
-    output_subdir: due_date_ub
-    subroutine_flow:
-      - method: run_mcf_lb_4
-        last_stage_only_priority_tags: [ "due_date_ub" ]
         profile_fix_by_machine: true
         machine_precedence_stride: 1
         repeat_pf_cp_while_improving: true
