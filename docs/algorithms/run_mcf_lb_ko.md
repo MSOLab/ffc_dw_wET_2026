@@ -102,7 +102,7 @@ reversed_full.makespan`; 추가 `right_shift`는 수행하지 않음). 따라서
 Step 1-3 CP-SAT 시각보다 오른쪽으로 밀릴 수 있음. 앞쪽 스테이지들은
 구성상 feasible.
 
-`compute_window_et(dispatched_schedule, instance)`로 `step2_obj` 계산 →
+`compute_weighted_earliness_tardiness(dispatched_schedule, instance)`로 `step2_obj` 계산 →
 `solution_manager`에 중간 인컴번트로 등록 (`obj_bound=mcf_lb`).
 
 ### Step 2-3 — profile-fix CP-SAT 풀 솔브
@@ -118,11 +118,11 @@ Step 1-3 CP-SAT 시각보다 오른쪽으로 밀릴 수 있음. 앞쪽 스테이
   `obj_value=step2_obj, obj_bound=obj_bound_final`로 반환.
 - 그 외에는 모든 스테이지의 `(j, i) → start/end`를 추출,
   `_build_schedule_from_op_starts`로 `final_schedule`을 만들고
-  `compute_window_et`로 ET 재계산, `solution_manager`에 최종 인컴번트 등록
+  `compute_weighted_earliness_tardiness`로 ET 재계산, `solution_manager`에 최종 인컴번트 등록
   후 최종 `SubroutineReport` 반환.
 
 재계산한 ET가 `pf_solver.objective_value`와 다르면 warning 로그는 남기되,
-`compute_window_et` 값을 사용.
+`compute_weighted_earliness_tardiness` 값을 사용.
 
 ## 부수 효과
 
@@ -162,7 +162,7 @@ Step 1-3 CP-SAT 시각보다 오른쪽으로 밀릴 수 있음. 앞쪽 스테이
   `add_ops_times_2_mc`, `as_reversed`,
   `get_jik_2_{start,end}_time_map`.
 - [`FFcDDWParameters.reverse_stages`](../../src/ffc_ddw_sum_et/parameters/ffc_ddw_params.py)
-- [`compute_window_et`](../../src/ffc_ddw_sum_et/solution/objectives.py)
+- [`compute_weighted_earliness_tardiness`](../../src/ffc_ddw_sum_et/solution/objectives.py)
 
 ## 관련
 

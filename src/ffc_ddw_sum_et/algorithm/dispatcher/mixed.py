@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 from ...solution.ffc_schedule import FFcSchedule
-from ...solution.objectives import compute_window_et
+from ...solution.objectives import compute_weighted_earliness_tardiness
 from .base import BaseDispatcher
 from .utils import from_job_sequence_get_schedule_mixed
 
@@ -83,7 +83,7 @@ class MixedDispatcher(BaseDispatcher):
             if criteria == "makespan":
                 obj = _schedule.makespan
             else:
-                sum_e, sum_t = compute_window_et(_schedule, self.instance)
+                sum_e, sum_t = compute_weighted_earliness_tardiness(_schedule, self.instance)
                 obj = sum_e + sum_t
             if best_obj is None or obj < best_obj:
                 best_obj = obj

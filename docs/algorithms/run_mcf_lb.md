@@ -102,7 +102,7 @@ The last-stage ops end up at `s + (M - ls_makespan)` where
 they may drift right of the CP-SAT step-1-3 times. Earlier stages remain
 feasible by construction.
 
-`compute_window_et(dispatched_schedule, instance)` yields `step2_obj`; it is
+`compute_weighted_earliness_tardiness(dispatched_schedule, instance)` yields `step2_obj`; it is
 registered with `solution_manager` as an intermediate incumbent alongside
 `obj_bound=mcf_lb`.
 
@@ -120,11 +120,11 @@ registered with `solution_manager` as an intermediate incumbent alongside
   obj_bound=obj_bound_final`.
 - Otherwise extract `(j, i) → start/end` for every stage, build
   `final_schedule` via `_build_schedule_from_op_starts`, recompute ET via
-  `compute_window_et`, register the final incumbent with `solution_manager`,
+  `compute_weighted_earliness_tardiness`, register the final incumbent with `solution_manager`,
   and return the final `SubroutineReport`.
 
 If the recomputed ET disagrees with `pf_solver.objective_value`, a warning is
-logged but the value from `compute_window_et` is used.
+logged but the value from `compute_weighted_earliness_tardiness` is used.
 
 ## Side effects
 
@@ -164,7 +164,7 @@ In the first three cases no final incumbent is registered by `run_mcf_lb`
   `add_ops_times_2_mc`, `as_reversed`,
   `get_jik_2_{start,end}_time_map`.
 - [`FFcDDWParameters.reverse_stages`](../../src/ffc_ddw_sum_et/parameters/ffc_ddw_params.py)
-- [`compute_window_et`](../../src/ffc_ddw_sum_et/solution/objectives.py)
+- [`compute_weighted_earliness_tardiness`](../../src/ffc_ddw_sum_et/solution/objectives.py)
 
 ## Related
 

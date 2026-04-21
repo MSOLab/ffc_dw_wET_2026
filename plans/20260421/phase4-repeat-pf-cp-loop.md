@@ -65,7 +65,7 @@ New function mirroring `solve_last_stage_with_profile_fix` but for the
   - `diagnostic.profile_fix_bound = result.bound` (or fall back to
     `phase1.mcf_lb` if no result, matching today's `try/except` path).
   - `diagnostic.profile_fix_obj = final_obj` (computed via
-    `compute_window_et` from the final schedule, same as today).
+    `compute_weighted_earliness_tardiness` from the final schedule, same as today).
   - `obj_bound_final = max(phase1.mcf_lb, profile_fix_bound)` unchanged.
 - Keep the existing post-build vs CP-SAT objective consistency warning
   (uses `result.objective` as the CP-SAT obj of the last iteration).
@@ -107,7 +107,7 @@ No new YAML scenarios are added.
 - `BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule` — the profile-fix precedence helper used by both Phase 2 and Phase 4.
 - `BaseModelBuilder.apply_start_hints_from_start_time_map` / `apply_end_hints_from_end_time_map` — warm-start helpers.
 - `build_schedule_from_op_starts(instance, j_i_2_start, j_i_2_end)` — full-schedule constructor.
-- `compute_window_et` — windowed E/T objective (kept inside `run_phase4`, not pushed into the routine, so the routine stays generic and matches the Phase 2 routine's responsibility split).
+- `compute_weighted_earliness_tardiness` — windowed E/T objective (kept inside `run_phase4`, not pushed into the routine, so the routine stays generic and matches the Phase 2 routine's responsibility split).
 
 ## Verification
 

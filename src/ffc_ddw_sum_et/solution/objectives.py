@@ -6,7 +6,8 @@ from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffc_schedule import FFcSchedule
 
 
-def compute_window_et(
+# TODO: put "weighted" in the name
+def compute_weighted_earliness_tardiness(
     schedule: FFcSchedule, instance: FFcDDWParameters
 ) -> tuple[int, int]:
     """Return (sum_earliness, sum_tardiness) on the last stage of *schedule*.

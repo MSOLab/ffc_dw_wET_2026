@@ -65,7 +65,7 @@ Finally, we add a new metadata config dedicated to this LB-init flow and wire
   `hybridflowshop/dispatcher/utils.py:678-890`, using `FFcSchedule` directly.
   Drop the `draw_gantt_per_step` branch.
 - `src/ffc_ddw_sum_et/solution/objectives.py` — extract
-  `compute_window_et(schedule, instance) -> (sum_earliness, sum_tardiness)` from
+  `compute_weighted_earliness_tardiness(schedule, instance) -> (sum_earliness, sum_tardiness)` from
   `fam.py:205-220` so both FAM and LB-init reuse it (DRY).
 - `src/ffc_ddw_sum_et/io/gantt.py` — `GanttPlotter` class ported from
   `hybridflowshop/hybridflowshop/painter/gantt.py`. Inputs use the
@@ -114,7 +114,7 @@ and returns fresh `FFcSchedule` instances.
 
 `MixedDispatcher` keeps only `_get_np_candidates` and
 `get_best_mixed_schedule_by_sequence`; best-schedule selection uses
-`compute_window_et` instead of `makespan`.
+`compute_weighted_earliness_tardiness` instead of `makespan`.
 
 `utils.from_job_sequence_get_schedule_mixed` reuses `FFcSchedule`'s built-in
 dispatch primitives directly; the `draw_gantt_per_step` hooks are dropped.
@@ -134,7 +134,7 @@ job_sequence = sorted(
 dispatcher = MixedDispatcher(instance)
 schedule = dispatcher.get_best_mixed_schedule_by_sequence(job_sequence)
 assert schedule is not None
-e_sum, t_sum = compute_window_et(schedule, instance)
+e_sum, t_sum = compute_weighted_earliness_tardiness(schedule, instance)
 obj_value = float(e_sum + t_sum)
 obj_bound = float(mcf.get_obj_value())
 report = SubroutineReport(elapsed_time=elapsed, obj_value=obj_value,
@@ -213,7 +213,7 @@ scenarios:
 
 ## Verification
 
-1. **Unit — objective helper:** `compute_window_et` on a hand-built
+1. **Unit — objective helper:** `compute_weighted_earliness_tardiness` on a hand-built
    `FFcSchedule` matches the inline calculation it replaces (one tardy job,
    one early job, one on-time).
 2. **Unit — dispatcher:** on a small toy instance,
@@ -221,7 +221,7 @@ scenarios:
    non-null schedule and its ET matches a manually computed value.
 3. **Integration — `run_mcf_lb`:** after the step,
    `solution_manager.get_incumbent()` is not `None`,
-   `report.obj_value == compute_window_et(schedule, ins)`,
+   `report.obj_value == compute_weighted_earliness_tardiness(schedule, ins)`,
    `report.obj_bound == mcf.get_obj_value()`, and `obj_value >= obj_bound`.
 4. **End-to-end run:** `uv run python main.py` on `ins_index: [0]`; check that
    `*_solution.json`, `*_schedule.yaml`, `*_gantt.png`, and the new summary CSV

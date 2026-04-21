@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
-from ...solution.objectives import compute_window_et
+from ...solution.objectives import compute_weighted_earliness_tardiness
 from ..dispatcher import MixedDispatcher
 from .diagnostic import MCFLBDiagnostic
 from .phase1_mcf import Phase1State
@@ -113,7 +113,7 @@ def run_phase3(
         dispatched_schedule_before_unflipping = reversed_full
         dispatched_schedule = reversed_full.as_reversed()
 
-    sum_e, sum_t = compute_window_et(dispatched_schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(dispatched_schedule, instance)
     dispatched_obj = float(sum_e + sum_t)
 
     diagnostic.dispatch_sec = time.monotonic() - t_disp

@@ -19,7 +19,7 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
-from ffc_ddw_sum_et.solution.objectives import compute_window_et
+from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
 from .controller_core import FFcDDWSubroutineControllerCore
@@ -438,7 +438,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 raise RuntimeError(
                     f"MixedDispatcher produced no schedule for {self.instance.name}"
                 )
-            sum_e, sum_t = compute_window_et(schedule, self.instance)
+            sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
             obj_value = float(sum_e + sum_t)
         elif dispatcher == "fam":
             spec = AlgSpec(
@@ -553,7 +553,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         }
         schedule = build_schedule_from_op_starts(instance, j_i_2_start, j_i_2_end)
 
-        sum_e, sum_t = compute_window_et(schedule, instance)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
         obj_value = float(sum_e + sum_t)
         cp_obj = float(solver.objective_value)
         if obj_value != cp_obj:

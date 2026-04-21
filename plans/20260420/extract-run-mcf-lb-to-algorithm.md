@@ -172,7 +172,7 @@ t-1" then "machine with smallest last-used time". Adjacent identical
 segments merge.
 
 **Scope note.** `MCFPreemptiveSchedule` is diagnostic-only. It does not
-plug into `compute_window_et`, `FFcSchedule`-based dispatchers, or
+plug into `compute_weighted_earliness_tardiness`, `FFcSchedule`-based dispatchers, or
 `BaseModelBuilder`. Its only consumers are offline inspection /
 per-phase Gantt emission.
 
@@ -317,7 +317,7 @@ def run_phase3(phase1, phase2, logger, diag) -> Phase3State | None
 ```
 
 Handles the `c == 1` short-circuit, reverse-seed construction,
-`MixedDispatcher` call, `as_reversed()`, `compute_window_et`. Returns
+`MixedDispatcher` call, `as_reversed()`, `compute_weighted_earliness_tardiness`. Returns
 `dispatched_schedule` + `step2_obj`, or `None` on dispatcher failure.
 
 Controller still does the intermediate-incumbent registration on the

@@ -22,7 +22,8 @@ class MCFPreemptiveSchedule:
     ``FFcSchedule`` cannot represent preemption (it stores one
     ``(start, end)`` per ``(stage, job)``), so this type is kept as a
     sibling, diagnostic-only solution object. It is **not** a valid
-    drop-in for ``compute_window_et`` or any dispatcher / model builder.
+    drop-in for ``compute_weighted_earliness_tardiness``
+    or any dispatcher / model builder.
     """
 
     stage_id: str

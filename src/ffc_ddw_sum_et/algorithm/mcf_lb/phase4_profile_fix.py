@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
-from ...solution.objectives import compute_window_et
+from ...solution.objectives import compute_weighted_earliness_tardiness
 from ..cumulative_routine import solve_full_cp_with_profile_fix
 from .diagnostic import MCFLBDiagnostic
 from .phase1_mcf import Phase1State
@@ -89,7 +89,7 @@ def run_phase4(
     obj_bound_final = max(phase1.mcf_lb, pf_bound)
 
     final_schedule = result.schedule
-    sum_e, sum_t = compute_window_et(final_schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(final_schedule, instance)
     final_obj = float(sum_e + sum_t)
     cp_obj = result.objective
     if final_obj != cp_obj and logger is not None:

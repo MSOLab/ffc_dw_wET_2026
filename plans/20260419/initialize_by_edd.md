@@ -59,7 +59,7 @@ if schedule is None:
         f"MixedDispatcher produced no schedule for {self.instance.name}"
     )
 
-sum_e, sum_t = compute_window_et(schedule, self.instance)
+sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
 obj_value = float(sum_e + sum_t)
 
 elapsed = self.timer.elapsed_sec - start_elapsed
@@ -76,7 +76,7 @@ return report
 ```
 
 Reused symbols (already imported at the top of `controller.py`):
-`MixedDispatcher`, `compute_window_et`, `SubroutineReport`, `FFcDDWSolution`,
+`MixedDispatcher`, `compute_weighted_earliness_tardiness`, `SubroutineReport`, `FFcDDWSolution`,
 `Literal`. No new imports required.
 
 ## Design choices

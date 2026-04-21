@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
-from ..solution.objectives import compute_window_et
+from ..solution.objectives import compute_weighted_earliness_tardiness
 from .base.alg_option import AlgOption
 from .base.alg_record import AlgRecord, AlgResult, TerminationReason, WorkStatus
 from .base.alg_spec import AlgSpec
@@ -129,7 +129,7 @@ class FAMDispatcher:
                 stage_job_sequence,
             )
 
-        sum_earliness, sum_tardiness = compute_window_et(schedule, instance)
+        sum_earliness, sum_tardiness = compute_weighted_earliness_tardiness(schedule, instance)
         obj_value = sum_earliness + sum_tardiness
         self._debug(
             spec,

@@ -70,7 +70,7 @@ Body steps:
    - If `status in (cp_model.OPTIMAL, cp_model.FEASIBLE)`: extract `(j, last_stage_id) -> start/end` ints and build an output FFcSchedule using a reusable helper (next bullet).
    - Else log a warning and leave `self.last_stage_cp_sat_solution` at its prior value (None); return a report with `obj_value=None`, `obj_bound=mcf_lb`.
 8. Store & return:
-   - `self.last_stage_cp_sat_solution = FFcDDWSolution(schedule=out_schedule, obj_value=cp_obj, obj_bound=mcf_lb)` — do **not** call `solution_manager.register` (a partial schedule is not a valid full incumbent; `compute_window_et` still works on it but it would wrongly dominate the MixedDispatcher incumbent because the relaxed model has no earlier-stage capacity).
+   - `self.last_stage_cp_sat_solution = FFcDDWSolution(schedule=out_schedule, obj_value=cp_obj, obj_bound=mcf_lb)` — do **not** call `solution_manager.register` (a partial schedule is not a valid full incumbent; `compute_weighted_earliness_tardiness` still works on it but it would wrongly dominate the MixedDispatcher incumbent because the relaxed model has no earlier-stage capacity).
    - Return `SubroutineReport(elapsed_time=..., obj_value=cp_obj, obj_bound=mcf_lb)`.
 
 ### 4. `controller.py` — parametrize `_build_schedule_from_op_starts`
@@ -96,5 +96,5 @@ The existing helper at [controller.py:311-344](src/ffc_ddw_sum_et/orchestration/
    - `controller.last_stage_cp_sat_solution is not None` after run,
    - `out_schedule` only has last-stage entries (`get_jik_2_start_time_map()` keys all share `last_stage_id`),
    - `cp_obj >= mcf_lb` (feasible vs. preemptive LB),
-   - `cp_obj <= init_schedule_obj` (warm start can only help; use `compute_window_et(init_schedule, instance)` for comparison).
+   - `cp_obj <= init_schedule_obj` (warm start can only help; use `compute_weighted_earliness_tardiness(init_schedule, instance)` for comparison).
 3. Regression: run the existing `run_mcf_lb` → `run_profile_fixed_ns` flow on the same instance and confirm its incumbent / bounds are unchanged vs. main (the WIP removal is side-effect-free).

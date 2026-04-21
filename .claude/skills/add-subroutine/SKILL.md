@@ -40,9 +40,9 @@ post-run artifact pipeline.
 ## 2. Extract shared objectives (DRY)
 
 Weighted ET is the FFcDDW objective. When a new step needs to score a
-schedule, reuse `ffc_ddw_sum_et.solution.objectives.compute_window_et`. Do
+schedule, reuse `ffc_ddw_sum_et.solution.objectives.compute_weighted_earliness_tardiness`. Do
 **not** re-inline the formula. If you need a different objective, add it to
-`solution/objectives.py` alongside `compute_window_et`.
+`solution/objectives.py` alongside `compute_weighted_earliness_tardiness`.
 
 ## 3. Port dispatchers / algorithms (only what you need)
 
@@ -58,7 +58,7 @@ When mirroring code from `../hybridflowshop/`:
   primitives: `dispatch_stage_by_jobs`, `dispatch_job_by_stages`,
   `machine_centric_dispatch_4`, `get_job_priority_queue_for_stage_dispatch`.
   Do not re-implement them.
-- Replace makespan-based objective with `compute_window_et` where
+- Replace makespan-based objective with `compute_weighted_earliness_tardiness` where
   hybridflowshop selects by makespan — the FFcDDW objective is weighted ET.
 - Drop `draw_gantt_per_step` hooks from upstream utils — Gantt rendering is
   strictly post-run in this project (see §5).
@@ -73,7 +73,7 @@ def run_<new_step>(self, ...) -> SubroutineReport:
 
     # ... algorithm body produces `schedule: FFcSchedule` ...
 
-    sum_e, sum_t = compute_window_et(schedule, self.instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
     obj_value = float(sum_e + sum_t)
     obj_bound = float(<lb_if_available> or 0.0)
 

@@ -101,7 +101,7 @@ Remove the chained `run_last_stage_cp_sat_lb` entry — it is now inside `run_mc
 - [`MixedDispatcher.get_best_mixed_schedule_by_sequence`](src/ffc_ddw_sum_et/algorithm/dispatcher/mixed.py) — internally tries multiple `np` heads and returns the best under `criteria="makespan"` — this is the "여러 dispatched schedule 중 제일 좋은 것" the user referenced.
 - [`FFcDDWParameters.reverse_stages`](src/ffc_ddw_sum_et/parameters/ffc_ddw_params.py#L82)
 - [`FFcSchedule.as_reversed` / `right_shift` / `add_ops_times_2_mc`](src/ffc_ddw_sum_et/solution/ffc_schedule.py)
-- [`compute_window_et`](src/ffc_ddw_sum_et/solution/objectives.py)
+- [`compute_weighted_earliness_tardiness`](src/ffc_ddw_sum_et/solution/objectives.py)
 
 ## Verification
 
