@@ -18,7 +18,7 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/20260420/1_mcf_lb_init_8_config.yaml")
+CONFIG_PATH = Path("metadata/20260421/1_mcf_lb_init_9_config.yaml")
 
 
 def main() -> None:

@@ -98,6 +98,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
         profile_fix_by_machine: bool = False,
         machine_precedence_stride: int = 1,
+        machine_then_job: bool = False,
     ) -> SubroutineReport:
         """Step method: full MCF-LB pipeline composed of four extracted phases.
 
@@ -119,7 +120,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         # Phase 1: MCF LB + one last-stage dispatch seed per MCF priority map.
         phase1 = run_phase1(
-            instance, diag, logger=self.logger, last_stage_only_priority_tags=last_stage_only_priority_tags
+            instance,
+            diag,
+            logger=self.logger,
+            last_stage_only_priority_tags=last_stage_only_priority_tags,
         )
         mcf_lb = phase1.mcf_lb
         self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
@@ -164,7 +168,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         # Phase 3: reverse-dispatch + unflip.
-        phase3 = run_phase3(phase1, phase2, instance, diag, logger=self.logger)
+        phase3 = run_phase3(
+            phase1,
+            phase2,
+            instance,
+            diag,
+            logger=self.logger,
+            machine_then_job=machine_then_job,
+        )
         if phase3 is None:
             elapsed = self.timer.elapsed_sec - start_elapsed
             return SubroutineReport(

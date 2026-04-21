@@ -41,6 +41,7 @@ def run_phase3(
     diagnostic: MCFLBDiagnostic,
     *,
     logger: logging.Logger | None = None,
+    machine_then_job: bool = False,
 ) -> Phase3State | None:
     """Build the full dispatched schedule via reverse-dispatch + unflip.
 
@@ -99,6 +100,7 @@ def run_phase3(
             rev_job_sequence,
             schedule=reversed_seed,
             from_stage=reversed_instance.stage_id_list[1],
+            machine_then_job=machine_then_job,
             criteria="makespan",
         )
         if reversed_full is None:
