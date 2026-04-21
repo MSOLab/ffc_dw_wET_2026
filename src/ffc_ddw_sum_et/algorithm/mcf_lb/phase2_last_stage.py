@@ -9,15 +9,14 @@ yields a feasible solution.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 
-from ortools.sat.python import cp_model
+from ffc_ddw_sum_et.algorithm.cumulative_routine import (
+    solve_last_stage_with_profile_fix,
+)
+from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 
-from ...parameters.ffc_ddw_params import FFcDDWParameters
-from ...solution.ffc_schedule import FFcSchedule
-from ...solution.schedule_build import build_schedule_from_op_starts
-from ..cumulative import BaseModelBuilder
 from .diagnostic import MCFLBDiagnostic
 from .phase1_mcf import LastStageSeed, Phase1State, SeedTag
 
@@ -59,10 +58,11 @@ def run_phase2(
     instance: FFcDDWParameters,
     diagnostic: MCFLBDiagnostic,
     *,
-    profile_fix_by_machine: bool,
-    machine_precedence_stride: int,
-    solver_thread_cnt: int = 1,
     logger: logging.Logger | None = None,
+    profile_fix_by_machine: bool = False,
+    machine_precedence_stride: int = 1,
+    solver_thread_cnt: int = 1,
+    repeat_pf_cp_while_improving: bool = False,
 ) -> Phase2State | None:
     """Solve the last-stage CP-SAT model once per seed, pick the best.
 
@@ -91,6 +91,7 @@ def run_phase2(
             profile_fix_by_machine=profile_fix_by_machine,
             machine_precedence_stride=machine_precedence_stride,
             solver_thread_cnt=solver_thread_cnt,
+            repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
         )
         total_solve_sec += solve_sec
         diagnostic.ls_status_per_seed[seed.tag] = status_name
@@ -141,6 +142,7 @@ def _solve_last_stage_for_seed(
     profile_fix_by_machine: bool,
     machine_precedence_stride: int,
     solver_thread_cnt: int,
+    repeat_pf_cp_while_improving: bool = False,
 ) -> tuple[LastStageCandidate | None, float, str]:
     """Build and solve a last-stage-only CP-SAT model for one seed.
 
@@ -149,75 +151,26 @@ def _solve_last_stage_for_seed(
     Raises ``RuntimeError`` on INFEASIBLE (the MCF LB should be
     consistent with the last-stage-only model).
     """
-    last_stage_id = phase1.last_stage_id
-    horizon = int(seed.init_schedule.makespan * 2)
-
-    ls_builder = BaseModelBuilder()
-    ls_mdl, ls_params, ls_ops_vars, _ls_obj_vars = ls_builder.build(
-        instance=instance,
-        horizon=horizon,
-        last_stage_only=True,
-        job_2_release=phase1.job_2_release_map,
-        obj_lb=phase1.mcf_lb,
-    )
-
-    BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
-        ls_mdl,
-        ls_params,
-        ls_ops_vars,
+    result, solve_sec, status_name = solve_last_stage_with_profile_fix(
         seed.init_schedule,
+        instance,
+        phase1.last_stage_id,
+        phase1.job_2_release_map,
+        phase1.mcf_lb,
         profile_fix_by_machine=profile_fix_by_machine,
         machine_precedence_stride=machine_precedence_stride,
+        solver_thread_cnt=solver_thread_cnt,
+        repeat_while_improving=repeat_pf_cp_while_improving,
     )
-    BaseModelBuilder.apply_start_hints_from_start_time_map(
-        ls_mdl,
-        ls_params,
-        ls_ops_vars,
-        seed.init_schedule.get_jik_2_start_time_map(),
-    )
-    BaseModelBuilder.apply_end_hints_from_end_time_map(
-        ls_mdl,
-        ls_params,
-        ls_ops_vars,
-        seed.init_schedule.get_jik_2_end_time_map(),
-    )
-
-    ls_solver = cp_model.CpSolver()
-    ls_solver.parameters.num_search_workers = int(solver_thread_cnt)
-
-    t_ls = time.monotonic()
-    ls_status = ls_solver.Solve(ls_mdl)
-    solve_sec = time.monotonic() - t_ls
-    status_name = ls_solver.StatusName(ls_status)
-
-    if ls_status == cp_model.INFEASIBLE:
-        raise RuntimeError(
-            f"Last-stage CP-SAT model is infeasible for seed={seed.tag}; "
-            "check MCF LB solution validity"
-        )
-    if ls_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+    if result is None:
         return None, solve_sec, status_name
-
-    ls_j_i_2_start = {
-        (j, last_stage_id): int(ls_solver.Value(ls_ops_vars.op_start[j, last_stage_id]))
-        for j in ls_params.j_list
-    }
-    ls_j_i_2_end = {
-        (j, last_stage_id): int(ls_solver.Value(ls_ops_vars.op_end[j, last_stage_id]))
-        for j in ls_params.j_list
-    }
-    last_stage_only_schedule = build_schedule_from_op_starts(
-        instance, ls_j_i_2_start, ls_j_i_2_end, stages=[last_stage_id]
-    )
-    last_stage_only_schedule_makespan = max(ls_j_i_2_end.values())
-
     candidate = LastStageCandidate(
         tag=seed.tag,
-        last_stage_only_schedule=last_stage_only_schedule,
-        last_stage_only_schedule_makespan=last_stage_only_schedule_makespan,
-        last_stage_only_obj=float(ls_solver.objective_value),
-        last_stage_only_bound=float(ls_solver.best_objective_bound),
-        ls_status=status_name,
-        ls_j_i_2_end=ls_j_i_2_end,
+        last_stage_only_schedule=result.schedule,
+        last_stage_only_schedule_makespan=result.makespan,
+        last_stage_only_obj=result.objective,
+        last_stage_only_bound=result.bound,
+        ls_status=result.status_name,
+        ls_j_i_2_end=result.j_i_2_end,
     )
     return candidate, solve_sec, status_name

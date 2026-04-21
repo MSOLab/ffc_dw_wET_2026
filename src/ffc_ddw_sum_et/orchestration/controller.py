@@ -99,6 +99,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         profile_fix_by_machine: bool = False,
         machine_precedence_stride: int = 1,
         machine_then_job: bool = False,
+        repeat_pf_cp_while_improving: bool = False,
     ) -> SubroutineReport:
         """Step method: full MCF-LB pipeline composed of four extracted phases.
 
@@ -143,8 +144,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             diag,
             profile_fix_by_machine=profile_fix_by_machine,
             machine_precedence_stride=machine_precedence_stride,
-            solver_thread_cnt=solver_thread_cnt,
             logger=self.logger,
+            solver_thread_cnt=solver_thread_cnt,
+            repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
         )
         if phase2 is None:
             elapsed = self.timer.elapsed_sec - start_elapsed
