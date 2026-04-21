@@ -42,27 +42,4 @@ scenarios:
           - "due_date_star_plus_p"
         profile_fix_by_machine: true
         machine_precedence_stride: 1
-        machine_then_job: false
-  # - name: machine_then_job
-  #   timelimit: 300.0
-  #   output_subdir: machine_then_job
-  #   subroutine_flow:
-  #     - method: run_mcf_lb_4
-  #       last_stage_only_priority_tags:
-  #         - "avg_time"
-  #         - "avg_time_minus_half_p"
-  #         - "start_time"
-  #         - "completion_time"
-  #         - "completion_time_minus_p"
-  #         - "due_date_lb"
-  #         - "due_date_lb_minus_p"
-  #         - "due_date_ub"
-  #         - "due_date_ub_minus_p"
-  #         - "due_date_star"
-  #         - "due_date_star_minus_p"
-  #         - "due_date_star_minus_half_p"
-  #         - "due_date_star_plus_half_p"
-  #         - "due_date_star_plus_p"
-  #       profile_fix_by_machine: true
-  #       machine_precedence_stride: 1
-  #       machine_then_job: true
+        repeat_pf_cp_while_improving: true
