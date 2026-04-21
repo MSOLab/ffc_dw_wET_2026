@@ -64,12 +64,18 @@ def run_phase2(
     solver_thread_cnt: int = 1,
     repeat_pf_cp_while_improving: bool = False,
 ) -> Phase2State | None:
-    """Solve the last-stage CP-SAT model once per seed, pick the best.
+    """Solve the last-stage CP-SAT model per seed, pick the best.
 
     Each seed gets its own model (horizon, profile-fix constraints, start
     and end hints are all seed-specific). Seeds that return INFEASIBLE
     raise; seeds that return UNKNOWN/time-limit are skipped with a
     warning; feasible seeds contribute a ``LastStageCandidate``.
+
+    When ``repeat_pf_cp_while_improving=True``, each seed's solve is
+    repeated with the new schedule fed back as the profile-fix reference
+    until the CP-SAT objective stops improving; per-seed ``solve_sec``
+    accumulates across iterations and the candidate reflects the last
+    (best) iteration.
 
     Mutates ``diagnostic``: accumulates ``last_stage_cp_sat_sec`` across
     seeds; records per-seed ``ls_status_per_seed`` /
