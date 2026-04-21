@@ -280,11 +280,42 @@ class FFcDDWParameters(FFcParameters):
     # Job → priority score maps
     # -------------------------
 
+    def get_job_2_due_date_lb_map(self) -> dict[str, int]:
+        """Get a mapping from job ID to due date lower bound (d^{-}_j)."""
+        return {
+            job_id: due_window[0]
+            for job_id, due_window in self._job_2_due_window_map.items()
+        }
+
+    def get_job_2_due_date_lb_minus_p_map(self) -> dict[str, float]:
+        """Get a mapping from job ID to due date lower bound minus processing time."""
+        job_2_due_date_lb_map = self.get_job_2_due_date_lb_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_lb_map[job_id]
+            - sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
     def get_job_2_due_date_ub_map(self) -> dict[str, int]:
         """Get a mapping from job ID to due date upper bound (d^{+}_j)."""
         return {
             job_id: due_window[1]
             for job_id, due_window in self._job_2_due_window_map.items()
+        }
+
+    def get_job_2_due_date_ub_minus_p_map(self) -> dict[str, float]:
+        """Get a mapping from job ID to due date upper bound minus processing time."""
+        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_ub_map[job_id]
+            - sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
         }
 
     def get_job_2_due_date_star_map(self) -> dict[str, float]:
@@ -301,6 +332,21 @@ class FFcDDWParameters(FFcParameters):
                 )
                 / (self._job_2_ewt_map[job_id] + self._job_2_twt_map[job_id])
             )
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_minus_p_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star minus half processing time
+        (d^{*}_j - 0.5 * sum_i p_{ij}).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_star_map[job_id]
+            - sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }
 

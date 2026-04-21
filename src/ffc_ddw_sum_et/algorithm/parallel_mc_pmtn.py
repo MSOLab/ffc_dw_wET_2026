@@ -211,25 +211,15 @@ class ParallelMachinePreemptionMcf:
             job_2_completion_time[j] = completion_time
         return job_2_completion_time
 
-    def get_job_2_average_time_map(self) -> dict[str, float | None]:
-        x_val = self.get_variable_value_dict()
-        job_2_average_time: dict[str, float | None] = {}
-        for j in self.calJ:
-            times = list(x_val[j].keys())
-            job_2_average_time[j] = sum(times) / len(times) if times else None
-        return job_2_average_time
-
     def get_job_priority_by_avg_time(self) -> dict[str, float | None]:
         x_val = self.get_variable_value_dict()
-        job_2_priority: dict[str, float | None] = {}
+        job_2_avg: dict[str, float | None] = {}
         for j in self.calJ:
             times = list(x_val[j].keys())
-            avg_time = sum(times) / len(times) if times else None
-            if avg_time is not None:
-                job_2_priority[j] = avg_time - (self.p[j] / 2) - 0.5
-            else:
-                job_2_priority[j] = None
-        return job_2_priority
+            if not times:
+                raise ValueError(f"Job {j} has no start times; cannot compute avg_time")
+            job_2_avg[j] = sum(times) / len(times)
+        return job_2_avg
 
     def get_job_priority_by_avg_time_minus_half_p(self) -> dict[str, float | None]:
         x_val = self.get_variable_value_dict()
@@ -242,3 +232,16 @@ class ParallelMachinePreemptionMcf:
                 )
             job_2_avg_minus_p_sum[j] = sum(times) / len(times) - (self.p[j] / 2)
         return job_2_avg_minus_p_sum
+
+    def get_job_2_completion_time_minus_p_map(self) -> dict[str, int | None]:
+        x_val = self.get_variable_value_dict()
+        job_2_completion_minus_p: dict[str, int | None] = {}
+        for j in self.calJ:
+            times = list(x_val[j].keys())
+            if not times:
+                raise ValueError(
+                    f"Job {j} has no start times; cannot compute completion_time_minus_p"
+                )
+            completion_time = max(times)
+            job_2_completion_minus_p[j] = completion_time - self.p[j]
+        return job_2_completion_minus_p

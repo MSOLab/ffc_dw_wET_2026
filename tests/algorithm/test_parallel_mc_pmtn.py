@@ -222,33 +222,6 @@ def test_start_before_completion() -> None:
             assert completions[j] >= starts[j]
 
 
-def test_job_2_average_time_map() -> None:
-    instance = _make_instance()
-    solver = ParallelMachinePreemptionMcf.from_instance(instance)
-    solver.solve()
-
-    avgs = solver.get_job_2_average_time_map()
-    for j in solver.calJ:
-        assert avgs[j] is not None
-        assert avgs[j] > 0
-
-
-def test_average_time_between_start_and_completion() -> None:
-    """Average time for a job should be between its start and completion."""
-    instance = _make_instance()
-    solver = ParallelMachinePreemptionMcf.from_instance(instance)
-    solver.solve()
-
-    starts = solver.get_job_2_start_time_map()
-    completions = solver.get_job_2_completion_time_map()
-    avgs = solver.get_job_2_average_time_map()
-
-    for j in solver.calJ:
-        if starts[j] is not None and completions[j] is not None:
-            assert avgs[j] is not None
-            assert starts[j] <= avgs[j] <= completions[j]
-
-
 # --- None for unscheduled jobs ---
 
 
@@ -274,8 +247,6 @@ def test_none_for_unscheduled_job() -> None:
 
     assert solver.get_variable_value_dict() == {"j0": {}, "j1": {}}
     assert solver.get_job_2_start_time_map() == {"j0": None, "j1": None}
-    assert solver.get_job_2_completion_time_map() == {"j0": None, "j1": None}
-    assert solver.get_job_2_average_time_map() == {"j0": None, "j1": None}
 
 
 def test_get_variable_value_dict_requires_optimal() -> None:

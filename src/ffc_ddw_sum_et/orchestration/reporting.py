@@ -533,6 +533,99 @@ class FFcDDWReporter:
                     writer.writerow(self._mcf_lb_analysis_row(ir))
             logger.info("MCF-LB analysis CSV written to %s", path)
 
+        self._write_last_stage_only_obj_summary_csv()
+
+    def _write_last_stage_only_obj_summary_csv(self) -> None:
+        """Cross-scenario summary of ``lastStageOnlyObj`` per instance.
+
+        One row per insIndex that appears in any scenario with an MCF-LB
+        diagnostic. Columns: insIndex, BKS, one value column per scenario,
+        BEST = row-wise max across scenario columns, then one indicator
+        column per scenario (1 when the scenario ties BEST, empty otherwise).
+        BKS is looked up from the PRA2017 instance table; missing BKS raises.
+        """
+        scenario_names = [sc.name for sc in self.scenario_results]
+        if not scenario_names:
+            return
+
+        # (insIndex -> {scenario_name -> last_stage_only_obj})
+        per_instance: dict[int, dict[str, float]] = {}
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                diag = ir.mcf_lb_diagnostic
+                if diag is None:
+                    continue
+                val = diag.get("last_stage_only_obj")
+                if val is None:
+                    continue
+                ins_index = self._resolve_ins_index(ir.instance_name)
+                if ins_index is None:
+                    continue
+                per_instance.setdefault(ins_index, {})[sc.name] = float(val)
+
+        if not per_instance:
+            return
+
+        header = (
+            ["insIndex", "BKS"]
+            + scenario_names
+            + ["BEST"]
+            + [f"{name}_is_best" for name in scenario_names]
+            + [f"{name}_lt_bks" for name in scenario_names]
+        )
+
+        best_counts: dict[str, int] = {name: 0 for name in scenario_names}
+        lt_bks_counts: dict[str, int] = {name: 0 for name in scenario_names}
+
+        path = (
+            self.output_dir / f"{self.output_dir.name}_mcf_lb_last_stage_only_obj.csv"
+        )
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            for ins_index in sorted(per_instance.keys()):
+                values_by_sc = per_instance[ins_index]
+                meta = self._index_to_meta.get(ins_index)
+                if meta is None or meta.get("BKS") is None:
+                    raise ValueError(
+                        f"BKS not found for insIndex={ins_index} in "
+                        f"{self.ins_index_source}"
+                    )
+                bks = meta["BKS"]
+                numeric_vals = list(values_by_sc.values())
+                best = min(numeric_vals) if numeric_vals else None
+
+                row: list[Any] = [ins_index, bks]
+                for name in scenario_names:
+                    v = values_by_sc.get(name)
+                    row.append("" if v is None else v)
+                row.append("" if best is None else best)
+                for name in scenario_names:
+                    v = values_by_sc.get(name)
+                    is_best = v is not None and best is not None and v == best
+                    row.append(1 if is_best else "")
+                    if is_best:
+                        best_counts[name] += 1
+                for name in scenario_names:
+                    v = values_by_sc.get(name)
+                    lt_bks = v is not None and v < bks
+                    row.append(1 if lt_bks else "")
+                    if lt_bks:
+                        lt_bks_counts[name] += 1
+                writer.writerow(row)
+        logger.info("Last-stage-only-obj summary CSV written to %s", path)
+
+        count_path = (
+            self.output_dir
+            / f"{self.output_dir.name}_mcf_lb_last_stage_only_obj_count.csv"
+        )
+        with open(count_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["scenarioName", "bestCount", "ltBksCount"])
+            for name in scenario_names:
+                writer.writerow([name, best_counts[name], lt_bks_counts[name]])
+        logger.info("Last-stage-only-obj count CSV written to %s", count_path)
+
     def _mcf_lb_analysis_row(self, ir: InstanceResult) -> list[str]:
         diag = ir.mcf_lb_diagnostic or {}
         ins_index = self._resolve_ins_index(ir.instance_name)
