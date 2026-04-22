@@ -14,7 +14,7 @@ from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
 from ..solution.schedule_build import build_schedule_from_op_starts
 from .cpsat_solver_options import CpsatSolverOptions, get_solver
-from .cumulative import BaseModelBuilder
+from .cumulative import BaseModelBuilder, PFMethod, decode_pf_method
 
 __all__ = [
     "FullCpSolveResult",
@@ -56,8 +56,7 @@ def solve_last_stage_with_profile_fix(
     obj_lb: float,
     *,
     logger: logging.Logger | None = None,
-    profile_fix_by_machine: bool = False,
-    machine_precedence_stride: int = 1,
+    pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_while_improving: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
@@ -78,12 +77,11 @@ def solve_last_stage_with_profile_fix(
             preemptive completion times of stages 1..c-1).
         obj_lb (float): Lower bound on the CP-SAT objective (e.g., the MCF
             LB), passed into the model for pruning.
-        profile_fix_by_machine (bool, optional): If True, profile-fix
-            precedence is enforced per-machine within each stage instead of
-            per-stage. Defaults to False.
-        machine_precedence_stride (int, optional): Stride ``k`` for the
-            per-machine precedence chain; only operations ``k`` positions
-            apart are constrained. ``1`` = full chain. Defaults to 1.
+        pf_method (PFMethod | None, optional): Profile-fix precedence policy
+            applied after dispatch. ``None`` (default) skips the precedence
+            pass entirely; the CP-SAT solve still runs with warm-start and
+            ET hints. ``"PF0"``/``"PF1"``/``"PF2"`` are decoded via
+            :func:`decode_pf_method`.
         solver_thread_cnt (int, optional): Value passed to
             ``CpSolver.parameters.num_search_workers``. Defaults to 1.
         repeat_while_improving (bool, optional): If True, after each
@@ -131,14 +129,16 @@ def solve_last_stage_with_profile_fix(
             job_2_release=job_2_release,
             obj_lb=obj_lb,
         )
-        BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
-            ls_mdl,
-            ls_params,
-            ls_ops_vars,
-            current_schedule,
-            profile_fix_by_machine=profile_fix_by_machine,
-            machine_precedence_stride=machine_precedence_stride,
-        )
+        if pf_method is not None:
+            by_machine, stride = decode_pf_method(pf_method)
+            BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
+                ls_mdl,
+                ls_params,
+                ls_ops_vars,
+                current_schedule,
+                profile_fix_by_machine=by_machine,
+                machine_precedence_stride=stride,
+            )
         BaseModelBuilder.apply_start_hints_from_start_time_map(
             ls_mdl,
             ls_params,
@@ -238,8 +238,7 @@ def solve_full_cp_with_profile_fix(
     instance: FFcDDWParameters,
     *,
     obj_lb: float | None = None,
-    profile_fix_by_machine: bool = False,
-    machine_precedence_stride: int = 1,
+    pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_while_improving: bool = False,
 ) -> tuple[FullCpSolveResult | None, float, str]:
@@ -257,12 +256,11 @@ def solve_full_cp_with_profile_fix(
         instance (FFcDDWParameters): The FFc DDW instance to model.
         obj_lb (float, optional): Lower bound on the CP-SAT objective
             (e.g., the MCF LB), passed into the model. Defaults to None.
-        profile_fix_by_machine (bool, optional): If True, profile-fix
-            precedence is enforced per-machine within each stage instead of
-            per-stage. Defaults to False.
-        machine_precedence_stride (int, optional): Stride ``k`` for the
-            per-machine precedence chain; only operations ``k`` positions
-            apart are constrained. ``1`` = full chain. Defaults to 1.
+        pf_method (PFMethod | None, optional): Profile-fix precedence policy
+            applied after dispatch. ``None`` (default) skips the precedence
+            pass entirely; the CP-SAT solve still runs with warm-start and
+            ET hints. ``"PF0"``/``"PF1"``/``"PF2"`` are decoded via
+            :func:`decode_pf_method`.
         solver_thread_cnt (int, optional): Value passed to
             ``CpSolver.parameters.num_search_workers``. Defaults to 1.
         repeat_while_improving (bool, optional): If True, after each
@@ -299,14 +297,16 @@ def solve_full_cp_with_profile_fix(
         pf_mdl, pf_params, pf_op_vars, pf_et_vars = pf_builder.build(
             instance, horizon=horizon, obj_lb=obj_lb
         )
-        BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
-            pf_mdl,
-            pf_params,
-            pf_op_vars,
-            current_schedule,
-            profile_fix_by_machine=profile_fix_by_machine,
-            machine_precedence_stride=machine_precedence_stride,
-        )
+        if pf_method is not None:
+            by_machine, stride = decode_pf_method(pf_method)
+            BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
+                pf_mdl,
+                pf_params,
+                pf_op_vars,
+                current_schedule,
+                profile_fix_by_machine=by_machine,
+                machine_precedence_stride=stride,
+            )
         BaseModelBuilder.apply_start_hints_from_start_time_map(
             pf_mdl,
             pf_params,

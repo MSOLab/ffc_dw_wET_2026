@@ -129,7 +129,9 @@ class FAMDispatcher:
                 stage_job_sequence,
             )
 
-        sum_earliness, sum_tardiness = compute_weighted_earliness_tardiness(schedule, instance)
+        sum_earliness, sum_tardiness = compute_weighted_earliness_tardiness(
+            schedule, instance
+        )
         obj_value = sum_earliness + sum_tardiness
         self._debug(
             spec,

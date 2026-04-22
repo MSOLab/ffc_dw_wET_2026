@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from bisect import bisect_left
 from dataclasses import dataclass
+from typing import Literal
 
 from ortools.sat.python.cp_model import CpModel, IntervalVar, IntVar
 
@@ -13,6 +14,30 @@ from ffc_ddw_sum_et.solution.ffc_schedule import (
     McIdType,
     StageIdType,
 )
+
+PFMethod = Literal["PF0", "PF1", "PF2"]
+"""Profile-fix precedence policy applied after dispatch:
+
+- ``"PF0"``: stage-level time-based successor selection (no per-machine chain).
+- ``"PF1"``: per-machine precedence chain with stride 1 (adjacent).
+- ``"PF2"``: per-machine precedence chain with stride 2 (every-other).
+
+Callers use ``None`` in place of a ``PFMethod`` to skip profile-fix precedence constraints
+and allow the solver full freedom to explore.
+"""
+
+
+def decode_pf_method(pf_method: PFMethod) -> tuple[bool, int]:
+    """Decode ``PFMethod`` into (profile_fix_by_machine, machine_precedence_stride)."""
+    if pf_method == "PF0":
+        return (False, 1)
+    if pf_method == "PF1":
+        return (True, 1)
+    if pf_method == "PF2":
+        return (True, 2)
+    raise ValueError(
+        f"Unknown pf_method: {pf_method!r}; expected 'PF0', 'PF1', or 'PF2'."
+    )
 
 
 @dataclass(frozen=True)

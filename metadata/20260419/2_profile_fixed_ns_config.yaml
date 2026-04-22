@@ -26,5 +26,4 @@ scenarios:
         params:
           computational_time: 300.0
           solver_thread_cnt: 1
-          profile_fix_by_machine: true
-          machine_precedence_stride: 1
+          pf_method: "PF1"

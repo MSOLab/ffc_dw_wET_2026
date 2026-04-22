@@ -23,24 +23,24 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["avg_time_minus_half_p"]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: mcf_lb_init_due_date_star_plus_half_p
     timelimit: 300.0
     output_subdir: mcf_lb_init_due_date_star_plus_half_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["due_date_star_plus_half_p"]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: mcf_lb_init_due_date_star_plus_p
     timelimit: 300.0
     output_subdir: mcf_lb_init_due_date_star_plus_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["due_date_star_plus_p"]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: mcf_lb_init_all
     timelimit: 300.0
     output_subdir: mcf_lb_init_all
@@ -56,5 +56,5 @@ scenarios:
           - due_date_star_minus_half_p
           - due_date_star_plus_half_p
           - due_date_star_plus_p
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"

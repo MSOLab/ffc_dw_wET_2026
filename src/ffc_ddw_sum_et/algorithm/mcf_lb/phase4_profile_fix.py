@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.objectives import compute_weighted_earliness_tardiness
+from ..cumulative import PFMethod
 from ..cumulative_routine import solve_full_cp_with_profile_fix
 from .diagnostic import MCFLBDiagnostic
 from .phase1_mcf import Phase1State
@@ -39,8 +40,7 @@ def run_phase4(
     diagnostic: MCFLBDiagnostic,
     *,
     logger: logging.Logger | None = None,
-    profile_fix_by_machine: bool = False,
-    machine_precedence_stride: int = 1,
+    pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_pf_cp_while_improving: bool = False,
 ) -> Phase4State:
@@ -64,8 +64,7 @@ def run_phase4(
     result, total_solve_sec, last_status_name = solve_full_cp_with_profile_fix(
         phase3.dispatched_schedule,
         instance,
-        profile_fix_by_machine=profile_fix_by_machine,
-        machine_precedence_stride=machine_precedence_stride,
+        pf_method=pf_method,
         solver_thread_cnt=solver_thread_cnt,
         repeat_while_improving=repeat_pf_cp_while_improving,
         obj_lb=phase1.mcf_lb,

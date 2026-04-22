@@ -21,6 +21,6 @@ scenarios:
     timelimit: 300.0
     output_subdir: mcf_lb_init
     subroutine_flow:
-      - method: run_mcf_lb
-        profile_fix_by_machine: false
-        machine_precedence_stride: 1
+      - method: run_mcf_lb_4
+        last_stage_only_pf_method: "PF0"
+        full_pf_method: "PF0"

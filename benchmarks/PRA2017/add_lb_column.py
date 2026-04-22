@@ -25,7 +25,7 @@ INSTANCE_DIR = HERE / "large"
 
 
 def compute_lb(instance: FFcDDWParameters) -> int:
-    # timelimit is unused here: run_mcf_lb() is called directly, not via
+    # timelimit is unused here: run_mcf_lb_4() is called directly, not via
     # ctrlr.run()'s subroutine loop. The value is only a formal argument
     # required by the controller constructor.
     ctrlr = FFcDDWSubroutineController(
@@ -33,7 +33,7 @@ def compute_lb(instance: FFcDDWParameters) -> int:
         subroutine_flow=[],
         stopping_criteria={"timelimit": 1.0},
     )
-    report = ctrlr.run_mcf_lb()
+    report = ctrlr.run_mcf_lb_4()
     assert report.obj_bound is not None
     return int(report.obj_bound)
 

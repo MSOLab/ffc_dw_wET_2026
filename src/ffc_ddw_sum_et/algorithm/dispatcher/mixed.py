@@ -83,7 +83,9 @@ class MixedDispatcher(BaseDispatcher):
             if criteria == "makespan":
                 obj = _schedule.makespan
             else:
-                sum_e, sum_t = compute_weighted_earliness_tardiness(_schedule, self.instance)
+                sum_e, sum_t = compute_weighted_earliness_tardiness(
+                    _schedule, self.instance
+                )
                 obj = sum_e + sum_t
             if best_obj is None or obj < best_obj:
                 best_obj = obj

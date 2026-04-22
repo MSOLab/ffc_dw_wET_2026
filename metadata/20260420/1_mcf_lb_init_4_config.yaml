@@ -22,5 +22,5 @@ scenarios:
     output_subdir: mcf_lb_init_4
     subroutine_flow:
       - method: run_mcf_lb_4
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"

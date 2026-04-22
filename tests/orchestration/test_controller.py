@@ -86,7 +86,7 @@ def test_run_mcf_lb_registers_dispatch_incumbent() -> None:
     """
     controller = _make_controller(_make_instance())
 
-    report = controller.run_mcf_lb()
+    report = controller.run_mcf_lb_4()
 
     assert report.obj_value is not None
     assert report.obj_bound is not None
@@ -105,7 +105,7 @@ def test_run_mcf_lb_not_greater_than_fam() -> None:
     """LB from MCF should be ≤ feasible FAM objective for the same instance."""
     controller = _make_controller(_make_instance())
 
-    lb_report = controller.run_mcf_lb()
+    lb_report = controller.run_mcf_lb_4()
     fam_report = controller.run_fam()
 
     assert lb_report.obj_bound is not None

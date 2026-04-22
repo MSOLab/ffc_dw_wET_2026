@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..base.alg_option import AlgOption
+from ..cumulative import PFMethod
 
 __all__ = ["MCFLBOption"]
 
@@ -13,12 +14,11 @@ __all__ = ["MCFLBOption"]
 class MCFLBOption(AlgOption):
     """Option payload for ``MCFLB``.
 
-    - ``profile_fix_by_machine`` / ``machine_precedence_stride`` are passed
-      through to
-      ``BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule``
-      in both the Phase 2 last-stage-only solve and the Phase 4
-      profile-fix full solve.
+    - ``last_stage_only_pf_method`` selects the profile-fix precedence policy
+      for the Phase 2 last-stage-only solve; ``full_pf_method`` does the same
+      for the Phase 4 full solve. ``None`` skips the precedence-arc pass
+      while keeping warm-start / ET hints. See :data:`PFMethod`.
     """
 
-    profile_fix_by_machine: bool = False
-    machine_precedence_stride: int = 1
+    last_stage_only_pf_method: PFMethod | None = None
+    full_pf_method: PFMethod | None = None

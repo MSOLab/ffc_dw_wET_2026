@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from ffc_ddw_sum_et.algorithm.cumulative import PFMethod
 from ffc_ddw_sum_et.algorithm.cumulative_routine import (
     solve_last_stage_with_profile_fix,
 )
@@ -61,8 +62,7 @@ def run_phase2(
     diagnostic: MCFLBDiagnostic,
     *,
     logger: logging.Logger | None = None,
-    profile_fix_by_machine: bool = False,
-    machine_precedence_stride: int = 1,
+    pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_pf_cp_while_improving: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
@@ -98,8 +98,7 @@ def run_phase2(
             phase1,
             instance,
             logger=logger,
-            profile_fix_by_machine=profile_fix_by_machine,
-            machine_precedence_stride=machine_precedence_stride,
+            pf_method=pf_method,
             solver_thread_cnt=solver_thread_cnt,
             repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
             solver_log_path_getter=solver_log_path_getter,
@@ -151,8 +150,7 @@ def _solve_last_stage_for_seed(
     instance: FFcDDWParameters,
     *,
     logger: logging.Logger | None = None,
-    profile_fix_by_machine: bool,
-    machine_precedence_stride: int,
+    pf_method: PFMethod | None,
     solver_thread_cnt: int,
     repeat_pf_cp_while_improving: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
@@ -171,8 +169,7 @@ def _solve_last_stage_for_seed(
         phase1.job_2_release_map,
         phase1.mcf_lb,
         logger=logger,
-        profile_fix_by_machine=profile_fix_by_machine,
-        machine_precedence_stride=machine_precedence_stride,
+        pf_method=pf_method,
         solver_thread_cnt=solver_thread_cnt,
         repeat_while_improving=repeat_pf_cp_while_improving,
         solver_log_path_getter=solver_log_path_getter,

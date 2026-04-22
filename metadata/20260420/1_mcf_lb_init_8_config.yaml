@@ -26,117 +26,117 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "avg_time" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: avg_time_minus_half_p
     timelimit: 300.0
     output_subdir: avg_time_minus_half_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "avg_time_minus_half_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: start_time
     timelimit: 300.0
     output_subdir: start_time
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "start_time" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: completion_time
     timelimit: 300.0
     output_subdir: completion_time
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "completion_time" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: completion_time_minus_p
     timelimit: 300.0
     output_subdir: completion_time_minus_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "completion_time_minus_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_lb
     timelimit: 300.0
     output_subdir: due_date_lb
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_lb" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_lb_minus_p
     timelimit: 300.0
     output_subdir: due_date_lb_minus_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_lb_minus_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_ub
     timelimit: 300.0
     output_subdir: due_date_ub
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_ub" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: mcf_lb_init_due_date_ub
     timelimit: 300.0
     output_subdir: mcf_lb_init_due_date_ub
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_ub" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_ub_minus_p
     timelimit: 300.0
     output_subdir: due_date_ub_minus_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_ub_minus_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_star
     timelimit: 300.0
     output_subdir: due_date_star
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_star_minus_p
     timelimit: 300.0
     output_subdir: due_date_star_minus_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_minus_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_star_minus_half_p
     timelimit: 300.0
     output_subdir: due_date_star_minus_half_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_minus_half_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_star_plus_half_p
     timelimit: 300.0
     output_subdir: due_date_star_plus_half_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_plus_half_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"
   - name: due_date_star_plus_p
     timelimit: 300.0
     output_subdir: due_date_star_plus_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_plus_p" ]
-        profile_fix_by_machine: true
-        machine_precedence_stride: 1
+        last_stage_only_pf_method: "PF1"
+        full_pf_method: "PF1"

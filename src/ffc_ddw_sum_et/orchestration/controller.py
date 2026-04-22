@@ -9,7 +9,11 @@ from ortools.sat.python import cp_model
 from routix.report import SubroutineReport
 
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
-from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
+from ffc_ddw_sum_et.algorithm.cumulative import (
+    BaseModelBuilder,
+    PFMethod,
+    decode_pf_method,
+)
 from ffc_ddw_sum_et.algorithm.dispatcher import MixedDispatcher
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
@@ -77,54 +81,51 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         return report
 
-    # TODO: remove; use run_mcf_lb_4 instead
-    def run_mcf_lb(
-        self,
-        profile_fix_by_machine: bool = False,
-        machine_precedence_stride: int = 1,
-    ) -> SubroutineReport:
-        """Legacy entrypoint delegating to :meth:`run_mcf_lb_4`.
-
-        Kept to avoid breaking configs that still reference ``run_mcf_lb``
-        by name. New configs should call :meth:`run_mcf_lb_4` directly.
-        """
-        return self.run_mcf_lb_4(
-            profile_fix_by_machine=profile_fix_by_machine,
-            machine_precedence_stride=machine_precedence_stride,
-        )
-
     def run_mcf_lb_4(
         self,
         last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
-        profile_fix_by_machine: bool = False,
-        machine_precedence_stride: int = 1,
+        last_stage_only_pf_method: PFMethod | None = None,
+        full_pf_method: PFMethod | None = None,
+        solver_thread_cnt: int = 1,
         repeat_last_stage_only_pf_cp_while_improving: bool = False,
         repeat_full_pf_cp_while_improving: bool = False,
         machine_then_job: bool = False,
     ) -> SubroutineReport:
-        """Step method: full MCF-LB pipeline composed of four extracted phases.
+        """Run the 4-phase MCF-LB algorithm and register the best incumbent.
 
-        Behavior-equivalent alternative to :meth:`run_mcf_lb`, built as a thin
-        wrapper around ``run_phase1`` / ``run_phase2`` / ``run_phase3`` /
-        ``run_phase4`` in :mod:`ffc_ddw_sum_et.algorithm.mcf_lb`. Kept
-        side-by-side with ``run_mcf_lb`` for parity verification before the
-        inline version is retired.
+        Phase 1 solves the MCF relaxation and dispatches one last-stage seed
+        per priority map. Phase 2 runs a CP-SAT last-stage-only solve for each
+        seed and picks the best. Phase 3 reverse-dispatches the best last-stage
+        solution to a full schedule. Phase 4 runs a full CP-SAT profile-fix
+        solve warm-started from the Phase 3 incumbent.
 
-        ``profile_fix_by_machine`` and ``machine_precedence_stride`` are
-        applied to both the Phase 2 last-stage CP-SAT solve (per seed) and
-        the Phase 4 profile-fix full solve.
+        Args:
+            last_stage_only_priority_tags: Priority tags used in Phase 1 to
+                generate dispatch seeds. ``None`` uses all available tags.
+            last_stage_only_pf_method: Profile-fix precedence policy for the
+                Phase 2 last-stage CP-SAT solve. ``None`` (default) skips the
+                precedence-arc pass entirely while keeping warm-start / ET
+                hints. Previously the implicit default was ``"PF0"``
+                (stage-level time-based selection); set explicitly to restore
+                that behaviour.
+            full_pf_method: Same policy for the Phase 4 full CP-SAT solve.
+                Same ``None`` / ``"PF0"`` distinction applies.
+            solver_thread_cnt: Number of CP-SAT solver threads (Phases 2 & 4).
+            repeat_last_stage_only_pf_cp_while_improving: If ``True``, Phase 2
+                re-solves with the updated profile until no improvement.
+            repeat_full_pf_cp_while_improving: If ``True``, Phase 4 re-solves
+                with the updated profile until no improvement.
+            machine_then_job: Passed to Phase 3 reverse-dispatch ordering.
 
-        ``repeat_last_stage_only_pf_cp_while_improving`` controls the Phase 2
-        last-stage solve, while ``repeat_full_pf_cp_while_improving`` controls
-        the Phase 4 full profile-fix solve: each loops on its own model, feeding
-        the solved schedule back as the new profile-fix reference until the
-        CP-SAT objective stops improving.
+        Returns:
+            SubroutineReport with ``obj_bound`` = MCF LB and ``obj_value`` =
+            Phase 4 objective (or Phase 3 dispatched objective if Phase 4 is
+            infeasible).
         """
         start_elapsed = self.timer.elapsed_sec
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
         instance = self.instance
-        solver_thread_cnt = 1
 
         # Phase 1: MCF LB + one last-stage dispatch seed per MCF priority map.
         phase1 = run_phase1(
@@ -150,8 +151,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance,
             diag,
             logger=self.logger,
-            profile_fix_by_machine=profile_fix_by_machine,
-            machine_precedence_stride=machine_precedence_stride,
+            pf_method=last_stage_only_pf_method,
             solver_thread_cnt=solver_thread_cnt,
             repeat_pf_cp_while_improving=repeat_last_stage_only_pf_cp_while_improving,
             solver_log_path_getter=self.get_file_path_for_subroutine,
@@ -227,8 +227,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             phase3,
             instance,
             diag,
-            profile_fix_by_machine=profile_fix_by_machine,
-            machine_precedence_stride=machine_precedence_stride,
+            pf_method=full_pf_method,
             solver_thread_cnt=solver_thread_cnt,
             logger=self.logger,
             repeat_pf_cp_while_improving=repeat_full_pf_cp_while_improving,
@@ -482,8 +481,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         computational_time: float,
         solver_thread_cnt: int = 1,
-        profile_fix_by_machine: bool = False,
-        machine_precedence_stride: int = 1,
+        pf_method: PFMethod = "PF0",
     ) -> SubroutineReport:
         """Step method: warm-start CP-SAT from the incumbent by fixing its
         dispatch profile (precedence arcs derived from the incumbent's
@@ -505,13 +503,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         builder = BaseModelBuilder()
         mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
 
+        by_machine, stride = decode_pf_method(pf_method)
         BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
             mdl,
             params,
             op_vars,
             incumbent.schedule,
-            profile_fix_by_machine=profile_fix_by_machine,
-            machine_precedence_stride=machine_precedence_stride,
+            profile_fix_by_machine=by_machine,
+            machine_precedence_stride=stride,
         )
         start_map = incumbent.schedule.get_jik_2_start_time_map()
         end_map = incumbent.schedule.get_jik_2_end_time_map()
