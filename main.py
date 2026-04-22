@@ -48,6 +48,7 @@ def _setup_main_logger(output_dir: Path) -> logging.Logger:
 
 
 def main() -> None:
+    main_start_dt = datetime.now()
     time_main_start = time.monotonic()
     # Load config and set up output directory based on run mode
     config = _load_config(CONFIG_PATH)
@@ -61,7 +62,7 @@ def main() -> None:
 
     # Set up logger after determining output directory
     logger = _setup_main_logger(output_dir)
-    logger.info("Starting main() at %s with run mode: %s", datetime.now(), mode.name)
+    logger.info("Starting main() at %s with run mode: %s", main_start_dt, mode.name)
     if mode == RunMode.POST_PROCESS_ONLY:
         logger.info("Post-processing existing output directory: %s", output_dir)
     else:
@@ -94,15 +95,7 @@ def main() -> None:
         )
         scenario_names.append(sc.get("name", f"scenario_{len(scenario_configs)}"))
 
-    base_output_dir = Path(config.get("output_dir", "output"))
-    if mode == RunMode.POST_PROCESS_ONLY:
-        output_dir = _resolve_post_process_dir(config, base_output_dir)
-        logger.info("Post-processing existing output directory: %s", output_dir)
-    else:
-        output_dir = init_timestamped_working_dir(base_output_dir=base_output_dir)
-        logger.info("Run output directory: %s", output_dir)
-        shutil.copy2(CONFIG_PATH, output_dir / CONFIG_PATH.name)
-    output_metadata = {"start_dt": datetime.now()}
+    output_metadata = {"start_dt": main_start_dt}
 
     runner = FFcDDWMultiScenarioRunner(
         m_i_runner_class=FFcDDWMultiInstanceRunner,
