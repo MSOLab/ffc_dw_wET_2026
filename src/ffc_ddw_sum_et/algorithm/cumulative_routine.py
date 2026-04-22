@@ -202,6 +202,7 @@ def solve_full_cp_with_profile_fix(
     reference_schedule: FFcSchedule,
     instance: FFcDDWParameters,
     *,
+    obj_lb: float | None = None,
     profile_fix_by_machine: bool = False,
     machine_precedence_stride: int = 1,
     solver_thread_cnt: int = 1,
@@ -219,6 +220,8 @@ def solve_full_cp_with_profile_fix(
             When ``repeat_while_improving=True`` this is only the initial
             reference; later iterations use the previously-solved schedule.
         instance (FFcDDWParameters): The FFc DDW instance to model.
+        obj_lb (float, optional): Lower bound on the CP-SAT objective
+            (e.g., the MCF LB), passed into the model. Defaults to None.
         profile_fix_by_machine (bool, optional): If True, profile-fix
             precedence is enforced per-machine within each stage instead of
             per-stage. Defaults to False.
@@ -258,7 +261,9 @@ def solve_full_cp_with_profile_fix(
         horizon = int(current_schedule.makespan * 2)
 
         pf_builder = BaseModelBuilder()
-        pf_mdl, pf_params, pf_op_vars, _ = pf_builder.build(instance, horizon=horizon)
+        pf_mdl, pf_params, pf_op_vars, _ = pf_builder.build(
+            instance, horizon=horizon, obj_lb=obj_lb
+        )
         BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
             pf_mdl,
             pf_params,

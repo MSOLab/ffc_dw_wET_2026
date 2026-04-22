@@ -68,6 +68,7 @@ def run_phase4(
         machine_precedence_stride=machine_precedence_stride,
         solver_thread_cnt=solver_thread_cnt,
         repeat_while_improving=repeat_pf_cp_while_improving,
+        obj_lb=phase1.mcf_lb,
     )
     diagnostic.profile_fix_cp_sat_sec = total_solve_sec
     diagnostic.pf_status = last_status_name

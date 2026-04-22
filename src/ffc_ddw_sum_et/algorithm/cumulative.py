@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from bisect import bisect_left
 from dataclasses import dataclass
-from typing import Mapping
 
 from ortools.sat.python.cp_model import CpModel, IntervalVar, IntVar
 
@@ -77,26 +76,40 @@ class BaseModelBuilder:
         self,
         instance: FFcDDWParameters,
         horizon: int,
-        tighten_ranges: bool = False,
-        link_job_completion: bool = False,
+        *,
         use_max_equality_for_obj: bool = True,
         last_stage_only: bool = False,
         job_2_release: dict[str, int] | None = None,
         obj_lb: float | None = None,
     ) -> tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]:
+        """Build a CP-SAT model for the FFc DDW sum E/T problem with cumulative constraints.
+
+        Args:
+            instance (FFcDDWParameters): FFc DDW problem instance parameters.
+            horizon (int): The time horizon for the scheduling problem.
+            use_max_equality_for_obj (bool, optional): Whether to use max equality
+                for the objective function. Defaults to True.
+            last_stage_only (bool, optional): Whether to consider only the last stage.
+                Defaults to False.
+            job_2_release (dict[str, int] | None, optional): A mapping from job IDs
+                to their release times at the first stage. If last_stage_only is True,
+                the release times are applied to the last stage. Defaults to None.
+            obj_lb (float | None, optional): The lower bound for the objective function.
+                Defaults to None.
+
+        Returns:
+            tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]: The built
+                CP-SAT model and associated variables.
+        """
         mdl = CpModel()
         params: Params = self.make_params(instance, last_stage_only=last_stage_only)
         ops_vars: OperationVars = self._make_vars(
             mdl,
             params,
             horizon,
-            tighten_ranges=tighten_ranges,
             job_2_release=job_2_release,
         )
         self._add_structural_constraints(mdl, params, ops_vars)
-        if link_job_completion:
-            self._add_job_completion_link_constraints(mdl, params, ops_vars)
-        # self._add_inter_stage_structural_constraints(mdl, params, variables)
         obj_vars = self._define_objective(
             mdl,
             params,
@@ -112,22 +125,27 @@ class BaseModelBuilder:
     def make_params(
         instance: FFcDDWParameters, last_stage_only: bool = False
     ) -> Params:
+        # stage parameters
         i_list = instance.stage_id_list
         M_of = instance.stage_2_machines_map
+
         j_list = instance.job_id_list
+        # (job, stage) parameters
         _p = instance.p_manager.job_stage_2_value_map(j_list, i_list)
         p = {(j, i): int(float(_p[j, i])) for j in j_list for i in i_list}
         if last_stage_only:
-            i_list = [i_list[-1]]
-            M_of = {i_list[0]: M_of[i_list[-1]]}
-            p = {(j, i_list[0]): p[j, i_list[-1]] for j in j_list}
+            last_i = i_list[-1]
+            i_list = [last_i]
+            M_of = {last_i: M_of[last_i]}
+            p = {(j, last_i): p[j, last_i] for j in j_list}
+
+        # job parameters
         due_window = instance.job_2_due_window_map
-        ewt = instance.job_2_ewt_map
-        twt = instance.job_2_twt_map
         d_lower = {j: due_window[j][0] for j in j_list}
         d_upper = {j: due_window[j][1] for j in j_list}
-        w_e = {j: ewt[j] for j in j_list}
-        w_t = {j: twt[j] for j in j_list}
+        w_e = instance.job_2_ewt_map
+        w_t = instance.job_2_twt_map
+
         return Params(
             i_list=i_list,
             M_of=M_of,
@@ -140,68 +158,40 @@ class BaseModelBuilder:
         )
 
     @staticmethod
-    def _compute_head(params: Params) -> dict[tuple[str, str], int]:
-        j_i_2_head: dict[tuple[str, str], int] = {}
-        for j in params.j_list:
-            acc = 0
-            for i in params.i_list:
-                j_i_2_head[j, i] = acc
-                acc += params.p[j, i]
-
-        return j_i_2_head
-
-    @staticmethod
-    def _compute_tail(params: Params) -> dict[tuple[str, str], int]:
-        j_i_2_tail: dict[tuple[str, str], int] = {}
-        for j in params.j_list:
-            acc = 0
-            for i in reversed(params.i_list):
-                j_i_2_tail[j, i] = acc
-                acc += params.p[j, i]
-
-        return j_i_2_tail
-
-    @staticmethod
     def _make_vars(
         mdl: CpModel,
         params: Params,
         horizon: int,
-        tighten_ranges: bool = False,
         job_2_release: dict[str, int] | None = None,
     ) -> OperationVars:
         op_start: dict[tuple[str, str], IntVar] = {}
         op_end: dict[tuple[str, str], IntVar] = {}
         op_intvl: dict[tuple[str, str], IntervalVar] = {}
 
-        if tighten_ranges:
-            j_i_2_head = BaseModelBuilder._compute_head(params)
-            j_i_2_tail = BaseModelBuilder._compute_tail(params)
-        else:
-            j_i_2_head = {(j, i): 0 for j in params.j_list for i in params.i_list}
-            j_i_2_tail = {(j, i): 0 for j in params.j_list for i in params.i_list}
-
         for j in params.j_list:
             for i in params.i_list:
                 p = params.p[j, i]
-
-                assert j_i_2_head[j, i] <= horizon - j_i_2_tail[j, i] - p
-                assert j_i_2_head[j, i] + p <= horizon - j_i_2_tail[j, i]
+                if p > horizon:
+                    raise ValueError(
+                        f"Processing time p[{j},{i}]={p} exceeds horizon={horizon}."
+                    )
 
                 if (
                     i == params.i_list[0]
                     and job_2_release is not None
                     and j in job_2_release
                 ):
-                    release_t = max(job_2_release[j], j_i_2_head[j, i])
+                    release_t = job_2_release[j]
+                    if release_t + p > horizon:
+                        raise ValueError(
+                            f"Release time {release_t} plus processing time {p} "
+                            f"for job {j} at stage {i} exceeds horizon {horizon}."
+                        )
                 else:
-                    release_t = j_i_2_head[j, i]
+                    release_t = 0
 
-                start_var = mdl.new_int_var(
-                    release_t, horizon - j_i_2_tail[j, i] - p, f"start_{j}_{i}"
-                )
-                end_var = mdl.new_int_var(
-                    release_t + p, horizon - j_i_2_tail[j, i], f"end_{j}_{i}"
-                )
+                start_var = mdl.new_int_var(release_t, horizon - p, f"start_{j}_{i}")
+                end_var = mdl.new_int_var(release_t + p, horizon, f"end_{j}_{i}")
                 interval_var = mdl.new_interval_var(
                     start_var, p, end_var, f"interval_{j}_{i}"
                 )
@@ -225,6 +215,8 @@ class BaseModelBuilder:
         """Add consecutive-stage precedence constraints for each job."""
         j_list = params.j_list
         i_list = params.i_list
+        if len(i_list) < 2:
+            return
 
         consecutive_stage_pairs = list(zip(i_list[:-1], i_list[1:]))
         for j in j_list:
@@ -236,36 +228,13 @@ class BaseModelBuilder:
         mdl: CpModel,
         params: Params,
         variables: OperationVars,
-        stage_2_mc_2_horizon: Mapping[str, Mapping[str, int]] = {},
     ) -> None:
         """Add stage capacity constraints."""
         i_list = params.i_list
-        last_i = i_list[-1]
-
-        stage_2_horizon: dict[str, int] = {
-            stage: max(mc_2_horizon.values())
-            for stage, mc_2_horizon in stage_2_mc_2_horizon.items()
-        }
 
         for i in i_list:
             intervals = [variables.op_intvl[j, i] for j in params.j_list]
             demands = [1] * len(params.j_list)
-            # Additional dummy intervals based on stage_2_mc_2_horizon
-            if i in stage_2_mc_2_horizon and i != last_i:
-                stage_horizon = stage_2_horizon[i]
-                dummy_idx = 0
-                for mc_horizon in stage_2_mc_2_horizon[i].values():
-                    if mc_horizon < stage_horizon:
-                        dummy_interval = mdl.new_interval_var(
-                            mc_horizon,
-                            stage_horizon - mc_horizon,
-                            stage_horizon,
-                            f"dummy_{i}_{dummy_idx}",
-                        )
-                        intervals.append(dummy_interval)
-                        demands.append(1)
-                        dummy_idx += 1
-
             capacity = len(params.M_of[i])
             mdl.add_cumulative(intervals, demands, capacity)
 
@@ -274,39 +243,18 @@ class BaseModelBuilder:
         mdl: CpModel,
         params: Params,
         variables: OperationVars,
-        stage_2_mc_2_horizon: Mapping[str, Mapping[str, int]] = {},
     ) -> None:
         """Add precedence and default stage-capacity constraints."""
         BaseModelBuilder._add_precedence_constraints(mdl, params, variables)
-        BaseModelBuilder._add_capacity_constraints(
-            mdl,
-            params,
-            variables,
-            stage_2_mc_2_horizon,
-        )
-
-    @staticmethod
-    def _add_job_completion_link_constraints(
-        mdl: CpModel, params: Params, variables: OperationVars
-    ) -> None:
-        j_i_2_tail = BaseModelBuilder._compute_tail(params)
-        j_list = params.j_list
-        i_list = params.i_list
-        last_i = i_list[-1]
-
-        for j in j_list:
-            for i in i_list:
-                mdl.add(
-                    variables.op_end[j, i] + j_i_2_tail[j, i]
-                    <= variables.op_end[j, last_i]
-                )
+        BaseModelBuilder._add_capacity_constraints(mdl, params, variables)
 
     @staticmethod
     def _define_objective(
         mdl: CpModel,
         params: Params,
         variables: OperationVars,
-        horizon: int = 0,
+        horizon: int,
+        *,
         use_max_equality: bool = True,
         obj_lb: float | None = None,
     ) -> EarlinessTardinessVars:
@@ -344,9 +292,6 @@ class BaseModelBuilder:
         j_list = params.j_list
         last_i = params.i_list[-1]
 
-        if horizon <= 0:
-            horizon = sum(params.p[j, i] for j in j_list for i in params.i_list)
-
         E: dict[str, IntVar] = {}
         T: dict[str, IntVar] = {}
         et_terms: list = []
@@ -368,6 +313,11 @@ class BaseModelBuilder:
                 et_terms.append(params.w_e[j] * E_j)
             if params.w_t[j]:
                 et_terms.append(params.w_t[j] * T_j)
+
+        if not et_terms:
+            raise ValueError(
+                "At least one job must have a nonzero earliness or tardiness weight."
+            )
         if obj_lb is not None:
             mdl.add(sum(et_terms) >= math.ceil(obj_lb))
         mdl.minimize(sum(et_terms))
@@ -499,6 +449,9 @@ class BaseModelBuilder:
                 # for each job j1 in end-time order
                 for idx, j1 in enumerate(sorted_by_end):
                     j1_end_time = j_2_end_time_map.get(j1, float("inf"))
+                    # Cap at m = |M_of[i]|: by capacity, any later successor of j1 must be
+                    # preceded by one of the first m in start-order, so its arc is covered
+                    # transitively. Second term is the trivial bound (# jobs ending after j1).
                     max_candidates = min(
                         len(params.M_of[i]), len(sorted_by_end) - idx - 1
                     )
