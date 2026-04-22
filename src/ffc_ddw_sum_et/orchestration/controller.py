@@ -98,8 +98,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
         profile_fix_by_machine: bool = False,
         machine_precedence_stride: int = 1,
+        repeat_last_stage_only_pf_cp_while_improving: bool = False,
+        repeat_full_pf_cp_while_improving: bool = False,
         machine_then_job: bool = False,
-        repeat_pf_cp_while_improving: bool = False,
     ) -> SubroutineReport:
         """Step method: full MCF-LB pipeline composed of four extracted phases.
 
@@ -113,11 +114,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         applied to both the Phase 2 last-stage CP-SAT solve (per seed) and
         the Phase 4 profile-fix full solve.
 
-        ``repeat_pf_cp_while_improving`` controls *both* the Phase 2
-        last-stage solve and the Phase 4 full profile-fix solve: each
-        loops on its own model, feeding the solved schedule back as the
-        new profile-fix reference until the CP-SAT objective stops
-        improving.
+        ``repeat_last_stage_only_pf_cp_while_improving`` controls the Phase 2
+        last-stage solve, while ``repeat_full_pf_cp_while_improving`` controls
+        the Phase 4 full profile-fix solve: each loops on its own model, feeding
+        the solved schedule back as the new profile-fix reference until the
+        CP-SAT objective stops improving.
         """
         start_elapsed = self.timer.elapsed_sec
         diag = MCFLBDiagnostic()
@@ -148,11 +149,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             phase1,
             instance,
             diag,
+            logger=self.logger,
             profile_fix_by_machine=profile_fix_by_machine,
             machine_precedence_stride=machine_precedence_stride,
-            logger=self.logger,
             solver_thread_cnt=solver_thread_cnt,
-            repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
+            repeat_pf_cp_while_improving=repeat_last_stage_only_pf_cp_while_improving,
+            solver_log_path_getter=self.get_file_path_for_subroutine,
         )
         if phase2 is None:
             elapsed = self.timer.elapsed_sec - start_elapsed
@@ -229,7 +231,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             machine_precedence_stride=machine_precedence_stride,
             solver_thread_cnt=solver_thread_cnt,
             logger=self.logger,
-            repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
+            repeat_pf_cp_while_improving=repeat_full_pf_cp_while_improving,
         )
 
         elapsed = self.timer.elapsed_sec - start_elapsed

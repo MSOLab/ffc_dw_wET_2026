@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
 
 from ortools.sat.python import cp_model
 
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
 from ..solution.schedule_build import build_schedule_from_op_starts
+from .cpsat_solver_options import CpsatSolverOptions, get_solver
 from .cumulative import BaseModelBuilder
 
 __all__ = [
@@ -51,10 +55,12 @@ def solve_last_stage_with_profile_fix(
     job_2_release: dict[str, int],
     obj_lb: float,
     *,
+    logger: logging.Logger | None = None,
     profile_fix_by_machine: bool = False,
     machine_precedence_stride: int = 1,
     solver_thread_cnt: int = 1,
     repeat_while_improving: bool = False,
+    solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> tuple[LastStageSolveResult | None, float, str]:
     """Build and solve a last-stage-only CP-SAT model, optionally looping.
 
@@ -103,6 +109,11 @@ def solve_last_stage_with_profile_fix(
         * ``last_status_name`` — ``CpSolver.status_name`` of the final
           solve attempt (the one that ended the loop).
     """
+    # TODO: as an optional keyword argument(defaults to False)
+    log_search_progress = True
+
+    if logger is None:
+        logger = logging.getLogger(__name__)
     current_schedule = reference_schedule
     total_solve_sec = 0.0
     best_result: LastStageSolveResult | None = None
@@ -141,13 +152,31 @@ def solve_last_stage_with_profile_fix(
             current_schedule.get_jik_2_end_time_map(),
         )
 
-        ls_solver = cp_model.CpSolver()
-        ls_solver.parameters.num_search_workers = int(solver_thread_cnt)
+        solver_options = CpsatSolverOptions(
+            log_search_progress=log_search_progress,
+            log_to_stdout=False if log_search_progress else None,
+            log_to_response=True if log_search_progress else None,
+            num_workers=solver_thread_cnt,
+        )
+        ls_solver = get_solver(solver_options)
 
         t0 = time.monotonic()
         status = ls_solver.solve(ls_mdl)
         status_name = ls_solver.status_name(status)
         total_solve_sec += time.monotonic() - t0
+
+        if log_search_progress:
+            solve_log = ls_solver.response_proto.solve_log
+            if solve_log:
+                try:
+                    filename_suffix = "_cp_sat_last_stage_only.log"
+                    solve_log_path = solver_log_path_getter(filename_suffix)
+                    with solve_log_path.open("a", encoding="utf-8") as fp:
+                        fp.write(solve_log)
+                        if not solve_log.endswith("\n"):
+                            fp.write("\n")
+                except Exception as err:
+                    logger.warning("Failed to write CP-SAT search log: %s", err)
 
         if status == cp_model.INFEASIBLE:
             raise RuntimeError(

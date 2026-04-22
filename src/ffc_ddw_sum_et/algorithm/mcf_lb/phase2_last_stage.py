@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
 
 from ffc_ddw_sum_et.algorithm.cumulative_routine import (
     solve_last_stage_with_profile_fix,
@@ -63,6 +65,7 @@ def run_phase2(
     machine_precedence_stride: int = 1,
     solver_thread_cnt: int = 1,
     repeat_pf_cp_while_improving: bool = False,
+    solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> Phase2State | None:
     """Solve the last-stage CP-SAT model per seed, pick the best.
 
@@ -94,10 +97,12 @@ def run_phase2(
             seed,
             phase1,
             instance,
+            logger=logger,
             profile_fix_by_machine=profile_fix_by_machine,
             machine_precedence_stride=machine_precedence_stride,
             solver_thread_cnt=solver_thread_cnt,
             repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
+            solver_log_path_getter=solver_log_path_getter,
         )
         total_solve_sec += solve_sec
         diagnostic.ls_status_per_seed[seed.tag] = status_name
@@ -145,10 +150,12 @@ def _solve_last_stage_for_seed(
     phase1: Phase1State,
     instance: FFcDDWParameters,
     *,
+    logger: logging.Logger | None = None,
     profile_fix_by_machine: bool,
     machine_precedence_stride: int,
     solver_thread_cnt: int,
     repeat_pf_cp_while_improving: bool = False,
+    solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> tuple[LastStageCandidate | None, float, str]:
     """Build and solve a last-stage-only CP-SAT model for one seed.
 
@@ -163,10 +170,12 @@ def _solve_last_stage_for_seed(
         phase1.last_stage_id,
         phase1.job_2_release_map,
         phase1.mcf_lb,
+        logger=logger,
         profile_fix_by_machine=profile_fix_by_machine,
         machine_precedence_stride=machine_precedence_stride,
         solver_thread_cnt=solver_thread_cnt,
         repeat_while_improving=repeat_pf_cp_while_improving,
+        solver_log_path_getter=solver_log_path_getter,
     )
     if result is None:
         return None, solve_sec, status_name
