@@ -124,7 +124,7 @@ def solve_last_stage_with_profile_fix(
         horizon = int(current_schedule.makespan * 2)
 
         ls_builder = BaseModelBuilder()
-        ls_mdl, ls_params, ls_ops_vars, _ = ls_builder.build(
+        ls_mdl, ls_params, ls_ops_vars, ls_et_vars = ls_builder.build(
             instance=instance,
             horizon=horizon,
             last_stage_only=True,
@@ -150,6 +150,12 @@ def solve_last_stage_with_profile_fix(
             ls_params,
             ls_ops_vars,
             current_schedule.get_jik_2_end_time_map(),
+        )
+        BaseModelBuilder.apply_et_hints_from_ref_schedule(
+            ls_mdl,
+            ls_params,
+            ls_et_vars,
+            current_schedule,
         )
 
         solver_options = CpsatSolverOptions(
@@ -290,7 +296,7 @@ def solve_full_cp_with_profile_fix(
         horizon = int(current_schedule.makespan * 2)
 
         pf_builder = BaseModelBuilder()
-        pf_mdl, pf_params, pf_op_vars, _ = pf_builder.build(
+        pf_mdl, pf_params, pf_op_vars, pf_et_vars = pf_builder.build(
             instance, horizon=horizon, obj_lb=obj_lb
         )
         BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
@@ -312,6 +318,12 @@ def solve_full_cp_with_profile_fix(
             pf_params,
             pf_op_vars,
             current_schedule.get_jik_2_end_time_map(),
+        )
+        BaseModelBuilder.apply_et_hints_from_ref_schedule(
+            pf_mdl,
+            pf_params,
+            pf_et_vars,
+            current_schedule,
         )
 
         pf_solver = cp_model.CpSolver()

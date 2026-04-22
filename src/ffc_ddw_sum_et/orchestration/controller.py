@@ -297,7 +297,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         horizon = sum(params_for_horizon.p.values())
 
         builder = BaseModelBuilder()
-        pm_mdl, pm_params, pm_ops_vars, _pm_obj_vars = builder.build(
+        pm_mdl, pm_params, pm_ops_vars, pm_et_vars = builder.build(
             instance=self.instance,
             horizon=horizon,
             last_stage_only=True,
@@ -338,6 +338,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         BaseModelBuilder.apply_end_hints_from_end_time_map(
             pm_mdl, pm_params, pm_ops_vars, init_schedule.get_jik_2_end_time_map()
+        )
+        BaseModelBuilder.apply_et_hints_from_ref_schedule(
+            pm_mdl, pm_params, pm_et_vars, init_schedule
         )
 
         solver = cp_model.CpSolver()
@@ -500,7 +503,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         horizon = sum(params_for_horizon.p.values())
 
         builder = BaseModelBuilder()
-        mdl, params, op_vars, _et_vars = builder.build(instance, horizon=horizon)
+        mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
 
         BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
             mdl,
@@ -517,6 +520,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         BaseModelBuilder.apply_end_hints_from_end_time_map(
             mdl, params, op_vars, end_map
+        )
+        BaseModelBuilder.apply_et_hints_from_ref_schedule(
+            mdl, params, et_vars, incumbent.schedule
         )
 
         solver = cp_model.CpSolver()

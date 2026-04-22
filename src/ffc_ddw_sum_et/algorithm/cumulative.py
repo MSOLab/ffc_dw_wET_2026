@@ -523,3 +523,24 @@ class BaseModelBuilder:
                 assert j in params.j_list, f"Job {j} not in job list."
                 assert i in params.i_list, f"Stage {i} not in stage list."
             mdl.add_hint(variables.op_end[j, i], e_time)
+
+    @staticmethod
+    def apply_et_hints_from_ref_schedule(
+        mdl: CpModel,
+        params: Params,
+        et_vars: EarlinessTardinessVars,
+        ref_schedule: FFcSchedule,
+    ) -> None:
+        """Hint E_j and T_j from the reference schedule's completion times.
+
+        For each job, compute ``E_j = max(0, d^{-}_j - C_j)`` and
+        ``T_j = max(0, C_j - d^{+}_j)`` from ``C_j = ref_schedule``'s
+        last-stage completion time, and apply the values as solver hints.
+        """
+        last_i = params.i_list[-1]
+        for j in params.j_list:
+            C_j = ref_schedule.get_job_end_time(last_i, j)
+            E_val = max(0, params.d_lower[j] - C_j)
+            T_val = max(0, C_j - params.d_upper[j])
+            mdl.add_hint(et_vars.E[j], E_val)
+            mdl.add_hint(et_vars.T[j], T_val)
