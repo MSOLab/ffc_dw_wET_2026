@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from io import StringIO
-from typing import TextIO
+from typing import Self, TextIO
 
 from ..io import TextDataParser
 from .base.job_stage_p import JobStageProcessingTimeManager
@@ -77,6 +77,39 @@ class FFcDDWParameters(FFcParameters):
     def generation_params(self) -> InstanceParams | None:
         """Get the generation parameters parsed from the instance filename."""
         return self._generation_params
+
+    @classmethod
+    def reverse_stages(cls, instance: FFcParameters) -> Self:
+        """Create a new instance of FFcDDWParameters with the order of stages reversed.
+
+        Args:
+            instance (FFcParameters): Original parameters instance.
+                Should be an FFcDDWParameters instance, but we use FFcParameters as the
+                type hint to allow calling this method from the base class.
+
+        Raises:
+            TypeError: If the input instance is not an FFcDDWParameters.
+
+        Returns:
+            Self: A new FFcDDWParameters instance with stages reversed.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.reverse_stages requires FFcDDWParameters, "
+                f"got {type(instance).__name__}"
+            )
+        base = FFcParameters.reverse_stages(instance)
+        return cls(
+            base.name,
+            base.job_id_list,
+            base.stage_id_list,
+            base.stage_2_machines_map,
+            base.p_manager,
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+            instance.generation_params,
+        )
 
     @classmethod
     def from_pra_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:
@@ -242,3 +275,122 @@ class FFcDDWParameters(FFcParameters):
             W_factor=int(cv_str),
             rep=int(rep_str),
         )
+
+    # -------------------------
+    # Job → priority score maps
+    # -------------------------
+
+    def get_job_2_due_date_lb_map(self) -> dict[str, int]:
+        """Get a mapping from job ID to due date lower bound (d^{-}_j)."""
+        return {
+            job_id: due_window[0]
+            for job_id, due_window in self._job_2_due_window_map.items()
+        }
+
+    def get_job_2_due_date_lb_minus_p_map(self) -> dict[str, float]:
+        """Get a mapping from job ID to due date lower bound minus processing time."""
+        job_2_due_date_lb_map = self.get_job_2_due_date_lb_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_lb_map[job_id]
+            - sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_ub_map(self) -> dict[str, int]:
+        """Get a mapping from job ID to due date upper bound (d^{+}_j)."""
+        return {
+            job_id: due_window[1]
+            for job_id, due_window in self._job_2_due_window_map.items()
+        }
+
+    def get_job_2_due_date_ub_minus_p_map(self) -> dict[str, float]:
+        """Get a mapping from job ID to due date upper bound minus processing time."""
+        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_ub_map[job_id]
+            - sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star
+        (d^{*}_j = (w^{-}_j * d^{-}_j + w^{+}_j * d^{+}_j) / (w^{-}_j + w^{+}_j).
+        """
+        return {
+            job_id: (
+                (
+                    self._job_2_ewt_map[job_id] * self._job_2_due_window_map[job_id][0]
+                    + self._job_2_twt_map[job_id]
+                    * self._job_2_due_window_map[job_id][1]
+                )
+                / (self._job_2_ewt_map[job_id] + self._job_2_twt_map[job_id])
+            )
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_minus_p_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star minus processing time
+        (d^{*}_j - sum_i p_{ij}).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_star_map[job_id]
+            - sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_minus_half_p_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star minus half processing time
+        (d^{*}_j - 0.5 * sum_i p_{ij}).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_star_map[job_id]
+            - 0.5 * sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_plus_half_p_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star plus half processing time
+        (d^{*}_j + 0.5 * sum_i p_{ij}).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_star_map[job_id]
+            + 0.5 * sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }
+
+    def get_job_2_due_date_star_plus_p_map(self) -> dict[str, float]:
+        """
+        Get a mapping from job ID to due date star plus processing time
+        (d^{*}_j + sum_i p_{ij}).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
+            self.job_id_list, self.stage_id_list
+        )
+        return {
+            job_id: job_2_due_date_star_map[job_id]
+            + sum(job_2_stage_2_value_map[job_id].values())
+            for job_id in self.job_id_list
+        }

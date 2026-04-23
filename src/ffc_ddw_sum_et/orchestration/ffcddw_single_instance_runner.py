@@ -5,15 +5,19 @@ from __future__ import annotations
 import json
 import logging
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
+from routix.io import dump_yaml
 from routix.report import SubroutineReportStatistics
 from routix.runner.single_instance_runner import (
     SingleInstanceRunner,
 )
 from routix.type_defs import RunMode
 
+from ..io import dump_preemptive_schedule_yaml, dump_schedule_yaml
 from ..parameters.ffc_ddw_params import FFcDDWParameters
+from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
 
@@ -49,6 +53,11 @@ class InstanceResult:
     first_obj_value: float | None = None
     first_obj_bound: float | None = None
     error: str | None = None
+    job_count: int | None = None
+    stage_count: int | None = None
+    machines_per_stage: int | None = None
+    timelimit: float | None = None
+    mcf_lb_diagnostic: dict[str, Any] | None = None
 
 
 class FFcDDWSingleInstanceRunner(
@@ -153,6 +162,72 @@ class FFcDDWSingleInstanceRunner(
                 solution_path = self._save_solution(incumbent)
             except Exception:
                 logger.exception("Error saving solution for %s", self.ins_name)
+            try:
+                dump_schedule_yaml(
+                    incumbent.schedule,
+                    self.working_dir / f"{self.ins_name}_schedule.yaml",
+                    instance_name=self.ins_name,
+                    obj_value=incumbent.obj_value,
+                    obj_bound=incumbent.obj_bound,
+                )
+            except Exception:
+                logger.exception("Error saving schedule yaml for %s", self.ins_name)
+
+        last_stage_cp_sat = getattr(controller, "last_stage_cp_sat_solution", None)
+        if last_stage_cp_sat is not None and self.working_dir is not None:
+            try:
+                dump_schedule_yaml(
+                    last_stage_cp_sat.schedule,
+                    self.working_dir
+                    / f"{self.ins_name}_last_stage_cp_sat_schedule.yaml",
+                    instance_name=f"{self.ins_name}_last_stage_cp_sat",
+                    obj_value=last_stage_cp_sat.obj_value,
+                    obj_bound=last_stage_cp_sat.obj_bound,
+                )
+            except Exception:
+                logger.exception(
+                    "Error saving last_stage_cp_sat schedule yaml for %s",
+                    self.ins_name,
+                )
+
+        phase_schedules = getattr(controller, "mcf_lb_phase_schedules", None) or []
+        if phase_schedules and self.working_dir is not None:
+            for name, sched in phase_schedules:
+                if sched is None:
+                    continue
+                yaml_path = self.working_dir / f"{self.ins_name}_{name}.yaml"
+                try:
+                    if isinstance(sched, MCFPreemptiveSchedule):
+                        dump_preemptive_schedule_yaml(
+                            yaml_path,
+                            instance_name=f"{self.ins_name}_{name}",
+                            stage_id=sched.stage_id,
+                            machines=sched.machines,
+                            jobs=self.instance.job_id_list,
+                            segments=sched.to_gantt_segments(),
+                            all_jobs=self.instance.job_id_list,
+                        )
+                    else:
+                        dump_schedule_yaml(
+                            sched,
+                            yaml_path,
+                            instance_name=f"{self.ins_name}_{name}",
+                        )
+                except Exception:
+                    logger.exception("Error saving %s yaml for %s", name, self.ins_name)
+
+        diag = getattr(controller, "mcf_lb_diagnostic", None)
+        diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None
+        if diag_dict is not None and self.working_dir is not None:
+            try:
+                dump_yaml(
+                    diag_dict,
+                    self.working_dir / f"{self.ins_name}_mcf_lb_diagnostic.yaml",
+                )
+            except Exception:
+                logger.exception(
+                    "Error saving mcf_lb_diagnostic yaml for %s", self.ins_name
+                )
 
         if self.working_dir is not None and last_report is not None:
             try:
@@ -165,6 +240,14 @@ class FFcDDWSingleInstanceRunner(
                 )
             except Exception:
                 logger.exception("Error saving statistics for %s", self.ins_name)
+
+        machines = self.instance.stage_2_machines_map
+        first_stage = (
+            self.instance.stage_id_list[0] if self.instance.stage_id_list else None
+        )
+        mps = len(machines[first_stage]) if first_stage is not None else 0
+        stopping = getattr(self, "stopping_criteria", None) or {}
+        timelimit = float(stopping["timelimit"]) if "timelimit" in stopping else None
 
         return InstanceResult(
             instance_name=self.ins_name,
@@ -183,6 +266,11 @@ class FFcDDWSingleInstanceRunner(
             first_obj_value=first_obj_value,
             first_obj_bound=first_obj_bound,
             error=getattr(self, "_run_error", None),
+            job_count=len(self.instance.job_id_list),
+            stage_count=len(self.instance.stage_id_list),
+            machines_per_stage=mps,
+            timelimit=timelimit,
+            mcf_lb_diagnostic=diag_dict,
         )
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:

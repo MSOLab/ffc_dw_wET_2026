@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,25 +19,64 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/cplns_config.yaml")
+CONFIG_PATH = Path("metadata/20260423/1_mcf_lb_init_13_config.yaml")
 
 
-def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+def _setup_main_logger(output_dir: Path) -> logging.Logger:
+    timestamp = output_dir.name
+    log_path = output_dir / f"{timestamp}_main.log"
+
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(fmt)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(fmt)
+
+    logger = logging.getLogger("ffc_ddw_sum_et.main")
+    logger.setLevel(logging.INFO)
+    # 재실행/재호출 시 핸들러 중복 부착 방지
+    if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+        logger.addHandler(file_handler)
+        logger.addHandler(stream_handler)
+    logger.propagate = False
+    return logger
+
+
+def main() -> None:
+    main_start_dt = datetime.now()
+    time_main_start = time.monotonic()
+    # Load config and set up output directory based on run mode
     config = _load_config(CONFIG_PATH)
     mode = _parse_run_mode(config.get("run_mode", "FULL_RUN"))
+    base_output_dir = Path(config.get("output_dir", "output"))
+    if mode == RunMode.POST_PROCESS_ONLY:
+        output_dir = _resolve_post_process_dir(config, base_output_dir)
+    else:
+        output_dir = init_timestamped_working_dir(base_output_dir=base_output_dir)
+        shutil.copy2(CONFIG_PATH, output_dir / CONFIG_PATH.name)
+
+    # Set up logger after determining output directory
+    logger = _setup_main_logger(output_dir)
+    logger.info("Starting main() at %s with run mode: %s", main_start_dt, mode.name)
+    if mode == RunMode.POST_PROCESS_ONLY:
+        logger.info("Post-processing existing output directory: %s", output_dir)
+    else:
+        logger.info("Run output directory: %s", output_dir)
+
+    # Load instances and prepare scenario configs
     instance_worker_cnt = config.get("instance_worker_cnt", 1)
+    draw_gantt = bool(config.get("draw_gantt", True))
+    painter_thread_cnt = int(config.get("painter_thread_cnt", 1))
 
     benchmark_dir = Path(config["benchmark_dir"])
     ins_index_source = config.get("ins_index_source")
     if ins_index_source:
         ins_index_source = Path(ins_index_source)
-    logger = logging.getLogger("ffc_ddw_sum_et.main")
     logger.info("Loading instances from %s", benchmark_dir)
     loader = BenchmarkLoader(benchmark_dir, ins_index_source=ins_index_source)
     ins_index_filter = config.get("ins_index")
@@ -55,15 +95,7 @@ def main() -> None:
         )
         scenario_names.append(sc.get("name", f"scenario_{len(scenario_configs)}"))
 
-    base_output_dir = Path(config.get("output_dir", "output"))
-    if mode == RunMode.POST_PROCESS_ONLY:
-        output_dir = _resolve_post_process_dir(config, base_output_dir)
-        logger.info("Post-processing existing output directory: %s", output_dir)
-    else:
-        output_dir = init_timestamped_working_dir(base_output_dir=base_output_dir)
-        logger.info("Run output directory: %s", output_dir)
-        shutil.copy2(CONFIG_PATH, output_dir / CONFIG_PATH.name)
-    output_metadata = {"start_dt": datetime.now()}
+    output_metadata = {"start_dt": main_start_dt}
 
     runner = FFcDDWMultiScenarioRunner(
         m_i_runner_class=FFcDDWMultiInstanceRunner,
@@ -76,6 +108,9 @@ def main() -> None:
         mode=mode,
         scenario_names=scenario_names,
         instance_worker_cnt=instance_worker_cnt,
+        draw_gantt=draw_gantt,
+        painter_thread_cnt=painter_thread_cnt,
+        ins_index_source=ins_index_source,
     )
 
     logger.info(
@@ -84,8 +119,16 @@ def main() -> None:
         len(instances),
         len(scenario_configs),
     )
-    runner.run()
-    logger.info("Experiment run complete")
+    try:
+        runner.run()
+        logger.info("Experiment run completed successfully.")
+    finally:
+        time_main_end = time.monotonic()
+        logger.info(
+            "Finished main() at %s. Total elapsed time: %f seconds",
+            datetime.now(),
+            time_main_end - time_main_start,
+        )
 
 
 def _load_config(path: Path) -> dict:

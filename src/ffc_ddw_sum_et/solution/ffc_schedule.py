@@ -509,11 +509,15 @@ class FFcSchedule:
         job_id_seq: Sequence[JobIdType],
         job_2_duration: Mapping[JobIdType, int],
         job_2_release: Mapping[JobIdType, int] | None = None,
+        force_job_id_seq_as_priority: bool = False,
     ) -> None:
         self._validate_stage(stage_id)
-        job_priority_queue = self.get_job_priority_queue_for_stage_dispatch(
-            stage_id, job_id_seq, job_2_release=job_2_release
-        )
+        if force_job_id_seq_as_priority:
+            job_priority_queue = list(job_id_seq)
+        else:
+            job_priority_queue = self.get_job_priority_queue_for_stage_dispatch(
+                stage_id, job_id_seq, job_2_release=job_2_release
+            )
         for job_id in job_priority_queue:
             if job_id not in job_2_duration:
                 raise ValueError(f"Duration for job ID {job_id} not provided")

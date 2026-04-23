@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from functools import cached_property
-from typing import TextIO
+from typing import Self, TextIO
 
-from ..io import TextDataParser
+from ffc_ddw_sum_et.io import TextDataParser
 
 from .base.job_stage_p import JobStageProcessingTimeManager
 
@@ -169,4 +169,43 @@ class FFcParameters:
     def stage_2_job_2_p_map(self) -> dict[str, dict[str, int]]:
         return self.p_manager.stage_2_job_2_value_map(
             self.stage_id_list, self.job_id_list
+        )
+
+    def get_job_2_p_map_for_stage(self, stage_id: str) -> dict[str, int]:
+        """Get a mapping from job IDs to processing times for a given stage."""
+        if stage_id not in self.stage_id_list:
+            raise ValueError(f"Invalid stage_id: {stage_id}")
+        return self.stage_2_job_2_p_map[stage_id]
+
+    def get_job_2_p_sum_except_last_stage(self) -> dict[str, int]:
+        """Get a mapping from job IDs to the sum of processing times across all stages except the last."""
+        job_2_p_sum = {job_id: 0 for job_id in self.job_id_list}
+        for stage_id in self.stage_id_list[:-1]:  # Exclude the last stage
+            for job_id in self.job_id_list:
+                job_2_p_sum[job_id] += self.stage_2_job_2_p_map[stage_id][job_id]
+        return job_2_p_sum
+
+    @classmethod
+    def reverse_stages(cls, instance: FFcParameters) -> Self:
+        """Create a new instance of FFcParameters with the order of stages reversed.
+
+        Args:
+            instance (FFcParameters): Original parameters instance.
+
+        Returns:
+            FFcParameters: New parameters instance with reversed stage order.
+        """
+        new_stage_ids = instance.stage_id_list[::-1]
+        new_processing_times = instance.p_manager.as_stage_reversed()
+        new_stage_2_machines_map = {
+            stage_id: list(instance.stage_2_machines_map[stage_id])
+            for stage_id in new_stage_ids
+        }
+
+        return cls(
+            instance.name + "_reversed",
+            instance.job_id_list,
+            new_stage_ids,
+            new_stage_2_machines_map,
+            new_processing_times,
         )
