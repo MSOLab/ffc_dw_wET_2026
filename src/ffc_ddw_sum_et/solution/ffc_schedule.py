@@ -1420,6 +1420,81 @@ class FFcSchedule:
                 ]
             self._rebuild_stage_time_caches(stage_id)
 
+    def insert_idle_time(
+        self,
+        due_window_map: Mapping[JobIdType, tuple[int, int]],
+        ewt_map: Mapping[JobIdType, int],
+        twt_map: Mapping[JobIdType, int],
+    ) -> None:
+        """Insert idle time on the last stage to minimise earliness-tardiness.
+
+        Implements the pseudocode from the paper exactly:
+          j starts at the last job and counts down to 0.
+          j is only decremented (j -= 1) when the current block is NOT
+          shifted. When a shift is applied, j stays fixed so the same
+          starting position is re-evaluated with updated completion times
+          (sets S_E/S_D/S_T may have changed, or S_M grew by merging with
+          the next block when delta == delta2).
+        """
+        last_stage_id = self.stages[-1]
+        INF = 10**9
+
+        for mc_id in self.machines_per_stage[last_stage_id]:
+            seq = self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id]
+            if not seq:
+                continue
+
+            job_ids = [j for j, _, _ in seq]
+            starts = [s for _, s, _ in seq]
+            ends = [e for _, _, e in seq]
+            n = len(seq)
+
+            j = n - 1
+            while j >= 0:
+                block_end = j
+                while block_end < n - 1 and starts[block_end + 1] == ends[block_end]:
+                    block_end += 1
+
+                delta2 = (
+                    starts[block_end + 1] - ends[block_end]
+                    if block_end < n - 1
+                    else INF
+                )
+
+                s_e, s_t, s_d = [], [], []
+                for i in range(j, block_end + 1):
+                    d_lo, d_hi = due_window_map[job_ids[i]]
+                    c = ends[i]
+                    if c < d_lo:
+                        s_e.append(i)
+                    elif c >= d_hi:
+                        s_t.append(i)
+                    else:
+                        s_d.append(i)
+
+                sum_e = sum(ewt_map.get(job_ids[i], 1) for i in s_e)
+                sum_t = sum(twt_map.get(job_ids[i], 1) for i in s_t)
+
+                if sum_e > sum_t:
+                    delta1_vals = [due_window_map[job_ids[i]][0] - ends[i] for i in s_e]
+                    delta1_vals += [
+                        due_window_map[job_ids[i]][1] - ends[i] for i in s_d
+                    ]
+                    delta1 = min(delta1_vals) if delta1_vals else INF
+                    delta = min(delta1, delta2)
+                    for i in range(j, block_end + 1):
+                        starts[i] += delta
+                        ends[i] += delta
+                    # j stays fixed — re-evaluate same position with updated times
+                else:
+                    j -= 1
+
+            self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id] = list(
+                zip(job_ids, starts, ends)
+            )
+
+        self._rebuild_stage_time_caches(last_stage_id)
+
 
 def validate_schedule(
     sched: FFcSchedule,
