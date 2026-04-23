@@ -22,6 +22,8 @@ def _make_instance(name: str = "c_instance") -> FFcDDWParameters:
             df=pd.DataFrame([[2, 3], [2, 2], [2, 1]]),
         ),
         job_2_due_window_map={"j0": (4, 5), "j1": (3, 4), "j2": (0, 10)},
+        job_2_ewt_map={"j0": 1, "j1": 1, "j2": 1},
+        job_2_twt_map={"j0": 1, "j1": 1, "j2": 1},
     )
 
 
