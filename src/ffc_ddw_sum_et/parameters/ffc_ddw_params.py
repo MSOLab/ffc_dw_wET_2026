@@ -112,6 +112,59 @@ class FFcDDWParameters(FFcParameters):
         )
 
     @classmethod
+    def create_instance_of_stage_subset(
+        cls,
+        instance: FFcParameters,
+        stage_id_subset: set[str],
+        reverse_stage_seq: bool = False,
+    ) -> Self:
+        """Create a new FFcDDWParameters restricted to a subset of stages.
+
+        Arbitrary stage permutations are not allowed: only the original forward
+        order of the remaining stages (or its reverse, when ``reverse_stage_seq``
+        is ``True``) is meaningful for a flow shop instance. ``stage_id_subset``
+        is therefore typed as ``set[str]`` and the final ordering is derived
+        from ``instance.stage_id_list``.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.create_instance_of_stage_subset requires "
+                f"FFcDDWParameters, got {type(instance).__name__}"
+            )
+        if not stage_id_subset.issubset(instance.stage_id_list):
+            raise ValueError("Stage subset contains invalid stage IDs.")
+        if not stage_id_subset:
+            raise ValueError("Stage subset must be non-empty.")
+
+        ordered_stage_ids = [
+            s for s in instance.stage_id_list if s in stage_id_subset
+        ]
+        if reverse_stage_seq:
+            ordered_stage_ids.reverse()
+
+        stage_id_2_index = {
+            stage_id: idx for idx, stage_id in enumerate(instance.stage_id_list)
+        }
+        stage_index_list = [stage_id_2_index[s] for s in ordered_stage_ids]
+        new_p_manager = instance.p_manager.filter_by_stage_indices(stage_index_list)
+        new_stage_2_machines_map = {
+            stage_id: list(instance.stage_2_machines_map[stage_id])
+            for stage_id in ordered_stage_ids
+        }
+
+        return cls(
+            instance.name,
+            instance.job_id_list,
+            ordered_stage_ids,
+            new_stage_2_machines_map,
+            new_p_manager,
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+            instance.generation_params,
+        )
+
+    @classmethod
     def from_pra_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:
         raise NotImplementedError(
             "FFcDDWParameters.from_pra_data() is not supported. "

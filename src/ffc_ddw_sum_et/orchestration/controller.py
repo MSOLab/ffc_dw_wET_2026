@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import Literal
 
@@ -14,7 +15,11 @@ from ffc_ddw_sum_et.algorithm.cumulative import (
     PFMethod,
     decode_pf_method,
 )
-from ffc_ddw_sum_et.algorithm.dispatcher import MixedDispatcher
+from ffc_ddw_sum_et.algorithm.dispatcher import (
+    BN2DDispatcher,
+    BN2DOption,
+    MixedDispatcher,
+)
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
@@ -115,6 +120,80 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_bound=obj_bound,
             )
             self.solution_manager.register(report, fam_solution)
+
+        return report
+
+    def run_bn2d(
+        self,
+        left_cap_multiplier: int | None = None,
+        right_cap_multiplier: int | None = None,
+        left_cap_portion: float | None = None,
+        right_cap_portion: float | None = None,
+        normalize_by_stage_cnt: bool = False,
+        randomize_mid_all: bool = False,
+        reverse_mid_even: bool = False,
+        reverse_mid_all: bool = False,
+        mixed_schedule_for_former_stages: bool = False,
+        mixed_schedule_for_later_stages: bool = False,
+        machine_then_job: bool = False,
+        all_stages_as_bottleneck: bool = False,
+        random_seed: int | None = None,
+    ) -> SubroutineReport:
+        """Step method: run BN2DDispatcher and return a SubroutineReport.
+
+        BN2D internally minimises makespan (the upstream algorithm's objective);
+        the returned ``obj_value`` is weighted earliness+tardiness (this
+        project's primary objective), while makespan is kept in
+        ``AlgResult.metrics``.
+        """
+        start_elapsed = time.monotonic()
+
+        option = BN2DOption(
+            left_cap_multiplier=left_cap_multiplier,
+            right_cap_multiplier=right_cap_multiplier,
+            left_cap_portion=left_cap_portion,
+            right_cap_portion=right_cap_portion,
+            normalize_by_stage_cnt=normalize_by_stage_cnt,
+            randomize_mid_all=randomize_mid_all,
+            reverse_mid_even=reverse_mid_even,
+            reverse_mid_all=reverse_mid_all,
+            mixed_schedule_for_former_stages=mixed_schedule_for_former_stages,
+            mixed_schedule_for_later_stages=mixed_schedule_for_later_stages,
+            machine_then_job=machine_then_job,
+            all_stages_as_bottleneck=all_stages_as_bottleneck,
+            random_seed=random_seed,
+        )
+
+        spec = AlgSpec(
+            instance=self.instance,
+            option=option,
+            logger=self.logger,
+        )
+
+        record = BN2DDispatcher().run(spec)
+        elapsed = time.monotonic() - start_elapsed
+
+        result = record.result
+        obj_value = (
+            float(result.obj_value) if result and result.obj_value is not None else None
+        )
+        obj_bound = (
+            float(result.obj_bound) if result and result.obj_bound is not None else None
+        )
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound,
+        )
+
+        if result is not None and result.schedule is not None:
+            bn2d_solution = FFcDDWSolution(
+                schedule=result.schedule,
+                obj_value=obj_value,
+                obj_bound=obj_bound,
+            )
+            self.solution_manager.register(report, bn2d_solution)
 
         return report
 

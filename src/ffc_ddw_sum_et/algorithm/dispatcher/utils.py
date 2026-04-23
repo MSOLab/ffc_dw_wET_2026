@@ -8,8 +8,91 @@ post-run pass that reads `*_schedule.yaml`).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import TypeVar
 
 from ...solution.ffc_schedule import FFcSchedule
+
+_T = TypeVar("_T")
+
+
+def dispatch_job_sequence_by_stages(
+    schedule: FFcSchedule,
+    job_sequence: Sequence[str],
+    job_2_stage_2_p: Mapping[str, Mapping[str, int]],
+    from_stage: str | None = None,
+    job_2_release_t: Mapping[str, int] | None = None,
+) -> None:
+    """Dispatch jobs through all stages, job by job, in the given sequence."""
+    for job_id in job_sequence:
+        schedule.dispatch_job_by_stages(
+            job_id,
+            dict(job_2_stage_2_p[job_id]),
+            from_stage=from_stage,
+            release_t=(
+                job_2_release_t[job_id] if job_2_release_t is not None else None
+            ),
+        )
+
+
+def dispatch_stages_by_job_sequence(
+    schedule: FFcSchedule,
+    job_sequence: Sequence[str],
+    stage_2_job_2_p: Mapping[str, Mapping[str, int]],
+    from_stage: str | None = None,
+    job_2_release_t: Mapping[str, int] | None = None,
+    machine_then_job: bool = False,
+) -> None:
+    """Dispatch a job sequence through stages, stage by stage."""
+    stage_id_list = list(schedule.stages)
+    if from_stage is not None:
+        from_stage_index = stage_id_list.index(from_stage)
+        target_stage_list = stage_id_list[from_stage_index:]
+    else:
+        target_stage_list = stage_id_list
+
+    if machine_then_job:
+        first_target = target_stage_list[0]
+        if first_target == stage_id_list[0]:
+            schedule.dispatch_stage_by_jobs(
+                first_target,
+                job_sequence,
+                dict(stage_2_job_2_p[first_target]),
+                job_2_release=job_2_release_t,
+            )
+        else:
+            schedule.machine_centric_dispatch_4(
+                first_target,
+                job_sequence,
+                stage_2_job_2_p,
+                job_2_release=job_2_release_t,
+            )
+        for stage_id in target_stage_list[1:]:
+            schedule.machine_centric_dispatch_4(
+                stage_id,
+                job_sequence,
+                stage_2_job_2_p,
+                job_2_release=job_2_release_t,
+            )
+    else:
+        for stage_id in target_stage_list:
+            schedule.dispatch_stage_by_jobs(
+                stage_id,
+                job_sequence,
+                dict(stage_2_job_2_p[stage_id]),
+                job_2_release=job_2_release_t,
+            )
+
+
+def reverse_even_positions(sequence: list[_T], in_place: bool = False) -> list[_T]:
+    """Reverse only even positions (1-based), keeping odd positions fixed.
+
+    For example, ``[A, B, C, D, E, F, G, H]`` -> ``[A, H, C, F, E, D, G, B]``.
+    """
+    result = sequence if in_place else list(sequence)
+    even_position_elements = result[1::2]
+    even_position_elements.reverse()
+    result[1::2] = even_position_elements
+    return result
 
 
 def from_job_sequence_get_schedule_mixed(
