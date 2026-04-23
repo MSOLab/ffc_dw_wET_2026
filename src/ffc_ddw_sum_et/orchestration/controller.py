@@ -84,11 +84,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def run_mcf_lb_4(
         self,
         last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
-        last_stage_only_pf_method: PFMethod | None = None,
-        full_pf_method: PFMethod | None = None,
+        last_stage_only_cp_pf_method: PFMethod | None = None,
+        full_cp_pf_method: PFMethod | None = None,
         solver_thread_cnt: int = 1,
-        repeat_last_stage_only_pf_cp_while_improving: bool = False,
-        repeat_full_pf_cp_while_improving: bool = False,
+        repeat_last_stage_only_cp_while_improving: bool = False,
+        repeat_full_cp_while_improving: bool = False,
         machine_then_job: bool = False,
     ) -> SubroutineReport:
         """Run the 4-phase MCF-LB algorithm and register the best incumbent.
@@ -102,18 +102,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Args:
             last_stage_only_priority_tags: Priority tags used in Phase 1 to
                 generate dispatch seeds. ``None`` uses all available tags.
-            last_stage_only_pf_method: Profile-fix precedence policy for the
+            last_stage_only_cp_pf_method: Profile-fix precedence policy for the
                 Phase 2 last-stage CP-SAT solve. ``None`` (default) skips the
                 precedence-arc pass entirely while keeping warm-start / ET
                 hints. Previously the implicit default was ``"PF0"``
                 (stage-level time-based selection); set explicitly to restore
                 that behaviour.
-            full_pf_method: Same policy for the Phase 4 full CP-SAT solve.
+            full_cp_pf_method: Same policy for the Phase 4 full CP-SAT solve.
                 Same ``None`` / ``"PF0"`` distinction applies.
             solver_thread_cnt: Number of CP-SAT solver threads (Phases 2 & 4).
-            repeat_last_stage_only_pf_cp_while_improving: If ``True``, Phase 2
+            repeat_last_stage_only_cp_while_improving: If ``True``, Phase 2
                 re-solves with the updated profile until no improvement.
-            repeat_full_pf_cp_while_improving: If ``True``, Phase 4 re-solves
+            repeat_full_cp_while_improving: If ``True``, Phase 4 re-solves
                 with the updated profile until no improvement.
             machine_then_job: Passed to Phase 3 reverse-dispatch ordering.
 
@@ -151,9 +151,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance,
             diag,
             logger=self.logger,
-            pf_method=last_stage_only_pf_method,
+            pf_method=last_stage_only_cp_pf_method,
             solver_thread_cnt=solver_thread_cnt,
-            repeat_pf_cp_while_improving=repeat_last_stage_only_pf_cp_while_improving,
+            repeat_pf_cp_while_improving=repeat_last_stage_only_cp_while_improving,
             solver_log_path_getter=self.get_file_path_for_subroutine,
         )
         if phase2 is None:
@@ -227,10 +227,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             phase3,
             instance,
             diag,
-            pf_method=full_pf_method,
+            pf_method=full_cp_pf_method,
             solver_thread_cnt=solver_thread_cnt,
             logger=self.logger,
-            repeat_pf_cp_while_improving=repeat_full_pf_cp_while_improving,
+            repeat_pf_cp_while_improving=repeat_full_cp_while_improving,
         )
 
         elapsed = self.timer.elapsed_sec - start_elapsed

@@ -23,48 +23,48 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["avg_time"]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
   - name: mcf_lb_init_start_time
     timelimit: 300.0
     output_subdir: mcf_lb_init_start_time
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["start_time"]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
   - name: mcf_lb_init_completion_time
     timelimit: 300.0
     output_subdir: mcf_lb_init_completion_time
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["completion_time"]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
   - name: mcf_lb_init_due_date_ub
     timelimit: 300.0
     output_subdir: mcf_lb_init_due_date_ub
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["due_date_ub"]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
   - name: mcf_lb_init_due_date_star
     timelimit: 300.0
     output_subdir: mcf_lb_init_due_date_star
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["due_date_star"]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
   - name: mcf_lb_init_due_date_star_minus_half_p
     timelimit: 300.0
     output_subdir: mcf_lb_init_due_date_star_minus_half_p
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: ["due_date_star_minus_half_p"]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
   - name: mcf_lb_init_all
     timelimit: 300.0
     output_subdir: mcf_lb_init_all
@@ -77,5 +77,5 @@ scenarios:
           - due_date_ub
           - due_date_star
           - due_date_star_minus_half_p
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"

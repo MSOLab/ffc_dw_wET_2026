@@ -29,8 +29,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "avg_time" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: avg_time_minus_half_p
     timelimit: 300.0
@@ -38,8 +38,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "avg_time_minus_half_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: start_time
     timelimit: 300.0
@@ -47,8 +47,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "start_time" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: completion_time
     timelimit: 300.0
@@ -56,8 +56,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "completion_time" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: completion_time_minus_p
     timelimit: 300.0
@@ -65,8 +65,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "completion_time_minus_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_lb
     timelimit: 300.0
@@ -74,8 +74,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_lb" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_lb_minus_p
     timelimit: 300.0
@@ -83,8 +83,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_lb_minus_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_ub
     timelimit: 300.0
@@ -92,8 +92,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_ub" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_ub_minus_p
     timelimit: 300.0
@@ -101,8 +101,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_ub_minus_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_star
     timelimit: 300.0
@@ -110,8 +110,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_star_minus_p
     timelimit: 300.0
@@ -119,8 +119,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_minus_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_star_minus_half_p
     timelimit: 300.0
@@ -128,8 +128,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_minus_half_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_star_plus_half_p
     timelimit: 300.0
@@ -137,8 +137,8 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_plus_half_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true
   - name: due_date_star_plus_p
     timelimit: 300.0
@@ -146,6 +146,6 @@ scenarios:
     subroutine_flow:
       - method: run_mcf_lb_4
         last_stage_only_priority_tags: [ "due_date_star_plus_p" ]
-        last_stage_only_pf_method: "PF1"
-        full_pf_method: "PF1"
+        last_stage_only_cp_pf_method: "PF1"
+        full_cp_pf_method: "PF1"
         repeat_pf_cp_while_improving: true

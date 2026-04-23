@@ -22,5 +22,5 @@ scenarios:
     output_subdir: mcf_lb_init
     subroutine_flow:
       - method: run_mcf_lb_4
-        last_stage_only_pf_method: "PF0"
-        full_pf_method: "PF0"
+        last_stage_only_cp_pf_method: "PF0"
+        full_cp_pf_method: "PF0"
