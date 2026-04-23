@@ -27,4 +27,4 @@ dev = [
 testpaths = ["tests"]
 
 [tool.ty.environment]
-python = ".venv/bin/python"
+python = ".venv"
