@@ -630,7 +630,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def run_profile_fixed_ns(
         self,
-        computational_time: float,
+        cp_tl: float | str | None = None,
         solver_thread_cnt: int = 1,
         pf_method: PFMethod = "PF0",
     ) -> SubroutineReport:
@@ -648,6 +648,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         instance = self.instance
+        cp_tl_seconds = _resolve_cp_tl(cp_tl, instance.job_count, instance.stage_count)
         params_for_horizon = BaseModelBuilder.make_params(instance)
         horizon = sum(params_for_horizon.p.values())
 
@@ -676,16 +677,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = float(computational_time)
+        if cp_tl_seconds is not None:
+            solver.parameters.max_time_in_seconds = cp_tl_seconds
         solver.parameters.num_search_workers = int(solver_thread_cnt)
         status = solver.Solve(mdl)
 
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
-        obj_bound: float | None = None
-        try:
-            obj_bound = float(solver.best_objective_bound)
-        except Exception:
-            obj_bound = None
 
         if not has_solution:
             elapsed = self.timer.elapsed_sec - start_elapsed
@@ -696,7 +693,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             return SubroutineReport(
                 elapsed_time=elapsed,
                 obj_value=None,
-                obj_bound=obj_bound,
+                obj_bound=None,
             )
 
         j_i_2_start = {
@@ -726,10 +723,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=obj_value,
-            obj_bound=obj_bound,
+            obj_bound=None,  # objBound by profile-fixed model is not a valid global bound
         )
         self.solution_manager.register(
             report,
-            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=obj_bound),
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value),
         )
         return report

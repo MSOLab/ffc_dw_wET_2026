@@ -30,7 +30,7 @@ scenarios:
         criteria: makespan
       - method: run_profile_fixed_ns
         params:
-          computational_time: 300.0
+          cp_tl: 300.0
           solver_thread_cnt: 1
           last_stage_only_cp_pf_method: "PF1"
           full_cp_pf_method: "PF1"
