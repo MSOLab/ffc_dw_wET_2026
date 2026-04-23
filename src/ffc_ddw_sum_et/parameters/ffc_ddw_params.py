@@ -112,6 +112,53 @@ class FFcDDWParameters(FFcParameters):
         )
 
     @classmethod
+    def create_instance_of_job_subset(
+        cls,
+        instance: FFcParameters,
+        job_id_subset: set[str],
+    ) -> Self:
+        """Create a new FFcDDWParameters restricted to a subset of jobs.
+
+        The returned instance keeps the parent's stage and machine layout and
+        the forward job order from ``instance.job_id_list`` (filtered down to
+        ``job_id_subset``). Arbitrary job permutations are not exposed.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.create_instance_of_job_subset requires "
+                f"FFcDDWParameters, got {type(instance).__name__}"
+            )
+        if not job_id_subset:
+            raise ValueError("Job subset must be non-empty.")
+        if not job_id_subset.issubset(instance.job_id_list):
+            raise ValueError("Job subset contains invalid job IDs.")
+
+        ordered_job_ids = [j for j in instance.job_id_list if j in job_id_subset]
+        job_id_2_index = {j: idx for idx, j in enumerate(instance.job_id_list)}
+        job_index_list = [job_id_2_index[j] for j in ordered_job_ids]
+        new_p_manager = instance.p_manager.filter_by_job_indices(job_index_list)
+
+        new_stage_2_machines_map = {
+            stage_id: list(instance.stage_2_machines_map[stage_id])
+            for stage_id in instance.stage_id_list
+        }
+        new_due_window = {j: instance.job_2_due_window_map[j] for j in ordered_job_ids}
+        new_ewt = {j: instance.job_2_ewt_map[j] for j in ordered_job_ids}
+        new_twt = {j: instance.job_2_twt_map[j] for j in ordered_job_ids}
+
+        return cls(
+            instance.name,
+            ordered_job_ids,
+            instance.stage_id_list,
+            new_stage_2_machines_map,
+            new_p_manager,
+            new_due_window,
+            new_ewt,
+            new_twt,
+            instance.generation_params,
+        )
+
+    @classmethod
     def create_instance_of_stage_subset(
         cls,
         instance: FFcParameters,

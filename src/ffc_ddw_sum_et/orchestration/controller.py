@@ -948,3 +948,219 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             FFcDDWSolution(schedule=schedule, obj_value=obj_value),
         )
         return report
+
+    def _neh_cp_job_sequence(self) -> list[str]:
+        """NEH-CP job order: (max(w-, w+) desc, w- + w+ desc, d+ - d- asc, pos)."""
+        instance = self.instance
+        ewt = instance.job_2_ewt_map
+        twt = instance.job_2_twt_map
+        ddw = instance.job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(instance.job_id_list)}
+
+        def key(j: str) -> tuple[int, int, int, int]:
+            w_e = ewt.get(j, 0)
+            w_t = twt.get(j, 0)
+            d_lower, d_upper = ddw[j]
+            return (
+                -max(w_e, w_t),
+                -(w_e + w_t),
+                int(d_upper - d_lower),
+                job_2_pos[j],
+            )
+
+        return sorted(instance.job_id_list, key=key)
+
+    def neh_cp(
+        self,
+        solver_thread_cnt: int = 1,
+        added_batch_size: int = 1,
+        cp_tl: float | str | None = None,
+        pf_method: PFMethod | None = "PF1",
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
+        """Build a schedule by incrementally adding job batches and refining via CP-SAT.
+
+        Differs from the upstream NEH-CP (hybridflowshop):
+
+        - No reference/incumbent schedule; the job sequence is decided up-front
+          by (1) max(w^-_j, w^+_j) desc, (2) (w^-_j + w^+_j) desc,
+          (3) (d^+_j - d^-_j) asc, (4) original job_id_list position.
+        - First batch size is max(added_batch_size, max_m_per_stage * 2).
+        - Remaining (not-yet-added) jobs are not dispatched at each step; the
+          obj log records only the sub-schedule weighted E+T for the current
+          subset of jobs.
+        """
+        from routix.io import dump_yaml  # local import: used only here
+
+        start_elapsed = time.monotonic()
+        instance = self.instance
+        n = instance.job_count
+        stage_count = instance.stage_count
+        if n == 0:
+            raise RuntimeError("neh_cp requires at least one job in the instance.")
+
+        cp_tl_seconds = _resolve_cp_tl(cp_tl, n, stage_count)
+        params_for_horizon = BaseModelBuilder.make_params(instance)
+        horizon = sum(params_for_horizon.p.values())
+
+        job_sequence = self._neh_cp_job_sequence()
+        max_m = max(instance.machine_count_per_stage)
+        first_batch_size = max(added_batch_size, max_m * 2)
+
+        batches: list[list[str]] = [job_sequence[:first_batch_size]]
+        tail = job_sequence[first_batch_size:]
+        for start in range(0, len(tail), added_batch_size):
+            batches.append(tail[start : start + added_batch_size])
+
+        partial_sol: FFcSchedule | None = None
+        current_jobs: list[str] = []
+        sub_obj_log: list[dict] = []
+
+        # For warm-start
+        mixed = MixedDispatcher(instance, logger=self.logger)
+        first_stage_id = instance.stage_id_list[0]
+        job_2_stage_2_p = instance.job_2_stage_2_p_map
+        stage_2_job_2_p = instance.stage_2_job_2_p_map
+        due_window_map = instance.job_2_due_window_map
+        ewt_map = instance.job_2_ewt_map
+        twt_map = instance.job_2_twt_map
+
+        for step, batch in enumerate(batches):
+            current_jobs.extend(batch)
+            sub_instance = FFcDDWParameters.create_instance_of_job_subset(
+                instance, set(current_jobs)
+            )
+
+            # Build a CP-SAT model for the current job subset
+            builder = BaseModelBuilder()
+            mdl, params, op_vars, et_vars = builder.build(sub_instance, horizon=horizon)
+            if partial_sol is not None and pf_method is not None:
+                by_machine, stride = decode_pf_method(pf_method)
+                BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
+                    mdl,
+                    params,
+                    op_vars,
+                    partial_sol,
+                    profile_fix_by_machine=by_machine,
+                    machine_precedence_stride=stride,
+                )
+
+            # Warm-start from a mixed dispatch of the current batch,
+            # using the previous step's solution as a base if available
+            base = (
+                partial_sol.deepcopy()
+                if partial_sol is not None
+                else FFcSchedule(
+                    jobs=instance.job_id_list,
+                    stages=instance.stage_id_list,
+                    machines_per_stage=instance.stage_2_machines_map,
+                )
+            )
+            dispatched = mixed.get_best_mixed_schedule_by_sequence(
+                batch,
+                schedule=base,
+                from_stage=first_stage_id,
+                head_for_all_stages=True,
+                criteria="makespan",
+            )
+            if dispatched is None:
+                self.logger.warning(
+                    "neh_cp step %d: MixedDispatcher returned None; falling back "
+                    "to dispatch_job_by_stages.",
+                    step,
+                )
+                dispatched = base
+                for j in batch:
+                    dispatched.dispatch_job_by_stages(j, job_2_stage_2_p[j])
+            dispatched.make_semi_active(stage_2_job_2_p)
+            dispatched.insert_idle_time(due_window_map, ewt_map, twt_map)
+            BaseModelBuilder.apply_start_hints_from_start_time_map(
+                mdl, params, op_vars, dispatched.get_jik_2_start_time_map()
+            )
+            BaseModelBuilder.apply_end_hints_from_end_time_map(
+                mdl, params, op_vars, dispatched.get_jik_2_end_time_map()
+            )
+            BaseModelBuilder.apply_et_hints_from_ref_schedule(
+                mdl, params, et_vars, dispatched
+            )
+
+            solver = cp_model.CpSolver()
+            if cp_tl_seconds is not None:
+                solver.parameters.max_time_in_seconds = cp_tl_seconds
+            solver.parameters.num_workers = solver_thread_cnt
+            status = solver.solve(mdl)
+
+            if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                j_i_2_start = {
+                    (j, i): int(solver.Value(op_vars.op_start[j, i]))
+                    for j in params.j_list
+                    for i in params.i_list
+                }
+                j_i_2_end = {
+                    (j, i): int(solver.Value(op_vars.op_end[j, i]))
+                    for j in params.j_list
+                    for i in params.i_list
+                }
+                cp_sch = build_schedule_from_op_starts(
+                    instance, j_i_2_start, j_i_2_end, jobs=current_jobs
+                )
+                se_new, st_new = compute_weighted_earliness_tardiness(
+                    cp_sch, sub_instance
+                )
+                se_dis, st_dis = compute_weighted_earliness_tardiness(
+                    dispatched, sub_instance
+                )
+                partial_sol = (
+                    cp_sch if (se_new + st_new) <= (se_dis + st_dis) else dispatched
+                )
+            else:
+                self.logger.info(
+                    "neh_cp step %d: CP-SAT infeasible (status=%s); keeping dispatched schedule.",
+                    step,
+                    solver.StatusName(status),
+                )
+                partial_sol = dispatched
+
+            se, st = compute_weighted_earliness_tardiness(partial_sol, sub_instance)
+            sub_obj_log.append(
+                {
+                    "step": step,
+                    "elapsed_time": float(time.monotonic() - start_elapsed),
+                    "sub_obj": float(se + st),
+                    "job_count": len(current_jobs),
+                }
+            )
+
+        if partial_sol is None:
+            if error_if_infeasible:
+                raise RuntimeError(
+                    f"neh_cp produced no schedule for instance {instance.name}."
+                )
+            elapsed = time.monotonic() - start_elapsed
+            self.logger.warning("neh_cp produced no schedule; returning empty report.")
+            return SubroutineReport(
+                elapsed_time=elapsed, obj_value=None, obj_bound=None
+            )
+
+        final = partial_sol
+        se, st = compute_weighted_earliness_tardiness(final, instance)
+        obj_value = float(se + st)
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        self.solution_manager.register(
+            report,
+            FFcDDWSolution(schedule=final, obj_value=obj_value),
+        )
+
+        try:
+            log_path = self.get_file_path_for_subroutine("_obj_log.yaml")
+        except AttributeError:
+            log_path = None
+        if log_path is not None:
+            dump_yaml(sub_obj_log, log_path)
+
+        return report
