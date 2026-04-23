@@ -122,14 +122,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
         last_stage_only_cp_pf_method: PFMethod | None = None,
-        full_cp_pf_method: PFMethod | None = None,
-        solver_thread_cnt: int = 1,
-        repeat_last_stage_only_cp_while_improving: bool = False,
-        repeat_full_cp_while_improving: bool = False,
-        machine_then_job: bool = False,
+        last_stage_only_cp_solver_thread_cnt: int = 1,
         last_stage_only_cp_tl: float | str | None = None,
-        full_cp_tl: float | str | None = None,
+        repeat_last_stage_only_cp_while_improving: bool = False,
         log_last_stage_only_cp_search_progress: bool = False,
+        machine_then_job: bool = False,
+        full_cp_pf_method: PFMethod | None = None,
+        full_cp_solver_thread_cnt: int = 1,
+        full_cp_tl: float | str | None = None,
+        repeat_full_cp_while_improving: bool = False,
         log_full_cp_search_progress: bool = False,
     ) -> SubroutineReport:
         """Run the 4-phase MCF-LB algorithm and register the best incumbent.
@@ -151,7 +152,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 that behaviour.
             full_cp_pf_method: Same policy for the Phase 4 full CP-SAT solve.
                 Same ``None`` / ``"PF0"`` distinction applies.
-            solver_thread_cnt: Number of CP-SAT solver threads (Phases 2 & 4).
+            full_cp_solver_thread_cnt: Number of CP-SAT solver threads for the
+                Phase 4 full CP-SAT solve.
             repeat_last_stage_only_cp_while_improving: If ``True``, Phase 2
                 re-solves with the updated profile until no improvement.
             repeat_full_cp_while_improving: If ``True``, Phase 4 re-solves
@@ -210,7 +212,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             diag,
             logger=self.logger,
             pf_method=last_stage_only_cp_pf_method,
-            solver_thread_cnt=solver_thread_cnt,
+            solver_thread_cnt=last_stage_only_cp_solver_thread_cnt,
             repeat_pf_cp_while_improving=repeat_last_stage_only_cp_while_improving,
             cp_tl_seconds=last_stage_only_cp_tl_seconds,
             log_search_progress=log_last_stage_only_cp_search_progress,
@@ -293,7 +295,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance,
             diag,
             pf_method=full_cp_pf_method,
-            solver_thread_cnt=solver_thread_cnt,
+            solver_thread_cnt=full_cp_solver_thread_cnt,
             logger=self.logger,
             repeat_pf_cp_while_improving=repeat_full_cp_while_improving,
             cp_tl_seconds=full_cp_tl_seconds,
