@@ -19,7 +19,7 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/20260423/neh_cp_config.yaml")
+CONFIG_PATH = Path("metadata/20260423/neh_cp_config_2.yaml")
 
 
 def _setup_main_logger(output_dir: Path) -> logging.Logger:

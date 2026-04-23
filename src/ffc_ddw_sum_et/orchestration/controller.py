@@ -975,22 +975,59 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         solver_thread_cnt: int = 1,
         added_batch_size: int = 1,
         cp_tl: float | str | None = None,
-        pf_method: PFMethod | None = "PF1",
+        pf_method: PFMethod = "PF1",
+        skip_pf_below_obj: str | float | None = None,
         error_if_infeasible: bool = False,
     ) -> SubroutineReport:
         """Build a schedule by incrementally adding job batches and refining via CP-SAT.
 
-        Differs from the upstream NEH-CP (hybridflowshop):
+        Jobs are ordered by ``_neh_cp_job_sequence`` and added in batches.  The
+        first batch is ``max(added_batch_size, max_machines_per_stage * 2)``; each
+        subsequent batch adds ``added_batch_size`` jobs.  After each batch a CP-SAT
+        model is solved; the best of the CP and dispatch solutions carries forward as
+        the warm-start for the next step.
 
-        - No reference/incumbent schedule; the job sequence is decided up-front
-          by (1) max(w^-_j, w^+_j) desc, (2) (w^-_j + w^+_j) desc,
-          (3) (d^+_j - d^-_j) asc, (4) original job_id_list position.
-        - First batch size is max(added_batch_size, max_m_per_stage * 2).
-        - Remaining (not-yet-added) jobs are not dispatched at each step; the
-          obj log records only the sub-schedule weighted E+T for the current
-          subset of jobs.
+        Args:
+            solver_thread_cnt (int, optional): CP-SAT solver threads per batch solve.
+                Defaults to 1.
+            added_batch_size (int, optional): Jobs added per incremental step after
+                the first batch. Defaults to 1.
+            cp_tl (float | str | None, optional): Time limit per batch solve.
+                A float is interpreted as seconds; a string such as ``"0.006nc"``
+                is evaluated as an expression where ``n`` = job count and ``c`` =
+                stage count; ``None`` means no limit. Defaults to None.
+            pf_method (PFMethod, optional): Partial-fix strategy used to inject the
+                previous step's solution as precedence constraints into the next model.
+                Defaults to "PF1".
+            skip_pf_below_obj (str | float | None, optional): When set, suppresses
+                partial-fix for any batch where the previous step's weighted E+T is
+                at or below this threshold.  ``"makespan"`` uses the previous
+                solution's makespan as the threshold; a float is used directly.
+                ``None`` always applies partial-fix. Defaults to None.
+            error_if_infeasible (bool, optional): Raise ``RuntimeError`` instead of
+                returning a dispatched fallback when no feasible solution is found.
+                Defaults to False.
+
+        Raises:
+            ValueError: If ``skip_pf_below_obj`` is a string other than ``"makespan"``
+                that cannot be parsed as a float.
+            RuntimeError: If the instance contains no jobs.
+            RuntimeError: If ``error_if_infeasible=True`` and no feasible schedule is
+                produced.
+
+        Returns:
+            SubroutineReport: Final schedule and per-batch objective log.
         """
         from routix.io import dump_yaml  # local import: used only here
+
+        if skip_pf_below_obj is not None and skip_pf_below_obj != "makespan":
+            try:
+                skip_pf_below_obj = float(skip_pf_below_obj)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid skip_pf_below_obj value: {skip_pf_below_obj!r}; "
+                    "expected 'makespan', a float, or None."
+                )
 
         start_elapsed = time.monotonic()
         instance = self.instance
@@ -1025,6 +1062,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ewt_map = instance.job_2_ewt_map
         twt_map = instance.job_2_twt_map
 
+        # State
+        last_obj_value = 0
+
         for step, batch in enumerate(batches):
             current_jobs.extend(batch)
             sub_instance = FFcDDWParameters.create_instance_of_job_subset(
@@ -1034,7 +1074,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             # Build a CP-SAT model for the current job subset
             builder = BaseModelBuilder()
             mdl, params, op_vars, et_vars = builder.build(sub_instance, horizon=horizon)
-            if partial_sol is not None and pf_method is not None:
+            skip_pf = False
+            if skip_pf_below_obj is not None:
+                if skip_pf_below_obj == "makespan":
+                    criteria_value = (
+                        partial_sol.makespan if partial_sol is not None else 0
+                    )
+                else:
+                    criteria_value = float(skip_pf_below_obj)
+
+                if last_obj_value <= criteria_value:
+                    skip_pf = True
+            if partial_sol is not None and not skip_pf:
                 by_machine, stride = decode_pf_method(pf_method)
                 BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
                     mdl,
@@ -1130,6 +1181,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     "job_count": len(current_jobs),
                 }
             )
+            last_obj_value = se + st
 
         if partial_sol is None:
             if error_if_infeasible:
