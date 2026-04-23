@@ -8,6 +8,8 @@ caller falls back to the Phase 3 incumbent.
 """
 
 from __future__ import annotations
+from pathlib import Path
+from typing import Callable
 
 import logging
 from dataclasses import dataclass
@@ -43,6 +45,9 @@ def run_phase4(
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_pf_cp_while_improving: bool = False,
+    cp_tl_seconds: float | None = None,
+    log_search_progress: bool = False,
+    solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> Phase4State:
     """Build and solve the profile-fix full CP-SAT model.
 
@@ -68,6 +73,9 @@ def run_phase4(
         solver_thread_cnt=solver_thread_cnt,
         repeat_while_improving=repeat_pf_cp_while_improving,
         obj_lb=phase1.mcf_lb,
+        max_time_in_seconds=cp_tl_seconds,
+        log_search_progress=log_search_progress,
+        solver_log_path_getter=solver_log_path_getter,
     )
     diagnostic.profile_fix_cp_sat_sec = total_solve_sec
     diagnostic.pf_status = last_status_name

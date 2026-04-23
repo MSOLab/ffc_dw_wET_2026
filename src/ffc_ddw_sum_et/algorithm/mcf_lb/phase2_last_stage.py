@@ -65,6 +65,8 @@ def run_phase2(
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_pf_cp_while_improving: bool = False,
+    cp_tl_seconds: float | None = None,
+    log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> Phase2State | None:
     """Solve the last-stage CP-SAT model per seed, pick the best.
@@ -101,6 +103,8 @@ def run_phase2(
             pf_method=pf_method,
             solver_thread_cnt=solver_thread_cnt,
             repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
+            cp_tl_seconds=cp_tl_seconds,
+            log_search_progress=log_search_progress,
             solver_log_path_getter=solver_log_path_getter,
         )
         total_solve_sec += solve_sec
@@ -153,6 +157,8 @@ def _solve_last_stage_for_seed(
     pf_method: PFMethod | None,
     solver_thread_cnt: int,
     repeat_pf_cp_while_improving: bool = False,
+    cp_tl_seconds: float | None = None,
+    log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> tuple[LastStageCandidate | None, float, str]:
     """Build and solve a last-stage-only CP-SAT model for one seed.
@@ -172,6 +178,8 @@ def _solve_last_stage_for_seed(
         pf_method=pf_method,
         solver_thread_cnt=solver_thread_cnt,
         repeat_while_improving=repeat_pf_cp_while_improving,
+        max_time_in_seconds=cp_tl_seconds,
+        log_search_progress=log_search_progress,
         solver_log_path_getter=solver_log_path_getter,
     )
     if result is None:

@@ -32,6 +32,43 @@ from .solution_manager import FFcDDWSolution
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic"]
 
 
+def _resolve_cp_tl(
+    tl_raw: float | str | None,
+    job_count: int,
+    stage_count: int,
+) -> float | None:
+    """Resolve a raw CP-SAT time-limit value to ``float | None``.
+
+    * ``None``  → ``None`` (no limit)
+    * ``float`` → used as-is (seconds)
+    * ``str`` ending with ``"nc"`` with a numeric prefix → ``number * job_count * stage_count``
+    * other ``str`` → ``float(value)``; raises ``ValueError`` if the cast fails
+    """
+    if tl_raw is None:
+        return None
+    if isinstance(tl_raw, (int, float)):
+        return float(tl_raw)
+    # str branch
+    s = tl_raw.strip()
+    if s.endswith("nc"):
+        prefix = s[:-2]
+        try:
+            factor = float(prefix)
+        except ValueError:
+            raise ValueError(
+                f"cp_tl string '{tl_raw}' ends with 'nc' but the prefix "
+                f"'{prefix}' is not a valid number"
+            )
+        return factor * job_count * stage_count
+    try:
+        return float(s)
+    except ValueError:
+        raise ValueError(
+            f"cp_tl string '{tl_raw}' cannot be interpreted as a float "
+            "and does not match the '<number>nc' pattern"
+        )
+
+
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def run_fam(self, job_sequence: Sequence[str] | None = None) -> SubroutineReport:
         """Step method: run FAMDispatcher and return a SubroutineReport.
@@ -90,6 +127,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         repeat_last_stage_only_cp_while_improving: bool = False,
         repeat_full_cp_while_improving: bool = False,
         machine_then_job: bool = False,
+        last_stage_only_cp_tl: float | str | None = None,
+        full_cp_tl: float | str | None = None,
+        log_last_stage_only_cp_search_progress: bool = False,
+        log_full_cp_search_progress: bool = False,
     ) -> SubroutineReport:
         """Run the 4-phase MCF-LB algorithm and register the best incumbent.
 
@@ -116,6 +157,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             repeat_full_cp_while_improving: If ``True``, Phase 4 re-solves
                 with the updated profile until no improvement.
             machine_then_job: Passed to Phase 3 reverse-dispatch ordering.
+            last_stage_only_cp_tl: Per-solve time limit (seconds) for the
+                Phase 2 last-stage-only CP-SAT model. Accepts a ``float``,
+                a ``"<n>nc"`` string (resolves to ``n * job_count *
+                stage_count``), or ``None`` for no limit.
+            full_cp_tl: Same for the Phase 4 full CP-SAT model.
 
         Returns:
             SubroutineReport with ``obj_bound`` = MCF LB and ``obj_value`` =
@@ -126,6 +172,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
         instance = self.instance
+        last_stage_only_cp_tl_seconds = _resolve_cp_tl(
+            last_stage_only_cp_tl, instance.job_count, instance.stage_count
+        )
+        full_cp_tl_seconds = _resolve_cp_tl(
+            full_cp_tl, instance.job_count, instance.stage_count
+        )
 
         # Phase 1: MCF LB + one last-stage dispatch seed per MCF priority map.
         phase1 = run_phase1(
@@ -146,6 +198,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         # Phase 2: solve the last-stage CP-SAT model for each seed, pick best.
+        self.logger.info(
+            "Phase 1 MCF LB: %d; preparing Phase 2 last-stage-only CP-SAT solves "
+            "with time limit %.2f seconds",
+            int(mcf_lb),
+            last_stage_only_cp_tl_seconds,
+        )
         phase2 = run_phase2(
             phase1,
             instance,
@@ -154,6 +212,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             pf_method=last_stage_only_cp_pf_method,
             solver_thread_cnt=solver_thread_cnt,
             repeat_pf_cp_while_improving=repeat_last_stage_only_cp_while_improving,
+            cp_tl_seconds=last_stage_only_cp_tl_seconds,
+            log_search_progress=log_last_stage_only_cp_search_progress,
             solver_log_path_getter=self.get_file_path_for_subroutine,
         )
         if phase2 is None:
@@ -222,6 +282,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         # Phase 4: profile-fix CP-SAT full solve.
+        self.logger.info(
+            "Phase 3 dispatched objective: %d; preparing Phase 4 full CP-SAT solve with time limit %.2f seconds",
+            int(phase3.dispatched_obj),
+            full_cp_tl_seconds,
+        )
         phase4 = run_phase4(
             phase1,
             phase3,
@@ -231,6 +296,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             solver_thread_cnt=solver_thread_cnt,
             logger=self.logger,
             repeat_pf_cp_while_improving=repeat_full_cp_while_improving,
+            cp_tl_seconds=full_cp_tl_seconds,
+            log_search_progress=log_full_cp_search_progress,
+            solver_log_path_getter=self.get_file_path_for_subroutine,
         )
 
         elapsed = self.timer.elapsed_sec - start_elapsed

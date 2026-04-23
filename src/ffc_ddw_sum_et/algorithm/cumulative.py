@@ -569,3 +569,24 @@ class BaseModelBuilder:
             T_val = max(0, C_j - params.d_upper[j])
             mdl.add_hint(et_vars.E[j], E_val)
             mdl.add_hint(et_vars.T[j], T_val)
+
+    @staticmethod
+    def apply_hints_from_schedule(
+        mdl: CpModel,
+        params: Params,
+        variables: OperationVars,
+        et_vars: EarlinessTardinessVars,
+        ref_schedule: FFcSchedule,
+    ) -> None:
+        """Apply all hints from a reference schedule."""
+        start_time_map = ref_schedule.get_jik_2_start_time_map()
+        end_time_map = ref_schedule.get_jik_2_end_time_map()
+        BaseModelBuilder.apply_start_hints_from_start_time_map(
+            mdl, params, variables, start_time_map
+        )
+        BaseModelBuilder.apply_end_hints_from_end_time_map(
+            mdl, params, variables, end_time_map
+        )
+        BaseModelBuilder.apply_et_hints_from_ref_schedule(
+            mdl, params, et_vars, ref_schedule
+        )

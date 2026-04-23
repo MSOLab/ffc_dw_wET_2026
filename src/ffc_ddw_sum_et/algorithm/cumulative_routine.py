@@ -59,6 +59,8 @@ def solve_last_stage_with_profile_fix(
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_while_improving: bool = False,
+    max_time_in_seconds: float | None = None,
+    log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> tuple[LastStageSolveResult | None, float, str]:
     """Build and solve a last-stage-only CP-SAT model, optionally looping.
@@ -107,9 +109,6 @@ def solve_last_stage_with_profile_fix(
         * ``last_status_name`` — ``CpSolver.status_name`` of the final
           solve attempt (the one that ended the loop).
     """
-    # TODO: as an optional keyword argument(defaults to False)
-    log_search_progress = True
-
     if logger is None:
         logger = logging.getLogger(__name__)
     current_schedule = reference_schedule
@@ -117,10 +116,10 @@ def solve_last_stage_with_profile_fix(
     best_result: LastStageSolveResult | None = None
     best_status: str | None = None
     prev_obj = float("inf")
+    horizon = int(current_schedule.makespan * 2)
 
+    loop_index = 0
     while True:
-        horizon = int(current_schedule.makespan * 2)
-
         ls_builder = BaseModelBuilder()
         ls_mdl, ls_params, ls_ops_vars, ls_et_vars = ls_builder.build(
             instance=instance,
@@ -139,32 +138,19 @@ def solve_last_stage_with_profile_fix(
                 profile_fix_by_machine=by_machine,
                 machine_precedence_stride=stride,
             )
-        BaseModelBuilder.apply_start_hints_from_start_time_map(
-            ls_mdl,
-            ls_params,
-            ls_ops_vars,
-            current_schedule.get_jik_2_start_time_map(),
-        )
-        BaseModelBuilder.apply_end_hints_from_end_time_map(
-            ls_mdl,
-            ls_params,
-            ls_ops_vars,
-            current_schedule.get_jik_2_end_time_map(),
-        )
-        BaseModelBuilder.apply_et_hints_from_ref_schedule(
-            ls_mdl,
-            ls_params,
-            ls_et_vars,
-            current_schedule,
+        BaseModelBuilder.apply_hints_from_schedule(
+            ls_mdl, ls_params, ls_ops_vars, ls_et_vars, current_schedule
         )
 
-        solver_options = CpsatSolverOptions(
-            log_search_progress=log_search_progress,
-            log_to_stdout=False if log_search_progress else None,
-            log_to_response=True if log_search_progress else None,
-            num_workers=solver_thread_cnt,
+        ls_solver = get_solver(
+            CpsatSolverOptions(
+                log_search_progress=log_search_progress,
+                log_to_stdout=False if log_search_progress else None,
+                log_to_response=True if log_search_progress else None,
+                num_workers=solver_thread_cnt,
+                max_time_in_seconds=max_time_in_seconds,
+            )
         )
-        ls_solver = get_solver(solver_options)
 
         t0 = time.monotonic()
         status = ls_solver.solve(ls_mdl)
@@ -173,9 +159,13 @@ def solve_last_stage_with_profile_fix(
 
         if log_search_progress:
             solve_log = ls_solver.response_proto.solve_log
-            if solve_log:
+            if solve_log and solver_log_path_getter is not None:
+                filename_suffix = (
+                    "_cp_sat_mcf_lb_phase2.log"
+                    if not repeat_while_improving
+                    else f"_cp_sat_mcf_lb_phase2_{loop_index}.log"
+                )
                 try:
-                    filename_suffix = "_cp_sat_last_stage_only.log"
                     solve_log_path = solver_log_path_getter(filename_suffix)
                     with solve_log_path.open("a", encoding="utf-8") as fp:
                         fp.write(solve_log)
@@ -229,6 +219,7 @@ def solve_last_stage_with_profile_fix(
         best_status = status_name
         prev_obj = new_obj
         current_schedule = result.schedule
+        loop_index += 1
 
     return best_result, total_solve_sec, best_status or status_name
 
@@ -237,10 +228,14 @@ def solve_full_cp_with_profile_fix(
     reference_schedule: FFcSchedule,
     instance: FFcDDWParameters,
     *,
+    logger: logging.Logger | None = None,
     obj_lb: float | None = None,
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_while_improving: bool = False,
+    max_time_in_seconds: float | None = None,
+    log_search_progress: bool = False,
+    solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> tuple[FullCpSolveResult | None, float, str]:
     """Build and solve the full profile-fix CP-SAT model, optionally looping.
 
@@ -284,15 +279,17 @@ def solve_full_cp_with_profile_fix(
         * ``last_status_name`` — ``CpSolver.status_name`` of the final
           solve attempt (the one that ended the loop).
     """
+    if logger is None:
+        logger = logging.getLogger(__name__)
     current_schedule = reference_schedule
     total_solve_sec = 0.0
     best_result: FullCpSolveResult | None = None
     best_status: str | None = None
     prev_obj = float("inf")
+    horizon = int(current_schedule.makespan * 2)
 
+    loop_index = 0
     while True:
-        horizon = int(current_schedule.makespan * 2)
-
         pf_builder = BaseModelBuilder()
         pf_mdl, pf_params, pf_op_vars, pf_et_vars = pf_builder.build(
             instance, horizon=horizon, obj_lb=obj_lb
@@ -307,32 +304,41 @@ def solve_full_cp_with_profile_fix(
                 profile_fix_by_machine=by_machine,
                 machine_precedence_stride=stride,
             )
-        BaseModelBuilder.apply_start_hints_from_start_time_map(
-            pf_mdl,
-            pf_params,
-            pf_op_vars,
-            current_schedule.get_jik_2_start_time_map(),
-        )
-        BaseModelBuilder.apply_end_hints_from_end_time_map(
-            pf_mdl,
-            pf_params,
-            pf_op_vars,
-            current_schedule.get_jik_2_end_time_map(),
-        )
-        BaseModelBuilder.apply_et_hints_from_ref_schedule(
-            pf_mdl,
-            pf_params,
-            pf_et_vars,
-            current_schedule,
+        BaseModelBuilder.apply_hints_from_schedule(
+            pf_mdl, pf_params, pf_op_vars, pf_et_vars, current_schedule
         )
 
-        pf_solver = cp_model.CpSolver()
-        pf_solver.parameters.num_search_workers = int(solver_thread_cnt)
+        pf_solver = get_solver(
+            CpsatSolverOptions(
+                log_search_progress=log_search_progress,
+                log_to_stdout=False if log_search_progress else None,
+                log_to_response=True if log_search_progress else None,
+                num_workers=solver_thread_cnt,
+                max_time_in_seconds=max_time_in_seconds,
+            )
+        )
 
         t0 = time.monotonic()
         status = pf_solver.solve(pf_mdl)
         status_name = pf_solver.status_name(status)
         total_solve_sec += time.monotonic() - t0
+
+        if log_search_progress:
+            solve_log = pf_solver.response_proto.solve_log
+            if solve_log and solver_log_path_getter is not None:
+                filename_suffix = (
+                    "_cp_sat_mcf_lb_phase4.log"
+                    if not repeat_while_improving
+                    else f"_cp_sat_mcf_lb_phase4_{loop_index}.log"
+                )
+                try:
+                    solve_log_path = solver_log_path_getter(filename_suffix)
+                    with solve_log_path.open("a", encoding="utf-8") as fp:
+                        fp.write(solve_log)
+                        if not solve_log.endswith("\n"):
+                            fp.write("\n")
+                except Exception as err:
+                    logger.warning("Failed to write CP-SAT search log: %s", err)
 
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             break
@@ -373,5 +379,6 @@ def solve_full_cp_with_profile_fix(
         best_status = status_name
         prev_obj = new_obj
         current_schedule = result.schedule
+        loop_index += 1
 
     return best_result, total_solve_sec, best_status or status_name
