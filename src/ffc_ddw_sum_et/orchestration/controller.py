@@ -557,33 +557,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
-    def initialize_by_edd(
+    def _dispatch_by_sequence(
         self,
+        job_sequence: Sequence[str],
         dispatcher: Literal["mixed", "fam"] = "mixed",
         dispatching_criteria: Literal["weighted_et", "makespan"] = "weighted_et",
-    ) -> SubroutineReport:
-        """Step method: seed an incumbent by dispatching jobs in EDD order.
-
-        With due-date windows ``[d^-_j, d^+_j]``, EDD uses ``d^+_j`` (the
-        latest on-time moment) so tight deadlines go first and slack jobs
-        drop to the tail. Ties on ``d^+`` break by native ``job_id_list``
-        order for determinism, matching the tie-break rule used by
-        :meth:`run_mcf_lb`.
-
-        ``dispatcher`` selects the decoder that turns the EDD permutation
-        into a schedule: ``"mixed"`` uses :class:`MixedDispatcher` (with
-        ``dispatching_criteria`` for its internal selection rule); ``"fam"`` uses
-        :class:`FAMDispatcher` and ignores ``dispatching_criteria``.
-        """
-        start_elapsed = time.monotonic()
-
-        due_window_map = self.instance.job_2_due_window_map
-        job_2_pos = {j: i for i, j in enumerate(self.instance.job_id_list)}
-        job_sequence = sorted(
-            self.instance.job_id_list,
-            key=lambda j: (due_window_map[j][1], job_2_pos[j]),
-        )
-
+    ) -> tuple[FFcSchedule, float | None]:
         if dispatcher == "mixed":
             mixed = MixedDispatcher(self.instance)
             schedule = mixed.get_best_mixed_schedule_by_sequence(
@@ -615,6 +594,33 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             raise ValueError(
                 f"Unknown dispatcher {dispatcher!r}; expected 'mixed' or 'fam'."
             )
+        return schedule, obj_value
+
+    def initialize_by_edd(
+        self,
+        dispatcher: Literal["mixed", "fam"] = "mixed",
+        dispatching_criteria: Literal["weighted_et", "makespan"] = "weighted_et",
+    ) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in EDD order.
+
+        With due-date windows ``[d^-_j, d^+_j]``, EDD uses ``d^+_j`` (the
+        latest on-time moment) so tight deadlines go first and slack jobs
+        drop to the tail. Ties on ``d^+`` break by native ``job_id_list``
+        order for determinism, matching the tie-break rule used by
+        :meth:`run_mcf_lb`.
+
+        ``dispatcher`` selects the decoder that turns the EDD permutation
+        into a schedule: ``"mixed"`` uses :class:`MixedDispatcher` (with
+        ``dispatching_criteria`` for its internal selection rule); ``"fam"`` uses
+        :class:`FAMDispatcher` and ignores ``dispatching_criteria``.
+        """
+        start_elapsed = time.monotonic()
+
+        job_sequence = self.instance.get_eddub_job_sequence()
+
+        schedule, obj_value = self._dispatch_by_sequence(
+            job_sequence, dispatcher=dispatcher, dispatching_criteria=dispatching_criteria
+        )
 
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(

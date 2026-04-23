@@ -136,9 +136,7 @@ class FFcDDWParameters(FFcParameters):
         if not stage_id_subset:
             raise ValueError("Stage subset must be non-empty.")
 
-        ordered_stage_ids = [
-            s for s in instance.stage_id_list if s in stage_id_subset
-        ]
+        ordered_stage_ids = [s for s in instance.stage_id_list if s in stage_id_subset]
         if reverse_stage_seq:
             ordered_stage_ids.reverse()
 
@@ -447,3 +445,14 @@ class FFcDDWParameters(FFcParameters):
             + sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }
+
+    def get_eddub_job_sequence(self) -> list[str]:
+        """
+        Get the EDDUB (Earliest Due Date Upper Bound) job sequence.
+        Sort by job sequence in job_id_list to break ties.
+        """
+        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
+        job_2_pos = {job_id: pos for pos, job_id in enumerate(self._job_id_list)}
+        return sorted(
+            self.job_id_list, key=lambda j: (job_2_due_date_ub_map[j], job_2_pos[j])
+        )
