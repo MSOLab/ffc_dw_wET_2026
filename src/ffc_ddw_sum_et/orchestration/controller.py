@@ -45,10 +45,25 @@ def _resolve_cp_tl(
 ) -> float | None:
     """Resolve a raw CP-SAT time-limit value to ``float | None``.
 
-    * ``None``  → ``None`` (no limit)
-    * ``float`` → used as-is (seconds)
-    * ``str`` ending with ``"nc"`` with a numeric prefix → ``number * job_count * stage_count``
-    * other ``str`` → ``float(value)``; raises ``ValueError`` if the cast fails
+    - ``None``  → ``None`` (no limit)
+    - ``float`` → used as-is (seconds)
+    - ``str`` ending with ``"nc"`` with a numeric prefix → ``number * job_count * stage_count``
+    - ``str`` ending with ``"c"`` with a numeric prefix → ``number * stage_count``
+    - other ``str`` → ``float(value)``; raises ``ValueError`` if the cast fails
+
+    Args:
+        tl_raw (float | str | None): Raw time limit value.
+        job_count (int): Number of jobs in the instance.
+        stage_count (int): Number of stages in the instance.
+
+    Raises:
+        ValueError: If the time limit value is invalid.
+        ValueError: If the time limit value is not a valid number.
+        ValueError: If the time limit value does not match any recognized pattern.
+
+    Returns:
+        float | None: The resolved time limit value in seconds,
+            or None if no limit is specified.
     """
     if tl_raw is None:
         return None
@@ -66,12 +81,22 @@ def _resolve_cp_tl(
                 f"'{prefix}' is not a valid number"
             )
         return factor * job_count * stage_count
+    elif s.endswith("c"):
+        prefix = s[:-1]
+        try:
+            factor = float(prefix)
+        except ValueError:
+            raise ValueError(
+                f"cp_tl string '{tl_raw}' ends with 'c' but the prefix "
+                f"'{prefix}' is not a valid number"
+            )
+        return factor * stage_count
     try:
         return float(s)
     except ValueError:
         raise ValueError(
             f"cp_tl string '{tl_raw}' cannot be interpreted as a float "
-            "and does not match the '<number>nc' pattern"
+            "and does not match the '<number>nc' or '<number>c' pattern"
         )
 
 
@@ -975,6 +1000,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         solver_thread_cnt: int = 1,
         added_batch_size: int = 1,
         cp_tl: float | str | None = None,
+        apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
         error_if_infeasible: bool = False,
@@ -996,6 +1022,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 A float is interpreted as seconds; a string such as ``"0.006nc"``
                 is evaluated as an expression where ``n`` = job count and ``c`` =
                 stage count; ``None`` means no limit. Defaults to None.
+            apply_cumulative_tl (bool, optional): When True and ``cp_tl`` is set,
+                each batch receives the remaining cumulative budget
+                (``cp_tl_seconds * (step + 1) - elapsed``) rather than a fixed
+                per-batch limit.  If the remaining budget is less than
+                ``cp_tl_seconds``, the per-batch value is used as a minimum floor.
+                Defaults to False.
             pf_method (PFMethod, optional): Partial-fix strategy used to inject the
                 previous step's solution as precedence constraints into the next model.
                 Defaults to "PF1".
@@ -1125,19 +1157,46 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     dispatched.dispatch_job_by_stages(j, job_2_stage_2_p[j])
             dispatched.make_semi_active(stage_2_job_2_p)
             dispatched.insert_idle_time(due_window_map, ewt_map, twt_map)
-            BaseModelBuilder.apply_start_hints_from_start_time_map(
-                mdl, params, op_vars, dispatched.get_jik_2_start_time_map()
-            )
-            BaseModelBuilder.apply_end_hints_from_end_time_map(
-                mdl, params, op_vars, dispatched.get_jik_2_end_time_map()
-            )
-            BaseModelBuilder.apply_et_hints_from_ref_schedule(
-                mdl, params, et_vars, dispatched
-            )
+            # BaseModelBuilder.apply_start_hints_from_start_time_map(
+            #     mdl, params, op_vars, dispatched.get_jik_2_start_time_map()
+            # )
+            # BaseModelBuilder.apply_end_hints_from_end_time_map(
+            #     mdl, params, op_vars, dispatched.get_jik_2_end_time_map()
+            # )
+            # BaseModelBuilder.apply_et_hints_from_ref_schedule(
+            #     mdl, params, et_vars, dispatched
+            # )
 
             solver = cp_model.CpSolver()
             if cp_tl_seconds is not None:
-                solver.parameters.max_time_in_seconds = cp_tl_seconds
+                if apply_cumulative_tl:
+                    elapsed_so_far = time.monotonic() - start_elapsed
+                    cumulative_tl = cp_tl_seconds * (step + 1)
+                    applied_tl = cumulative_tl - elapsed_so_far
+                    if applied_tl < cp_tl_seconds:
+                        self.logger.warning(
+                            "neh_cp step %d: remaining cumulative budget %.2f seconds "
+                            "is below per-batch floor %.2f seconds "
+                            "(cumulative_tl=%.2f, elapsed=%.2f); using floor.",
+                            step,
+                            applied_tl,
+                            cp_tl_seconds,
+                            cumulative_tl,
+                            elapsed_so_far,
+                        )
+                        applied_tl = cp_tl_seconds
+                    else:
+                        self.logger.info(
+                            "neh_cp step %d: applying %.2f seconds "
+                            "(cumulative_tl=%.2f, elapsed=%.2f).",
+                            step,
+                            applied_tl,
+                            cumulative_tl,
+                            elapsed_so_far,
+                        )
+                    solver.parameters.max_time_in_seconds = applied_tl
+                else:
+                    solver.parameters.max_time_in_seconds = cp_tl_seconds
             solver.parameters.num_workers = solver_thread_cnt
             status = solver.solve(mdl)
 
