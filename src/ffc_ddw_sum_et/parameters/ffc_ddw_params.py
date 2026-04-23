@@ -503,3 +503,26 @@ class FFcDDWParameters(FFcParameters):
         return sorted(
             self.job_id_list, key=lambda j: (job_2_due_date_ub_map[j], job_2_pos[j])
         )
+
+    def get_neh_cp_job_sequence(self) -> list[str]:
+        """
+        Get the NEH-CP priority job sequence.
+        Sort by (max(w⁻, w⁺) desc, w⁻+w⁺ desc, due-window width asc, position asc).
+        """
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[int, int, int, int]:
+            w_e = ewt.get(j, 0)
+            w_t = twt.get(j, 0)
+            d_lower, d_upper = ddw[j]
+            return (
+                -max(w_e, w_t),
+                -(w_e + w_t),
+                int(d_upper - d_lower),
+                job_2_pos[j],
+            )
+
+        return sorted(self.job_id_list, key=key)

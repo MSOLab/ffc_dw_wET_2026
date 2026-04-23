@@ -975,25 +975,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return report
 
     def _neh_cp_job_sequence(self) -> list[str]:
-        """NEH-CP job order: (max(w-, w+) desc, w- + w+ desc, d+ - d- asc, pos)."""
-        instance = self.instance
-        ewt = instance.job_2_ewt_map
-        twt = instance.job_2_twt_map
-        ddw = instance.job_2_due_window_map
-        job_2_pos = {j: pos for pos, j in enumerate(instance.job_id_list)}
-
-        def key(j: str) -> tuple[int, int, int, int]:
-            w_e = ewt.get(j, 0)
-            w_t = twt.get(j, 0)
-            d_lower, d_upper = ddw[j]
-            return (
-                -max(w_e, w_t),
-                -(w_e + w_t),
-                int(d_upper - d_lower),
-                job_2_pos[j],
-            )
-
-        return sorted(instance.job_id_list, key=key)
+        return self.instance.get_neh_cp_job_sequence()
 
     def neh_cp(
         self,

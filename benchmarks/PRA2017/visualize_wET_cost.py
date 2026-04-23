@@ -1,18 +1,17 @@
-"""Render parallel_mc_pmtn.py C coefficients as a signed HTML heatmap.
+"""Render per-job wET (weighted earliness + tardiness) penalty as a signed HTML heatmap.
 
-Signed: earliness region (left of due date window) -> negative, tardiness
-region (right of window) -> positive, in-window -> 0. Rendered with a RdBu
-diverging colorscale centered at 0 so blue = earliness, red = tardiness,
-white = zero cost.
+Each cell (job j, time t) shows the penalty incurred when job j completes at time t:
+  - t < d⁻:  earliness  =  w⁻ * (d⁻ - t)   (negative, blue)
+  - d⁻ ≤ t ≤ d⁺:  0  (white)
+  - t > d⁺:  tardiness  =  w⁺ * (t - d⁺)  (positive, red)
 
-Source of truth for the C formula:
-src/ffc_ddw_sum_et/algorithm/parallel_mc_pmtn.py:113-125
+Source of truth for the formula:
+src/ffc_ddw_sum_et/solution/objectives.py:compute_weighted_earliness_tardiness
 """
 
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +24,7 @@ MAX_Z_ABS = 100
 
 
 def _weights_or_default(raw: dict[str, int], jobs: list[str]) -> dict[str, int]:
-    # Matches _resolve_weight_map in parallel_mc_pmtn.py: empty map -> all 1s.
+    # Matches objectives.py: missing weights default to 1
     return dict.fromkeys(jobs, 1) if not raw else raw
 
 
@@ -38,7 +37,7 @@ def _sort_jobs(
     return sorted(instance.job_id_list, key=lambda j: instance.job_2_due_window_map[j])
 
 
-def build_signed_cost_matrix(
+def build_wet_cost_matrix(
     instance: FFcDDWParameters,
     sort: Literal["due-window", "neh-cp"] = "due-window",
 ) -> tuple[list[str], list[int], np.ndarray]:
@@ -56,14 +55,13 @@ def build_signed_cost_matrix(
 
     Z = np.zeros((len(calJ), len(t_axis)), dtype=float)
     for i, j in enumerate(calJ):
-        pj = p[j]
         d_minus, d_plus = ddw[j]
         wm, wp = w_minus[j], w_plus[j]
         for k, t in enumerate(t_axis):
-            if t <= d_minus - pj:
-                Z[i, k] = -wm * math.ceil((d_minus - pj - t + 1) / pj)
+            if t < d_minus:
+                Z[i, k] = -wm * (d_minus - t)
             elif t > d_plus:
-                Z[i, k] = wp * math.ceil((t - d_plus) / pj)
+                Z[i, k] = wp * (t - d_plus)
     Z = np.clip(Z, -MAX_Z_ABS, MAX_Z_ABS)
     return calJ, t_axis, Z
 
@@ -83,13 +81,13 @@ def make_figure(
             zmax=z_abs,
             xgap=0,
             ygap=0,
-            colorbar={"title": "signed C"},
-            hovertemplate=("job=%{y}<br>t=%{x}<br>signed C=%{z}<extra></extra>"),
+            colorbar={"title": "wET"},
+            hovertemplate=("job=%{y}<br>t=%{x}<br>wET=%{z}<extra></extra>"),
         )
     )
     fig.update_layout(
         title=title,
-        xaxis_title="time t",
+        xaxis_title="completion time t",
         yaxis_title="job",
         yaxis={"autorange": "reversed"},
         width=max(900, len(t_axis) + 200),
@@ -111,7 +109,7 @@ def main() -> None:
         type=Path,
         default=None,
         help=(
-            "HTML output path. Defaults to <instance_stem>_C_heatmap.html "
+            "HTML output path. Defaults to <instance_stem>_wET_heatmap.html "
             "next to the instance file."
         ),
     )
@@ -135,18 +133,18 @@ def main() -> None:
     with instance_path.open() as fh:
         instance = FFcDDWParameters.from_pra_2017_data(instance_path.stem, fh)
 
-    calJ, t_axis, Z = build_signed_cost_matrix(instance, sort=args.sort)
+    calJ, t_axis, Z = build_wet_cost_matrix(instance, sort=args.sort)
     fig = make_figure(
         calJ,
         t_axis,
         Z,
-        title=f"parallel_mc_pmtn C heatmap — {instance_path.stem}",
+        title=f"wET cost heatmap — {instance_path.stem}",
     )
 
     out_path = (
         args.output
         if args.output is not None
-        else instance_path.with_name(f"{instance_path.stem}_C_heatmap.html")
+        else instance_path.with_name(f"{instance_path.stem}_wET_heatmap.html")
     )
     out_path = out_path.expanduser().resolve()
     fig.write_html(str(out_path), include_plotlyjs="cdn")
