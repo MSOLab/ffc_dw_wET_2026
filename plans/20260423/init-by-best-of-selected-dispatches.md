@@ -32,7 +32,6 @@ This project wants the same pattern, wired through the YAML
   method_list:
     - run_bn2d
     - select_best_of_mixed_dispatches
-  iit_after_each_dispatch: true
 - method: run_profile_fixed_ns
   solver_thread_cnt: 2
   pf_method: "PF1"
@@ -44,9 +43,16 @@ This project wants the same pattern, wired through the YAML
   forward and reversed instance, mirroring upstream
   `_get_schedule_by_best_of_mixed_dispatches` (`hfs_cp_lns.py:5183`).
   CDS/Gupta/Palmer are **not** currently in this project — they must be ported.
-- Candidate selection criterion:
-  - `iit_after_each_dispatch=True` → compare by **weighted E+T**.
-  - `iit_after_each_dispatch=False` → compare by **makespan** (upstream default).
+- Candidate selection criterion (two-level):
+  - **Mixed dispatch wrappers** (`get_schedule_by_{cds,gupta,palmer}`) always
+    select their internal best (across k-cuts / np variants) **by makespan** —
+    `criteria` parameter was removed from these methods.
+  - **Controller-level final selection** across all candidates:
+    - `iit_after_each_dispatch=True` → IIT applied to each candidate first,
+      then compare by **weighted E+T**.
+    - `iit_after_each_dispatch=False` → compare by **makespan** (upstream default).
+  - The two levels are independent: mixed dispatch internals never use E+T,
+    regardless of `iit_after_each_dispatch`.
 - `AlgRecord.obj_value` / `SubroutineReport.obj_value` reports weighted E+T
   always (project convention; makespan stays in `metrics`).
 
@@ -72,15 +78,15 @@ already exposed on `BaseDispatcher` in this project.
 
 Add three sequence-to-schedule wrappers mirroring upstream `mixed.py:135/204/254`:
 
-- `get_schedule_by_cds(schedule=None, from_stage=None, machine_then_job=False, head_for_all_stages=False, criteria="makespan") -> FFcSchedule | None`
+- `get_schedule_by_cds(schedule=None, from_stage=None, machine_then_job=False, head_for_all_stages=False) -> FFcSchedule | None`
   — iterate `k` in `range(1, stage_count)`, compute CDS sequence, dispatch via
-  existing `get_best_mixed_schedule_by_sequence`, keep best per `criteria`.
-- `get_schedule_by_gupta(...)` — single call via Gupta sequence.
-- `get_schedule_by_palmer(...)` — single call via Palmer sequence.
+  existing `get_best_mixed_schedule_by_sequence`, keep best by **makespan** (hardcoded).
+- `get_schedule_by_gupta(...)` — single call via Gupta sequence, best by makespan.
+- `get_schedule_by_palmer(...)` — single call via Palmer sequence, best by makespan.
 
-`criteria` default `"makespan"` preserves upstream semantics; the new controller
-step passes `"weighted_et"` when `iit_after_each_dispatch=True` (IIT applied
-**per candidate before comparison**).
+`criteria` parameter is **not** exposed on these wrappers — they always use
+`"makespan"` internally, matching upstream. E+T comparison lives at the
+controller layer only.
 
 ### 3. Reversed-instance pipeline
 
@@ -95,16 +101,18 @@ step passes `"weighted_et"` when `iit_after_each_dispatch=True` (IIT applied
 
 ### 4. `src/ffc_ddw_sum_et/orchestration/controller.py`
 
-**Private helper** — `_get_schedule_by_best_of_mixed_dispatches(option_kwargs, *, criteria) -> dict[str, FFcSchedule | None]`:
+**Private helper** — `_get_schedule_by_best_of_mixed_dispatches(*, machine_then_job, head_for_all_stages) -> dict[str, FFcSchedule | None]`:
 
 1. Build fwd + reversed `FFcDDWParameters`.
 2. For each of {CDS, Gupta, Palmer}:
    - Instantiate a `MixedDispatcher` on the fwd instance; call
-     `get_schedule_by_<name>(..., criteria=criteria)`.
+     `get_schedule_by_<name>(machine_then_job=..., head_for_all_stages=...)`.
    - Instantiate a `MixedDispatcher` on the reversed instance; call the same
      method; if result is non-None, convert via `as_reversed()` +
      `make_semi_active(stage_2_job_2_p)` to map back to forward indexing.
 3. Return a flat map `{"mixed.cds": sch, "mixed.cds_rev": sch, "mixed.gupta": …, …}`.
+
+`criteria` is **not** a parameter — mixed wrappers always use makespan internally.
 
 **Public step** — `initialize_by_best_of_selected_dispatches` on
 `FFcDDWSubroutineController` (follows the `run_bn2d` / `initialize_by_edd`
@@ -200,6 +208,8 @@ new step name. No YAML edit required.
   not currently have one; fallback to `instance.job_id_list` position (already
   the default in `_get_rank_tiebreak_key`) is sufficient. No extra plumbing
   needed unless tests reveal non-determinism across runs.
-- **Criterion under `iit_after_each_dispatch=True`.** Plan uses weighted E+T
-  for comparison in that case, per user confirmation. Verify that the
-  integration run shows E+T improving across candidates (not just makespan).
+- **Criterion under `iit_after_each_dispatch=True`.** ~~Plan uses weighted E+T
+  for comparison in that case.~~ **Resolved:** mixed dispatch wrappers always
+  use makespan internally; `iit_after_each_dispatch` only governs the
+  controller-level final selection (IIT-then-E+T vs makespan). The two levels
+  are decoupled.

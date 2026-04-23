@@ -34,7 +34,6 @@ scenarios:
         method_list:
           - run_bn2d
           - select_best_of_mixed_dispatches
-        iit_after_each_dispatch: true
       - method: run_profile_fixed_ns
         solver_thread_cnt: 2
         pf_method: "PF1"

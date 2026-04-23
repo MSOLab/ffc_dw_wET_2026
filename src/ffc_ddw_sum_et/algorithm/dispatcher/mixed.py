@@ -101,7 +101,6 @@ class MixedDispatcher(BaseDispatcher):
         machine_then_job: bool = False,
         head_for_all_stages: bool = False,
         use_palmer_index: bool = False,
-        criteria: Literal["weighted_et", "makespan"] = "makespan",
     ) -> FFcSchedule | None:
         """Run the mixed decoder on every CDS k-cut (1 <= k < stage_count) and
         return the best candidate by ``criteria``."""
@@ -118,17 +117,11 @@ class MixedDispatcher(BaseDispatcher):
                 machine_then_job=machine_then_job,
                 head_for_all_stages=head_for_all_stages,
                 use_palmer_index=use_palmer_index,
-                criteria=criteria,
+                criteria="makespan",
             )
             if dispatched is None:
                 continue
-            if criteria == "makespan":
-                obj = dispatched.makespan
-            else:
-                sum_e, sum_t = compute_weighted_earliness_tardiness(
-                    dispatched, self.instance
-                )
-                obj = sum_e + sum_t
+            obj = dispatched.makespan
             if best_obj is None or obj < best_obj:
                 best_obj = obj
                 best_sch = dispatched
@@ -142,7 +135,6 @@ class MixedDispatcher(BaseDispatcher):
         machine_then_job: bool = False,
         head_for_all_stages: bool = False,
         use_palmer_index: bool = False,
-        criteria: Literal["weighted_et", "makespan"] = "makespan",
     ) -> FFcSchedule | None:
         """Run the mixed decoder on the Gupta sequence."""
         base_schedule = schedule.deepcopy() if schedule is not None else None
@@ -154,7 +146,7 @@ class MixedDispatcher(BaseDispatcher):
             machine_then_job=machine_then_job,
             head_for_all_stages=head_for_all_stages,
             use_palmer_index=use_palmer_index,
-            criteria=criteria,
+            criteria="makespan",
         )
 
     def get_schedule_by_palmer(
@@ -165,7 +157,6 @@ class MixedDispatcher(BaseDispatcher):
         machine_then_job: bool = False,
         head_for_all_stages: bool = False,
         use_palmer_index: bool = False,
-        criteria: Literal["weighted_et", "makespan"] = "makespan",
     ) -> FFcSchedule | None:
         """Run the mixed decoder on the Palmer slope-index sequence."""
         base_schedule = schedule.deepcopy() if schedule is not None else None
@@ -177,5 +168,5 @@ class MixedDispatcher(BaseDispatcher):
             machine_then_job=machine_then_job,
             head_for_all_stages=head_for_all_stages,
             use_palmer_index=use_palmer_index,
-            criteria=criteria,
+            criteria="makespan",
         )

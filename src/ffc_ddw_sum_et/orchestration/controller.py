@@ -207,7 +207,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         *,
         machine_then_job: bool = False,
         head_for_all_stages: bool = False,
-        criteria: Literal["weighted_et", "makespan"] = "makespan",
     ) -> dict[str, FFcSchedule | None]:
         """Build a map of candidate schedules from CDS / Gupta / Palmer on the
         forward instance and the stage-reversed instance.
@@ -239,14 +238,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             fwd_sch = fwd_fn(
                 machine_then_job=machine_then_job,
                 head_for_all_stages=head_for_all_stages,
-                criteria=criteria,
             )
             candidates[f"mixed.{name}"] = fwd_sch
 
             rev_sch = rev_fn(
                 machine_then_job=machine_then_job,
                 head_for_all_stages=head_for_all_stages,
-                criteria=criteria,
             )
             if rev_sch is not None:
                 converted = rev_sch.as_reversed()
@@ -305,13 +302,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ]
         )
 
-        # Per-candidate comparison objective: match upstream (makespan) unless
-        # IIT is applied per candidate, in which case E+T is the natural
-        # comparison objective.
-        criteria: Literal["weighted_et", "makespan"] = (
-            "weighted_et" if iit_after_each_dispatch else "makespan"
-        )
-
         candidates: dict[str, FFcSchedule | None] = {}
         for name in methods:
             if name == "run_bn2d":
@@ -346,7 +336,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     self._get_schedule_by_best_of_mixed_dispatches(
                         machine_then_job=machine_then_job,
                         head_for_all_stages=all_stages_as_bottleneck,
-                        criteria=criteria,
                     )
                 )
             else:
