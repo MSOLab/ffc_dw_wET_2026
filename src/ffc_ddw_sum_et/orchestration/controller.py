@@ -138,6 +138,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         machine_then_job: bool = False,
         all_stages_as_bottleneck: bool = False,
         random_seed: int | None = None,
+        iit_after_dispatch: bool = False,
     ) -> SubroutineReport:
         """Step method: run BN2DDispatcher and return a SubroutineReport.
 
@@ -162,6 +163,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             machine_then_job=machine_then_job,
             all_stages_as_bottleneck=all_stages_as_bottleneck,
             random_seed=random_seed,
+            iit_after_dispatch=iit_after_dispatch,
         )
 
         spec = AlgSpec(

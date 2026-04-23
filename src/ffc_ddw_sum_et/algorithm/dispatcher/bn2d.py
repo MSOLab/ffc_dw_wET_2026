@@ -55,6 +55,7 @@ class BN2DOption(AlgOption):
     machine_then_job: bool = False
     all_stages_as_bottleneck: bool = False
     random_seed: int | None = None
+    iit_after_dispatch: bool = False
 
 
 class BN2DDispatcher:
@@ -87,6 +88,12 @@ class BN2DDispatcher:
             bottleneck_stage_id = self._get_bottleneck_stage(base)
             best_sch = self._get_schedule_from_bottleneck_stage(
                 base, mixed, bottleneck_stage_id, option, rng, spec
+            )
+        if option.iit_after_dispatch:
+            best_sch.insert_idle_time(
+                instance.job_2_due_window_map,
+                instance.job_2_ewt_map,
+                instance.job_2_twt_map,
             )
 
         sum_e, sum_t = compute_weighted_earliness_tardiness(best_sch, instance)
