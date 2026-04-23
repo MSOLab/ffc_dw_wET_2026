@@ -83,7 +83,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 instance job exactly once. When omitted, the instance's native
                 ``job_id_list`` order is used.
         """
-        start_elapsed = self.timer.elapsed_sec
+        start_elapsed = time.monotonic()
 
         if job_sequence is None:
             option = FAMOption()
@@ -97,7 +97,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         record = FAMDispatcher().run(spec)
-        elapsed = self.timer.elapsed_sec - start_elapsed
+        elapsed = time.monotonic() - start_elapsed
 
         result = record.result
         obj_value = (
@@ -251,7 +251,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             Phase 4 objective (or Phase 3 dispatched objective if Phase 4 is
             infeasible).
         """
-        start_elapsed = self.timer.elapsed_sec
+        start_elapsed = time.monotonic()
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
         instance = self.instance
@@ -300,7 +300,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             solver_log_path_getter=self.get_file_path_for_subroutine,
         )
         if phase2 is None:
-            elapsed = self.timer.elapsed_sec - start_elapsed
+            elapsed = time.monotonic() - start_elapsed
             return SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
             )
@@ -330,7 +330,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             machine_then_job=machine_then_job,
         )
         if phase3 is None:
-            elapsed = self.timer.elapsed_sec - start_elapsed
+            elapsed = time.monotonic() - start_elapsed
             return SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
             )
@@ -353,7 +353,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         self.solution_manager.register(
             SubroutineReport(
-                elapsed_time=self.timer.elapsed_sec - start_elapsed,
+                elapsed_time=time.monotonic() - start_elapsed,
                 obj_value=phase3.dispatched_obj,
                 obj_bound=mcf_lb,
             ),
@@ -384,7 +384,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             solver_log_path_getter=self.get_file_path_for_subroutine,
         )
 
-        elapsed = self.timer.elapsed_sec - start_elapsed
+        elapsed = time.monotonic() - start_elapsed
         if phase4.final_schedule is None:
             # Infeasible profile-fix: keep the phase-3 incumbent, bound upgraded.
             return SubroutineReport(
@@ -428,7 +428,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         NOT registered with the incumbent manager (a partial schedule is not
         a full incumbent).
         """
-        start_elapsed = self.timer.elapsed_sec
+        start_elapsed = time.monotonic()
 
         mcf = ParallelMachinePreemptionMcf.from_instance(self.instance)
         mcf.solve()
@@ -519,7 +519,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         if not has_solution:
-            elapsed = self.timer.elapsed_sec - start_elapsed
+            elapsed = time.monotonic() - start_elapsed
             self.logger.warning(
                 "run_last_stage_cp_sat_lb: no feasible solution (status=%s)",
                 solver.StatusName(status),
@@ -549,7 +549,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             schedule=out_schedule, obj_value=cp_obj, obj_bound=mcf_lb
         )
 
-        elapsed = self.timer.elapsed_sec - start_elapsed
+        elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=cp_obj,
@@ -575,7 +575,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``dispatching_criteria`` for its internal selection rule); ``"fam"`` uses
         :class:`FAMDispatcher` and ignores ``dispatching_criteria``.
         """
-        start_elapsed = self.timer.elapsed_sec
+        start_elapsed = time.monotonic()
 
         due_window_map = self.instance.job_2_due_window_map
         job_2_pos = {j: i for i, j in enumerate(self.instance.job_id_list)}
@@ -616,7 +616,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 f"Unknown dispatcher {dispatcher!r}; expected 'mixed' or 'fam'."
             )
 
-        elapsed = self.timer.elapsed_sec - start_elapsed
+        elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=obj_value,
@@ -638,7 +638,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         dispatch profile (precedence arcs derived from the incumbent's
         operation ordering), then solve under a time budget.
         """
-        start_elapsed = self.timer.elapsed_sec
+        start_elapsed = time.monotonic()
 
         incumbent = self.solution_manager.get_incumbent()
         if incumbent is None or incumbent.schedule is None:
@@ -685,7 +685,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
 
         if not has_solution:
-            elapsed = self.timer.elapsed_sec - start_elapsed
+            elapsed = time.monotonic() - start_elapsed
             self.logger.warning(
                 "run_profile_fixed_ns: no feasible solution (status=%s)",
                 solver.StatusName(status),
@@ -719,7 +719,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 cp_obj,
             )
 
-        elapsed = self.timer.elapsed_sec - start_elapsed
+        elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=obj_value,
