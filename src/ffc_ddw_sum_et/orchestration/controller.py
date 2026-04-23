@@ -139,6 +139,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         machine_then_job: bool = False,
         all_stages_as_bottleneck: bool = False,
         random_seed: int | None = None,
+        solver_thread_cnt: int = 1,
         iit_after_dispatch: bool = False,
     ) -> SubroutineReport:
         """Step method: run BN2DDispatcher and return a SubroutineReport.
@@ -164,6 +165,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             machine_then_job=machine_then_job,
             all_stages_as_bottleneck=all_stages_as_bottleneck,
             random_seed=random_seed,
+            solver_thread_cnt=solver_thread_cnt,
             iit_after_dispatch=iit_after_dispatch,
         )
 
@@ -714,7 +716,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(0.01 * n * c)
-        solver.parameters.num_search_workers = int(solver_thread_cnt)
+        solver.parameters.num_search_workers = solver_thread_cnt
         status = solver.Solve(pm_mdl)
 
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
@@ -906,8 +908,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         solver = cp_model.CpSolver()
         if cp_tl_seconds is not None:
             solver.parameters.max_time_in_seconds = cp_tl_seconds
-        solver.parameters.num_search_workers = int(solver_thread_cnt)
-        status = solver.Solve(mdl)
+        solver.parameters.num_workers = solver_thread_cnt
+        status = solver.solve(mdl)
 
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
 

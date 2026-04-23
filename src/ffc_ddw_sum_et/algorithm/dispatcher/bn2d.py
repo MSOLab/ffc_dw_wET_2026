@@ -55,6 +55,7 @@ class BN2DOption(AlgOption):
     machine_then_job: bool = False
     all_stages_as_bottleneck: bool = False
     random_seed: int | None = None
+    solver_thread_cnt: int = 1
     iit_after_dispatch: bool = False
 
 
@@ -151,15 +152,15 @@ class BN2DDispatcher:
         rng: random.Random,
         spec: AlgSpec,
     ) -> FFcSchedule:
-        best_mk: int | None = None
+        best_cmax: int | None = None
         best_sch: FFcSchedule | None = None
         for bottleneck_stage_id in base.stage_id_list:
             sch = self._get_schedule_from_bottleneck_stage(
                 base, mixed, bottleneck_stage_id, option, rng, spec
             )
-            mk = sch.makespan
-            if best_mk is None or mk < best_mk:
-                best_mk = mk
+            cmax = sch.makespan
+            if best_cmax is None or cmax < best_cmax:
+                best_cmax = cmax
                 best_sch = sch
         if best_sch is None:
             raise RuntimeError("BN2D produced no feasible schedule.")
@@ -339,12 +340,17 @@ class BN2DDispatcher:
         right_cap_job_id_list: list[str] = []
 
         if left_cap_op_cnt > 0 or right_cap_op_cnt > 0:
+            if spec.option is None or not isinstance(spec.option, BN2DOption):
+                solver_thread_cnt = 1
+            else:
+                solver_thread_cnt = spec.option.solver_thread_cnt
             result = solve_selection_problem(
                 jobs=base.job_id_list,
                 r=r_dict,
                 t=tr_dict,
                 K_L=left_cap_op_cnt,
                 K_R=right_cap_op_cnt,
+                solver_thread_cnt=solver_thread_cnt,
             )
 
             if result["status"] in ("OPTIMAL", "FEASIBLE"):

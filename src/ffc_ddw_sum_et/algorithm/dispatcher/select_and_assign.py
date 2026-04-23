@@ -19,6 +19,7 @@ def solve_selection_problem(
     t: Mapping[str, int],
     K_L: int,
     K_R: int,
+    solver_thread_cnt: int = 1,
 ) -> dict[str, Any]:
     """Select disjoint ``L`` and ``R`` subsets of ``jobs`` minimising r/t cost.
 
@@ -48,6 +49,7 @@ def solve_selection_problem(
     model.minimize(primary_obj)
 
     solver = cp_model.CpSolver()
+    solver.parameters.num_workers = solver_thread_cnt
     status = solver.solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return {"status": "INFEASIBLE"}
@@ -61,6 +63,7 @@ def solve_selection_problem(
     model.minimize(secondary_obj)
 
     solver = cp_model.CpSolver()
+    solver.parameters.num_workers = solver_thread_cnt
     status = solver.solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return {"status": "INFEASIBLE"}
