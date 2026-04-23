@@ -8,7 +8,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [0, 1439]
+# ins_index: [0, 1439]
 
 output_dir: output
 
@@ -31,8 +31,8 @@ scenarios:
         last_stage_only_cp_solver_thread_cnt: 4
         last_stage_only_cp_tl: "0.01nc"
         repeat_last_stage_only_cp_while_improving: false
-        log_last_stage_only_cp_search_progress: true
+        # log_last_stage_only_cp_search_progress: true
         full_cp_pf_method: "PF1"
         full_cp_solver_thread_cnt: 4
         repeat_full_cp_while_improving: true
-        log_full_cp_search_progress: true
+        # log_full_cp_search_progress: true
