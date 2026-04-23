@@ -1,9 +1,9 @@
 """MixedDispatcher adapted from hybridflowshop/dispatcher/mixed.py.
 
-Only the sequence-driven entry point is ported (the CDS/Gupta/Palmer variants
-are not needed for the MCF LB-init path). Candidate schedules are scored by
-weighted earliness+tardiness instead of makespan, matching the FFcDDW
-objective.
+Candidate schedules are scored by weighted earliness+tardiness by default
+(matching the FFcDDW objective), and can optionally be scored by makespan
+via ``criteria="makespan"`` to preserve upstream semantics when used inside
+BN2D / Johnson / CDS / Gupta / Palmer variants.
 """
 
 from __future__ import annotations
@@ -92,3 +92,90 @@ class MixedDispatcher(BaseDispatcher):
                 best_sch = _schedule
 
         return best_sch
+
+    def get_schedule_by_cds(
+        self,
+        schedule: FFcSchedule | None = None,
+        from_stage: str | None = None,
+        job_2_release_t: dict[str, int] | None = None,
+        machine_then_job: bool = False,
+        head_for_all_stages: bool = False,
+        use_palmer_index: bool = False,
+        criteria: Literal["weighted_et", "makespan"] = "makespan",
+    ) -> FFcSchedule | None:
+        """Run the mixed decoder on every CDS k-cut (1 <= k < stage_count) and
+        return the best candidate by ``criteria``."""
+        best_obj: float | None = None
+        best_sch: FFcSchedule | None = None
+        for k in range(1, self.stage_count):
+            base_schedule = schedule.deepcopy() if schedule is not None else None
+            job_sequence = self.get_cds_sequence(k)
+            dispatched = self.get_best_mixed_schedule_by_sequence(
+                job_sequence,
+                schedule=base_schedule,
+                from_stage=from_stage,
+                job_2_release_t=job_2_release_t,
+                machine_then_job=machine_then_job,
+                head_for_all_stages=head_for_all_stages,
+                use_palmer_index=use_palmer_index,
+                criteria=criteria,
+            )
+            if dispatched is None:
+                continue
+            if criteria == "makespan":
+                obj = dispatched.makespan
+            else:
+                sum_e, sum_t = compute_weighted_earliness_tardiness(
+                    dispatched, self.instance
+                )
+                obj = sum_e + sum_t
+            if best_obj is None or obj < best_obj:
+                best_obj = obj
+                best_sch = dispatched
+        return best_sch
+
+    def get_schedule_by_gupta(
+        self,
+        schedule: FFcSchedule | None = None,
+        from_stage: str | None = None,
+        job_2_release_t: dict[str, int] | None = None,
+        machine_then_job: bool = False,
+        head_for_all_stages: bool = False,
+        use_palmer_index: bool = False,
+        criteria: Literal["weighted_et", "makespan"] = "makespan",
+    ) -> FFcSchedule | None:
+        """Run the mixed decoder on the Gupta sequence."""
+        base_schedule = schedule.deepcopy() if schedule is not None else None
+        return self.get_best_mixed_schedule_by_sequence(
+            self.get_gupta_sequence(),
+            schedule=base_schedule,
+            from_stage=from_stage,
+            job_2_release_t=job_2_release_t,
+            machine_then_job=machine_then_job,
+            head_for_all_stages=head_for_all_stages,
+            use_palmer_index=use_palmer_index,
+            criteria=criteria,
+        )
+
+    def get_schedule_by_palmer(
+        self,
+        schedule: FFcSchedule | None = None,
+        from_stage: str | None = None,
+        job_2_release_t: dict[str, int] | None = None,
+        machine_then_job: bool = False,
+        head_for_all_stages: bool = False,
+        use_palmer_index: bool = False,
+        criteria: Literal["weighted_et", "makespan"] = "makespan",
+    ) -> FFcSchedule | None:
+        """Run the mixed decoder on the Palmer slope-index sequence."""
+        base_schedule = schedule.deepcopy() if schedule is not None else None
+        return self.get_best_mixed_schedule_by_sequence(
+            self.get_palmer_sequence(),
+            schedule=base_schedule,
+            from_stage=from_stage,
+            job_2_release_t=job_2_release_t,
+            machine_then_job=machine_then_job,
+            head_for_all_stages=head_for_all_stages,
+            use_palmer_index=use_palmer_index,
+            criteria=criteria,
+        )

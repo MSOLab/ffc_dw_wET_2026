@@ -27,6 +27,7 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
+from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
@@ -197,6 +198,224 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
             self.solution_manager.register(report, bn2d_solution)
 
+        return report
+
+    def _get_schedule_by_best_of_mixed_dispatches(
+        self,
+        *,
+        machine_then_job: bool = False,
+        head_for_all_stages: bool = False,
+        criteria: Literal["weighted_et", "makespan"] = "makespan",
+    ) -> dict[str, FFcSchedule | None]:
+        """Build a map of candidate schedules from CDS / Gupta / Palmer on the
+        forward instance and the stage-reversed instance.
+
+        The reversed-instance candidates are mapped back to forward stage
+        indexing via :meth:`FFcSchedule.as_reversed` followed by
+        :meth:`FFcSchedule.make_semi_active` using the forward stage/job
+        processing-time map.
+        """
+        instance = self.instance
+        fwd_mixed = MixedDispatcher(instance, logger=self.logger)
+
+        reversed_instance = FFcDDWParameters.reverse_stages(instance)
+        rev_mixed = MixedDispatcher(reversed_instance, logger=self.logger)
+
+        stage_2_job_2_p = instance.stage_2_job_2_p_map
+        method_pairs = [
+            ("cds", fwd_mixed.get_schedule_by_cds, rev_mixed.get_schedule_by_cds),
+            ("gupta", fwd_mixed.get_schedule_by_gupta, rev_mixed.get_schedule_by_gupta),
+            (
+                "palmer",
+                fwd_mixed.get_schedule_by_palmer,
+                rev_mixed.get_schedule_by_palmer,
+            ),
+        ]
+
+        candidates: dict[str, FFcSchedule | None] = {}
+        for name, fwd_fn, rev_fn in method_pairs:
+            fwd_sch = fwd_fn(
+                machine_then_job=machine_then_job,
+                head_for_all_stages=head_for_all_stages,
+                criteria=criteria,
+            )
+            candidates[f"mixed.{name}"] = fwd_sch
+
+            rev_sch = rev_fn(
+                machine_then_job=machine_then_job,
+                head_for_all_stages=head_for_all_stages,
+                criteria=criteria,
+            )
+            if rev_sch is not None:
+                converted = rev_sch.as_reversed()
+                converted.make_semi_active(stage_2_job_2_p)
+                candidates[f"mixed.{name}_rev"] = converted
+            else:
+                candidates[f"mixed.{name}_rev"] = None
+        return candidates
+
+    def initialize_by_best_of_selected_dispatches(
+        self,
+        left_cap_multiplier: int | None = None,
+        right_cap_multiplier: int | None = None,
+        left_cap_portion: float | None = None,
+        right_cap_portion: float | None = None,
+        normalize_by_stage_cnt: bool = False,
+        randomize_mid_all: bool = False,
+        reverse_mid_even: bool = False,
+        reverse_mid_all: bool = False,
+        mixed_schedule_for_former_stages: bool = False,
+        mixed_schedule_for_later_stages: bool = False,
+        machine_then_job: bool = False,
+        all_stages_as_bottleneck: bool = False,
+        random_seed: int | None = None,
+        error_if_infeasible: bool = False,
+        draw_gantt: bool = False,
+        method_list: Sequence[str] | None = None,
+        iit_after_each_dispatch: bool = False,
+    ) -> SubroutineReport:
+        """Seed an incumbent by taking the best of several dispatching
+        heuristics (BN2D and/or CDS / Gupta / Palmer on the forward + reversed
+        instance).
+
+        ``method_list`` defaults to
+        ``["run_bn2d", "select_best_of_mixed_dispatches"]`` — matching the
+        upstream ``initialize_by_best_of_selected_dispatches`` step from
+        ``hybridflowshop``. Unknown method names are logged and skipped.
+
+        When ``iit_after_each_dispatch`` is ``True``, last-stage idle-time
+        insertion is applied to each non-None candidate **before** comparison,
+        and candidates are compared by weighted E+T; otherwise comparison is
+        by makespan (mirroring the upstream default, which minimizes
+        makespan). The reported ``obj_value`` is always weighted E+T of the
+        chosen schedule (project convention).
+        """
+        del draw_gantt  # Controller-level gantt drawing is orchestrated elsewhere.
+        start_elapsed = time.monotonic()
+        instance = self.instance
+
+        methods = (
+            list(method_list)
+            if method_list
+            else [
+                "run_bn2d",
+                "select_best_of_mixed_dispatches",
+            ]
+        )
+
+        # Per-candidate comparison objective: match upstream (makespan) unless
+        # IIT is applied per candidate, in which case E+T is the natural
+        # comparison objective.
+        criteria: Literal["weighted_et", "makespan"] = (
+            "weighted_et" if iit_after_each_dispatch else "makespan"
+        )
+
+        candidates: dict[str, FFcSchedule | None] = {}
+        for name in methods:
+            if name == "run_bn2d":
+                bn2d_option = BN2DOption(
+                    left_cap_multiplier=left_cap_multiplier,
+                    right_cap_multiplier=right_cap_multiplier,
+                    left_cap_portion=left_cap_portion,
+                    right_cap_portion=right_cap_portion,
+                    normalize_by_stage_cnt=normalize_by_stage_cnt,
+                    randomize_mid_all=randomize_mid_all,
+                    reverse_mid_even=reverse_mid_even,
+                    reverse_mid_all=reverse_mid_all,
+                    mixed_schedule_for_former_stages=mixed_schedule_for_former_stages,
+                    mixed_schedule_for_later_stages=mixed_schedule_for_later_stages,
+                    machine_then_job=machine_then_job,
+                    all_stages_as_bottleneck=all_stages_as_bottleneck,
+                    random_seed=random_seed,
+                    iit_after_dispatch=False,
+                )
+                bn2d_spec = AlgSpec(
+                    instance=instance,
+                    option=bn2d_option,
+                    logger=self.logger,
+                )
+                bn2d_record = BN2DDispatcher().run(bn2d_spec)
+                bn2d_result = bn2d_record.result
+                candidates["run_bn2d"] = (
+                    bn2d_result.schedule if bn2d_result is not None else None
+                )
+            elif name == "select_best_of_mixed_dispatches":
+                candidates.update(
+                    self._get_schedule_by_best_of_mixed_dispatches(
+                        machine_then_job=machine_then_job,
+                        head_for_all_stages=all_stages_as_bottleneck,
+                        criteria=criteria,
+                    )
+                )
+            else:
+                self.logger.warning(
+                    "initialize_by_best_of_selected_dispatches: "
+                    "unknown candidate method '%s'; skipping.",
+                    name,
+                )
+
+        if iit_after_each_dispatch:
+            for sch in candidates.values():
+                if sch is None:
+                    continue
+                sch.insert_idle_time(
+                    instance.job_2_due_window_map,
+                    instance.job_2_ewt_map,
+                    instance.job_2_twt_map,
+                )
+
+        best_name = ""
+        best_sch: FFcSchedule | None = None
+        best_cmp: float | None = None
+        for name, sch in candidates.items():
+            if sch is None:
+                continue
+            if iit_after_each_dispatch:
+                sum_e, sum_t = compute_weighted_earliness_tardiness(sch, instance)
+                cmp = float(sum_e + sum_t)
+            else:
+                cmp = float(sch.makespan)
+            if best_cmp is None or cmp < best_cmp:
+                best_cmp = cmp
+                best_sch = sch
+                best_name = name
+
+        elapsed = time.monotonic() - start_elapsed
+
+        if best_sch is None:
+            if error_if_infeasible:
+                raise RuntimeError(
+                    "initialize_by_best_of_selected_dispatches produced no "
+                    f"feasible schedule for instance {instance.name}."
+                )
+            self.logger.warning(
+                "initialize_by_best_of_selected_dispatches: no feasible "
+                "candidate; returning empty report."
+            )
+            return SubroutineReport(
+                elapsed_time=elapsed, obj_value=None, obj_bound=None
+            )
+
+        sum_e, sum_t = compute_weighted_earliness_tardiness(best_sch, instance)
+        obj_value = float(sum_e + sum_t)
+        self.logger.info(
+            "initialize_by_best_of_selected_dispatches: best=%s cmp=%s "
+            "obj_value(weighted_et)=%s makespan=%s",
+            best_name,
+            best_cmp,
+            obj_value,
+            best_sch.makespan,
+        )
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        self.solution_manager.register(
+            report,
+            FFcDDWSolution(schedule=best_sch, obj_value=obj_value, obj_bound=None),
+        )
         return report
 
     def run_mcf_lb_4(
@@ -619,7 +838,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         job_sequence = self.instance.get_eddub_job_sequence()
 
         schedule, obj_value = self._dispatch_by_sequence(
-            job_sequence, dispatcher=dispatcher, dispatching_criteria=dispatching_criteria
+            job_sequence,
+            dispatcher=dispatcher,
+            dispatching_criteria=dispatching_criteria,
         )
 
         elapsed = time.monotonic() - start_elapsed
