@@ -58,6 +58,7 @@ class InstanceResult:
     machines_per_stage: int | None = None
     timelimit: float | None = None
     mcf_lb_diagnostic: dict[str, Any] | None = None
+    makespan: float | None = None
 
 
 class FFcDDWSingleInstanceRunner(
@@ -229,6 +230,8 @@ class FFcDDWSingleInstanceRunner(
                     "Error saving mcf_lb_diagnostic yaml for %s", self.ins_name
                 )
 
+        makespan = int(incumbent.schedule.makespan) if incumbent is not None else None
+
         if self.working_dir is not None and last_report is not None:
             try:
                 self._save_obj_log(solution_manager.history)
@@ -271,6 +274,7 @@ class FFcDDWSingleInstanceRunner(
             machines_per_stage=mps,
             timelimit=timelimit,
             mcf_lb_diagnostic=diag_dict,
+            makespan=makespan,
         )
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:

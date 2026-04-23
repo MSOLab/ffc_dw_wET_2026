@@ -19,7 +19,7 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/20260423/cmax_init_pfns_config_2.yaml")
+CONFIG_PATH = Path("metadata/20260423/cmax_init_pfns_config_3.yaml")
 
 
 def _setup_main_logger(output_dir: Path) -> logging.Logger:
