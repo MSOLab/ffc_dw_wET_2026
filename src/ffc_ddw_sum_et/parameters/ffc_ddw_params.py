@@ -337,8 +337,8 @@ class FFcDDWParameters(FFcParameters):
 
     def get_job_2_due_date_star_minus_p_map(self) -> dict[str, float]:
         """
-        Get a mapping from job ID to due date star minus half processing time
-        (d^{*}_j - 0.5 * sum_i p_{ij}).
+        Get a mapping from job ID to due date star minus processing time
+        (d^{*}_j - sum_i p_{ij}).
         """
         job_2_due_date_star_map = self.get_job_2_due_date_star_map()
         job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(

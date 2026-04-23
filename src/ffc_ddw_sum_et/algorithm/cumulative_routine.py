@@ -22,6 +22,7 @@ __all__ = [
     "solve_full_cp_with_profile_fix",
     "solve_last_stage_with_profile_fix",
 ]
+HORIZON_MULTIPLIER = 2
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -116,7 +117,7 @@ def solve_last_stage_with_profile_fix(
     best_result: LastStageSolveResult | None = None
     best_status: str | None = None
     prev_obj = float("inf")
-    horizon = int(current_schedule.makespan * 2)
+    horizon = int(current_schedule.makespan * HORIZON_MULTIPLIER)
 
     loop_index = 0
     while True:
@@ -286,7 +287,7 @@ def solve_full_cp_with_profile_fix(
     best_result: FullCpSolveResult | None = None
     best_status: str | None = None
     prev_obj = float("inf")
-    horizon = int(current_schedule.makespan * 2)
+    horizon = int(current_schedule.makespan * HORIZON_MULTIPLIER)
 
     loop_index = 0
     while True:
