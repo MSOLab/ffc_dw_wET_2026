@@ -6,7 +6,6 @@ from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffc_schedule import FFcSchedule
 
 
-# TODO: put "weighted" in the name
 def compute_weighted_earliness_tardiness(
     schedule: FFcSchedule, instance: FFcDDWParameters
 ) -> tuple[int, int]:

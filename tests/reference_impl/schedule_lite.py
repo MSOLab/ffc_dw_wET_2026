@@ -907,7 +907,6 @@ class HybridFlowshopLiteSchedule:
         Returns:
             dict[JobIdType, int]: Job ID -> Palmer's slope index
         """
-        # TODO: overlap with hybridflowshop/dispatcher/base.py's get_palmer_sequence
         if not jobs:
             _job_id_list = self.jobs
         else:
@@ -952,7 +951,6 @@ class HybridFlowshopLiteSchedule:
         Returns:
             dict[JobIdType, float]: Job ID -> Gupta's index
         """
-        # TODO: overlap with hybridflowshop/dispatcher/base.py's get_gupta_sequence
         if not jobs:
             _job_id_list = self.jobs
         else:
