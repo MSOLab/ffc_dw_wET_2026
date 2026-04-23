@@ -20,6 +20,8 @@ import plotly.graph_objects as go
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
+MAX_Z_ABS = 100
+
 
 def _weights_or_default(raw: dict[str, int], jobs: list[str]) -> dict[str, int]:
     # Matches _resolve_weight_map in parallel_mc_pmtn.py: empty map -> all 1s.
@@ -29,7 +31,7 @@ def _weights_or_default(raw: dict[str, int], jobs: list[str]) -> dict[str, int]:
 def build_signed_cost_matrix(
     instance: FFcDDWParameters,
 ) -> tuple[list[str], list[int], np.ndarray]:
-    calJ = instance.job_id_list
+    calJ = sorted(instance.job_id_list, key=lambda j: instance.job_2_due_window_map[j])
     last_stage = instance.stage_id_list[-1]
     p = instance.get_job_2_p_map_for_stage(last_stage)
     ddw = instance.job_2_due_window_map
@@ -51,6 +53,7 @@ def build_signed_cost_matrix(
                 Z[i, k] = -wm * math.ceil((d_minus - pj - t + 1) / pj)
             elif t > d_plus:
                 Z[i, k] = wp * math.ceil((t - d_plus) / pj)
+    Z = np.clip(Z, -MAX_Z_ABS, MAX_Z_ABS)
     return calJ, t_axis, Z
 
 
