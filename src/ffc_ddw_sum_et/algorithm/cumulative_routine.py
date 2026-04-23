@@ -167,7 +167,7 @@ def solve_last_stage_with_profile_fix(
                 )
                 try:
                     solve_log_path = solver_log_path_getter(filename_suffix)
-                    with solve_log_path.open("a", encoding="utf-8") as fp:
+                    with solve_log_path.open("w", encoding="utf-8") as fp:
                         fp.write(solve_log)
                         if not solve_log.endswith("\n"):
                             fp.write("\n")
@@ -333,7 +333,7 @@ def solve_full_cp_with_profile_fix(
                 )
                 try:
                     solve_log_path = solver_log_path_getter(filename_suffix)
-                    with solve_log_path.open("a", encoding="utf-8") as fp:
+                    with solve_log_path.open("w", encoding="utf-8") as fp:
                         fp.write(solve_log)
                         if not solve_log.endswith("\n"):
                             fp.write("\n")
