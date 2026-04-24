@@ -21,7 +21,7 @@ import plotly.graph_objects as go
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
-MAX_Z_ABS = 100
+CLIP_QUANTILE = 0.25
 
 
 def _weights_or_default(raw: dict[str, int], jobs: list[str]) -> dict[str, int]:
@@ -35,13 +35,18 @@ def _sort_jobs(
 ) -> list[str]:
     if sort == "neh-cp":
         return instance.get_neh_cp_job_sequence()
-    return sorted(instance.job_id_list, key=lambda j: instance.job_2_due_window_map[j])
+    ddw = instance.job_2_due_window_map
+    p = instance.get_job_2_p_map_for_stage(instance.stage_id_list[-1])
+    return sorted(
+        instance.job_id_list,
+        key=lambda j: (max(0, ddw[j][1] - p[j]), ddw[j][1], ddw[j][0]),
+    )
 
 
 def build_signed_cost_matrix(
     instance: FFcDDWParameters,
     sort: Literal["due-window", "neh-cp"] = "due-window",
-) -> tuple[list[str], list[int], np.ndarray]:
+) -> tuple[list[str], list[int], np.ndarray, list[tuple[float, float, int]]]:
     calJ = _sort_jobs(instance, sort=sort)
     last_stage = instance.stage_id_list[-1]
     p = instance.get_job_2_p_map_for_stage(last_stage)
@@ -55,6 +60,8 @@ def build_signed_cost_matrix(
     t_axis = list(range(t_min, t_max + 1))
 
     Z = np.zeros((len(calJ), len(t_axis)), dtype=float)
+    rects: list[tuple[float, float, int]] = []
+    y_labels: list[str] = []
     for i, j in enumerate(calJ):
         pj = p[j]
         d_minus, d_plus = ddw[j]
@@ -64,19 +71,27 @@ def build_signed_cost_matrix(
                 Z[i, k] = -wm * math.ceil((d_minus - pj - t + 1) / pj)
             elif t > d_plus:
                 Z[i, k] = wp * math.ceil((t - d_plus) / pj)
-    Z = np.clip(Z, -MAX_Z_ABS, MAX_Z_ABS)
-    return calJ, t_axis, Z
+        x0 = max(0.0, d_plus - pj)
+        rects.append((x0, x0 + pj, i))
+        y_labels.append(f"{j}({pj:>3})")
+    threshold = float(np.quantile(np.abs(Z), CLIP_QUANTILE))
+    Z = np.clip(Z, -threshold, threshold)
+    return y_labels, t_axis, Z, rects
 
 
 def make_figure(
-    calJ: list[str], t_axis: list[int], Z: np.ndarray, title: str
+    y_labels: list[str],
+    t_axis: list[int],
+    Z: np.ndarray,
+    rects: list[tuple[float, float, int]],
+    title: str,
 ) -> go.Figure:
     z_abs = max(1.0, float(np.abs(Z).max()))
     fig = go.Figure(
         go.Heatmap(
             z=Z,
             x=t_axis,
-            y=calJ,
+            y=y_labels,
             colorscale="RdBu_r",
             zmid=0,
             zmin=-z_abs,
@@ -90,11 +105,25 @@ def make_figure(
     fig.update_layout(
         title=title,
         xaxis_title="time t",
-        yaxis_title="job",
-        yaxis={"autorange": "reversed"},
+        yaxis_title="job (p)",
+        yaxis={
+            "autorange": "reversed",
+            "tickfont": {"family": "Courier New, monospace"},
+        },
         width=max(900, len(t_axis) + 200),
-        height=max(400, 18 * len(calJ) + 120),
+        height=max(400, 18 * len(y_labels) + 120),
     )
+    for x0, x1, i in rects:
+        fig.add_shape(
+            type="rect",
+            x0=x0,
+            x1=x1,
+            y0=i - 0.5,
+            y1=i + 0.5,
+            line={"color": "black", "width": 1},
+            fillcolor="rgba(0,0,0,0)",
+            layer="above",
+        )
     return fig
 
 
@@ -121,7 +150,7 @@ def main() -> None:
         default="due-window",
         help=(
             "Job row ordering in the heatmap. "
-            "'due-window' sorts by (d⁻, d⁺) tuples. "
+            "'due-window' sorts by max(0, d⁺−p) asc, then d⁺ asc, then d⁻ asc. "
             "'neh-cp' sorts by (max(w⁻,w⁺) desc, w⁻+w⁺ desc, window width asc, position). "
             "Defaults to 'due-window'."
         ),
@@ -135,11 +164,12 @@ def main() -> None:
     with instance_path.open() as fh:
         instance = FFcDDWParameters.from_pra_2017_data(instance_path.stem, fh)
 
-    calJ, t_axis, Z = build_signed_cost_matrix(instance, sort=args.sort)
+    y_labels, t_axis, Z, rects = build_signed_cost_matrix(instance, sort=args.sort)
     fig = make_figure(
-        calJ,
+        y_labels,
         t_axis,
         Z,
+        rects,
         title=f"parallel_mc_pmtn C heatmap — {instance_path.stem}",
     )
 
@@ -152,7 +182,7 @@ def main() -> None:
     fig.write_html(str(out_path), include_plotlyjs="cdn")
 
     print(
-        f"Wrote {out_path} — jobs={len(calJ)}, "
+        f"Wrote {out_path} — jobs={len(y_labels)}, "
         f"t-range=[{t_axis[0]}..{t_axis[-1]}] ({len(t_axis)} cells/row)"
     )
 
