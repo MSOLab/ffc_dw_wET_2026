@@ -34,13 +34,8 @@ def _sort_jobs(
     sort: Literal["due-window", "neh-cp"] = "due-window",
 ) -> list[str]:
     if sort == "neh-cp":
-        return instance.get_neh_cp_job_sequence()
-    ddw = instance.job_2_due_window_map
-    p = instance.get_job_2_p_map_for_stage(instance.stage_id_list[-1])
-    return sorted(
-        instance.job_id_list,
-        key=lambda j: (max(0, ddw[j][1] - p[j]), ddw[j][1], ddw[j][0]),
-    )
+        return instance.get_weight_due_pos_job_sequence()
+    return instance.get_due_weight_pos_job_sequence()
 
 
 def build_signed_cost_matrix(

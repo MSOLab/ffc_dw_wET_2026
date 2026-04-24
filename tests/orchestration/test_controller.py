@@ -158,3 +158,51 @@ def test_neh_cp_job_sequence_priority() -> None:
     controller = _make_controller(instance)
 
     assert controller._neh_cp_job_sequence() == ["j0", "j2", "j1"]
+    assert controller._neh_cp_job_sequence(job_priority="weight-due-pos") == [
+        "j0",
+        "j2",
+        "j1",
+    ]
+
+
+def test_neh_cp_job_sequence_due_weight_pos() -> None:
+    # Last-stage p_j: j0=2, j1=3, j2=4, j3=4, j4=4
+    # d_plus:         j0=10, j1=10, j2=10, j3=10, j4=10
+    # d_minus:        j0=0,  j1=0,  j2=2,  j3=5,  j4=5
+    # w_sum:          j0=3,  j1=3,  j2=3,  j3=4,  j4=2
+    # Priority keys (max(0, d+ - p), d+, d-, w_sum, pos):
+    #   j0: (8, 10, 0, 3, 0)
+    #   j1: (7, 10, 0, 3, 1)
+    #   j2: (6, 10, 2, 3, 2)
+    #   j3: (6, 10, 5, 4, 3)
+    #   j4: (6, 10, 5, 2, 4)
+    # Ascending: j2 (6, d-=2), then j4 (6, d-=5, w_sum=2), then j3 (6, d-=5,
+    # w_sum=4), then j1 (7), then j0 (8).
+    instance = FFcDDWParameters(
+        name="due_weight_pos_instance",
+        job_id_list=["j0", "j1", "j2", "j3", "j4"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="due_weight_pos_instance_p",
+            df=pd.DataFrame([[2], [3], [4], [4], [4]]),
+        ),
+        job_2_due_window_map={
+            "j0": (0, 10),
+            "j1": (0, 10),
+            "j2": (2, 10),
+            "j3": (5, 10),
+            "j4": (5, 10),
+        },
+        job_2_ewt_map={"j0": 2, "j1": 2, "j2": 2, "j3": 2, "j4": 1},
+        job_2_twt_map={"j0": 1, "j1": 1, "j2": 1, "j3": 2, "j4": 1},
+    )
+    controller = _make_controller(instance)
+
+    assert controller._neh_cp_job_sequence(job_priority="due-weight-pos") == [
+        "j2",
+        "j4",
+        "j3",
+        "j1",
+        "j0",
+    ]

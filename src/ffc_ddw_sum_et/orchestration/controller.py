@@ -35,7 +35,9 @@ from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 from .controller_core import FFcDDWSubroutineControllerCore
 from .solution_manager import FFcDDWSolution
 
-__all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic"]
+__all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
+
+NehCpJobPriority = Literal["weight-due-pos", "due-weight-pos"]
 
 
 def _resolve_cp_tl(
@@ -974,8 +976,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
-    def _neh_cp_job_sequence(self) -> list[str]:
-        return self.instance.get_neh_cp_job_sequence()
+    def _neh_cp_job_sequence(
+        self, job_priority: NehCpJobPriority = "weight-due-pos"
+    ) -> list[str]:
+        if job_priority == "weight-due-pos":
+            return self.instance.get_weight_due_pos_job_sequence()
+        if job_priority == "due-weight-pos":
+            return self.instance.get_due_weight_pos_job_sequence()
+        raise ValueError(f"Unknown job_priority: {job_priority!r}")
 
     def neh_cp(
         self,
@@ -986,6 +994,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
         error_if_infeasible: bool = False,
+        job_priority: NehCpJobPriority = "weight-due-pos",
     ) -> SubroutineReport:
         """Build a schedule by incrementally adding job batches and refining via CP-SAT.
 
@@ -1021,6 +1030,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible (bool, optional): Raise ``RuntimeError`` instead of
                 returning a dispatched fallback when no feasible solution is found.
                 Defaults to False.
+            job_priority (NehCpJobPriority, optional): Rule used to order jobs for
+                the incremental batches. ``"weight-due-pos"`` (default) sorts by
+                ``(max(w⁻, w⁺) desc, w⁻+w⁺ desc, due-window width asc, position
+                asc)``. ``"due-weight-pos"`` sorts by
+                ``(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ asc, position
+                asc)``. Defaults to ``"weight-due-pos"``.
 
         Raises:
             ValueError: If ``skip_pf_below_obj`` is a string other than ``"makespan"``
@@ -1054,7 +1069,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         params_for_horizon = BaseModelBuilder.make_params(instance)
         horizon = sum(params_for_horizon.p.values())
 
-        job_sequence = self._neh_cp_job_sequence()
+        job_sequence = self._neh_cp_job_sequence(job_priority=job_priority)
         max_m = max(instance.machine_count_per_stage)
         first_batch_size = max(added_batch_size, max_m * 2)
 

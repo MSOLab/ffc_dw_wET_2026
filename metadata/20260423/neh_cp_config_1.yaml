@@ -23,6 +23,7 @@ scenarios:
     output_subdir: neh_cp_b01_pf0
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 1
         cp_tl: "0.0006nc"
@@ -33,6 +34,7 @@ scenarios:
     output_subdir: neh_cp_b02_pf0
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 2
         cp_tl: "0.0012nc"
@@ -43,6 +45,7 @@ scenarios:
     output_subdir: neh_cp_b05_pf0
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 5
         cp_tl: "0.003nc"
@@ -53,6 +56,7 @@ scenarios:
     output_subdir: neh_cp_b10_pf0
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 10
         cp_tl: "0.006nc"
@@ -63,6 +67,7 @@ scenarios:
     output_subdir: neh_cp_b01_pf1
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 1
         cp_tl: "0.0006nc"
@@ -73,6 +78,7 @@ scenarios:
     output_subdir: neh_cp_b02_pf1
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 2
         cp_tl: "0.0012nc"
@@ -83,6 +89,7 @@ scenarios:
     output_subdir: neh_cp_b05_pf1
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 5
         cp_tl: "0.003nc"
@@ -93,6 +100,7 @@ scenarios:
     output_subdir: neh_cp_b10_pf1
     subroutine_flow:
       - method: neh_cp
+        job_priority: "weight-due-pos"
         solver_thread_cnt: 8
         added_batch_size: 10
         cp_tl: "0.006nc"
