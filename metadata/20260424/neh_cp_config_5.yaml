@@ -1,8 +1,4 @@
 # NEH-CP incremental constructor experiment.
-# Job sequence decided up-front by (max(w-,w+) desc, w-+w+ desc, d+-d- asc);
-# first batch size = max(added_batch_size, max_m_per_stage * 2).
-# Reported objective: weighted earliness + tardiness.
-# Ref: plans/20260423/neh_cp.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

@@ -914,15 +914,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
-    def _neh_cp_job_sequence(
-        self, job_priority: NehCpJobPriority = "weight-due-pos"
-    ) -> list[str]:
-        if job_priority == "weight-due-pos":
-            return self.instance.get_weight_due_pos_job_sequence()
-        if job_priority == "due-weight-pos":
-            return self.instance.get_due_weight_pos_job_sequence()
-        raise ValueError(f"Unknown job_priority: {job_priority!r}")
-
     def neh_cp(
         self,
         job_priority: NehCpJobPriority = "weight-due-pos",

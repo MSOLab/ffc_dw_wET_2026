@@ -19,7 +19,7 @@ scenarios:
     output_subdir: neh_cp_b5_pf1_below_cmax_idv
     subroutine_flow:
       - method: neh_cp
-        job_priority: "due-weight-pos"
+        job_priority: "due*-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 5
         cp_tl: "0.12c"

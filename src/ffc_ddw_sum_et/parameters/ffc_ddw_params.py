@@ -530,7 +530,7 @@ class FFcDDWParameters(FFcParameters):
     def get_due_weight_pos_job_sequence(self) -> list[str]:
         """
         Get the "due-weight-pos" priority job sequence.
-        Sort by (max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ asc, position asc).
+        Sort by (max(0, d⁺-p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc, position asc).
         """
         last_stage_id = self.stage_id_list[-1]
         p_last = self.get_job_2_p_map_for_stage(last_stage_id)
@@ -545,7 +545,30 @@ class FFcDDWParameters(FFcParameters):
                 max(0, d_upper - p_last[j]),
                 d_upper,
                 d_lower,
-                ewt[j] + twt[j],
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+
+        return sorted(self.job_id_list, key=key)
+
+    def get_due_star_weight_pos_job_sequence(self) -> list[str]:
+        """
+        Get the "due-star-weight-pos" priority job sequence.
+        Sort by (d* asc, d+ asc, w⁻+w⁺ desc, position asc).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[float, int, int, int]:
+            d_star = job_2_due_date_star_map[j]
+            d_upper = ddw[j][1]
+            return (
+                d_star,
+                d_upper,
+                -(ewt[j] + twt[j]),
                 job_2_pos[j],
             )
 

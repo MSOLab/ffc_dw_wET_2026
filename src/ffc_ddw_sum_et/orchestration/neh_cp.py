@@ -33,7 +33,19 @@ from .tl_resolver import resolve_cp_tl
 
 __all__ = ["NehCpConstructor", "NehCpContext", "NehCpJobPriority"]
 
-NehCpJobPriority = Literal["weight-due-pos", "due-weight-pos"]
+NehCpJobPriority = Literal["weight-due-pos", "due-weight-pos", "due*-weight-pos"]
+
+
+def _neh_cp_job_sequence(
+    instance: FFcDDWParameters, job_priority: NehCpJobPriority = "weight-due-pos"
+) -> list[str]:
+    if job_priority == "weight-due-pos":
+        return instance.get_weight_due_pos_job_sequence()
+    if job_priority == "due-weight-pos":
+        return instance.get_due_weight_pos_job_sequence()
+    if job_priority == "due*-weight-pos":
+        return instance.get_due_star_weight_pos_job_sequence()
+    raise ValueError(f"Unknown job_priority: {job_priority!r}")
 
 
 class NehCpContext(Protocol):
@@ -42,10 +54,6 @@ class NehCpContext(Protocol):
     instance: FFcDDWParameters
     logger: logging.Logger
     solution_manager: FFcDDWSolutionManager
-
-    def _neh_cp_job_sequence(
-        self, job_priority: NehCpJobPriority = "weight-due-pos"
-    ) -> list[str]: ...
 
     def get_file_path_for_subroutine(self, suffix: str) -> Path: ...
 
@@ -77,7 +85,7 @@ class NehCpConstructor:
     ) -> SubroutineReport:
         """Build a schedule by incrementally adding job batches and refining via CP-SAT.
 
-        Jobs are ordered by ``ctx._neh_cp_job_sequence`` and added in batches.
+        Jobs are ordered by ``_neh_cp_job_sequence`` and added in batches.
         The first batch is ``max(added_batch_size, max_machines_per_stage * 2)``;
         each subsequent batch adds ``added_batch_size`` jobs.  After each batch
         a CP-SAT model is solved; the best of the CP and dispatch solutions
@@ -174,7 +182,7 @@ class NehCpConstructor:
         params_for_horizon = BaseModelBuilder.make_params(instance)
         horizon = sum(params_for_horizon.p.values())
 
-        job_sequence = ctx._neh_cp_job_sequence(job_priority=job_priority)
+        job_sequence = _neh_cp_job_sequence(instance, job_priority=job_priority)
         max_m = max(instance.machine_count_per_stage)
         first_batch_size = max(added_batch_size, max_m * 2)
 
