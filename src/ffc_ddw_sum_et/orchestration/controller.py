@@ -1154,15 +1154,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     dispatched.dispatch_job_by_stages(j, job_2_stage_2_p[j])
             dispatched.make_semi_active(stage_2_job_2_p)
             dispatched.insert_idle_time(due_window_map, ewt_map, twt_map)
-            # BaseModelBuilder.apply_start_hints_from_start_time_map(
-            #     mdl, params, op_vars, dispatched.get_jik_2_start_time_map()
-            # )
-            # BaseModelBuilder.apply_end_hints_from_end_time_map(
-            #     mdl, params, op_vars, dispatched.get_jik_2_end_time_map()
-            # )
-            # BaseModelBuilder.apply_et_hints_from_ref_schedule(
-            #     mdl, params, et_vars, dispatched
-            # )
+            BaseModelBuilder.apply_start_hints_from_start_time_map(
+                mdl, params, op_vars, dispatched.get_jik_2_start_time_map()
+            )
+            BaseModelBuilder.apply_end_hints_from_end_time_map(
+                mdl, params, op_vars, dispatched.get_jik_2_end_time_map()
+            )
+            BaseModelBuilder.apply_et_hints_from_ref_schedule(
+                mdl, params, et_vars, dispatched
+            )
 
             solver = cp_model.CpSolver()
             if cp_tl_seconds is not None:
