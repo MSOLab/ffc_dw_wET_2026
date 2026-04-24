@@ -925,23 +925,29 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def neh_cp(
         self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
         solver_thread_cnt: int = 1,
         added_batch_size: int = 1,
         cp_tl: float | str | None = None,
         apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
-        job_priority: NehCpJobPriority = "weight-due-pos",
     ) -> SubroutineReport:
         """Delegates to :class:`NehCpConstructor`; see its ``run`` for details."""
         return NehCpConstructor(self).run(
+            job_priority=job_priority,
             solver_thread_cnt=solver_thread_cnt,
             added_batch_size=added_batch_size,
             cp_tl=cp_tl,
             apply_cumulative_tl=apply_cumulative_tl,
             pf_method=pf_method,
             skip_pf_below_obj=skip_pf_below_obj,
+            make_semi_active_after_cp=make_semi_active_after_cp,
+            minimize_makespan_lex=minimize_makespan_lex,
+            cp_tl_2nd_obj=cp_tl_2nd_obj,
             error_if_infeasible=error_if_infeasible,
-            job_priority=job_priority,
         )

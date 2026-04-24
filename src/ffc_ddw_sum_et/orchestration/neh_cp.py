@@ -1,8 +1,9 @@
 """NEH-CP constructor: incremental batched CP-SAT schedule construction.
 
-Extracted from ``FFcDDWSubroutineController.neh_cp``. The two-stage
-optimize port (modeled on
-``hybridflowshop/controller/neh_cp.py``) is a follow-up task.
+Extracted from ``FFcDDWSubroutineController.neh_cp``. Mirrors the
+two-stage lexicographic optimize structure in
+``hybridflowshop/controller/neh_cp.py``: primary minimizes weighted E/T,
+optional secondary minimizes makespan subject to the primary's E/T ceiling.
 """
 
 from __future__ import annotations
@@ -62,14 +63,17 @@ class NehCpConstructor:
 
     def run(
         self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
         solver_thread_cnt: int = 1,
         added_batch_size: int = 1,
         cp_tl: float | str | None = None,
         apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
-        job_priority: NehCpJobPriority = "weight-due-pos",
     ) -> SubroutineReport:
         """Build a schedule by incrementally adding job batches and refining via CP-SAT.
 
@@ -80,6 +84,12 @@ class NehCpConstructor:
         carries forward as the warm-start for the next step.
 
         Args:
+            job_priority (NehCpJobPriority, optional): Rule used to order jobs for
+                the incremental batches. ``"weight-due-pos"`` (default) sorts by
+                ``(max(w⁻, w⁺) desc, w⁻+w⁺ desc, due-window width asc, position
+                asc)``. ``"due-weight-pos"`` sorts by
+                ``(max(0, d⁺-p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ asc, position
+                asc)``. Defaults to ``"weight-due-pos"``.
             solver_thread_cnt (int, optional): CP-SAT solver threads per batch solve.
                 Defaults to 1.
             added_batch_size (int, optional): Jobs added per incremental step after
@@ -102,15 +112,26 @@ class NehCpConstructor:
                 at or below this threshold.  ``"makespan"`` uses the previous
                 solution's makespan as the threshold; a float is used directly.
                 ``None`` always applies partial-fix. Defaults to None.
+            make_semi_active_after_cp (bool, optional): When True, the stage-1
+                CP solution is post-processed with ``make_semi_active`` and
+                ``insert_idle_time`` before it is compared against the
+                dispatched warm-start. The tidied schedule replaces the raw
+                CP decode only when its weighted E/T is strictly lower.
+                Has no effect on the dispatched fallback (already tidied) or
+                on the stage-2 solve. Defaults to False.
+            minimize_makespan_lex (bool, optional): When True, run a
+                lexicographic secondary CP solve after each batch's primary
+                (weighted E/T) solve. The secondary model constrains
+                ``weighted_E_T <= primary_obj`` and minimizes makespan,
+                refining the warm-start handed to the next batch. Defaults to
+                False.
+            cp_tl_2nd_obj (float | str | None, optional): Time limit for the
+                secondary makespan solve, using the same grammar as ``cp_tl``.
+                Only applies when ``minimize_makespan_lex=True``. If None,
+                falls back to ``cp_tl``. Defaults to None.
             error_if_infeasible (bool, optional): Raise ``RuntimeError`` instead of
                 returning a dispatched fallback when no feasible solution is found.
                 Defaults to False.
-            job_priority (NehCpJobPriority, optional): Rule used to order jobs for
-                the incremental batches. ``"weight-due-pos"`` (default) sorts by
-                ``(max(w⁻, w⁺) desc, w⁻+w⁺ desc, due-window width asc, position
-                asc)``. ``"due-weight-pos"`` sorts by
-                ``(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ asc, position
-                asc)``. Defaults to ``"weight-due-pos"``.
 
         Raises:
             ValueError: If ``skip_pf_below_obj`` is a string other than ``"makespan"``
@@ -141,6 +162,15 @@ class NehCpConstructor:
             raise RuntimeError("neh_cp requires at least one job in the instance.")
 
         cp_tl_seconds = resolve_cp_tl(cp_tl, n, stage_count)
+        cp_tl_2nd_obj_seconds = (
+            resolve_cp_tl(
+                cp_tl_2nd_obj if cp_tl_2nd_obj is not None else cp_tl,
+                n,
+                stage_count,
+            )
+            if minimize_makespan_lex
+            else None
+        )
         params_for_horizon = BaseModelBuilder.make_params(instance)
         horizon = sum(params_for_horizon.p.values())
 
@@ -283,6 +313,21 @@ class NehCpConstructor:
                 se_new, st_new = compute_weighted_earliness_tardiness(
                     cp_sch, sub_instance
                 )
+                if make_semi_active_after_cp:
+                    cp_sch.make_semi_active(stage_2_job_2_p)
+                    cp_sch.insert_idle_time(due_window_map, ewt_map, twt_map)
+                    se_tidy, st_tidy = compute_weighted_earliness_tardiness(
+                        cp_sch, sub_instance
+                    )
+                    if (se_tidy + st_tidy) < (se_new + st_new):
+                        ctx.logger.info(
+                            "neh_cp step %d: making CP solution semi-active reduced E/T "
+                            "from %d to %d; using semi-active solution.",
+                            step,
+                            se_new + st_new,
+                            se_tidy + st_tidy,
+                        )
+                        se_new, st_new = se_tidy, st_tidy
                 se_dis, st_dis = compute_weighted_earliness_tardiness(
                     dispatched, sub_instance
                 )
@@ -297,6 +342,69 @@ class NehCpConstructor:
                 )
                 partial_sol = dispatched
 
+            se_stage1, st_stage1 = compute_weighted_earliness_tardiness(
+                partial_sol, sub_instance
+            )
+            stage1_obj = se_stage1 + st_stage1
+
+            ran_2nd_obj = False
+            if minimize_makespan_lex and partial_sol.makespan > 0:
+                horizon_2 = int(partial_sol.makespan)
+                mdl_2, params_2, op_vars_2, et_vars_2 = builder.build(
+                    sub_instance,
+                    horizon=horizon_2,
+                    minimize_makespan_lex=True,
+                    et_ub=stage1_obj,
+                )
+                by_machine, stride = decode_pf_method(pf_method)
+                BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
+                    mdl_2,
+                    params_2,
+                    op_vars_2,
+                    partial_sol,
+                    profile_fix_by_machine=by_machine,
+                    machine_precedence_stride=stride,
+                )
+                BaseModelBuilder.apply_hints_from_schedule(
+                    mdl_2, params_2, op_vars_2, et_vars_2, partial_sol
+                )
+
+                solver_2 = cp_model.CpSolver()
+                if cp_tl_2nd_obj_seconds is not None:
+                    solver_2.parameters.max_time_in_seconds = cp_tl_2nd_obj_seconds
+                solver_2.parameters.num_workers = solver_thread_cnt
+                status_2 = solver_2.solve(mdl_2)
+                if status_2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                    j_i_2_start_2 = {
+                        (j, i): int(solver_2.Value(op_vars_2.op_start[j, i]))
+                        for j in params_2.j_list
+                        for i in params_2.i_list
+                    }
+                    j_i_2_end_2 = {
+                        (j, i): int(solver_2.Value(op_vars_2.op_end[j, i]))
+                        for j in params_2.j_list
+                        for i in params_2.i_list
+                    }
+                    cp_sch_2 = build_schedule_from_op_starts(
+                        instance, j_i_2_start_2, j_i_2_end_2, jobs=current_jobs
+                    )
+                    ctx.logger.info(
+                        "neh_cp step %d: stage-2 makespan solve: %d -> %d (E/T <= %d).",
+                        step,
+                        horizon_2,
+                        int(cp_sch_2.makespan),
+                        int(stage1_obj),
+                    )
+                    partial_sol = cp_sch_2
+                    ran_2nd_obj = True
+                else:
+                    ctx.logger.info(
+                        "neh_cp step %d: stage-2 makespan solve infeasible "
+                        "(status=%s); keeping stage-1 schedule.",
+                        step,
+                        solver_2.StatusName(status_2),
+                    )
+
             se, st = compute_weighted_earliness_tardiness(partial_sol, sub_instance)
             sub_obj_log.append(
                 {
@@ -304,6 +412,8 @@ class NehCpConstructor:
                     "elapsed_time": float(time.monotonic() - start_elapsed),
                     "sub_obj": float(se + st),
                     "job_count": len(current_jobs),
+                    "makespan": int(partial_sol.makespan),
+                    "ran_2nd_obj": ran_2nd_obj,
                 }
             )
             last_obj_value = se + st

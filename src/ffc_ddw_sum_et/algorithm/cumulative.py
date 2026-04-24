@@ -106,6 +106,8 @@ class BaseModelBuilder:
         last_stage_only: bool = False,
         job_2_release: dict[str, int] | None = None,
         obj_lb: float | None = None,
+        minimize_makespan_lex: bool = False,
+        et_ub: float | None = None,
     ) -> tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]:
         """Build a CP-SAT model for the FFc DDW sum E/T problem with cumulative constraints.
 
@@ -119,8 +121,15 @@ class BaseModelBuilder:
             job_2_release (dict[str, int] | None, optional): A mapping from job IDs
                 to their release times at the first stage. If last_stage_only is True,
                 the release times are applied to the last stage. Defaults to None.
-            obj_lb (float | None, optional): The lower bound for the objective function.
-                Defaults to None.
+            obj_lb (float | None, optional): The lower bound for the weighted E/T
+                objective. Ignored when ``minimize_makespan_lex=True``. Defaults to None.
+            minimize_makespan_lex (bool, optional): Lexicographic secondary-stage
+                mode. When True, the weighted E/T sum is constrained to
+                ``<= floor(et_ub)`` and the model minimizes makespan instead.
+                Defaults to False.
+            et_ub (float | None, optional): Upper bound on the weighted E/T sum
+                for the secondary stage. Required when
+                ``minimize_makespan_lex=True``. Defaults to None.
 
         Returns:
             tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]: The built
@@ -142,6 +151,8 @@ class BaseModelBuilder:
             horizon=horizon,
             use_max_equality=use_max_equality_for_obj,
             obj_lb=obj_lb,
+            minimize_makespan_lex=minimize_makespan_lex,
+            et_ub=et_ub,
         )
 
         return mdl, params, ops_vars, obj_vars
@@ -282,12 +293,14 @@ class BaseModelBuilder:
         *,
         use_max_equality: bool = True,
         obj_lb: float | None = None,
+        minimize_makespan_lex: bool = False,
+        et_ub: float | None = None,
     ) -> EarlinessTardinessVars:
         """Define the weighted earliness/tardiness objective with due date window.
 
-        Minimizes the weighted sum of earliness and tardiness deviations from
-        each job's due date window ``[d^{-}_j, d^{+}_j]``. Completion inside
-        the window incurs zero cost.
+        Default mode minimizes the weighted sum of earliness and tardiness
+        deviations from each job's due date window ``[d^{-}_j, d^{+}_j]``.
+        Completion inside the window incurs zero cost.
 
         ``minimize sum_j (w^{-}_j * max(0, d^{-}_j - C_j)
                           + w^{+}_j * max(0, C_j - d^{+}_j))``
@@ -298,6 +311,10 @@ class BaseModelBuilder:
         ``add_max_equality``) so every feasible solution — not just the final
         optimum — reports a matching objective value against a post-hoc E/T
         recomputation from completion times.
+
+        When ``minimize_makespan_lex=True``, the weighted E/T sum is instead
+        constrained to ``<= floor(et_ub)`` and the model minimizes makespan
+        (``max_j C_j``) — the lexicographic secondary stage.
 
         Args:
             mdl (CpModel): The CP-SAT model to which the objective will be added.
@@ -310,6 +327,10 @@ class BaseModelBuilder:
                 tie E_j and T_j to their respective max(0, ·) expressions exactly.
                 If False, use inequality constraints which may lead to looser LP relaxations.
                 Defaults to True.
+            minimize_makespan_lex (bool, optional): Secondary-stage lex mode.
+                Defaults to False.
+            et_ub (float | None, optional): Required when ``minimize_makespan_lex``
+                is True — upper bound on the weighted E/T sum.
 
         Returns:
             EarlinessTardinessVars: The per-job ``E_j`` and ``T_j`` IntVars.
@@ -343,9 +364,21 @@ class BaseModelBuilder:
             raise ValueError(
                 "At least one job must have a nonzero earliness or tardiness weight."
             )
-        if obj_lb is not None:
-            mdl.add(sum(et_terms) >= math.ceil(obj_lb))
-        mdl.minimize(sum(et_terms))
+        if minimize_makespan_lex:
+            if et_ub is None:
+                raise ValueError(
+                    "minimize_makespan_lex=True requires et_ub to be specified."
+                )
+            mdl.add(sum(et_terms) <= math.floor(et_ub))
+            makespan_var = mdl.new_int_var(0, horizon, "makespan")
+            mdl.add_max_equality(
+                makespan_var, [variables.op_end[j, last_i] for j in j_list]
+            )
+            mdl.minimize(makespan_var)
+        else:
+            if obj_lb is not None:
+                mdl.add(sum(et_terms) >= math.ceil(obj_lb))
+            mdl.minimize(sum(et_terms))
         return EarlinessTardinessVars(E=E, T=T)
 
     # Additional constraints
