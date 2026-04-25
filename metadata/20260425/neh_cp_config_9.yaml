@@ -12,7 +12,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [ 0, 1, 2 ]
+# ins_index: [ 0, 1, 2 ]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
 
 output_dir: output/20260425
@@ -32,20 +32,6 @@ scenarios:
         solver_thread_cnt: 8
         added_batch_size: 15
         cp_tl: "0.16c"
-        apply_cumulative_tl: false
-        pf_method: "PF1"
-        skip_pf_below_obj: "makespan"
-        make_semi_active_after_cp: true
-        minimize_makespan_lex: false
-  - name: neh_cp_b15_single_dplus_pf1_2
-    timelimit: 120.0
-    output_subdir: neh_cp_b15_single_dplus_pf1_2
-    subroutine_flow:
-      - method: neh_cp
-        job_priority: "due-weight-pos"
-        solver_thread_cnt: 8
-        added_batch_size: 15
-        cp_tl: "0.2c"
         apply_cumulative_tl: false
         pf_method: "PF1"
         skip_pf_below_obj: "makespan"
