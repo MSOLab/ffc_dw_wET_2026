@@ -75,6 +75,7 @@ class NehCpConstructor:
         solver_thread_cnt: int = 1,
         added_batch_size: int = 1,
         cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
         apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
@@ -105,7 +106,18 @@ class NehCpConstructor:
             cp_tl (float | str | None, optional): Time limit per batch solve.
                 A float is interpreted as seconds; a string such as ``"0.006nc"``
                 is evaluated as an expression where ``n`` = job count and ``c`` =
-                stage count; ``None`` means no limit. Defaults to None.
+                stage count; ``None`` means no limit. When ``total_timelimit``
+                is also set, the per-batch limit becomes
+                ``min(cp_tl, total_timelimit * added_batch_size / n)``.
+                Defaults to None.
+            total_timelimit (float | str | None, optional): Total CP-SAT budget
+                across all batches, using the same grammar as ``cp_tl``
+                (e.g. ``"0.024nc"``). When set, the per-batch limit is derived
+                as ``total_timelimit * added_batch_size / n`` (the simple
+                ``n / added_batch_size`` batch count is used; the larger first
+                batch is not subtracted). When both ``cp_tl`` and
+                ``total_timelimit`` are set, the smaller of the two values is
+                used as the per-batch limit. Defaults to None.
             apply_cumulative_tl (bool, optional): When True and ``cp_tl`` is set,
                 each batch receives the remaining cumulative budget
                 (``cp_tl_seconds * (step + 1) - elapsed``) rather than a fixed
@@ -169,7 +181,15 @@ class NehCpConstructor:
         if n == 0:
             raise RuntimeError("neh_cp requires at least one job in the instance.")
 
-        cp_tl_seconds = resolve_cp_tl(cp_tl, n, stage_count)
+        cp_tl_from_arg = resolve_cp_tl(cp_tl, n, stage_count)
+        if total_timelimit is not None:
+            total_seconds = resolve_cp_tl(total_timelimit, n, stage_count)
+            derived = total_seconds * added_batch_size / n
+            cp_tl_seconds = (
+                min(cp_tl_from_arg, derived) if cp_tl_from_arg is not None else derived
+            )
+        else:
+            cp_tl_seconds = cp_tl_from_arg
         cp_tl_2nd_obj_seconds = (
             resolve_cp_tl(
                 cp_tl_2nd_obj if cp_tl_2nd_obj is not None else cp_tl,
