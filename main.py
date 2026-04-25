@@ -19,7 +19,7 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/20260424/neh_cp_config_8.yaml")
+CONFIG_PATH = Path("metadata/20260425/neh_cp_config_9.yaml")
 
 
 def _setup_main_logger(output_dir: Path) -> logging.Logger:
@@ -77,6 +77,9 @@ def main() -> None:
     ins_index_source = config.get("ins_index_source")
     if ins_index_source:
         ins_index_source = Path(ins_index_source)
+    bks_table_csv_path = config.get("bks_table_csv_path")
+    if bks_table_csv_path:
+        bks_table_csv_path = Path(bks_table_csv_path)
     logger.info("Loading instances from %s", benchmark_dir)
     loader = BenchmarkLoader(benchmark_dir, ins_index_source=ins_index_source)
     ins_index_filter = config.get("ins_index")
@@ -111,6 +114,7 @@ def main() -> None:
         draw_gantt=draw_gantt,
         painter_thread_cnt=painter_thread_cnt,
         ins_index_source=ins_index_source,
+        bks_table_csv_path=bks_table_csv_path,
     )
 
     logger.info(

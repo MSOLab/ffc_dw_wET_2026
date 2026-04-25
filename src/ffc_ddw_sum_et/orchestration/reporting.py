@@ -196,6 +196,7 @@ class FFcDDWMultiScenarioRunner(
         draw_gantt: bool = True,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
+        bks_table_csv_path: Path | None = None,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -205,6 +206,7 @@ class FFcDDWMultiScenarioRunner(
         self.draw_gantt = draw_gantt
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = ins_index_source
+        self.bks_table_csv_path = bks_table_csv_path
 
     def run(self):
         runner_cnt = len(self.runners)
@@ -258,6 +260,7 @@ class FFcDDWMultiScenarioRunner(
             draw_gantt=self.draw_gantt,
             painter_thread_cnt=self.painter_thread_cnt,
             ins_index_source=self.ins_index_source,
+            bks_table_csv_path=self.bks_table_csv_path,
         ).generate()
 
         return FinalResult(scenario_results=scenario_results)
@@ -274,6 +277,7 @@ class FFcDDWReporter:
         draw_gantt: bool = True,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
+        bks_table_csv_path: Path | None = None,
     ):
         self.output_dir = output_dir or Path("output")
         self.scenario_results = scenario_results
@@ -281,6 +285,9 @@ class FFcDDWReporter:
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = (
             Path(ins_index_source) if ins_index_source is not None else None
+        )
+        self.bks_table_csv_path = (
+            Path(bks_table_csv_path) if bks_table_csv_path is not None else None
         )
         self._filename_to_index: dict[str, int] = self._load_filename_to_index()
         self._index_to_meta: dict[int, dict[str, Any]] = self._load_index_to_meta()
@@ -337,7 +344,28 @@ class FFcDDWReporter:
         self._write_mcf_lb_analysis_csv()
         self._write_statistics_yaml()
         self._write_excel_report()
+        self._write_post_run_pivot_artifacts()
         self._generate_gantt_charts()
+
+    def _write_post_run_pivot_artifacts(self) -> None:
+        """Emit long-format RPDf comparison CSV + 3 PivotTable.js HTML files."""
+        if not self.ins_index_source or not self.ins_index_source.exists():
+            return
+        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
+            return
+
+        from .post_run_pivot import write_post_run_pivot_artifacts
+
+        summary_csv = self.output_dir / self.generate_summary_filename("csv")
+        if not summary_csv.exists():
+            return
+        write_post_run_pivot_artifacts(
+            summary_csv=summary_csv,
+            output_dir=self.output_dir,
+            run_id=self.output_dir.name,
+            hybrid_match_csv=self.ins_index_source,
+            bks_table_csv=self.bks_table_csv_path,
+        )
 
     def generate_summary_filename(self, extension: str) -> str:
         return f"{self.output_dir.name}_summary.{extension}"
