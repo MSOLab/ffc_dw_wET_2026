@@ -31,7 +31,7 @@ scenarios:
         job_priority: "due-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        cp_tl: "0.16c"
+        cp_tl: "0.36c"
         apply_cumulative_tl: false
         pf_method: "PF1"
         skip_pf_below_obj: "makespan"
