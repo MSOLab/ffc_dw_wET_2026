@@ -213,7 +213,7 @@ class NehCpConstructor:
 
         partial_sol: FFcSchedule | None = None
         current_jobs: list[str] = []
-        sub_obj_log: list[dict] = []
+        sub_step_log: list[dict] = []
 
         # For warm-start
         mixed = MixedDispatcher(instance, logger=ctx.logger)
@@ -323,6 +323,13 @@ class NehCpConstructor:
                     solver.parameters.max_time_in_seconds = cp_tl_seconds
             solver.parameters.num_workers = solver_thread_cnt
             status = solver.solve(mdl)
+
+            raw_lb = (
+                solver.best_objective_bound
+                if status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+                else None
+            )
+            sub_obj_lb = float(raw_lb) if raw_lb is not None else 0.0
 
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 j_i_2_start = {
@@ -434,11 +441,18 @@ class NehCpConstructor:
                     )
 
             se, st = compute_weighted_earliness_tardiness(partial_sol, sub_instance)
-            sub_obj_log.append(
+            ub = float(se + st)
+            if sub_obj_lb == 0:
+                gap: float | None = 0.0 if ub == 0 else None
+            else:
+                gap = ub / sub_obj_lb
+            sub_step_log.append(
                 {
                     "step": step,
                     "elapsed_time": float(time.monotonic() - start_elapsed),
-                    "sub_obj": float(se + st),
+                    "sub_obj": ub,
+                    "sub_obj_lb": sub_obj_lb,
+                    "gap": gap,
                     "job_count": len(current_jobs),
                     "makespan": int(partial_sol.makespan),
                     "ran_2nd_obj": ran_2nd_obj,
@@ -472,10 +486,10 @@ class NehCpConstructor:
         )
 
         try:
-            log_path = ctx.get_file_path_for_subroutine("_obj_log.yaml")
+            log_path = ctx.get_file_path_for_subroutine("_step_log.yaml")
         except AttributeError:
             log_path = None
         if log_path is not None:
-            dump_yaml(sub_obj_log, log_path)
+            dump_yaml(sub_step_log, log_path)
 
         return report

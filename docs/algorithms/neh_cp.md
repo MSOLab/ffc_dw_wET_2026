@@ -55,7 +55,7 @@ def run(
 - `ctx.solution_manager: FFcDDWSolutionManager` — final incumbent registration.
 - `ctx._neh_cp_job_sequence(job_priority) -> list[str]`.
 - `ctx.get_file_path_for_subroutine(suffix)` — optional. `AttributeError` here
-  is swallowed; `sub_obj_log` is simply not dumped.
+  is swallowed; `sub_step_log` is simply not dumped.
 
 `FFcDDWSubroutineController` satisfies this protocol.
 
@@ -80,7 +80,7 @@ Let `n = instance.job_count`, `c = instance.stage_count`.
   max_m_per_stage · 2)`. Batch 0 is `job_sequence[:first_batch_size]`;
   subsequent batches slice the tail in chunks of `added_batch_size`.
 - **Warm-start state.** A single `MixedDispatcher(instance, logger=ctx.logger)`
-  is reused across all batches. `partial_sol`, `current_jobs`, `sub_obj_log`
+  is reused across all batches. `partial_sol`, `current_jobs`, `sub_step_log`
   start empty; `last_obj_value = 0`.
 
 ## Per-batch loop
@@ -184,17 +184,23 @@ For each `(step, batch)`:
 
 10. **Per-step log.** Recompute `(se, st) =
     compute_weighted_earliness_tardiness(partial_sol, sub_instance)` and
-    append to `sub_obj_log`:
+    append to `sub_step_log`:
     ```yaml
     step: <int>
     elapsed_time: <sec-since-start_elapsed>
     sub_obj: <float, weighted E+T>
+    sub_obj_lb: <float, stage-1 solver.best_objective_bound or 0.0>
+    gap: <float | None, ub / lb (None when lb=0 and ub>0; 0 when both 0)>
     job_count: <len(current_jobs)>
     makespan: <int, partial_sol.makespan>
     ran_2nd_obj: <bool>
     ```
-    `last_obj_value = se + st` feeds the `skip_pf_below_obj` check of the
-    **next** batch.
+    `sub_obj_lb` comes from the stage-1 CP-SAT solver
+    (`solver.best_objective_bound`) when `status ∈ {OPTIMAL, FEASIBLE}`,
+    else `0.0`. The stage-2 makespan solver's bound is **not** used here —
+    its objective is makespan, not E/T. `gap = ub / lb` exactly: it is **not**
+    a relative gap. `last_obj_value = se + st` feeds the `skip_pf_below_obj`
+    check of the **next** batch.
 
 ## Post-loop finalization
 
@@ -209,15 +215,15 @@ For each `(step, batch)`:
   obj_bound=None)`, and
   `ctx.solution_manager.register(report,
   FFcDDWSolution(schedule=final, obj_value=...))`.
-- If `ctx.get_file_path_for_subroutine("_obj_log.yaml")` succeeds, dump
-  `sub_obj_log` to that path via `routix.io.dump_yaml`.
+- If `ctx.get_file_path_for_subroutine("_step_log.yaml")` succeeds, dump
+  `sub_step_log` to that path via `routix.io.dump_yaml`.
   `AttributeError` is swallowed — the file is simply not written.
 
 ## Output conventions
 
 - `SubroutineReport.obj_bound` is always `None` from this subroutine (no
   lower bound is computed here).
-- The dumped `_obj_log.yaml` is a list of dicts, one per batch step, in the
+- The dumped `_step_log.yaml` is a list of dicts, one per batch step, in the
   shape above.
 
 ## Side effects
@@ -225,10 +231,10 @@ For each `(step, batch)`:
 | State | Set by |
 | --- | --- |
 | `ctx.solution_manager` | Final registration only (once, after loop). |
-| `<subroutine_dir>/…_obj_log.yaml` | Dumped when `ctx.get_file_path_for_subroutine` is callable. |
+| `<subroutine_dir>/…_step_log.yaml` | Dumped when `ctx.get_file_path_for_subroutine` is callable. |
 
 No intermediate incumbents are registered during the loop; downstream
-consumers of the per-step objective trajectory must read `_obj_log.yaml`.
+consumers of the per-step objective trajectory must read `_step_log.yaml`.
 
 ## Early-return paths
 
