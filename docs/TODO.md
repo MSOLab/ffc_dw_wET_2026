@@ -65,3 +65,18 @@ scope of the per-step log change that triggered this note.
 `neh_cp` outside the orchestration controller, or (b) the algorithm-side
 contract (`Algorithm` / `AlgRecord`) has an established sibling that
 `neh_cp` would simply slot into without inventing new conventions.
+
+## Hardcoded TL (time limit) formula in analysis_long sheet
+
+The `analysis_long` Excel sheet computes `TL = 0.09 * job_count * stage_count`
+as a reference time limit. The `time%` column is then `(elapsedSec / TL) * 100`.
+The coefficient `0.09` is hardcoded in `src/ffc_ddw_sum_et/orchestration/reporting.py`
+in the `_write_analysis_sheets` method.
+
+**Why:** The coefficient is experimentally determined and may need adjustment
+for different instance families or solver configurations. Making it
+configurable adds complexity (config key, validation, default) for a single
+reporting column.
+
+**When to act:** When the coefficient needs to change, or when multiple
+teams use different TL thresholds and want to configure it per experiment.

@@ -824,7 +824,7 @@ class FFcDDWReporter:
         has_meta = bool(self._index_to_meta)
         meta_cols = ["n", "c", "totalMcCount", "T", "R", "W", "BKS"] if has_meta else []
         header = (
-            ["insIndex", "insFileName"]
+            ["Scenario", "insIndex", "insFileName"]
             + meta_cols
             + [
                 "Best Obj",
@@ -858,6 +858,7 @@ class FFcDDWReporter:
                     else {}
                 )
                 values: list[Any] = [
+                    sc.name,
                     ins_index if ins_index is not None else "",
                     ir.instance_name,
                 ]
@@ -885,55 +886,120 @@ class FFcDDWReporter:
             return
 
         long_sheet = workbook.add_worksheet("analysis_long")
+        meta_keys = ["n", "c", "totalMcCount", "T", "R", "W"]
         long_sheet.write_row(
             "A1",
-            ["insIndex", "insFileName", "Scenario", "Obj Value", "BKS", "RPDf"],
+            ["Scenario", "insIndex"]
+            + meta_keys
+            + ["TL", "elapsedSec", "time%", "ObjValue", "BKS", "RPDf", "Win", "Tie"],
             header_fmt,
         )
 
-        entries: list[tuple[int | None, str, str, float | None, float | None]] = []
+        entries = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
                 ins_index = self._resolve_ins_index(ir.instance_name)
-                bks = None
-                if ins_index is not None:
-                    bks = self._index_to_meta.get(ins_index, {}).get("BKS")
+                meta = (
+                    self._index_to_meta.get(ins_index, {})
+                    if ins_index is not None
+                    else {}
+                )
+                bks = meta.get("BKS")
+                # TL = 0.09 * job_count * stage_count (hardcoded, see docs/TODO.md)
+                tl = None
+                if ir.job_count is not None and ir.stage_count is not None:
+                    tl = 0.09 * ir.job_count * ir.stage_count
                 entries.append(
-                    (ins_index, ir.instance_name, sc.name, ir.obj_value, bks)
+                    {
+                        "ins_index": ins_index,
+                        "sc_name": sc.name,
+                        "meta": meta,
+                        "tl": tl,
+                        "elapsed": ir.elapsed_time,
+                        "obj": ir.obj_value,
+                        "bks": bks,
+                    }
                 )
 
         entries.sort(
             key=lambda e: (
-                e[0] if e[0] is not None else 10**9,
-                e[2],
+                e["ins_index"] if e["ins_index"] is not None else 10**9,
+                e["sc_name"],
             )
         )
 
         row = 1
-        for ins_index, ins_name, sc_name, obj, bks in entries:
+        for entry in entries:
+            col = 0
+            long_sheet.write(row, col, entry["sc_name"], cell_fmt)
+            col += 1
             long_sheet.write(
-                row, 0, ins_index if ins_index is not None else "", cell_fmt
+                row,
+                col,
+                entry["ins_index"] if entry["ins_index"] is not None else "",
+                cell_fmt,
             )
-            long_sheet.write(row, 1, ins_name, cell_fmt)
-            long_sheet.write(row, 2, sc_name, cell_fmt)
-            if obj is not None:
-                long_sheet.write_number(row, 3, float(obj), cell_fmt)
+            col += 1
+            for key in meta_keys:
+                val = entry["meta"].get(key)
+                if val is not None:
+                    long_sheet.write(row, col, val, cell_fmt)
+                else:
+                    long_sheet.write_blank(row, col, None, cell_fmt)
+                col += 1
+            if entry["tl"] is not None:
+                long_sheet.write_number(row, col, entry["tl"], cell_fmt)
             else:
-                long_sheet.write_blank(row, 3, None, cell_fmt)
-            if bks is not None:
-                long_sheet.write_number(row, 4, float(bks), cell_fmt)
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            elapsed_rounded = round(entry["elapsed"], 3)
+            long_sheet.write_number(row, col, elapsed_rounded, cell_fmt)
+            col += 1
+            if entry["tl"] is not None and entry["tl"] != 0:
+                time_pct = (elapsed_rounded / entry["tl"]) * 100
+                long_sheet.write_number(row, col, time_pct, cell_fmt)
             else:
-                long_sheet.write_blank(row, 4, None, cell_fmt)
-            rpdf = _compute_rpdf(obj, bks)
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            if entry["obj"] is not None:
+                long_sheet.write_number(row, col, float(entry["obj"]), cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            if entry["bks"] is not None:
+                long_sheet.write_number(row, col, float(entry["bks"]), cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            rpdf = _compute_rpdf(entry["obj"], entry["bks"])
             if rpdf is not None:
-                long_sheet.write_number(row, 5, rpdf, rpdf_fmt)
+                long_sheet.write_number(row, col, rpdf, rpdf_fmt)
             else:
-                long_sheet.write_blank(row, 5, None, rpdf_fmt)
+                long_sheet.write_blank(row, col, None, rpdf_fmt)
+            col += 1
+            # Win: 1 if BKS > ObjValue, else blank
+            if entry["obj"] is not None and entry["bks"] is not None:
+                if entry["bks"] > entry["obj"]:
+                    long_sheet.write_number(row, col, 1, cell_fmt)
+                else:
+                    long_sheet.write_blank(row, col, None, cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            # Tie: 1 if BKS == ObjValue, else blank
+            if entry["obj"] is not None and entry["bks"] is not None:
+                if entry["bks"] == entry["obj"]:
+                    long_sheet.write_number(row, col, 1, cell_fmt)
+                else:
+                    long_sheet.write_blank(row, col, None, cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
             row += 1
 
         wide_sheet = workbook.add_worksheet("analysis_wide")
         scenario_names = [sc.name for sc in self.scenario_results]
-        wide_header: list[str] = ["insIndex", "insFileName", "BKS"]
+        wide_meta_keys = ["n", "c", "totalMcCount", "T", "R", "W"]
+        wide_header: list[str] = ["insIndex", "insFileName"] + wide_meta_keys + ["BKS"]
         for sc_name in scenario_names:
             wide_header.append(f"obj_{sc_name}")
             wide_header.append(f"RPDf_{sc_name}")
@@ -945,10 +1011,16 @@ class FFcDDWReporter:
                 ins_index = self._resolve_ins_index(ir.instance_name)
                 row_data = per_instance.setdefault(
                     ins_index,
-                    {"insFileName": ir.instance_name, "BKS": None, "by_sc": {}},
+                    {
+                        "insFileName": ir.instance_name,
+                        "meta": {},
+                        "BKS": None,
+                        "by_sc": {},
+                    },
                 )
-                if row_data["BKS"] is None and ins_index is not None:
-                    row_data["BKS"] = self._index_to_meta.get(ins_index, {}).get("BKS")
+                if not row_data["meta"] and ins_index is not None:
+                    row_data["meta"] = self._index_to_meta.get(ins_index, {})
+                    row_data["BKS"] = row_data["meta"].get("BKS")
                 row_data["by_sc"][sc.name] = ir.obj_value
 
         ordered_indices = sorted(
@@ -958,16 +1030,26 @@ class FFcDDWReporter:
         row = 1
         for ins_index in ordered_indices:
             data = per_instance[ins_index]
+            col = 0
             wide_sheet.write(
-                row, 0, ins_index if ins_index is not None else "", cell_fmt
+                row, col, ins_index if ins_index is not None else "", cell_fmt
             )
-            wide_sheet.write(row, 1, data["insFileName"], cell_fmt)
+            col += 1
+            wide_sheet.write(row, col, data["insFileName"], cell_fmt)
+            col += 1
+            for key in wide_meta_keys:
+                val = data["meta"].get(key)
+                if val is not None:
+                    wide_sheet.write(row, col, val, cell_fmt)
+                else:
+                    wide_sheet.write_blank(row, col, None, cell_fmt)
+                col += 1
             bks = data["BKS"]
             if bks is not None:
-                wide_sheet.write_number(row, 2, float(bks), cell_fmt)
+                wide_sheet.write_number(row, col, float(bks), cell_fmt)
             else:
-                wide_sheet.write_blank(row, 2, None, cell_fmt)
-            col = 3
+                wide_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
             for sc_name in scenario_names:
                 obj = data["by_sc"].get(sc_name)
                 if obj is not None:
