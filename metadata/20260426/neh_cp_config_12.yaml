@@ -10,7 +10,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [ 0, 1439 ]
+# ins_index: [ 0, 1439 ]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
 
 output_dir: output/20260426
@@ -21,14 +21,14 @@ draw_gantt: false
 painter_thread_cnt: 48
 
 scenarios:
-  - name: neh_cp_b25_single_due2_pf1
+  - name: neh_cp_b20_single_dplus2_pf1
     timelimit: 120.0
-    output_subdir: neh_cp_b25_single_due2_pf1
+    output_subdir: neh_cp_b20_single_dplus2_pf1
     subroutine_flow:
       - method: neh_cp
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
-        added_batch_size: 25
+        added_batch_size: 20
         total_timelimit: "0.024nc"
         apply_cumulative_tl: false
         pf_method: "PF1"
