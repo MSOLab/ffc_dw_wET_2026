@@ -10,7 +10,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [ 0, 1439 ]
+# ins_index: [ 0, 1439 ]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
 
 output_dir: output/20260426
@@ -106,6 +106,7 @@ scenarios:
         added_batch_size: 20
         total_timelimit: "0.024nc"
         batch_tl_mode: "linear"
+        batch_tl_offset_seconds: 0.1
         apply_cumulative_tl: false
         pf_method: "PF1"
         skip_pf_below_obj: "makespan"
