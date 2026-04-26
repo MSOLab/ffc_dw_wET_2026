@@ -551,6 +551,31 @@ class FFcDDWParameters(FFcParameters):
 
         return sorted(self.job_id_list, key=key)
 
+    def due2_weight_pos_job_sequence(self) -> list[str]:
+        """
+        Get a mapping from (due-weight-pos) priority tuples to lists of job IDs.
+        The priority tuples are defined as in get_due_weight_pos_job_sequence().
+        """
+        last_stage_id = self.stage_id_list[-1]
+        p_last = self.get_job_2_p_map_for_stage(last_stage_id)
+        r_j = self.get_job_2_p_sum_except_last_stage()
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[int, int, int, int, int]:
+            d_lower, d_upper = ddw[j]
+            return (
+                max(r_j[j], d_upper - p_last[j]),
+                d_upper,
+                d_lower,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+
+        return sorted(self.job_id_list, key=key)
+
     def get_due_star_weight_pos_job_sequence(self) -> list[str]:
         """
         Get the "due-star-weight-pos" priority job sequence.

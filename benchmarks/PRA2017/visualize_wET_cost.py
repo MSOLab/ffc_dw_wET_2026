@@ -30,10 +30,12 @@ def _weights_or_default(raw: dict[str, int], jobs: list[str]) -> dict[str, int]:
 
 def _sort_jobs(
     instance: FFcDDWParameters,
-    sort: Literal["due-window", "neh-cp"] = "due-window",
+    sort: Literal["due-window", "neh-cp", "due-window-2"] = "due-window",
 ) -> list[str]:
     if sort == "neh-cp":
         return instance.get_weight_due_pos_job_sequence()
+    if sort == "due-window-2":
+        return instance.due2_weight_pos_job_sequence()
     ddw = instance.job_2_due_window_map
     p = instance.get_job_2_p_map_for_stage(instance.stage_id_list[-1])
     return sorted(
@@ -44,14 +46,15 @@ def _sort_jobs(
 
 def build_wet_cost_matrix(
     instance: FFcDDWParameters,
-    sort: Literal["due-window", "neh-cp"] = "due-window",
-) -> tuple[list[str], list[int], np.ndarray, list[tuple[float, float, int]]]:
+    sort: Literal["due-window", "neh-cp", "due-window-2"] = "due-window",
+) -> tuple[list[str], list[int], np.ndarray, list[tuple[float, float, int]], list[int], float]:
     calJ = _sort_jobs(instance, sort=sort)
     last_stage = instance.stage_id_list[-1]
     p = instance.get_job_2_p_map_for_stage(last_stage)
     ddw = instance.job_2_due_window_map
     w_minus = _weights_or_default(instance.job_2_ewt_map, calJ)
     w_plus = _weights_or_default(instance.job_2_twt_map, calJ)
+    r = instance.get_job_2_p_sum_except_last_stage()
 
     p_max = max(p[j] for j in calJ)
     t_min = max(0, min(ddw[j][0] - p[j] for j in calJ) - p_max)
@@ -60,6 +63,7 @@ def build_wet_cost_matrix(
 
     Z = np.zeros((len(calJ), len(t_axis)), dtype=float)
     rects: list[tuple[float, float, int]] = []
+    earliest_starts: list[int] = []
     y_labels: list[str] = []
     for i, j in enumerate(calJ):
         pj = p[j]
@@ -70,12 +74,13 @@ def build_wet_cost_matrix(
                 Z[i, k] = -wm * (d_minus - t)
             elif t > d_plus:
                 Z[i, k] = wp * (t - d_plus)
-        x0 = max(0.0, d_plus - pj)
+        x0 = max(r[j], d_plus - pj)
         rects.append((x0, x0 + pj, i))
+        earliest_starts.append(r[j])
         y_labels.append(f"{j}({pj:>3})")
     threshold = float(np.quantile(np.abs(Z), CLIP_QUANTILE))
     Z = np.clip(Z, -threshold, threshold)
-    return y_labels, t_axis, Z, rects
+    return y_labels, t_axis, Z, rects, earliest_starts, threshold
 
 
 def make_figure(
@@ -83,6 +88,7 @@ def make_figure(
     t_axis: list[int],
     Z: np.ndarray,
     rects: list[tuple[float, float, int]],
+    earliest_starts: list[int],
     title: str,
 ) -> go.Figure:
     z_abs = max(1.0, float(np.abs(Z).max()))
@@ -112,6 +118,19 @@ def make_figure(
         width=max(900, len(t_axis) + 200),
         height=max(400, 18 * len(y_labels) + 120),
     )
+    t_left = t_axis[0] - 0.5
+    for i, r_j in enumerate(earliest_starts):
+        if r_j > t_axis[0]:
+            fig.add_shape(
+                type="rect",
+                x0=t_left,
+                x1=r_j - 0.5,
+                y0=i - 0.5,
+                y1=i + 0.5,
+                line={"width": 0},
+                fillcolor="rgba(127,127,127,1)",
+                layer="above",
+            )
     for x0, x1, i in rects:
         fig.add_shape(
             type="rect",
@@ -145,12 +164,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--sort",
-        choices=["due-window", "neh-cp"],
-        default="due-window",
+        choices=["due-window", "neh-cp", "due-window-2"],
+        default="due-window-2",
         help=(
             "Job row ordering in the heatmap. "
-            "'due-window' sorts by max(0, d⁺−p) asc, then d⁺ asc, then d⁻ asc. "
+            "'due-window' sorts by max(0, d⁺-p) asc, then d⁺ asc, then d⁻ asc. "
             "'neh-cp' sorts by (max(w⁻,w⁺) desc, w⁻+w⁺ desc, window width asc, position). "
+            "'due-window-2' sorts by max(r_j[j], d⁺-p_last[j]) asc, then d⁺ asc, then d⁻ asc. "
             "Defaults to 'due-window'."
         ),
     )
@@ -163,13 +183,14 @@ def main() -> None:
     with instance_path.open() as fh:
         instance = FFcDDWParameters.from_pra_2017_data(instance_path.stem, fh)
 
-    y_labels, t_axis, Z, rects = build_wet_cost_matrix(instance, sort=args.sort)
+    y_labels, t_axis, Z, rects, earliest_starts, threshold = build_wet_cost_matrix(instance, sort=args.sort)
     fig = make_figure(
         y_labels,
         t_axis,
         Z,
         rects,
-        title=f"wET cost heatmap — {instance_path.stem}",
+        earliest_starts,
+        title=f"wET cost heatmap — {instance_path.stem} (clip threshold: {threshold:.1f})",
     )
 
     out_path = (
