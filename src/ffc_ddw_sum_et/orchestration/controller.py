@@ -444,7 +444,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             logger=self.logger,
             last_stage_only_priority_tags=last_stage_only_priority_tags,
         )
-        mcf_lb = phase1.mcf_lb
+        obj_bound_by_mcf = phase1.mcf_lb
         self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
         self.mcf_lb_phase_schedules.append(
@@ -459,7 +459,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.logger.info(
             "Phase 1 MCF LB: %d; preparing Phase 2 last-stage-only CP-SAT solves "
             "with time limit %.2f seconds",
-            int(mcf_lb),
+            int(obj_bound_by_mcf),
             last_stage_only_cp_tl_seconds,
         )
         phase2 = run_phase2(
@@ -477,12 +477,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if phase2 is None:
             elapsed = time.monotonic() - start_elapsed
             return SubroutineReport(
-                elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
+                elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
         self.last_stage_cp_sat_solution = FFcDDWSolution(
             schedule=phase2.last_stage_only_schedule,
             obj_value=phase2.last_stage_only_obj,
-            obj_bound=mcf_lb,
+            obj_bound=obj_bound_by_mcf,
         )
         for candidate in phase2.candidates:
             self.mcf_lb_phase_schedules.append(
@@ -507,7 +507,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if phase3 is None:
             elapsed = time.monotonic() - start_elapsed
             return SubroutineReport(
-                elapsed_time=elapsed, obj_value=None, obj_bound=mcf_lb
+                elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
         if phase3.last_stage_only_schedule_flipped is not None:
             self.mcf_lb_phase_schedules.append(
@@ -530,12 +530,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             SubroutineReport(
                 elapsed_time=time.monotonic() - start_elapsed,
                 obj_value=phase3.dispatched_obj,
-                obj_bound=mcf_lb,
+                obj_bound=obj_bound_by_mcf,
             ),
             FFcDDWSolution(
                 schedule=phase3.dispatched_schedule,
                 obj_value=phase3.dispatched_obj,
-                obj_bound=mcf_lb,
+                obj_bound=obj_bound_by_mcf,
             ),
         )
 
@@ -565,21 +565,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             return SubroutineReport(
                 elapsed_time=elapsed,
                 obj_value=phase3.dispatched_obj,
-                obj_bound=phase4.obj_bound_final,
+                obj_bound=obj_bound_by_mcf,
             )
         self.mcf_lb_phase_schedules.append(("7_final_schedule", phase4.final_schedule))
 
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=phase4.final_obj,
-            obj_bound=phase4.obj_bound_final,
+            obj_bound=obj_bound_by_mcf,
         )
         self.solution_manager.register(
             report,
             FFcDDWSolution(
                 schedule=phase4.final_schedule,
                 obj_value=phase4.final_obj,
-                obj_bound=phase4.obj_bound_final,
+                obj_bound=obj_bound_by_mcf,
             ),
         )
         return report
