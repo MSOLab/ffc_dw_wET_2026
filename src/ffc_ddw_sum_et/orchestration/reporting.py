@@ -794,7 +794,6 @@ class FFcDDWReporter:
                 "reports",
                 "elapsed_sec",
                 "objValue",
-                "makespan",
             ],
             header_fmt,
         )
@@ -813,7 +812,6 @@ class FFcDDWReporter:
                         ir.report_count,
                         round(ir.elapsed_time, 3),
                         ir.obj_value,
-                        ir.makespan,
                     ],
                     cell_fmt,
                 )
@@ -824,7 +822,7 @@ class FFcDDWReporter:
         has_meta = bool(self._index_to_meta)
         meta_cols = ["n", "c", "totalMcCount", "T", "R", "W", "BKS"] if has_meta else []
         header = (
-            ["Scenario", "insIndex", "insFileName"]
+            ["Scenario", "insIndex"]
             + meta_cols
             + [
                 "Best Obj",
@@ -833,6 +831,7 @@ class FFcDDWReporter:
                 "First Bound",
                 "Improvement %",
                 "Total Elapsed",
+                "makespan",
                 "Report Count",
             ]
         )
@@ -860,7 +859,6 @@ class FFcDDWReporter:
                 values: list[Any] = [
                     sc.name,
                     ins_index if ins_index is not None else "",
-                    ir.instance_name,
                 ]
                 if has_meta:
                     for key in meta_cols:
@@ -874,6 +872,7 @@ class FFcDDWReporter:
                         ir.first_obj_bound,
                         improvement,
                         round(ir.elapsed_time, 3),
+                        ir.makespan,
                         ir.report_count,
                     ]
                 )
@@ -999,7 +998,7 @@ class FFcDDWReporter:
         wide_sheet = workbook.add_worksheet("analysis_wide")
         scenario_names = [sc.name for sc in self.scenario_results]
         wide_meta_keys = ["n", "c", "totalMcCount", "T", "R", "W"]
-        wide_header: list[str] = ["insIndex", "insFileName"] + wide_meta_keys + ["BKS"]
+        wide_header: list[str] = ["insIndex"] + wide_meta_keys + ["BKS"]
         for sc_name in scenario_names:
             wide_header.append(f"obj_{sc_name}")
             wide_header.append(f"RPDf_{sc_name}")
@@ -1012,7 +1011,6 @@ class FFcDDWReporter:
                 row_data = per_instance.setdefault(
                     ins_index,
                     {
-                        "insFileName": ir.instance_name,
                         "meta": {},
                         "BKS": None,
                         "by_sc": {},
@@ -1034,8 +1032,6 @@ class FFcDDWReporter:
             wide_sheet.write(
                 row, col, ins_index if ins_index is not None else "", cell_fmt
             )
-            col += 1
-            wide_sheet.write(row, col, data["insFileName"], cell_fmt)
             col += 1
             for key in wide_meta_keys:
                 val = data["meta"].get(key)
