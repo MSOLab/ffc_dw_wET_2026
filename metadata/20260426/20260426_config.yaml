@@ -1,0 +1,151 @@
+# NEH-CP vs MCF-LB sweep experiment (linear batch_tl_mode).
+# All scenarios: due2-weight-pos priority, PF1 profile-fix.
+#   sorting: due2-weight-pos (max(r_j, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc)
+# NEH-CP block (5 scenarios, 120s each, batch_tl_mode=linear):
+#   batch-size sweep at total_timelimit="0.024nc": bs20 / bs15 / bs12+0.04n
+#   TL-budget sweep at bs20: 0.024nc / 0.01nc / 0.02nc
+# MCF-LB block (3 scenarios, 300s each, run_mcf_lb_4 with phase2 cumulative heuristic):
+#   (last_stage_only_tl, full_cp_tl) sweep: (0.005,0.005) / (0.01,0.005) / (0.01,0.01) nc
+# Reported objective: weighted earliness + tardiness.
+# Refs: plans/20260423/neh_cp.md, plans/20260427/neh-cp-extra-batch-size-expr.md,
+#       docs/algorithms/20260426_mcf_lb.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0, 1, 2, 3 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
+
+output_dir: output/20260426
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: neh_cp_bs20_linear_dplus2_pf1_tl024nc
+    timelimit: 120.0
+    output_subdir: neh_cp_bs20_linear_dplus2_pf1_tl024nc
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 20
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_bs15_linear_dplus2_pf1_tl024nc
+    timelimit: 120.0
+    output_subdir: neh_cp_bs15_linear_dplus2_pf1_tl024nc
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_bs12_plus_004n_dplus2_pf1_tl024nc
+    timelimit: 120.0
+    output_subdir: neh_cp_bs12_plus_004n_dplus2_pf1_tl024nc
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 12
+        extra_batch_size_expr: "0.04n"
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_bs20_linear_dplus2_pf1_tl010nc
+    timelimit: 120.0
+    output_subdir: neh_cp_bs20_linear_dplus2_pf1_tl010nc
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 20
+        total_timelimit: "0.01nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_bs20_linear_dplus2_pf1_tl020nc
+    timelimit: 120.0
+    output_subdir: neh_cp_bs20_linear_dplus2_pf1_tl020nc
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 20
+        total_timelimit: "0.02nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: best_mcf_lb_p2_005nc_p4_005nc
+    timelimit: 300.0
+    output_subdir: best_mcf_lb_p2_005nc_p4_005nc
+    subroutine_flow:
+      - method: run_mcf_lb_4
+        last_stage_only_priority_tags: [ "start_time", "due2-weight-pos" ]
+        last_stage_only_use_heuristic: true
+        last_stage_only_tl: "0.005nc"
+        last_stage_only_heuristic_insert_radius: "3m"
+        log_last_stage_only_cp_search_progress: false
+        machine_then_job: false
+        full_cp_pf_method: "PF1"
+        full_cp_solver_thread_cnt: 1
+        full_cp_tl: "0.005nc"
+        repeat_full_cp_while_improving: true
+        log_full_cp_search_progress: false
+  - name: best_mcf_lb_p2_010nc_p4_005nc
+    timelimit: 300.0
+    output_subdir: best_mcf_lb_p2_010nc_p4_005nc
+    subroutine_flow:
+      - method: run_mcf_lb_4
+        last_stage_only_priority_tags: [ "start_time", "due2-weight-pos" ]
+        last_stage_only_use_heuristic: true
+        last_stage_only_tl: "0.01nc"
+        last_stage_only_heuristic_insert_radius: "3m"
+        log_last_stage_only_cp_search_progress: false
+        machine_then_job: false
+        full_cp_pf_method: "PF1"
+        full_cp_solver_thread_cnt: 1
+        full_cp_tl: "0.005nc"
+        repeat_full_cp_while_improving: true
+        log_full_cp_search_progress: false
+  - name: best_mcf_lb_p2_010nc_p4_010nc
+    timelimit: 300.0
+    output_subdir: best_mcf_lb_p2_010nc_p4_010nc
+    subroutine_flow:
+      - method: run_mcf_lb_4
+        last_stage_only_priority_tags: [ "start_time", "due2-weight-pos" ]
+        last_stage_only_use_heuristic: true
+        last_stage_only_tl: "0.01nc"
+        last_stage_only_heuristic_insert_radius: "3m"
+        log_last_stage_only_cp_search_progress: false
+        machine_then_job: false
+        full_cp_pf_method: "PF1"
+        full_cp_solver_thread_cnt: 1
+        full_cp_tl: "0.01nc"
+        repeat_full_cp_while_improving: true
+        log_full_cp_search_progress: false
