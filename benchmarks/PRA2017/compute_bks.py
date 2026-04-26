@@ -10,9 +10,10 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT.parent / "src"))
 
+from ffc_ddw_sum_et.algorithm import decode_by_reverse_dispatch
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
-from ffc_ddw_sum_et.solution.objectives import compute_window_et
+from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
 
 LARGE_DIR = ROOT / "large"
 BEST_SEQ_DIR = ROOT / "best_seq_large"
@@ -49,8 +50,7 @@ def decode_instance(
         jobs=list(instance.job_id_list),
         stages=list(instance.stage_id_list),
         machines_per_stage={
-            sid: list(mids)
-            for sid, mids in instance.stage_2_machines_map.items()
+            sid: list(mids) for sid, mids in instance.stage_2_machines_map.items()
         },
     )
 
@@ -68,7 +68,25 @@ def decode_instance(
         instance.job_2_twt_map,
     )
 
-    sum_e, sum_t = compute_window_et(schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+    return sum_e + sum_t
+
+
+def decode_instance_reversed(
+    instance: FFcDDWParameters,
+    sequences: list[list[str]],
+    *,
+    head_for_all_stages: bool,
+) -> int | None:
+    """Decode the last-stage permutation via reverse dispatch."""
+    schedule = decode_by_reverse_dispatch(
+        instance,
+        sequences[-1],
+        head_for_all_stages=head_for_all_stages,
+    )
+    if schedule is None:
+        return None
+    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
     return sum_e + sum_t
 
 
@@ -129,28 +147,43 @@ def main() -> None:
         # Validate: best_seq job count must match instance job count
         seq_jobs = len(sequences[0]) if sequences else 0
         if seq_jobs != n_jobs:
-            msg = (
-                f"{stem}: job count mismatch "
-                f"instance={n_jobs} seq={seq_jobs}"
-            )
+            msg = f"{stem}: job count mismatch instance={n_jobs} seq={seq_jobs}"
             skips.append(msg)
-            print(f"  SKIP {stem} (job mismatch {n_jobs} vs {seq_jobs})", file=sys.stderr)
+            print(
+                f"  SKIP {stem} (job mismatch {n_jobs} vs {seq_jobs})", file=sys.stderr
+            )
             continue
 
         try:
             obj_t = decode_instance(instance, sequences, force=True)
             obj_f = decode_instance(instance, sequences, force=False)
-            obj_calc = min(obj_t, obj_f)
         except Exception as exc:
             msg = f"{stem}: decode failed: {exc}"
             skips.append(msg)
             print(f"  SKIP {stem} (decode): {exc}", file=sys.stderr)
             continue
 
+        try:
+            obj_r = decode_instance_reversed(
+                instance, sequences, head_for_all_stages=False
+            )
+            obj_rh = decode_instance_reversed(
+                instance, sequences, head_for_all_stages=True
+            )
+        except Exception as exc:
+            print(f"  WARN {stem} (reverse decode): {exc}", file=sys.stderr)
+            obj_r = None
+            obj_rh = None
+
+        candidates = [v for v in (obj_t, obj_f, obj_r, obj_rh) if v is not None]
+        obj_calc = min(candidates)
+
         row_data = {
             "insIndex": ins_index,
             "BKS_T": obj_t,
             "BKS_F": obj_f,
+            "BKS_R": obj_r if obj_r is not None else "",
+            "BKS_RH": obj_rh if obj_rh is not None else "",
             "BKS_calc": obj_calc,
         }
         # Merge instance table columns
@@ -161,14 +194,28 @@ def main() -> None:
 
         if (i + 1) % 100 == 0:
             elapsed = time.time() - start
-            print(f"  [{i+1}/{len(filenames)}] done in {elapsed:.1f}s")
+            print(f"  [{i + 1}/{len(filenames)}] done in {elapsed:.1f}s")
 
     # Sort by insIndex ascending
     results.sort(key=lambda r: int(r["insIndex"]) if r["insIndex"].isdigit() else 0)
 
-    # Column order: insIndex, n, c, totalMcCount, T, R, W, BKS_data, BKS_calc, BKS_T, BKS_F
-    fieldnames = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W", "BKS_data",
-                  "BKS_calc", "BKS_T", "BKS_F"]
+    # Column order: insIndex, n, c, totalMcCount, T, R, W, BKS_data,
+    #               BKS_calc, BKS_T, BKS_F, BKS_R, BKS_RH
+    fieldnames = [
+        "insIndex",
+        "n",
+        "c",
+        "totalMcCount",
+        "T",
+        "R",
+        "W",
+        "BKS_data",
+        "BKS_calc",
+        "BKS_T",
+        "BKS_F",
+        "BKS_R",
+        "BKS_RH",
+    ]
 
     # Write output CSV
     with OUTPUT.open("w", newline="") as f:

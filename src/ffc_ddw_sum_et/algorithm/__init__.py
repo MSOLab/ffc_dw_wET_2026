@@ -13,6 +13,7 @@ from .dispatcher import BN2DDispatcher, BN2DOption
 from .fam import FAMDispatcher, FAMOption
 from .mcf_lb import MCFLBDiagnostic, MCFLBOption, MCFLBResult
 from .options.dispatch_stages_option import DispatchStagesOption
+from .reverse_dispatch import decode_by_reverse_dispatch
 
 __all__ = [
     "AlgOption",
@@ -32,4 +33,5 @@ __all__ = [
     "TerminationReason",
     "TimingInfo",
     "WorkStatus",
+    "decode_by_reverse_dispatch",
 ]
