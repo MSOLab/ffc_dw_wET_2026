@@ -33,7 +33,7 @@ from .tl_resolver import resolve_cp_tl
 
 __all__ = ["NehCpConstructor", "NehCpContext", "NehCpJobPriority"]
 
-NehCpJobPriority = Literal["weight-due-pos", "due-weight-pos", "due*-weight-pos"]
+NehCpJobPriority = Literal["weight-due-pos", "due-weight-pos", "due*-weight-pos", "due2-weight-pos"]
 
 
 def _neh_cp_job_sequence(
@@ -45,6 +45,8 @@ def _neh_cp_job_sequence(
         return instance.get_due_weight_pos_job_sequence()
     if job_priority == "due*-weight-pos":
         return instance.get_due_star_weight_pos_job_sequence()
+    if job_priority == "due2-weight-pos":
+        return instance.due2_weight_pos_job_sequence()
     raise ValueError(f"Unknown job_priority: {job_priority!r}")
 
 
