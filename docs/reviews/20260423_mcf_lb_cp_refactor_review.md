@@ -37,7 +37,7 @@
 | `machine_precedence_stride: int = 1` | `full_cp_pf_method: PFMethod \| None = None` |
 | `solver_thread_cnt = 1` (내부 로컬) | `last_stage_only_cp_solver_thread_cnt: int = 1` |
 |   | `full_cp_solver_thread_cnt: int = 1` |
-| `repeat_pf_cp_while_improving: bool = False` | `repeat_last_stage_only_cp_while_improving: bool = False` |
+| `repeat_full_cp_while_improving: bool = False` | `repeat_last_stage_only_cp_while_improving: bool = False` |
 |   | `repeat_full_cp_while_improving: bool = False` |
 | — (없음) | `last_stage_only_cp_tl: float \| str \| None = None` |
 | — (없음) | `full_cp_tl: float \| str \| None = None` |
@@ -210,7 +210,7 @@ Phase 2/4 각 solve 의 `response_proto.solve_log` 를 `log_search_progress=True
 | `tests/orchestration/test_controller.py` | `run_mcf_lb()` → `run_mcf_lb_4()` 로 수정됨. 다른 assertion 무변경 ✅ |
 | `benchmarks/PRA2017/add_lb_column.py` | `run_mcf_lb_4()` 로 전환 + 주석 업데이트 ✅ |
 | repo 내부의 `profile_fix_by_machine` 참조 | `rg` 기준 0건 잔존 (config/코드 모두 정리됨) ✅ |
-| 외부(리포 밖) 캡처된 config | 소유자가 직접 마이그레이션 필요 — `repeat_pf_cp_while_improving`, `solver_thread_cnt`, `profile_fix_by_machine`, `machine_precedence_stride` 를 보유한 YAML 은 업데이트 대상 |
+| 외부(리포 밖) 캡처된 config | 소유자가 직접 마이그레이션 필요 — `repeat_full_cp_while_improving`, `solver_thread_cnt`, `profile_fix_by_machine`, `machine_precedence_stride` 를 보유한 YAML 은 업데이트 대상 |
 
 ---
 

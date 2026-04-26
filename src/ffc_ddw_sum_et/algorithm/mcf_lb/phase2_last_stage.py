@@ -64,7 +64,7 @@ def run_phase2(
     logger: logging.Logger | None = None,
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
-    repeat_pf_cp_while_improving: bool = False,
+    repeat_last_stage_only_cp_while_improving: bool = False,
     cp_tl_seconds: float | None = None,
     log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
@@ -76,11 +76,10 @@ def run_phase2(
     raise; seeds that return UNKNOWN/time-limit are skipped with a
     warning; feasible seeds contribute a ``LastStageCandidate``.
 
-    When ``repeat_pf_cp_while_improving=True``, each seed's solve is
-    repeated with the new schedule fed back as the profile-fix reference
-    until the CP-SAT objective stops improving; per-seed ``solve_sec``
-    accumulates across iterations and the candidate reflects the last
-    (best) iteration.
+    When ``repeat_last_stage_only_cp_while_improving=True``, each seed's solve
+    is repeated with the new schedule fed back as the reference until
+    the CP-SAT objective stops improving; per-seed ``solve_sec`` accumulates
+    across iterations and the candidate reflects the last (best) iteration.
 
     Mutates ``diagnostic``: accumulates ``last_stage_cp_sat_sec`` across
     seeds; records per-seed ``ls_status_per_seed`` /
@@ -102,7 +101,7 @@ def run_phase2(
             logger=logger,
             pf_method=pf_method,
             solver_thread_cnt=solver_thread_cnt,
-            repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
+            repeat_cp_while_improving=repeat_last_stage_only_cp_while_improving,
             cp_tl_seconds=cp_tl_seconds,
             log_search_progress=log_search_progress,
             solver_log_path_getter=solver_log_path_getter,
@@ -156,7 +155,7 @@ def _solve_last_stage_for_seed(
     logger: logging.Logger | None = None,
     pf_method: PFMethod | None,
     solver_thread_cnt: int,
-    repeat_pf_cp_while_improving: bool = False,
+    repeat_cp_while_improving: bool = False,
     cp_tl_seconds: float | None = None,
     log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
@@ -177,7 +176,7 @@ def _solve_last_stage_for_seed(
         logger=logger,
         pf_method=pf_method,
         solver_thread_cnt=solver_thread_cnt,
-        repeat_while_improving=repeat_pf_cp_while_improving,
+        repeat_while_improving=repeat_cp_while_improving,
         max_time_in_seconds=cp_tl_seconds,
         log_search_progress=log_search_progress,
         solver_log_path_getter=solver_log_path_getter,
