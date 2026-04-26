@@ -9,6 +9,7 @@ optional secondary minimizes makespan subject to the primary's E/T ceiling.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from pathlib import Path
 from typing import Literal, Protocol
@@ -31,9 +32,17 @@ from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
 from .tl_resolver import resolve_cp_tl
 
-__all__ = ["NehCpConstructor", "NehCpContext", "NehCpJobPriority"]
+__all__ = [
+    "NehCpBatchTlMode",
+    "NehCpConstructor",
+    "NehCpContext",
+    "NehCpJobPriority",
+]
 
-NehCpJobPriority = Literal["weight-due-pos", "due-weight-pos", "due*-weight-pos", "due2-weight-pos"]
+NehCpJobPriority = Literal[
+    "weight-due-pos", "due-weight-pos", "due*-weight-pos", "due2-weight-pos"
+]
+NehCpBatchTlMode = Literal["constant", "linear"]
 
 
 def _neh_cp_job_sequence(
@@ -48,6 +57,66 @@ def _neh_cp_job_sequence(
     if job_priority == "due2-weight-pos":
         return instance.due2_weight_pos_job_sequence()
     raise ValueError(f"Unknown job_priority: {job_priority!r}")
+
+
+def _resolve_per_step_tl(
+    *,
+    cp_tl_from_arg: float | None,
+    total_seconds: float | None,
+    num_batches: int | None,
+    batch_count: int,
+    batch_tl_mode: NehCpBatchTlMode,
+    batch_tl_offset_seconds: float,
+    logger: logging.Logger,
+) -> list[float] | None:
+    """Build the per-batch CP-SAT time-limit list (or None for no limit).
+
+    When ``total_seconds`` is None, this is a flat ``[cp_tl_from_arg] * B``
+    (or None if ``cp_tl_from_arg`` is also None).  When ``total_seconds`` is
+    set, ``cp_tl_from_arg`` is ignored — the per-batch limit is derived from
+    ``batch_tl_mode``: ``"constant"`` yields a flat ``total_seconds /
+    divisor`` per batch (``divisor`` is ``num_batches`` when set, else
+    ``batch_count``); ``"linear"`` yields ``offset + i * x`` per batch with
+    ``x`` chosen so the limits sum to ``total_seconds``, falling back to
+    constant ``total_seconds / batch_count`` when the offset would consume
+    the whole budget.
+    """
+    if total_seconds is None:
+        if cp_tl_from_arg is None:
+            return None
+        return [cp_tl_from_arg] * batch_count
+
+    if cp_tl_from_arg is not None:
+        logger.info(
+            "neh_cp: cp_tl=%s ignored because total_timelimit is set; "
+            "per-batch limit governed by batch_tl_mode=%r.",
+            cp_tl_from_arg,
+            batch_tl_mode,
+        )
+
+    if batch_tl_mode == "constant":
+        divisor = num_batches if num_batches is not None else batch_count
+        return [total_seconds / divisor] * batch_count
+
+    if batch_tl_mode == "linear":
+        offset = batch_tl_offset_seconds
+        x = (
+            2.0
+            * (total_seconds - batch_count * offset)
+            / (batch_count * (batch_count + 1))
+        )
+        if x <= 0:
+            logger.warning(
+                "neh_cp: batch_tl_offset_seconds=%.4f * B=%d exceeds "
+                "total_timelimit=%.2f; falling back to constant schedule.",
+                offset,
+                batch_count,
+                total_seconds,
+            )
+            return [total_seconds / batch_count] * batch_count
+        return [offset + (i + 1) * x for i in range(batch_count)]
+
+    raise ValueError(f"Unknown batch_tl_mode: {batch_tl_mode!r}")
 
 
 class NehCpContext(Protocol):
@@ -78,6 +147,9 @@ class NehCpConstructor:
         added_batch_size: int = 1,
         cp_tl: float | str | None = None,
         total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: NehCpBatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
         apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
@@ -108,23 +180,58 @@ class NehCpConstructor:
             cp_tl (float | str | None, optional): Time limit per batch solve.
                 A float is interpreted as seconds; a string such as ``"0.006nc"``
                 is evaluated as an expression where ``n`` = job count and ``c`` =
-                stage count; ``None`` means no limit. When ``total_timelimit``
-                is also set, the per-batch limit becomes
-                ``min(cp_tl, total_timelimit * added_batch_size / n)``.
-                Defaults to None.
+                stage count; ``None`` means no limit. ``cp_tl`` is **ignored**
+                whenever ``total_timelimit`` is set — the per-batch limit is
+                then governed entirely by ``total_timelimit`` /
+                ``num_batches`` / ``batch_tl_mode`` /
+                ``batch_tl_offset_seconds``. Defaults to None.
             total_timelimit (float | str | None, optional): Total CP-SAT budget
                 across all batches, using the same grammar as ``cp_tl``
                 (e.g. ``"0.024nc"``). When set, the per-batch limit is derived
-                as ``total_timelimit * added_batch_size / n`` (the simple
-                ``n / added_batch_size`` batch count is used; the larger first
-                batch is not subtracted). When both ``cp_tl`` and
-                ``total_timelimit`` are set, the smaller of the two values is
-                used as the per-batch limit. Defaults to None.
-            apply_cumulative_tl (bool, optional): When True and ``cp_tl`` is set,
-                each batch receives the remaining cumulative budget
-                (``cp_tl_seconds * (step + 1) - elapsed``) rather than a fixed
-                per-batch limit.  If the remaining budget is less than
-                ``cp_tl_seconds``, the per-batch value is used as a minimum floor.
+                from ``batch_tl_mode``: ``"constant"`` (default) gives every
+                batch the same limit (``total_timelimit / num_batches`` when
+                ``num_batches`` is set, else ``total_timelimit /
+                len(batches)``); ``"linear"`` gives batch *i*
+                ``offset + i * x`` seconds (see ``batch_tl_mode`` /
+                ``batch_tl_offset_seconds``). Setting ``total_timelimit``
+                causes ``cp_tl`` to be ignored. Defaults to None.
+            num_batches (int | None, optional): When set, overrides the
+                incremental batching layout: ``added_batch_size`` is replaced
+                with ``ceil(n / num_batches)`` so the run completes in
+                roughly ``num_batches`` CP solves, and ``num_batches`` is
+                used as the divisor for the per-batch time limit
+                (``total_timelimit / num_batches`` under
+                ``batch_tl_mode="constant"``). Must be castable to ``int``
+                — a non-integer value raises ``TypeError``. Pass ``None``
+                (default) to keep the explicit ``added_batch_size`` and let
+                the per-batch divisor be the actual batch count
+                ``len(batches)``. Defaults to None.
+            batch_tl_mode (NehCpBatchTlMode, optional): How the resolved
+                ``total_timelimit`` budget is distributed across batches.
+                ``"constant"`` (default) gives every batch the same per-batch
+                limit and reproduces prior behavior. ``"linear"`` gives batch
+                *i* (1-indexed) ``batch_tl_offset_seconds + i * x`` seconds,
+                with ``x = 2 * (total_timelimit - B * offset) / (B * (B + 1))``
+                where ``B`` is the actual batch count (``num_batches`` if
+                set, else ``len(batches)``). When ``B * offset`` exceeds
+                ``total_timelimit`` the slope is non-positive; the schedule
+                logs a warning and falls back to constant
+                ``total_timelimit / B``. Has no effect when
+                ``total_timelimit`` is None. Defaults to ``"constant"``.
+            batch_tl_offset_seconds (float, optional): Per-batch CP build /
+                CP-SAT initialization offset used by ``batch_tl_mode="linear"``
+                (the constant in ``offset + i * x``). Has no effect under
+                ``"constant"`` or when ``total_timelimit`` is None.
+                Defaults to 0.01.
+            apply_cumulative_tl (bool, optional): When True and a per-batch
+                limit is in effect, each batch receives the remaining
+                cumulative budget (``sum(per_step_limits[: step + 1]) -
+                elapsed``) rather than a fixed per-batch limit. If that
+                remainder is less than this batch's own limit, the batch's
+                limit is used as a minimum floor. Under ``batch_tl_mode=
+                "constant"`` this matches the prior ``cp_tl_seconds * (step
+                + 1) - elapsed`` form; under ``"linear"`` the cumulative
+                budget grows quadratically because per-batch limits grow.
                 Defaults to False.
             pf_method (PFMethod, optional): Partial-fix strategy used to inject the
                 previous step's solution as precedence constraints into the next model.
@@ -183,15 +290,21 @@ class NehCpConstructor:
         if n == 0:
             raise RuntimeError("neh_cp requires at least one job in the instance.")
 
+        if num_batches is not None:
+            try:
+                num_batches = int(num_batches)
+            except (TypeError, ValueError) as exc:
+                raise TypeError(
+                    f"num_batches must be an integer, got {num_batches!r}"
+                ) from exc
+            added_batch_size = math.ceil(n / num_batches)
+
         cp_tl_from_arg = resolve_cp_tl(cp_tl, n, stage_count)
-        if total_timelimit is not None:
-            total_seconds = resolve_cp_tl(total_timelimit, n, stage_count)
-            derived = total_seconds * added_batch_size / n
-            cp_tl_seconds = (
-                min(cp_tl_from_arg, derived) if cp_tl_from_arg is not None else derived
-            )
-        else:
-            cp_tl_seconds = cp_tl_from_arg
+        total_seconds = (
+            resolve_cp_tl(total_timelimit, n, stage_count)
+            if total_timelimit is not None
+            else None
+        )
         cp_tl_2nd_obj_seconds = (
             resolve_cp_tl(
                 cp_tl_2nd_obj if cp_tl_2nd_obj is not None else cp_tl,
@@ -212,6 +325,16 @@ class NehCpConstructor:
         tail = job_sequence[first_batch_size:]
         for start in range(0, len(tail), added_batch_size):
             batches.append(tail[start : start + added_batch_size])
+
+        cp_tl_seconds_per_step: list[float] | None = _resolve_per_step_tl(
+            cp_tl_from_arg=cp_tl_from_arg,
+            total_seconds=total_seconds,
+            num_batches=num_batches,
+            batch_count=len(batches),
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            logger=ctx.logger,
+        )
 
         partial_sol: FFcSchedule | None = None
         current_jobs: list[str] = []
@@ -294,23 +417,24 @@ class NehCpConstructor:
             )
 
             solver = cp_model.CpSolver()
-            if cp_tl_seconds is not None:
+            if cp_tl_seconds_per_step is not None:
+                step_tl = cp_tl_seconds_per_step[step]
                 if apply_cumulative_tl:
                     elapsed_so_far = time.monotonic() - start_elapsed
-                    cumulative_tl = cp_tl_seconds * (step + 1)
+                    cumulative_tl = sum(cp_tl_seconds_per_step[: step + 1])
                     applied_tl = cumulative_tl - elapsed_so_far
-                    if applied_tl < cp_tl_seconds:
+                    if applied_tl < step_tl:
                         ctx.logger.warning(
                             "neh_cp step %d: remaining cumulative budget %.2f seconds "
                             "is below per-batch floor %.2f seconds "
                             "(cumulative_tl=%.2f, elapsed=%.2f); using floor.",
                             step,
                             applied_tl,
-                            cp_tl_seconds,
+                            step_tl,
                             cumulative_tl,
                             elapsed_so_far,
                         )
-                        applied_tl = cp_tl_seconds
+                        applied_tl = step_tl
                     else:
                         ctx.logger.info(
                             "neh_cp step %d: applying %.2f seconds "
@@ -322,7 +446,7 @@ class NehCpConstructor:
                         )
                     solver.parameters.max_time_in_seconds = applied_tl
                 else:
-                    solver.parameters.max_time_in_seconds = cp_tl_seconds
+                    solver.parameters.max_time_in_seconds = step_tl
             solver.parameters.num_workers = solver_thread_cnt
             status = solver.solve(mdl)
 

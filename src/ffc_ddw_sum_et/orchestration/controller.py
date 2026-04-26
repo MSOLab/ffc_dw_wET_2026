@@ -33,7 +33,7 @@ from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardin
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
 from .controller_core import FFcDDWSubroutineControllerCore
-from .neh_cp import NehCpConstructor, NehCpJobPriority
+from .neh_cp import NehCpBatchTlMode, NehCpConstructor, NehCpJobPriority
 from .solution_manager import FFcDDWSolution
 from .tl_resolver import resolve_cp_tl
 
@@ -921,6 +921,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         added_batch_size: int = 1,
         cp_tl: float | str | None = None,
         total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: NehCpBatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.1,
         apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
@@ -936,6 +939,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             added_batch_size=added_batch_size,
             cp_tl=cp_tl,
             total_timelimit=total_timelimit,
+            num_batches=num_batches,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
             apply_cumulative_tl=apply_cumulative_tl,
             pf_method=pf_method,
             skip_pf_below_obj=skip_pf_below_obj,
