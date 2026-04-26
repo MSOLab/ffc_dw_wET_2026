@@ -35,7 +35,7 @@ from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 from .controller_core import FFcDDWSubroutineControllerCore
 from .neh_cp import NehCpBatchTlMode, NehCpConstructor, NehCpJobPriority
 from .solution_manager import FFcDDWSolution
-from .tl_resolver import resolve_cp_tl
+from .value_resolver import resolve_value_expr
 
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
 
@@ -377,17 +377,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def run_mcf_lb_4(
         self,
         last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
+        last_stage_only_use_heuristic: bool = False,
+        last_stage_only_heuristic_first_improvement_restart: bool = False,
+        last_stage_only_heuristic_insert_radius: int | None = None,
         last_stage_only_cp_pf_method: PFMethod | None = None,
         last_stage_only_cp_solver_thread_cnt: int = 1,
-        last_stage_only_cp_tl: float | str | None = None,
         repeat_last_stage_only_cp_while_improving: bool = False,
         log_last_stage_only_cp_search_progress: bool = False,
+        last_stage_only_tl: float | str | None = None,
         machine_then_job: bool = False,
         full_cp_pf_method: PFMethod | None = None,
         full_cp_solver_thread_cnt: int = 1,
-        full_cp_tl: float | str | None = None,
         repeat_full_cp_while_improving: bool = False,
         log_full_cp_search_progress: bool = False,
+        full_cp_tl: float | str | None = None,
     ) -> SubroutineReport:
         """Run the 4-phase MCF-LB algorithm and register the best incumbent.
 
@@ -400,25 +403,40 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Args:
             last_stage_only_priority_tags: Priority tags used in Phase 1 to
                 generate dispatch seeds. ``None`` uses all available tags.
+            last_stage_only_use_heuristic: When ``True``, Phase 2 solves each
+                seed with the cumulative reinsertion heuristic instead of
+                CP-SAT. The other ``last_stage_only_cp_*`` /
+                ``repeat_last_stage_only_cp_while_improving`` /
+                ``log_last_stage_only_cp_search_progress`` arguments are
+                ignored on the heuristic path.
+            last_stage_only_heuristic_first_improvement_restart: Restart
+                policy for the cumulative heuristic. ``False`` (default)
+                completes a full pass over the sequence and restarts only if
+                any move was made; ``True`` restarts immediately when the
+                first improving move is found.
+            last_stage_only_heuristic_insert_radius
             last_stage_only_cp_pf_method: Profile-fix precedence policy for the
                 Phase 2 last-stage CP-SAT solve. ``None`` (default) skips the
                 precedence-arc pass entirely while keeping warm-start / ET
                 hints. Previously the implicit default was ``"PF0"``
                 (stage-level time-based selection); set explicitly to restore
                 that behaviour.
+            last_stage_only_cp_solver_thread_cnt
+            repeat_last_stage_only_cp_while_improving: If ``True``, Phase 2
+                re-solves with the updated profile until no improvement.
+            log_last_stage_only_cp_search_progress
+            last_stage_only_tl: Per-solve time limit (seconds) for the
+                Phase 2 last-stage-only CP-SAT model. Accepts a ``float``,
+                a ``"<n>nc"`` string (resolves to ``n * job_count *
+                stage_count``), or ``None`` for no limit.
+            machine_then_job: Passed to Phase 3 reverse-dispatch ordering.
             full_cp_pf_method: Same policy for the Phase 4 full CP-SAT solve.
                 Same ``None`` / ``"PF0"`` distinction applies.
             full_cp_solver_thread_cnt: Number of CP-SAT solver threads for the
                 Phase 4 full CP-SAT solve.
-            repeat_last_stage_only_cp_while_improving: If ``True``, Phase 2
-                re-solves with the updated profile until no improvement.
             repeat_full_cp_while_improving: If ``True``, Phase 4 re-solves
                 with the updated profile until no improvement.
-            machine_then_job: Passed to Phase 3 reverse-dispatch ordering.
-            last_stage_only_cp_tl: Per-solve time limit (seconds) for the
-                Phase 2 last-stage-only CP-SAT model. Accepts a ``float``,
-                a ``"<n>nc"`` string (resolves to ``n * job_count *
-                stage_count``), or ``None`` for no limit.
+            log_full_cp_search_progress
             full_cp_tl: Same for the Phase 4 full CP-SAT model.
 
         Returns:
@@ -430,12 +448,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
         instance = self.instance
-        last_stage_only_cp_tl_seconds = resolve_cp_tl(
-            last_stage_only_cp_tl, instance.job_count, instance.stage_count
+        last_stage_only_tl_seconds = resolve_value_expr(
+            last_stage_only_tl,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
         )
-        full_cp_tl_seconds = resolve_cp_tl(
-            full_cp_tl, instance.job_count, instance.stage_count
+        full_cp_tl_seconds = resolve_value_expr(
+            full_cp_tl,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
         )
+        last_stage_only_heuristic_insert_radius_count = resolve_value_expr(
+            last_stage_only_heuristic_insert_radius,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+        if last_stage_only_heuristic_insert_radius_count is not None:
+            last_stage_only_heuristic_insert_radius_count = int(
+                last_stage_only_heuristic_insert_radius_count
+            )
 
         # Phase 1: MCF LB + one last-stage dispatch seed per MCF priority map.
         phase1 = run_phase1(
@@ -460,7 +494,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             "Phase 1 MCF LB: %d; preparing Phase 2 last-stage-only CP-SAT solves "
             "with time limit %.2f seconds",
             int(obj_bound_by_mcf),
-            last_stage_only_cp_tl_seconds,
+            last_stage_only_tl_seconds,
         )
         phase2 = run_phase2(
             phase1,
@@ -470,9 +504,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             pf_method=last_stage_only_cp_pf_method,
             solver_thread_cnt=last_stage_only_cp_solver_thread_cnt,
             repeat_last_stage_only_cp_while_improving=repeat_last_stage_only_cp_while_improving,
-            cp_tl_seconds=last_stage_only_cp_tl_seconds,
+            tl_seconds=last_stage_only_tl_seconds,
             log_search_progress=log_last_stage_only_cp_search_progress,
             solver_log_path_getter=self.get_file_path_for_subroutine,
+            use_heuristic=last_stage_only_use_heuristic,
+            heuristic_first_improvement_restart=last_stage_only_heuristic_first_improvement_restart,
+            heuristic_insert_radius=last_stage_only_heuristic_insert_radius_count,
         )
         if phase2 is None:
             elapsed = time.monotonic() - start_elapsed
@@ -831,7 +868,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         instance = self.instance
-        cp_tl_seconds = resolve_cp_tl(cp_tl, instance.job_count, instance.stage_count)
+        cp_tl_seconds = resolve_value_expr(
+            cp_tl,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
         params_for_horizon = BaseModelBuilder.make_params(instance)
         horizon = sum(params_for_horizon.p.values())
 

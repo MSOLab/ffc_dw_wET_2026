@@ -32,7 +32,7 @@
 | instance_worker_cnt | 24 |
 | last_stage_only_cp_pf_method | `null` |
 | last_stage_only_cp_solver_thread_cnt | 4 |
-| last_stage_only_cp_tl | `"0.01nc"` |
+| last_stage_only_tl | `"0.01nc"` |
 | repeat_last_stage_only_cp_while_improving | false |
 | full_cp_pf_method | `"PF1"` |
 | full_cp_solver_thread_cnt | 4 |

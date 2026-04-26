@@ -28,7 +28,7 @@ scenarios:
         last_stage_only_priority_tags: [ "start_time" ]
         last_stage_only_cp_pf_method: "PF1"
         last_stage_only_cp_solver_thread_cnt: 1
-        last_stage_only_cp_tl: null
+        last_stage_only_tl: null
         repeat_last_stage_only_cp_while_improving: true
         log_last_stage_only_cp_search_progress: false
         machine_then_job: false
@@ -45,7 +45,7 @@ scenarios:
         last_stage_only_priority_tags: [ "due2-weight-pos" ]
         last_stage_only_cp_pf_method: "PF1"
         last_stage_only_cp_solver_thread_cnt: 1
-        last_stage_only_cp_tl: null
+        last_stage_only_tl: null
         repeat_last_stage_only_cp_while_improving: true
         log_last_stage_only_cp_search_progress: false
         machine_then_job: false
@@ -62,7 +62,7 @@ scenarios:
         last_stage_only_priority_tags: [ "start_time", "due2-weight-pos" ]
         last_stage_only_cp_pf_method: "PF1"
         last_stage_only_cp_solver_thread_cnt: 1
-        last_stage_only_cp_tl: null
+        last_stage_only_tl: null
         repeat_last_stage_only_cp_while_improving: true
         log_last_stage_only_cp_search_progress: false
         machine_then_job: false

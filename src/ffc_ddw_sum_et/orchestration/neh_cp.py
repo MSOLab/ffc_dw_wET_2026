@@ -30,7 +30,7 @@ from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardin
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
 from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
-from .tl_resolver import resolve_cp_tl
+from .value_resolver import resolve_value_expr
 
 __all__ = [
     "NehCpBatchTlMode",
@@ -287,6 +287,7 @@ class NehCpConstructor:
         instance = ctx.instance
         n = instance.job_count
         stage_count = instance.stage_count
+        last_stage_mc_count = instance.last_stage_mc_count
         if n == 0:
             raise RuntimeError("neh_cp requires at least one job in the instance.")
 
@@ -299,17 +300,18 @@ class NehCpConstructor:
                 ) from exc
             added_batch_size = math.ceil(n / num_batches)
 
-        cp_tl_from_arg = resolve_cp_tl(cp_tl, n, stage_count)
+        cp_tl_from_arg = resolve_value_expr(cp_tl, n, stage_count, last_stage_mc_count)
         total_seconds = (
-            resolve_cp_tl(total_timelimit, n, stage_count)
+            resolve_value_expr(total_timelimit, n, stage_count, last_stage_mc_count)
             if total_timelimit is not None
             else None
         )
         cp_tl_2nd_obj_seconds = (
-            resolve_cp_tl(
+            resolve_value_expr(
                 cp_tl_2nd_obj if cp_tl_2nd_obj is not None else cp_tl,
                 n,
                 stage_count,
+                last_stage_mc_count,
             )
             if minimize_makespan_lex
             else None
