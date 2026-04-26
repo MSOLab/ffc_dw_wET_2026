@@ -1,10 +1,25 @@
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-df = pd.read_csv("batch_size_5_10_15.csv")
+# ------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------
+ANALYSIS_DIR = Path("analysis/diff/20260426_batch_size")
+
+if len(sys.argv) > 1:
+    csv_filename = sys.argv[1]
+else:
+    csv_filename = "batch_size_5_10_15.csv"
+
+csv_path = ANALYSIS_DIR / Path(csv_filename).name
+
+df = pd.read_csv(csv_path)
 
 instance_params = ["n", "c", "totalMcCount", "T", "R", "W"]
 
@@ -163,9 +178,9 @@ for bs in [5, 10, 15]:
 # ---------------------------------------------------------------
 # Save per-scenario recommendations
 # ---------------------------------------------------------------
-result_df.to_csv("batch_size_regression_recommendations.csv", index=False)
+result_df.to_csv(ANALYSIS_DIR / "batch_size_regression_recommendations.csv", index=False)
 print("\nRecommendations saved to batch_size_regression_recommendations.csv")
 
 # Save actual per-instance winner
-pivot[["best_bs", 5, 10, 15]].to_csv("batch_size_actual_winner.csv")
+pivot[["best_bs", 5, 10, 15]].to_csv(ANALYSIS_DIR / "batch_size_actual_winner.csv")
 print("Actual winner saved to batch_size_actual_winner.csv")

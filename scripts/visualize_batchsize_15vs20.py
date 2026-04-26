@@ -20,23 +20,26 @@ import seaborn as sns
 # ------------------------------------------------------------------
 # Config
 # ------------------------------------------------------------------
-if len(sys.argv) > 1:
-    csv_path = sys.argv[1]
-else:
-    csv_path = "batch_size_5_10_15_20.csv"
+ANALYSIS_DIR = Path("analysis/diff/20260426_batch_size")
 
-prefix = Path(csv_path).stem
+if len(sys.argv) > 1:
+    csv_filename = sys.argv[1]
+else:
+    csv_filename = "batch_size_5_10_15_20.csv"
+
+csv_path = ANALYSIS_DIR / Path(csv_filename).name
+prefix = csv_path.stem
 df = pd.read_csv(csv_path)
 instance_params = ["n", "c", "totalMcCount", "T", "R", "W"]
 batch_sizes = sorted(df["batchSize"].unique().tolist())  # [5, 10, 15, 20]
 
 # Load analysis outputs
-diff_desc = pd.read_csv(f"{prefix}_diff_descriptive.csv")
-diff_reg = pd.read_csv(f"{prefix}_diff_regression.csv")
-slicing = pd.read_csv(f"{prefix}_slicing_analysis.csv")
-interaction = pd.read_csv(f"{prefix}_interaction_effects.csv")
-rec_matrix = pd.read_csv(f"{prefix}_recommendation_matrix.csv")
-rec_full = pd.read_csv(f"{prefix}_recommendations_full.csv")
+diff_desc = pd.read_csv(ANALYSIS_DIR / f"{prefix}_diff_descriptive.csv")
+diff_reg = pd.read_csv(ANALYSIS_DIR / f"{prefix}_diff_regression.csv")
+slicing = pd.read_csv(ANALYSIS_DIR / f"{prefix}_slicing_analysis.csv")
+interaction = pd.read_csv(ANALYSIS_DIR / f"{prefix}_interaction_effects.csv")
+rec_matrix = pd.read_csv(ANALYSIS_DIR / f"{prefix}_recommendation_matrix.csv")
+rec_full = pd.read_csv(ANALYSIS_DIR / f"{prefix}_recommendations_full.csv")
 
 # Build pivot
 pivot = df.pivot(index="insIndex", columns="batchSize", values="RPDf")
@@ -182,7 +185,7 @@ legend_elements = [Patch(facecolor=BS_COLORS[bs], edgecolor="white", label=f"bs=
 ax1d.legend(handles=legend_elements, loc="upper right", fontsize=9)
 
 plt.tight_layout()
-fig1.savefig(f"{prefix}_evidence_15vs20.png", dpi=200, bbox_inches="tight")
+fig1.savefig(ANALYSIS_DIR / f"{prefix}_evidence_15vs20.png", dpi=200, bbox_inches="tight")
 plt.close(fig1)
 print(f"Saved: {prefix}_evidence_15vs20.png")
 
@@ -307,7 +310,7 @@ for i, bs in enumerate(batch_sizes):
               f"{mean_val:.3f}", ha="center", fontweight="bold", fontsize=9)
 
 plt.tight_layout()
-fig2.savefig(f"{prefix}_evidence_all.png", dpi=200, bbox_inches="tight")
+fig2.savefig(ANALYSIS_DIR / f"{prefix}_evidence_all.png", dpi=200, bbox_inches="tight")
 plt.close(fig2)
 print(f"Saved: {prefix}_evidence_all.png")
 

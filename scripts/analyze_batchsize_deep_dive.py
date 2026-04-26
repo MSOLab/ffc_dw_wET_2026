@@ -13,12 +13,15 @@ from statsmodels.stats.multicomp import pairwise_tukeyhsd
 # ------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------
-if len(sys.argv) > 1:
-    csv_path = sys.argv[1]
-else:
-    csv_path = "batch_size_5_10_15.csv"
+ANALYSIS_DIR = Path("analysis/diff/20260426_batch_size")
 
-prefix = Path(csv_path).stem  # e.g. "batch_size_5_10_15" or "batch_size_5_10_15_20"
+if len(sys.argv) > 1:
+    csv_filename = sys.argv[1]
+else:
+    csv_filename = "batch_size_5_10_15.csv"
+
+csv_path = ANALYSIS_DIR / Path(csv_filename).name
+prefix = csv_path.stem  # e.g. "batch_size_5_10_15" or "batch_size_5_10_15_20"
 
 df = pd.read_csv(csv_path)
 instance_params = ["n", "c", "totalMcCount", "T", "R", "W"]
@@ -72,7 +75,7 @@ print("=" * 72)
 
 # Save Model 2 coefficients
 coef_df = model2.summary2().tables[1]
-coef_df.to_csv(f"{prefix}_model2_summary.csv")
+coef_df.to_csv(ANALYSIS_DIR / f"{prefix}_model2_summary.csv")
 print(f"Saved: {prefix}_model2_summary.csv")
 
 # ======================================================================
@@ -131,7 +134,7 @@ for diff_col in diff_col_names:
     print(f"  significant: {sig_text}")
 
 diff_descriptive_df = pd.DataFrame(diff_descriptive_rows)
-diff_descriptive_df.to_csv(f"{prefix}_diff_descriptive.csv", index=False)
+diff_descriptive_df.to_csv(ANALYSIS_DIR / f"{prefix}_diff_descriptive.csv", index=False)
 print(f"\nSaved: {prefix}_diff_descriptive.csv")
 
 diff_reg_rows = []
@@ -147,7 +150,7 @@ for diff_col, m in diff_regressions.items():
             }
         )
 diff_reg_df = pd.DataFrame(diff_reg_rows)
-diff_reg_df.to_csv(f"{prefix}_diff_regression.csv", index=False)
+diff_reg_df.to_csv(ANALYSIS_DIR / f"{prefix}_diff_regression.csv", index=False)
 print(f"Saved: {prefix}_diff_regression.csv")
 
 # ======================================================================
@@ -215,7 +218,7 @@ for param in instance_params:
             )
 
 slicing_df = pd.DataFrame(slicing_rows)
-slicing_df.to_csv(f"{prefix}_slicing_analysis.csv", index=False)
+slicing_df.to_csv(ANALYSIS_DIR / f"{prefix}_slicing_analysis.csv", index=False)
 print(f"\nSaved: {prefix}_slicing_analysis.csv ({len(slicing_df)} rows)")
 
 # ======================================================================
@@ -283,7 +286,7 @@ for param in instance_params:
             print(f"  {param}={val}: {pred_strs} → best=bs{best_bs}")
 
 interaction_df = pd.DataFrame(interaction_rows)
-interaction_df.to_csv(f"{prefix}_interaction_effects.csv", index=False)
+interaction_df.to_csv(ANALYSIS_DIR / f"{prefix}_interaction_effects.csv", index=False)
 print(f"\nSaved: {prefix}_interaction_effects.csv ({len(interaction_df)} rows)")
 
 # ======================================================================
@@ -328,7 +331,7 @@ print(
     f"median={grid_df['savings'].median():.4f}"
 )
 
-grid_df.to_csv(f"{prefix}_recommendations_full.csv", index=False)
+grid_df.to_csv(ANALYSIS_DIR / f"{prefix}_recommendations_full.csv", index=False)
 print(f"Saved: {prefix}_recommendations_full.csv")
 
 # Collapse to 2D matrix: R × n (top interaction drivers)
@@ -352,7 +355,7 @@ for r_val in grid_values["R"]:
         )
 
 matrix_df = pd.DataFrame(matrix_rows)
-matrix_df.to_csv(f"{prefix}_recommendation_matrix.csv", index=False)
+matrix_df.to_csv(ANALYSIS_DIR / f"{prefix}_recommendation_matrix.csv", index=False)
 print(f"Saved: {prefix}_recommendation_matrix.csv")
 print("\nRecommendation matrix (R × n):")
 print(matrix_df.to_string(index=False))
@@ -400,7 +403,7 @@ for diff_col, m in diff_regressions.items():
     diag_rows.append({"metric": f"R2_{diff_col}_regression", "value": m.rsquared})
 
 diag_df = pd.DataFrame(diag_rows)
-diag_df.to_csv(f"{prefix}_model_diagnostics.csv", index=False)
+diag_df.to_csv(ANALYSIS_DIR / f"{prefix}_model_diagnostics.csv", index=False)
 print(f"\nSaved: {prefix}_model_diagnostics.csv")
 
 print("\n" + "=" * 72)
