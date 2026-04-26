@@ -1,0 +1,41 @@
+# NEH-CP incremental constructor experiment.
+# Single scenario: due2-weight-pos priority with size-adaptive batch.
+#   sorting: due2-weight-pos (max(r_j, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc)
+#   profile fix: PF1
+#   batch size: added_batch_size + int(extra_batch_size_expr resolved)
+#                = 12 + int(0.04 * n)   (e.g., n=50 → 14, n=100 → 16, n=200 → 20)
+# total_timelimit: "0.01nc" derives cp_tl per batch.
+# Reported objective: weighted earliness + tardiness.
+# Ref: plans/20260427/neh-cp-extra-batch-size-expr.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1439 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
+
+output_dir: output/20260426
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: neh_cp_bs12_plus_004n_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_bs12_plus_004n_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 12
+        extra_batch_size_expr: "0.04n"
+        total_timelimit: "0.01nc"
+        batch_tl_mode: "constant"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false

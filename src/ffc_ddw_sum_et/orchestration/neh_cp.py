@@ -119,6 +119,12 @@ def _resolve_per_step_tl(
     raise ValueError(f"Unknown batch_tl_mode: {batch_tl_mode!r}")
 
 
+def _trunc4(x: float | None) -> float | None:
+    if x is None:
+        return None
+    return math.trunc(x * 10000) / 10000
+
+
 class NehCpContext(Protocol):
     """Minimal interface `NehCpConstructor` requires from its calling context."""
 
@@ -145,6 +151,7 @@ class NehCpConstructor:
         job_priority: NehCpJobPriority = "weight-due-pos",
         solver_thread_cnt: int = 1,
         added_batch_size: int = 1,
+        extra_batch_size_expr: str | None = None,
         cp_tl: float | str | None = None,
         total_timelimit: float | str | None = None,
         num_batches: int | None = None,
@@ -177,6 +184,13 @@ class NehCpConstructor:
                 Defaults to 1.
             added_batch_size (int, optional): Jobs added per incremental step after
                 the first batch. Defaults to 1.
+            extra_batch_size_expr (str | None, optional): Optional add-on to
+                ``added_batch_size`` evaluated against problem dimensions. Uses the
+                same grammar as ``cp_tl`` (e.g. ``"0.04n"`` adds ``int(0.04 * n)``).
+                The effective per-step batch size becomes
+                ``added_batch_size + int(resolve_value_expr(extra_batch_size_expr,
+                n, c, m))``. Ignored when ``num_batches`` is set, mirroring the
+                ``added_batch_size`` override behavior. Defaults to None.
             cp_tl (float | str | None, optional): Time limit per batch solve.
                 A float is interpreted as seconds; a string such as ``"0.006nc"``
                 is evaluated as an expression where ``n`` = job count and ``c`` =
@@ -299,6 +313,12 @@ class NehCpConstructor:
                     f"num_batches must be an integer, got {num_batches!r}"
                 ) from exc
             added_batch_size = math.ceil(n / num_batches)
+        elif extra_batch_size_expr is not None:
+            extra = resolve_value_expr(
+                extra_batch_size_expr, n, stage_count, last_stage_mc_count
+            )
+            if extra is not None:
+                added_batch_size = added_batch_size + int(extra)
 
         cp_tl_from_arg = resolve_value_expr(cp_tl, n, stage_count, last_stage_mc_count)
         total_seconds = (
@@ -353,6 +373,7 @@ class NehCpConstructor:
 
         # State
         last_obj_value = 0
+        prev_elapsed_seconds = 0.0
 
         for step, batch in enumerate(batches):
             current_jobs.extend(batch)
@@ -419,6 +440,7 @@ class NehCpConstructor:
             )
 
             solver = cp_model.CpSolver()
+            applied_tl_seconds: float | None = None
             if cp_tl_seconds_per_step is not None:
                 step_tl = cp_tl_seconds_per_step[step]
                 if apply_cumulative_tl:
@@ -447,8 +469,10 @@ class NehCpConstructor:
                             elapsed_so_far,
                         )
                     solver.parameters.max_time_in_seconds = applied_tl
+                    applied_tl_seconds = applied_tl
                 else:
                     solver.parameters.max_time_in_seconds = step_tl
+                    applied_tl_seconds = step_tl
             solver.parameters.num_workers = solver_thread_cnt
             status = solver.solve(mdl)
 
@@ -574,18 +598,28 @@ class NehCpConstructor:
                 gap: float | None = 0.0 if ub == 0 else None
             else:
                 gap = ub / sub_obj_lb
+            step_elapsed_seconds = float(time.monotonic() - start_elapsed)
+            step_delta_seconds = step_elapsed_seconds - prev_elapsed_seconds
+            elapsed_portion = (
+                step_delta_seconds / applied_tl_seconds
+                if applied_tl_seconds is not None and applied_tl_seconds > 0
+                else None
+            )
             sub_step_log.append(
                 {
                     "step": step,
-                    "elapsed_time": float(time.monotonic() - start_elapsed),
+                    "elapsed_time": _trunc4(step_elapsed_seconds),
+                    "TL": _trunc4(applied_tl_seconds),
+                    "elapsed_portion": _trunc4(elapsed_portion),
                     "sub_obj": ub,
                     "sub_obj_lb": sub_obj_lb,
-                    "gap": gap,
+                    "gap": _trunc4(gap),
                     "job_count": len(current_jobs),
                     "makespan": int(partial_sol.makespan),
                     "ran_2nd_obj": ran_2nd_obj,
                 }
             )
+            prev_elapsed_seconds = step_elapsed_seconds
             last_obj_value = se + st
 
         if partial_sol is None:

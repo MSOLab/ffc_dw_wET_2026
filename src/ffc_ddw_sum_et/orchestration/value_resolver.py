@@ -19,17 +19,27 @@ def resolve_value_expr(
             factor = float(prefix)
         except ValueError:
             raise ValueError(
-                f"cp_tl string '{value_expr}' ends with 'nc' but the prefix "
+                f"value expression '{value_expr}' ends with 'nc' but the prefix "
                 f"'{prefix}' is not a valid number"
             )
         return factor * job_count * stage_count
+    elif s.endswith("n"):
+        prefix = s[:-1]
+        try:
+            factor = float(prefix)
+        except ValueError:
+            raise ValueError(
+                f"value expression '{value_expr}' ends with 'n' but the prefix "
+                f"'{prefix}' is not a valid number"
+            )
+        return factor * job_count
     elif s.endswith("c"):
         prefix = s[:-1]
         try:
             factor = float(prefix)
         except ValueError:
             raise ValueError(
-                f"cp_tl string '{value_expr}' ends with 'c' but the prefix "
+                f"value expression '{value_expr}' ends with 'c' but the prefix "
                 f"'{prefix}' is not a valid number"
             )
         return factor * stage_count
@@ -39,7 +49,7 @@ def resolve_value_expr(
             factor = float(prefix)
         except ValueError:
             raise ValueError(
-                f"cp_tl string '{value_expr}' ends with 'm' but the prefix "
+                f"value expression '{value_expr}' ends with 'm' but the prefix "
                 f"'{prefix}' is not a valid number"
             )
         return factor * last_stage_mc_count
@@ -47,6 +57,7 @@ def resolve_value_expr(
         return float(s)
     except ValueError:
         raise ValueError(
-            f"cp_tl string '{value_expr}' cannot be interpreted as a float "
-            "and does not match the '<number>nc' or '<number>c' or '<number>m' pattern"
+            f"value expression '{value_expr}' cannot be interpreted as a float "
+            "and does not match the '<number>nc' / '<number>n' / '<number>c' / "
+            "'<number>m' pattern"
         )
