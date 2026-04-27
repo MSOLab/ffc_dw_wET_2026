@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Literal, Sequence
+from typing import Callable, Literal, Sequence
 
 from ortools.sat.python import cp_model
 from routix.io import dump_yaml
@@ -824,6 +824,92 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         return schedule, obj_value
 
+    def _dispatch_by_reversed_sequence_with_iit(
+        self, job_sequence: Sequence[str]
+    ) -> tuple[FFcSchedule, float]:
+        """Dispatch ``job_sequence`` via the reverse-instance + IIT pipeline.
+
+        Steps: stage-reverse the instance, dispatch ``reversed(job_sequence)``
+        with :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`
+        minimising makespan, unflip the result with
+        :meth:`FFcSchedule.as_reversed`, push left to semi-active form, then
+        insert idle time on the last stage.
+        """
+        instance = self.instance
+        reversed_instance = FFcDDWParameters.reverse_stages(instance)
+        rev_seq = list(reversed(job_sequence))
+
+        rev_dispatcher = MixedDispatcher(reversed_instance, logger=self.logger)
+        reversed_full_1 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
+            rev_seq,
+            machine_then_job=True,
+            criteria="makespan",
+        )
+        reversed_full_2 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
+            rev_seq,
+            machine_then_job=False,
+            criteria="makespan",
+        )
+        if reversed_full_1 is None and reversed_full_2 is None:
+            raise RuntimeError(
+                f"_dispatch_by_reversed_sequence_with_iit: MixedDispatcher "
+                f"produced no schedule for {instance.name}"
+            )
+        if reversed_full_1 is not None:
+            schedule_1 = reversed_full_1.as_reversed()
+        else:
+            schedule_1 = None
+        if reversed_full_2 is not None:
+            schedule_2 = reversed_full_2.as_reversed()
+        else:
+            schedule_2 = None
+
+        if schedule_1 is not None and schedule_2 is not None:
+            sum_e_1, sum_t_1 = compute_weighted_earliness_tardiness(
+                schedule_1, instance
+            )
+            obj_1 = float(sum_e_1 + sum_t_1)
+
+            sum_e_2, sum_t_2 = compute_weighted_earliness_tardiness(
+                schedule_2, instance
+            )
+            obj_2 = float(sum_e_2 + sum_t_2)
+
+            if obj_1 <= obj_2:
+                schedule = schedule_1
+                self.logger.info(
+                    "_dispatch_by_reversed_sequence_with_iit: "
+                    "machine_then_job=True better (obj=%s) than "
+                    "machine_then_job=False (obj=%s)",
+                    obj_1,
+                    obj_2,
+                )
+            else:
+                schedule = schedule_2
+                self.logger.info(
+                    "_dispatch_by_reversed_sequence_with_iit: "
+                    "machine_then_job=False better (obj=%s) than "
+                    "machine_then_job=True (obj=%s)",
+                    obj_2,
+                    obj_1,
+                )
+        else:
+            schedule = schedule_1 or schedule_2
+
+        if schedule is None:
+            raise RuntimeError(
+                f"_dispatch_by_reversed_sequence_with_iit: no schedule after "
+                f"unflipping for {instance.name}"
+            )
+        schedule.make_semi_active(instance.stage_2_job_2_p_map)
+        schedule.insert_idle_time(
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+        )
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+        return schedule, float(sum_e + sum_t)
+
     def initialize_by_edd(
         self,
         dispatcher: Literal["mixed", "fam"] = "mixed",
@@ -863,6 +949,76 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
         return report
+
+    def _initialize_by_reversed_sequence(
+        self, sequence_getter: Callable[[], Sequence[str]]
+    ) -> SubroutineReport:
+        """Time ``sequence_getter()``, dispatch via the reverse-instance + IIT
+        pipeline (:meth:`_dispatch_by_reversed_sequence_with_iit`), then
+        register the resulting incumbent.
+        """
+        start_elapsed = time.monotonic()
+        job_sequence = sequence_getter()
+        schedule, obj_value = self._dispatch_by_reversed_sequence_with_iit(job_sequence)
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        self.solution_manager.register(
+            report,
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
+        )
+        return report
+
+    def initialize_by_due2_weight_pos(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in
+        ``due2-weight-pos`` order (see
+        :meth:`FFcDDWParameters.get_due2_weight_pos_job_sequence`) via the
+        reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_due2_weight_pos_job_sequence
+        )
+
+    def initialize_by_w1(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``w1`` order — descending by ``(w⁺_j - w⁻_j)`` — via the
+        reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(self.instance.get_w1_job_sequence)
+
+    def initialize_by_wxd1(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``wxd1`` order — ascending by ``abs(w⁺_j - w⁻_j) * (d_j - d_bar)``
+        with ``d_j = (d⁻_j + d⁺_j) / 2`` and ``d_bar`` the mean over jobs —
+        via the reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_wxd1_job_sequence
+        )
+
+    def initialize_by_wxd2(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``wxd2`` order — early group (``d_j - d_bar < 0``) sorted ascending
+        by ``w⁺_j - 2·w⁻_j + 2·w_max``, late group (``>= 0``) sorted
+        ascending by ``w⁻_j - 2·w⁺_j + 2·w_max``, concatenated early ++ late
+        — via the reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_wxd2_job_sequence
+        )
+
+    def initialize_by_wxd3(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``wxd3`` order — same split as ``wxd2`` but each group's sort key
+        is multiplied by ``(d_j - d_bar)`` — via the reverse-instance + IIT
+        pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_wxd3_job_sequence
+        )
 
     def run_profile_fixed_ns(
         self,

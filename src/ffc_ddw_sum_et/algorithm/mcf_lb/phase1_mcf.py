@@ -162,7 +162,7 @@ def _resolve_job_sequence(
     composite key defined on the instance directly.
     """
     if tag == "due2-weight-pos":
-        return instance.due2_weight_pos_job_sequence()
+        return instance.get_due2_weight_pos_job_sequence()
     priority_map = priority_map_by_tag[tag]
     return sorted(
         instance.job_id_list,
