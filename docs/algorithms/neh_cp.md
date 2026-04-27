@@ -5,13 +5,20 @@ for the FFc DDW weighted earliness/tardiness problem. Jobs are ordered
 up-front, appended in batches, and after each batch a CP-SAT model over the
 current job subset refines the warm-start that carries into the next step.
 
-Defined at [neh_cp.py](../../src/ffc_ddw_sum_et/orchestration/neh_cp.py); thin
-pass-through method at
-[controller.py](../../src/ffc_ddw_sum_et/orchestration/controller.py). The
-solve for each batch optionally runs a lexicographic two-stage optimize:
-primary minimizes weighted E/T, secondary minimizes makespan under an E/T
-ceiling — mirroring `hybridflowshop/controller/neh_cp.py` (where the primary
-is makespan and the secondary is sum C_i).
+The algorithm-side entry point is
+[`NehCpDispatcher`](../../src/ffc_ddw_sum_et/algorithm/neh_cp/dispatcher.py)
+(conforms to the `Algorithm` / `AlgSpec` / `AlgRecord` contract — see
+[algorithm-principles.md](../architecture/algorithm-principles.md)). The
+controller-side adapter
+[`controller.neh_cp`](../../src/ffc_ddw_sum_et/orchestration/controller.py)
+resolves expression-grammar inputs, builds an
+[`NehCpOption`](../../src/ffc_ddw_sum_et/algorithm/neh_cp/option.py),
+dispatches via `NehCpDispatcher`, registers the resulting schedule, and
+emits the per-batch `_step_log.yaml` next to the controller's working
+directory. The solve for each batch optionally runs a lexicographic two-stage
+optimize: primary minimizes weighted E/T, secondary minimizes makespan under
+an E/T ceiling — mirroring `hybridflowshop/controller/neh_cp.py` (where the
+primary is makespan and the secondary is sum C_i).
 
 ## Signature
 
@@ -46,18 +53,21 @@ def run(
 | `cp_tl_2nd_obj` | Per-batch time limit for stage 2. Same grammar as `cp_tl`. Falls back to `cp_tl` when `None` and `minimize_makespan_lex=True`; ignored otherwise. |
 | `error_if_infeasible` | Raise when no schedule at all was produced; otherwise return an empty report. Does **not** police per-batch infeasibility — those steps fall back to `dispatched`. |
 
-## Context protocol
+## Algorithm contract
 
-`NehCpConstructor(ctx)` requires:
+`NehCpDispatcher.run(spec)` accepts an `AlgSpec` carrying:
 
-- `ctx.instance: FFcDDWParameters`
-- `ctx.logger: logging.Logger`
-- `ctx.solution_manager: FFcDDWSolutionManager` — final incumbent registration.
-- `ctx._neh_cp_job_sequence(job_priority) -> list[str]`.
-- `ctx.get_file_path_for_subroutine(suffix)` — optional. `AttributeError` here
-  is swallowed; `sub_step_log` is simply not dumped.
+- `spec.instance: FFcDDWParameters` — the full instance.
+- `spec.option: NehCpOption | None` — pre-resolved scalars (no expression
+  strings); `None` falls back to `NehCpOption()` defaults.
+- `spec.logger: logging.Logger | None` — falls back to
+  `logging.getLogger(__name__)` when `None`.
 
-`FFcDDWSubroutineController` satisfies this protocol.
+It returns an `AlgRecord` whose `result.obj_value` is the final schedule's
+weighted E+T, `result.metrics["step_log"]` is a tuple of `NehCpStepEntry`,
+and `progress_log` is one `ProgressLogEntry` per batch. The dispatcher does
+not touch the filesystem or any incumbent registry — those are the
+controller adapter's responsibility.
 
 ## Pre-loop setup
 
@@ -71,8 +81,8 @@ Let `n = instance.job_count`, `c = instance.stage_count`.
   resolve_cp_tl(cp_tl_2nd_obj ?? cp_tl, n, c)`; otherwise `None`.
 - **Horizon.** `horizon = sum(params.p.values())` over the full instance —
   used for **every** stage-1 model build. Stage 2 tightens it per batch.
-- **Job ordering.** `job_sequence = _neh_cp_job_sequence(instance, job_priority)`
-  (module helper in `ffc_ddw_sum_et.orchestration.neh_cp`).
+- **Job ordering.** `job_sequence = neh_cp_job_sequence(instance, job_priority)`
+  (module helper in `ffc_ddw_sum_et.algorithm.neh_cp.sequence`).
   - `"weight-due-pos"`: `(max(w⁻, w⁺) desc, w⁻+w⁺ desc, d⁺−d⁻ asc,
     position asc)`.
   - `"due-weight-pos"`: `(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc,

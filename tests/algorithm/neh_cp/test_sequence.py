@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ffc_ddw_sum_et.orchestration.neh_cp import _neh_cp_job_sequence
+from ffc_ddw_sum_et.algorithm.neh_cp import neh_cp_job_sequence
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
@@ -26,8 +26,8 @@ def test_neh_cp_job_sequence_priority() -> None:
         job_2_twt_map={"j0": 1, "j1": 5, "j2": 5},
     )
 
-    assert _neh_cp_job_sequence(instance) == ["j0", "j2", "j1"]
-    assert _neh_cp_job_sequence(instance, job_priority="weight-due-pos") == [
+    assert neh_cp_job_sequence(instance) == ["j0", "j2", "j1"]
+    assert neh_cp_job_sequence(instance, job_priority="weight-due-pos") == [
         "j0",
         "j2",
         "j1",
@@ -68,7 +68,7 @@ def test_neh_cp_job_sequence_due_weight_pos() -> None:
         job_2_twt_map={"j0": 1, "j1": 1, "j2": 1, "j3": 2, "j4": 1},
     )
 
-    assert _neh_cp_job_sequence(instance, job_priority="due-weight-pos") == [
+    assert neh_cp_job_sequence(instance, job_priority="due-weight-pos") == [
         "j2",
         "j3",
         "j4",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from ...solution.ffc_schedule import FFcSchedule
 from .alg_option import AlgOption
@@ -57,12 +58,18 @@ class ProgressLogEntry:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AlgResult:
-    """Primary result payload for one algorithm run."""
+    """Primary result payload for one algorithm run.
+
+    ``metrics`` carries algorithm-specific auxiliary data; the value type is
+    intentionally ``Any`` so individual algorithms can publish structured
+    payloads (e.g. NEH-CP per-batch step entries) without each one carving
+    out a bespoke top-level field on ``AlgRecord``.
+    """
 
     schedule: FFcSchedule | None = None
     obj_value: int | float | None = None
     obj_bound: int | float | None = None
-    metrics: Mapping[str, int | float] | None = None
+    metrics: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

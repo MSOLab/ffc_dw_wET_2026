@@ -135,6 +135,3 @@ def test_neh_cp_registers_full_schedule() -> None:
 
     sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
     assert float(sum_e + sum_t) == report.obj_value
-
-
-

@@ -31,41 +31,6 @@ timer/context management, consider overriding `_call_method` instead — see
 hybridflowshop's `hybridflowshop/controller/controller_core.py:467` for an
 existing precedent of extending the routix step hook.
 
-## Lift `NehCpConstructor` onto the `Algorithm` boundary
-
-`src/ffc_ddw_sum_et/orchestration/neh_cp.py` currently lives in the
-orchestration layer and exposes its own `NehCpContext(Protocol)` (logger,
-instance, solution_manager, `get_file_path_for_subroutine`). It also returns
-`SubroutineReport` directly and registers via `solution_manager.register`
-inside the constructor.
-
-Once the algorithm-side execution contract (`Algorithm` / `AlgSpec` /
-`AlgRecord`) defined in `docs/architecture/algorithm-principles.md` is firm
-enough for new entries:
-
-1. Move `NehCpConstructor` (or its execution-only core) under
-   `src/ffc_ddw_sum_et/algorithm/...`.
-2. Drop the local `NehCpContext` Protocol in favor of the standard algorithm
-   inputs (instance + params + a step-log sink supplied by the caller).
-3. Change the return type from `SubroutineReport` to `AlgRecord` — keep
-   `obj_value = weighted E+T` per the project's `AlgRecord.obj_value`
-   convention. Move the `solution_manager.register` call to the orchestration
-   adapter that wraps the algorithm.
-4. Per-step log emission (`_step_log.yaml`) should still be supported, but
-   via an injected sink rather than a context method, so the algorithm core
-   has no dependency on `get_file_path_for_subroutine`.
-
-**Why:** YAGNI today — the only caller is `FFcDDWSubroutineController`, the
-`Algorithm` boundary is still being shaped, and lifting `neh_cp` would force
-that shape prematurely (KISS). The current Protocol-based seam is enough for
-the single caller. Doing this now would also expand the diff well beyond the
-scope of the per-step log change that triggered this note.
-
-**When to act:** When (a) a second caller appears that wants to invoke
-`neh_cp` outside the orchestration controller, or (b) the algorithm-side
-contract (`Algorithm` / `AlgRecord`) has an established sibling that
-`neh_cp` would simply slot into without inventing new conventions.
-
 ## Hardcoded TL (time limit) formula in analysis_long sheet
 
 The `analysis_long` Excel sheet computes `TL = 0.09 * job_count * stage_count`

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 from ortools.sat.python import cp_model
+from routix.io import dump_yaml
 from routix.report import SubroutineReport
 
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
@@ -26,6 +27,12 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
+from ffc_ddw_sum_et.algorithm.neh_cp import (
+    NehCpBatchTlMode,
+    NehCpDispatcher,
+    NehCpJobPriority,
+    NehCpOption,
+)
 from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
@@ -33,7 +40,6 @@ from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardin
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
 from .controller_core import FFcDDWSubroutineControllerCore
-from .neh_cp import NehCpBatchTlMode, NehCpConstructor, NehCpJobPriority
 from .solution_manager import FFcDDWSolution
 from .value_resolver import resolve_value_expr
 
@@ -985,22 +991,91 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
     ) -> SubroutineReport:
-        """Delegates to :class:`NehCpConstructor`; see its ``run`` for details."""
-        return NehCpConstructor(self).run(
+        """Step method: run :class:`NehCpDispatcher` and register its schedule.
+
+        Resolves expression-grammar inputs (``cp_tl`` / ``total_timelimit`` /
+        ``cp_tl_2nd_obj`` / ``extra_batch_size_expr``) into pre-resolved
+        scalars, hands them to :class:`NehCpOption`, dispatches via
+        :class:`NehCpDispatcher`, then registers the resulting schedule and
+        emits the per-batch ``_step_log.yaml`` next to the controller's
+        working directory.
+        """
+        start_elapsed = time.monotonic()
+        instance = self.instance
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+
+        cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
+        total_timelimit_seconds = (
+            resolve_value_expr(total_timelimit, n, c, m)
+            if total_timelimit is not None
+            else None
+        )
+        cp_tl_2nd_obj_seconds = (
+            resolve_value_expr(
+                cp_tl_2nd_obj if cp_tl_2nd_obj is not None else cp_tl, n, c, m
+            )
+            if minimize_makespan_lex
+            else None
+        )
+        extra_batch_size_extra = 0
+        if num_batches is None and extra_batch_size_expr is not None:
+            extra = resolve_value_expr(extra_batch_size_expr, n, c, m)
+            if extra is not None:
+                extra_batch_size_extra = int(extra)
+
+        skip_pf_below_obj_resolved = NehCpOption.coerce_skip_pf_below_obj(
+            skip_pf_below_obj
+        )
+
+        option = NehCpOption(
             job_priority=job_priority,
             solver_thread_cnt=solver_thread_cnt,
             added_batch_size=added_batch_size,
-            extra_batch_size_expr=extra_batch_size_expr,
-            cp_tl=cp_tl,
-            total_timelimit=total_timelimit,
+            extra_batch_size_extra=extra_batch_size_extra,
+            cp_tl_seconds=cp_tl_seconds,
+            total_timelimit_seconds=total_timelimit_seconds,
             num_batches=num_batches,
             batch_tl_mode=batch_tl_mode,
             batch_tl_offset_seconds=batch_tl_offset_seconds,
             apply_cumulative_tl=apply_cumulative_tl,
             pf_method=pf_method,
-            skip_pf_below_obj=skip_pf_below_obj,
+            skip_pf_below_obj=skip_pf_below_obj_resolved,
             make_semi_active_after_cp=make_semi_active_after_cp,
             minimize_makespan_lex=minimize_makespan_lex,
-            cp_tl_2nd_obj=cp_tl_2nd_obj,
+            cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
         )
+        spec = AlgSpec(instance=instance, option=option, logger=self.logger)
+        record = NehCpDispatcher().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        if result is not None and result.schedule is not None:
+            self.solution_manager.register(
+                report,
+                FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
+            )
+
+        if result is not None and result.metrics is not None:
+            step_log = result.metrics.get("step_log")
+            if step_log:
+                log_path = self.try_get_file_path_for_subroutine("_step_log.yaml")
+                if log_path is not None:
+                    dump_yaml(
+                        [entry.as_dict() for entry in step_log],
+                        log_path,
+                    )
+
+        return report

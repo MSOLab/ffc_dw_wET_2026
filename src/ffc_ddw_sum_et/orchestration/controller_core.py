@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from routix.dynamic_data_object import DynamicDataObject
@@ -70,6 +71,18 @@ class FFcDDWSubroutineControllerCore(
     def is_stopping_condition(self, **kwargs: Any) -> bool:
         """Stop when the timelimit is exceeded."""
         return self.timer.time_over(self.stopping_criteria.timelimit)
+
+    def try_get_file_path_for_subroutine(self, suffix: str) -> Path | None:
+        """Like ``get_file_path_for_subroutine`` but returns ``None`` instead
+        of raising when no working directory is configured.
+
+        Use for optional artifact emission (e.g. ``_step_log.yaml``) that
+        should be silently skipped in tests or scripted runs without a
+        working directory.
+        """
+        if self._working_dir_path is None:
+            return None
+        return self.get_file_path_for_subroutine(suffix)
 
     def post_run_process(self) -> None:
         """Nothing to do at the controller level — the runner handles file I/O."""
