@@ -342,6 +342,9 @@ class FFcDDWReporter:
 
         self._write_summary_csv()
         self._write_mcf_lb_analysis_csv()
+        self._write_mcf_lb_pivot_artifacts()
+        self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
+        self._write_mcf_lb_last_stage_only_obj_bks_wintie_table()
         self._write_statistics_yaml()
         self._write_excel_report()
         self._write_post_run_pivot_artifacts()
@@ -653,6 +656,239 @@ class FFcDDWReporter:
             for name in scenario_names:
                 writer.writerow([name, best_counts[name], lt_bks_counts[name]])
         logger.info("Last-stage-only-obj count CSV written to %s", count_path)
+
+    _MCF_LB_REF_OBJ_COLUMNS: tuple[str, ...] = (
+        "lastStageOnlyBound",
+        "lastStageOnlyObj",
+        "dispatchedObj",
+        "profileFixObj",
+        "profileFixBound",
+    )
+    _MCF_LB_STEP_SEC_COLUMNS: tuple[str, ...] = (
+        "mcfSolveSec",
+        "lastStageCpSatSec",
+        "dispatchSec",
+        "profileFixCpSatSec",
+    )
+    _MCF_LB_REF_BLANK_COLUMNS: tuple[str, ...] = (
+        *_MCF_LB_STEP_SEC_COLUMNS,
+        "mcfLbSec",
+        "time%",
+    )
+    # Mirrors post_run_pivot.build_rpdf_comparison_df's timelimit_factor.
+    _MCF_LB_TIMELIMIT_FACTOR: float = 0.09
+
+    def _write_mcf_lb_pivot_artifacts(self) -> None:
+        """Render an MCF-LB-only PivotTable.js dashboard from the per-scenario
+        ``<scenario_name>_mcf_lb_analysis.csv`` files.
+
+        Concatenates each scenario's analysis CSV (with ``scenarioName``
+        prepended) and appends two synthetic reference rows per instance —
+        ``scenarioName="mcfLb"`` and ``scenarioName="bks"`` — whose
+        objective-style columns carry the instance's ``mcfLb``/``bks`` value
+        so the heatmap can show LB/BKS reference rows alongside scenarios.
+        Time/count columns on the synthetic rows are blanked. Returns
+        silently when no MCF-LB analysis CSV exists for this run.
+        """
+        import pandas as pd
+
+        from .post_run_pivot import DEFAULT_AGGREGATORS_JS, write_pivot_html
+
+        frames: list[pd.DataFrame] = []
+        for sc in self.scenario_results:
+            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            if not csv_path.exists():
+                continue
+            df = pd.read_csv(csv_path)
+            df.insert(0, "scenarioName", sc.name)
+            frames.append(df)
+
+        if not frames:
+            return
+
+        combined = pd.concat(frames, ignore_index=True)
+        combined["mcfLbSec"] = combined[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
+            axis=1, min_count=1
+        )
+        combined["timelimit"] = (
+            combined["n"] * combined["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+        )
+        combined["time%"] = combined["mcfLbSec"] / combined["timelimit"]
+        combined = pd.concat(
+            [combined, *self._build_mcf_lb_reference_rows(combined)],
+            ignore_index=True,
+        )
+
+        initial_state = {
+            "rows": ["scenarioName"],
+            "cols": [],
+            "vals": ["lastStageOnlyObj"],
+            "aggregatorName": "Average",
+            "rendererName": "Heatmap",
+        }
+
+        path = self.output_dir / f"{self.output_dir.name}_mcf_lb_dashboard.html"
+        write_pivot_html(
+            combined,
+            path,
+            initial_state=initial_state,
+            aggregators_js=DEFAULT_AGGREGATORS_JS,
+            title="MCF-LB Pivot",
+        )
+        logger.info("MCF-LB pivot dashboard written to %s", path)
+
+    def _build_mcf_lb_reference_rows(self, combined: Any) -> list[Any]:
+        """Build synthetic ``scenarioName="mcfLb"`` and ``"bks"`` reference rows."""
+        unique = combined.drop_duplicates(subset=["insIndex"]).copy()
+        unique["error"] = ""
+        nan = float("nan")
+
+        def _ref_rows(name: str, source_col: str):
+            df = unique.copy()
+            df["scenarioName"] = name
+            for col in self._MCF_LB_REF_OBJ_COLUMNS:
+                df[col] = df[source_col]
+            for col in self._MCF_LB_REF_BLANK_COLUMNS:
+                df[col] = nan
+            return df
+
+        return [_ref_rows("mcfLb", "mcfLb"), _ref_rows("bks", "bks")]
+
+    def _write_mcf_lb_last_stage_only_obj_bks_wintie_pivot(self) -> None:
+        """Render a focused win/tie + RPDf dashboard comparing each scenario's
+        ``lastStageOnlyObj`` against ``BKS``.
+
+        Drops every column except scenario/instance dimensions and the five
+        comparison metrics: ``lastStageOnlyObj``, ``BKS``, ``RPDf``, ``win``,
+        ``tie``. ``win=1`` when ``lastStageOnlyObj < BKS``, ``tie=1`` when
+        equal, otherwise both default to 0. Returns silently when no MCF-LB
+        analysis CSV exists.
+        """
+        import pandas as pd
+
+        from .post_run_pivot import WIN_TIE_AGGREGATORS_JS, write_pivot_html
+
+        keep_cols = [
+            "scenarioName",
+            "insIndex",
+            "n",
+            "c",
+            "totalMcCount",
+            "T",
+            "R",
+            "W",
+            "lastStageOnlyObj",
+            "BKS",
+            "RPDf",
+            "win",
+            "tie",
+            "time%",
+        ]
+
+        frames: list[pd.DataFrame] = []
+        for sc in self.scenario_results:
+            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            if not csv_path.exists():
+                continue
+            df = pd.read_csv(csv_path)
+            df.insert(0, "scenarioName", sc.name)
+            df = df.rename(columns={"bks": "BKS"})
+            df["RPDf"] = (
+                2
+                * (df["lastStageOnlyObj"] - df["BKS"])
+                / (df["lastStageOnlyObj"] + df["BKS"])
+            )
+            df["win"] = (df["lastStageOnlyObj"] < df["BKS"]).astype(int)
+            df["tie"] = (df["lastStageOnlyObj"] == df["BKS"]).astype(int)
+            mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
+                axis=1, min_count=1
+            )
+            timelimit = df["n"] * df["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+            df["time%"] = mcf_lb_sec / timelimit
+            frames.append(df[keep_cols])
+
+        if not frames:
+            return
+
+        combined = pd.concat(frames, ignore_index=True)
+
+        initial_state = {
+            "rows": ["scenarioName"],
+            "cols": [],
+            "vals": ["win", "tie"],
+            "aggregatorName": "Win / Tie sum",
+            "rendererName": "Table",
+        }
+
+        path = (
+            self.output_dir
+            / f"{self.output_dir.name}_mcf_lb_lastStageOnlyObj_BKS_wintie_pivot.html"
+        )
+        write_pivot_html(
+            combined,
+            path,
+            initial_state=initial_state,
+            aggregators_js=WIN_TIE_AGGREGATORS_JS,
+            title="MCF-LB lastStageOnlyObj vs BKS Win/Tie",
+        )
+        logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie pivot written to %s", path)
+
+    def _write_mcf_lb_last_stage_only_obj_bks_wintie_table(self) -> None:
+        """Write a static HTML table with per-scenario ``time%`` average plus
+        ``win``/``tie`` counts over all instances. One row per scenario, no
+        interactivity. Returns silently when no MCF-LB analysis CSV exists.
+        """
+        import pandas as pd
+
+        rows: list[dict[str, Any]] = []
+        for sc in self.scenario_results:
+            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            if not csv_path.exists():
+                continue
+            df = pd.read_csv(csv_path)
+            mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
+                axis=1, min_count=1
+            )
+            timelimit = df["n"] * df["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+            time_pct = mcf_lb_sec / timelimit
+            rows.append(
+                {
+                    "scenarioName": sc.name,
+                    "timePctAverage": float(time_pct.mean()),
+                    "winCount": int((df["lastStageOnlyObj"] < df["bks"]).sum()),
+                    "tieCount": int((df["lastStageOnlyObj"] == df["bks"]).sum()),
+                }
+            )
+
+        if not rows:
+            return
+
+        summary = pd.DataFrame(rows).set_index("scenarioName")
+        table_html = summary.to_html(
+            float_format=lambda x: f"{x:.4f}",
+            border=0,
+        )
+        payload = (
+            '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n'
+            "<title>MCF-LB lastStageOnlyObj vs BKS Win/Tie</title>\n"
+            "<style>\n"
+            "body { font-family: Verdana, sans-serif; margin: 24px; }\n"
+            "table { border-collapse: collapse; }\n"
+            "th, td { padding: 6px 12px; border: 1px solid #ccc; "
+            "text-align: right; }\n"
+            "th { background: #f4f4f4; }\n"
+            "td:first-child, th:first-child { text-align: left; }\n"
+            "</style>\n</head>\n<body>\n"
+            "<h2>MCF-LB lastStageOnlyObj vs BKS — per-scenario summary</h2>\n"
+            f"{table_html}\n"
+            "</body>\n</html>\n"
+        )
+        path = (
+            self.output_dir
+            / f"{self.output_dir.name}_mcf_lb_lastStageOnlyObj_BKS_wintie_table.html"
+        )
+        path.write_text(payload, encoding="utf8")
+        logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie table written to %s", path)
 
     def _mcf_lb_analysis_row(self, ir: InstanceResult) -> list[str]:
         diag = ir.mcf_lb_diagnostic or {}
