@@ -226,7 +226,7 @@ def write_post_run_pivot_artifacts(
     comp_df.to_csv(comp_path, index=False)
     logger.info("Wrote %s (%d rows)", comp_path, len(comp_df))
 
-    common_axes = {"rows": ["n"], "cols": ["R"]}
+    common_axes = {"rows": ["scenarioName", "R"], "cols": ["T"]}
 
     write_pivot_html(
         comp_df,

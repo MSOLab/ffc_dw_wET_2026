@@ -720,8 +720,8 @@ class FFcDDWReporter:
         )
 
         initial_state = {
-            "rows": ["scenarioName"],
-            "cols": [],
+            "rows": ["scenarioName", "R"],
+            "cols": ["T"],
             "vals": ["lastStageOnlyObj"],
             "aggregatorName": "Average",
             "rendererName": "Heatmap",
@@ -813,8 +813,8 @@ class FFcDDWReporter:
         combined = pd.concat(frames, ignore_index=True)
 
         initial_state = {
-            "rows": ["scenarioName"],
-            "cols": [],
+            "rows": ["scenarioName", "R"],
+            "cols": ["T"],
             "vals": ["win", "tie"],
             "aggregatorName": "Win / Tie sum",
             "rendererName": "Table",

@@ -19,7 +19,7 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/20260427/mcf_lb_init_16_config.yaml")
+CONFIG_PATH = Path("metadata/20260427/mcf_lb_init_17_config.yaml")
 
 
 def _setup_main_logger(output_dir: Path) -> logging.Logger:
