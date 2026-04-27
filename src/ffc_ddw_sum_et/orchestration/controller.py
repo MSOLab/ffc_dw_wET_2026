@@ -234,7 +234,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         all_stages_as_bottleneck: bool = False,
         random_seed: int | None = None,
         error_if_infeasible: bool = False,
-        draw_gantt: bool = False,
         method_list: Sequence[str] | None = None,
         iit_after_each_dispatch: bool = False,
     ) -> SubroutineReport:
@@ -254,7 +253,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         makespan). The reported ``obj_value`` is always weighted E+T of the
         chosen schedule (project convention).
         """
-        del draw_gantt  # Controller-level gantt drawing is orchestrated elsewhere.
         start_elapsed = time.monotonic()
         instance = self.instance
 
@@ -978,7 +976,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         total_timelimit: float | str | None = None,
         num_batches: int | None = None,
         batch_tl_mode: NehCpBatchTlMode = "constant",
-        batch_tl_offset_seconds: float = 0.1,
+        batch_tl_offset_seconds: float = 0.01,
         apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
