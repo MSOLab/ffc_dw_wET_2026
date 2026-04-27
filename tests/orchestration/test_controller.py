@@ -7,6 +7,7 @@ from ffc_ddw_sum_et.algorithm.base.alg_record import WorkStatus
 from ffc_ddw_sum_et.orchestration.controller import FFcDDWSubroutineController
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
 
 
 def _make_instance(name: str = "c_instance") -> FFcDDWParameters:
@@ -113,3 +114,24 @@ def test_run_mcf_lb_not_greater_than_fam() -> None:
     assert lb_report.obj_bound is not None
     assert fam_report.obj_value is not None
     assert lb_report.obj_bound <= fam_report.obj_value
+
+
+def test_neh_cp_registers_full_schedule() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.neh_cp(cp_tl=1.0)
+
+    assert report.obj_value is not None
+    assert report.obj_bound is None
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+
+    # Every instance job must be scheduled at every stage.
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value

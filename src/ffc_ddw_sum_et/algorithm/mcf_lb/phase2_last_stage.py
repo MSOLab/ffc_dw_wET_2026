@@ -14,11 +14,15 @@ from pathlib import Path
 from typing import Callable
 
 from ffc_ddw_sum_et.algorithm.cumulative import PFMethod
+from ffc_ddw_sum_et.algorithm.cumulative_heuristic import (
+    solve_last_stage_by_cumulative_heuristic,
+)
 from ffc_ddw_sum_et.algorithm.cumulative_routine import (
     solve_last_stage_with_profile_fix,
 )
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
+from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
 
 from .diagnostic import MCFLBDiagnostic
 from .phase1_mcf import LastStageSeed, Phase1State, SeedTag
@@ -64,10 +68,13 @@ def run_phase2(
     logger: logging.Logger | None = None,
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
-    repeat_pf_cp_while_improving: bool = False,
-    cp_tl_seconds: float | None = None,
+    repeat_last_stage_only_cp_while_improving: bool = False,
+    tl_seconds: float | None = None,
     log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
+    use_heuristic: bool = False,
+    heuristic_first_improvement_restart: bool = False,
+    heuristic_insert_radius: int | None = None,
 ) -> Phase2State | None:
     """Solve the last-stage CP-SAT model per seed, pick the best.
 
@@ -76,11 +83,10 @@ def run_phase2(
     raise; seeds that return UNKNOWN/time-limit are skipped with a
     warning; feasible seeds contribute a ``LastStageCandidate``.
 
-    When ``repeat_pf_cp_while_improving=True``, each seed's solve is
-    repeated with the new schedule fed back as the profile-fix reference
-    until the CP-SAT objective stops improving; per-seed ``solve_sec``
-    accumulates across iterations and the candidate reflects the last
-    (best) iteration.
+    When ``repeat_last_stage_only_cp_while_improving=True``, each seed's solve
+    is repeated with the new schedule fed back as the reference until
+    the CP-SAT objective stops improving; per-seed ``solve_sec`` accumulates
+    across iterations and the candidate reflects the last (best) iteration.
 
     Mutates ``diagnostic``: accumulates ``last_stage_cp_sat_sec`` across
     seeds; records per-seed ``ls_status_per_seed`` /
@@ -89,23 +95,44 @@ def run_phase2(
     from the chosen candidate; sets ``chosen_seed_tag`` and advances
     ``reached_phase`` to ``"last_stage"``.
 
+    When ``use_heuristic=True``, the seed whose ``init_schedule`` has the
+    lowest weighted E+T is selected from Phase 1, and the cumulative
+    reinsertion heuristic is run on that single seed's schedule. All other
+    seeds and all CP-SAT-related kwargs are ignored on that path.
+
     Returns ``None`` when no seed produces a feasible solution.
     """
     candidates: list[LastStageCandidate] = []
     total_solve_sec = 0.0
 
-    for seed in phase1.last_stage_seeds:
+    if use_heuristic:
+        seeds_to_run = [
+            min(
+                phase1.last_stage_seeds,
+                key=lambda s: sum(
+                    compute_weighted_earliness_tardiness(s.init_schedule, instance)
+                ),
+            )
+        ]
+    else:
+        seeds_to_run = phase1.last_stage_seeds
+
+    for seed in seeds_to_run:
         candidate, solve_sec, status_name = _solve_last_stage_for_seed(
             seed,
             phase1,
             instance,
+            diagnostic,
             logger=logger,
             pf_method=pf_method,
             solver_thread_cnt=solver_thread_cnt,
-            repeat_pf_cp_while_improving=repeat_pf_cp_while_improving,
-            cp_tl_seconds=cp_tl_seconds,
+            repeat_cp_while_improving=repeat_last_stage_only_cp_while_improving,
+            tl_seconds=tl_seconds,
             log_search_progress=log_search_progress,
             solver_log_path_getter=solver_log_path_getter,
+            use_heuristic=use_heuristic,
+            heuristic_first_improvement_restart=heuristic_first_improvement_restart,
+            heuristic_insert_radius=heuristic_insert_radius,
         )
         total_solve_sec += solve_sec
         diagnostic.ls_status_per_seed[seed.tag] = status_name
@@ -152,22 +179,54 @@ def _solve_last_stage_for_seed(
     seed: LastStageSeed,
     phase1: Phase1State,
     instance: FFcDDWParameters,
+    diagnostic: MCFLBDiagnostic,
     *,
     logger: logging.Logger | None = None,
     pf_method: PFMethod | None,
     solver_thread_cnt: int,
-    repeat_pf_cp_while_improving: bool = False,
-    cp_tl_seconds: float | None = None,
+    repeat_cp_while_improving: bool = False,
+    tl_seconds: float | None = None,
     log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
+    use_heuristic: bool = False,
+    heuristic_first_improvement_restart: bool = False,
+    heuristic_insert_radius: int | None = None,
 ) -> tuple[LastStageCandidate | None, float, str]:
-    """Build and solve a last-stage-only CP-SAT model for one seed.
+    """Solve the last-stage-only model for one seed (CP-SAT or heuristic).
 
-    Returns ``(candidate, solve_sec, status_name)``. ``candidate`` is
-    ``None`` when the solver returns neither OPTIMAL nor FEASIBLE.
-    Raises ``RuntimeError`` on INFEASIBLE (the MCF LB should be
-    consistent with the last-stage-only model).
+    Returns ``(candidate, solve_sec, status_name)``. On the CP-SAT path,
+    ``candidate`` is ``None`` when the solver returns neither OPTIMAL nor
+    FEASIBLE; ``RuntimeError`` is raised on INFEASIBLE (the MCF LB should be
+    consistent with the last-stage-only model). The heuristic path always
+    yields a candidate.
     """
+    if use_heuristic:
+        result, solve_sec, status_name, progress, scan_stats = (
+            solve_last_stage_by_cumulative_heuristic(
+                seed.init_schedule,
+                instance,
+                phase1.last_stage_id,
+                phase1.job_2_release_map,
+                phase1.mcf_lb,
+                logger=logger,
+                time_limit_seconds=tl_seconds,
+                first_improvement_restart=heuristic_first_improvement_restart,
+                insert_radius=heuristic_insert_radius,
+            )
+        )
+        diagnostic.heuristic_progress_per_seed[seed.tag] = progress
+        diagnostic.heuristic_scan_stats_per_seed[seed.tag] = scan_stats
+        candidate = LastStageCandidate(
+            tag=seed.tag,
+            last_stage_only_schedule=result.schedule,
+            last_stage_only_schedule_makespan=result.makespan,
+            last_stage_only_obj=result.objective,
+            last_stage_only_bound=result.bound,
+            ls_status=result.status_name,
+            ls_j_i_2_end=result.j_i_2_end,
+        )
+        return candidate, solve_sec, status_name
+
     result, solve_sec, status_name = solve_last_stage_with_profile_fix(
         seed.init_schedule,
         instance,
@@ -177,8 +236,8 @@ def _solve_last_stage_for_seed(
         logger=logger,
         pf_method=pf_method,
         solver_thread_cnt=solver_thread_cnt,
-        repeat_while_improving=repeat_pf_cp_while_improving,
-        max_time_in_seconds=cp_tl_seconds,
+        repeat_while_improving=repeat_cp_while_improving,
+        max_time_in_seconds=tl_seconds,
         log_search_progress=log_search_progress,
         solver_log_path_getter=solver_log_path_getter,
     )

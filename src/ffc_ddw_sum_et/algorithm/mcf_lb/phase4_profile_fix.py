@@ -8,11 +8,11 @@ caller falls back to the Phase 3 incumbent.
 """
 
 from __future__ import annotations
-from pathlib import Path
-from typing import Callable
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
@@ -44,7 +44,7 @@ def run_phase4(
     logger: logging.Logger | None = None,
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
-    repeat_pf_cp_while_improving: bool = False,
+    repeat_full_cp_while_improving: bool = False,
     cp_tl_seconds: float | None = None,
     log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
@@ -55,7 +55,7 @@ def run_phase4(
     ``profile_fix_bound`` always; on feasibility also ``profile_fix_obj``
     and advances ``reached_phase`` to ``"profile_fix"``.
 
-    When ``repeat_pf_cp_while_improving=True``, the solve is repeated with
+    When ``repeat_full_cp_while_improving=True``, the solve is repeated with
     the new schedule fed back as the dispatched-schedule reference until
     the CP-SAT objective stops improving. ``profile_fix_cp_sat_sec``
     accumulates across iterations; ``pf_status``, ``profile_fix_bound``,
@@ -71,7 +71,7 @@ def run_phase4(
         instance,
         pf_method=pf_method,
         solver_thread_cnt=solver_thread_cnt,
-        repeat_while_improving=repeat_pf_cp_while_improving,
+        repeat_while_improving=repeat_full_cp_while_improving,
         obj_lb=phase1.mcf_lb,
         max_time_in_seconds=cp_tl_seconds,
         log_search_progress=log_search_progress,

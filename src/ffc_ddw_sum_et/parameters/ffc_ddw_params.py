@@ -112,6 +112,104 @@ class FFcDDWParameters(FFcParameters):
         )
 
     @classmethod
+    def create_instance_of_job_subset(
+        cls,
+        instance: FFcParameters,
+        job_id_subset: set[str],
+    ) -> Self:
+        """Create a new FFcDDWParameters restricted to a subset of jobs.
+
+        The returned instance keeps the parent's stage and machine layout and
+        the forward job order from ``instance.job_id_list`` (filtered down to
+        ``job_id_subset``). Arbitrary job permutations are not exposed.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.create_instance_of_job_subset requires "
+                f"FFcDDWParameters, got {type(instance).__name__}"
+            )
+        if not job_id_subset:
+            raise ValueError("Job subset must be non-empty.")
+        if not job_id_subset.issubset(instance.job_id_list):
+            raise ValueError("Job subset contains invalid job IDs.")
+
+        ordered_job_ids = [j for j in instance.job_id_list if j in job_id_subset]
+        job_id_2_index = {j: idx for idx, j in enumerate(instance.job_id_list)}
+        job_index_list = [job_id_2_index[j] for j in ordered_job_ids]
+        new_p_manager = instance.p_manager.filter_by_job_indices(job_index_list)
+
+        new_stage_2_machines_map = {
+            stage_id: list(instance.stage_2_machines_map[stage_id])
+            for stage_id in instance.stage_id_list
+        }
+        new_due_window = {j: instance.job_2_due_window_map[j] for j in ordered_job_ids}
+        new_ewt = {j: instance.job_2_ewt_map[j] for j in ordered_job_ids}
+        new_twt = {j: instance.job_2_twt_map[j] for j in ordered_job_ids}
+
+        return cls(
+            instance.name,
+            ordered_job_ids,
+            instance.stage_id_list,
+            new_stage_2_machines_map,
+            new_p_manager,
+            new_due_window,
+            new_ewt,
+            new_twt,
+            instance.generation_params,
+        )
+
+    @classmethod
+    def create_instance_of_stage_subset(
+        cls,
+        instance: FFcParameters,
+        stage_id_subset: set[str],
+        reverse_stage_seq: bool = False,
+    ) -> Self:
+        """Create a new FFcDDWParameters restricted to a subset of stages.
+
+        Arbitrary stage permutations are not allowed: only the original forward
+        order of the remaining stages (or its reverse, when ``reverse_stage_seq``
+        is ``True``) is meaningful for a flow shop instance. ``stage_id_subset``
+        is therefore typed as ``set[str]`` and the final ordering is derived
+        from ``instance.stage_id_list``.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.create_instance_of_stage_subset requires "
+                f"FFcDDWParameters, got {type(instance).__name__}"
+            )
+        if not stage_id_subset.issubset(instance.stage_id_list):
+            raise ValueError("Stage subset contains invalid stage IDs.")
+        if not stage_id_subset:
+            raise ValueError("Stage subset must be non-empty.")
+
+        ordered_stage_ids = [s for s in instance.stage_id_list if s in stage_id_subset]
+        if reverse_stage_seq:
+            ordered_stage_ids.reverse()
+
+        stage_id_2_index = {
+            stage_id: idx for idx, stage_id in enumerate(instance.stage_id_list)
+        }
+        stage_index_list = [stage_id_2_index[s] for s in ordered_stage_ids]
+        new_p_manager = instance.p_manager.filter_by_stage_indices(stage_index_list)
+        new_stage_2_machines_map = {
+            stage_id: list(instance.stage_2_machines_map[stage_id])
+            for stage_id in ordered_stage_ids
+        }
+
+        return cls(
+            instance.name,
+            instance.job_id_list,
+            ordered_stage_ids,
+            new_stage_2_machines_map,
+            new_p_manager,
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+            instance.generation_params,
+        )
+
+    @classmethod
     def from_pra_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:
         raise NotImplementedError(
             "FFcDDWParameters.from_pra_data() is not supported. "
@@ -394,3 +492,109 @@ class FFcDDWParameters(FFcParameters):
             + sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }
+
+    def get_eddub_job_sequence(self) -> list[str]:
+        """
+        Get the EDDUB (Earliest Due Date Upper Bound) job sequence.
+        Sort by job sequence in job_id_list to break ties.
+        """
+        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
+        job_2_pos = {job_id: pos for pos, job_id in enumerate(self._job_id_list)}
+        return sorted(
+            self.job_id_list, key=lambda j: (job_2_due_date_ub_map[j], job_2_pos[j])
+        )
+
+    def get_weight_due_pos_job_sequence(self) -> list[str]:
+        """
+        Get the "weight-due-pos" priority job sequence.
+        Sort by (max(w⁻, w⁺) desc, w⁻+w⁺ desc, due-window width asc, position asc).
+        """
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[int, int, int, int]:
+            w_e = ewt[j]
+            w_t = twt[j]
+            d_lower, d_upper = ddw[j]
+            return (
+                -max(w_e, w_t),
+                -(w_e + w_t),
+                int(d_upper - d_lower),
+                job_2_pos[j],
+            )
+
+        return sorted(self.job_id_list, key=key)
+
+    def get_due_weight_pos_job_sequence(self) -> list[str]:
+        """
+        Get the "due-weight-pos" priority job sequence.
+        Sort by (max(0, d⁺-p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc, position asc).
+        """
+        last_stage_id = self.stage_id_list[-1]
+        p_last = self.get_job_2_p_map_for_stage(last_stage_id)
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[int, int, int, int, int]:
+            d_lower, d_upper = ddw[j]
+            return (
+                max(0, d_upper - p_last[j]),
+                d_upper,
+                d_lower,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+
+        return sorted(self.job_id_list, key=key)
+
+    def due2_weight_pos_job_sequence(self) -> list[str]:
+        """
+        Job sequence prioritised by max(r_j, d⁺-p_last) asc, d⁺ asc, d⁻ asc,
+        w_sum desc, position asc.
+        """
+        last_stage_id = self.stage_id_list[-1]
+        p_last = self.get_job_2_p_map_for_stage(last_stage_id)
+        r_j = self.get_job_2_p_sum_except_last_stage()
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[int, int, int, int, int]:
+            d_lower, d_upper = ddw[j]
+            return (
+                max(r_j[j], d_upper - p_last[j]),
+                d_upper,
+                d_lower,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+
+        return sorted(self.job_id_list, key=key)
+
+    def get_due_star_weight_pos_job_sequence(self) -> list[str]:
+        """
+        Get the "due-star-weight-pos" priority job sequence.
+        Sort by (d* asc, d+ asc, w⁻+w⁺ desc, position asc).
+        """
+        job_2_due_date_star_map = self.get_job_2_due_date_star_map()
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[float, int, int, int]:
+            d_star = job_2_due_date_star_map[j]
+            d_upper = ddw[j][1]
+            return (
+                d_star,
+                d_upper,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+
+        return sorted(self.job_id_list, key=key)

@@ -1,0 +1,39 @@
+# BN2D dispatcher init experiment (makespan-driven bottleneck two-way dispatch).
+# Internal objective: minimize makespan (preserves the upstream BN2D goal).
+# Reported objective: weighted earliness + tardiness.
+# Ref: plans/20260423/bn2d-dispatcher-port.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0, 1439 ]
+
+output_dir: output
+
+instance_worker_cnt: 48
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: cmax_init_pf1ns
+    timelimit: 120.0
+    output_subdir: cmax_init_pf1ns
+    subroutine_flow:
+      - method: initialize_by_best_of_selected_dispatches
+        left_cap_portion: 0.25
+        right_cap_portion: 0.25
+        normalize_by_stage_cnt: false
+        mixed_schedule_for_former_stages: true
+        mixed_schedule_for_later_stages: true
+        machine_then_job: true
+        all_stages_as_bottleneck: true
+        error_if_infeasible: false
+        draw_gantt: false
+        method_list:
+          - run_bn2d
+          - select_best_of_mixed_dispatches
+      - method: run_profile_fixed_ns
+        solver_thread_cnt: 2
+        pf_method: "PF1"

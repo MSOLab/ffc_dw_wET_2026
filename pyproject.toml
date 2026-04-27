@@ -11,6 +11,9 @@ dependencies = [
     "xlsxwriter>=3.2.0",
     "pyyaml>=6.0.3",
     "ortools>=9.15.6755",
+    "plotly>=6.7.0",
+    "statsmodels>=0.14.6",
+    "seaborn>=0.13.2",
 ]
 
 [build-system]
@@ -25,6 +28,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
 
 [tool.ty.environment]
 python = ".venv"

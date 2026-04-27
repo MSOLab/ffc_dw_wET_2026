@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT.parent / "src"))
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
-from ffc_ddw_sum_et.solution.objectives import compute_window_et
+from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
 
 LARGE_DIR = ROOT / "large"
 BEST_SEQ_DIR = ROOT / "best_seq_large"
@@ -49,8 +49,7 @@ def decode_instance(
         jobs=list(instance.job_id_list),
         stages=list(instance.stage_id_list),
         machines_per_stage={
-            sid: list(mids)
-            for sid, mids in instance.stage_2_machines_map.items()
+            sid: list(mids) for sid, mids in instance.stage_2_machines_map.items()
         },
     )
 
@@ -68,7 +67,7 @@ def decode_instance(
         instance.job_2_twt_map,
     )
 
-    sum_e, sum_t = compute_window_et(schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
     return sum_e + sum_t
 
 
@@ -129,12 +128,11 @@ def main() -> None:
         # Validate: best_seq job count must match instance job count
         seq_jobs = len(sequences[0]) if sequences else 0
         if seq_jobs != n_jobs:
-            msg = (
-                f"{stem}: job count mismatch "
-                f"instance={n_jobs} seq={seq_jobs}"
-            )
+            msg = f"{stem}: job count mismatch instance={n_jobs} seq={seq_jobs}"
             skips.append(msg)
-            print(f"  SKIP {stem} (job mismatch {n_jobs} vs {seq_jobs})", file=sys.stderr)
+            print(
+                f"  SKIP {stem} (job mismatch {n_jobs} vs {seq_jobs})", file=sys.stderr
+            )
             continue
 
         try:
@@ -161,14 +159,25 @@ def main() -> None:
 
         if (i + 1) % 100 == 0:
             elapsed = time.time() - start
-            print(f"  [{i+1}/{len(filenames)}] done in {elapsed:.1f}s")
+            print(f"  [{i + 1}/{len(filenames)}] done in {elapsed:.1f}s")
 
     # Sort by insIndex ascending
     results.sort(key=lambda r: int(r["insIndex"]) if r["insIndex"].isdigit() else 0)
 
     # Column order: insIndex, n, c, totalMcCount, T, R, W, BKS_data, BKS_calc, BKS_T, BKS_F
-    fieldnames = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W", "BKS_data",
-                  "BKS_calc", "BKS_T", "BKS_F"]
+    fieldnames = [
+        "insIndex",
+        "n",
+        "c",
+        "totalMcCount",
+        "T",
+        "R",
+        "W",
+        "BKS_data",
+        "BKS_calc",
+        "BKS_T",
+        "BKS_F",
+    ]
 
     # Write output CSV
     with OUTPUT.open("w", newline="") as f:

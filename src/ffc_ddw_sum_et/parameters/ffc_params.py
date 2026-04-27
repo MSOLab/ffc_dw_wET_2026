@@ -155,6 +155,11 @@ class FFcParameters:
         ]
 
     @cached_property
+    def last_stage_mc_count(self) -> int:
+        """Number of parallel machines at the last stage."""
+        return len(self._stage_2_machines_map[self._stage_id_list[-1]])
+
+    @cached_property
     def operation_count(self) -> int:
         """Total number of operations (jobs x stages)."""
         return self.job_count * self.stage_count

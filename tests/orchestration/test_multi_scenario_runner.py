@@ -17,6 +17,7 @@ def _bare_runner(tmp_path: Path) -> FFcDDWMultiScenarioRunner:
     runner.draw_gantt = False
     runner.painter_thread_cnt = 1
     runner.ins_index_source = None
+    runner.bks_table_csv_path = None
     return runner
 
 

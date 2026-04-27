@@ -1,0 +1,114 @@
+# NEH-CP incremental constructor experiment.
+# Single scenario: due2-weight-pos priority.
+#   sorting: due2-weight-pos (max(r_j, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc)
+#   profile fix: PF1
+# total_timelimit: "0.024nc" derives cp_tl = 0.024 * c * added_batch_size per batch.
+# Reported objective: weighted earliness + tardiness.
+# Ref: plans/20260423/neh_cp.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0, 1439 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
+
+output_dir: output/20260426
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: neh_cp_bs20_constant_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_bs20_constant_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 20
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "constant"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_nb10_constant_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_nb10_constant_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        total_timelimit: "0.024nc"
+        num_batches: 10
+        batch_tl_mode: "constant"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_nb5_constant_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_nb5_constant_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        total_timelimit: "0.024nc"
+        num_batches: 5
+        batch_tl_mode: "constant"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_nb4_constant_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_nb4_constant_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        total_timelimit: "0.024nc"
+        num_batches: 4
+        batch_tl_mode: "constant"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_nb3_constant_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_nb3_constant_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        total_timelimit: "0.024nc"
+        num_batches: 3
+        batch_tl_mode: "constant"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: neh_cp_bs20_linear_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_bs20_linear_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 20
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        batch_tl_offset_seconds: 0.1
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false

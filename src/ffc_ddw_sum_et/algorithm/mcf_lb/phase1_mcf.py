@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal, Mapping, Sequence
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
@@ -38,6 +37,7 @@ SeedTag = Literal[
     "due_date_star_minus_half_p",
     "due_date_star_plus_half_p",
     "due_date_star_plus_p",
+    "due2-weight-pos",
 ]
 
 # Fixed emission order across artifacts (diagnostic, gantt, CSV).
@@ -124,11 +124,15 @@ def run_phase1(
     last_stage_seeds = [
         _build_seed(
             tag=tag,
-            priority_map=priority_map_by_tag[tag],
+            job_sequence=_resolve_job_sequence(
+                tag=tag,
+                instance=instance,
+                priority_map_by_tag=priority_map_by_tag,
+                job_2_pos=job_2_pos,
+            ),
             instance=instance,
             last_stage_id=last_stage_id,
             job_2_release=job_2_release_map,
-            job_2_pos=job_2_pos,
             duration_map=duration_map,
         )
         for tag in last_stage_only_priority_tags
@@ -144,19 +148,23 @@ def run_phase1(
     )
 
 
-def _build_seed(
+def _resolve_job_sequence(
     *,
     tag: SeedTag,
-    priority_map: Mapping[str, float | int | None],
     instance: FFcDDWParameters,
-    last_stage_id: str,
-    job_2_release: dict[str, int],
+    priority_map_by_tag: Mapping[SeedTag, Mapping[str, float | int | None]],
     job_2_pos: dict[str, int],
-    duration_map: dict[str, int],
-) -> LastStageSeed:
-    """Sort jobs by ``priority_map`` (None-last, ties by instance order) and
-    dispatch them onto the last stage under the MCF release times."""
-    job_sequence = sorted(
+) -> list[str]:
+    """Resolve the job dispatch order for a seed tag.
+
+    Most tags derive the order from a per-job priority score (None-last,
+    ties broken by instance order). The ``due2-weight-pos`` tag uses the
+    composite key defined on the instance directly.
+    """
+    if tag == "due2-weight-pos":
+        return instance.due2_weight_pos_job_sequence()
+    priority_map = priority_map_by_tag[tag]
+    return sorted(
         instance.job_id_list,
         key=lambda j: (
             priority_map[j] is None,
@@ -164,6 +172,18 @@ def _build_seed(
             job_2_pos[j],
         ),
     )
+
+
+def _build_seed(
+    *,
+    tag: SeedTag,
+    job_sequence: list[str],
+    instance: FFcDDWParameters,
+    last_stage_id: str,
+    job_2_release: dict[str, int],
+    duration_map: dict[str, int],
+) -> LastStageSeed:
+    """Dispatch ``job_sequence`` onto the last stage under the MCF release times."""
     init_schedule = FFcSchedule(
         jobs=instance.job_id_list,
         stages=instance.stage_id_list,

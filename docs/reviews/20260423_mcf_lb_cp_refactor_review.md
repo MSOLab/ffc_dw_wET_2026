@@ -37,9 +37,9 @@
 | `machine_precedence_stride: int = 1` | `full_cp_pf_method: PFMethod \| None = None` |
 | `solver_thread_cnt = 1` (내부 로컬) | `last_stage_only_cp_solver_thread_cnt: int = 1` |
 |   | `full_cp_solver_thread_cnt: int = 1` |
-| `repeat_pf_cp_while_improving: bool = False` | `repeat_last_stage_only_cp_while_improving: bool = False` |
+| `repeat_full_cp_while_improving: bool = False` | `repeat_last_stage_only_cp_while_improving: bool = False` |
 |   | `repeat_full_cp_while_improving: bool = False` |
-| — (없음) | `last_stage_only_cp_tl: float \| str \| None = None` |
+| — (없음) | `last_stage_only_tl: float \| str \| None = None` |
 | — (없음) | `full_cp_tl: float \| str \| None = None` |
 | — (없음) | `log_last_stage_only_cp_search_progress: bool = False` |
 | — (없음) | `log_full_cp_search_progress: bool = False` |
@@ -124,7 +124,7 @@ def _resolve_cp_tl(tl_raw: float | str | None, job_count, stage_count) -> float 
 YAML 예시 (`metadata/20260422/1_mcf_lb_init_12_config.yaml`):
 
 ```yaml
-last_stage_only_cp_tl: "0.03nc"
+last_stage_only_tl: "0.03nc"
 full_cp_tl: "0.03nc"
 ```
 
@@ -178,7 +178,7 @@ Phase 2/4 각 solve 의 `response_proto.solve_log` 를 `log_search_progress=True
 ### 4.4 `ad4a023` — 실험 설정 전환
 
 - `main.py::CONFIG_PATH`: `metadata/20260421/1_mcf_lb_init_11_config.yaml` → `metadata/20260423/1_mcf_lb_init_13_config.yaml`
-- `config 13`: 단일 시나리오 `mcf_lb_4_4cores_no_pf` — `last_stage_only_cp_pf_method: null` + `full_cp_pf_method: "PF1"`, `last_stage_only_cp_tl: "0.01nc"`, Phase 4 는 `repeat_full_cp_while_improving: true`, `instance_worker_cnt: 24`
+- `config 13`: 단일 시나리오 `mcf_lb_4_4cores_no_pf` — `last_stage_only_cp_pf_method: null` + `full_cp_pf_method: "PF1"`, `last_stage_only_tl: "0.01nc"`, Phase 4 는 `repeat_full_cp_while_improving: true`, `instance_worker_cnt: 24`
 
 ---
 
@@ -210,7 +210,7 @@ Phase 2/4 각 solve 의 `response_proto.solve_log` 를 `log_search_progress=True
 | `tests/orchestration/test_controller.py` | `run_mcf_lb()` → `run_mcf_lb_4()` 로 수정됨. 다른 assertion 무변경 ✅ |
 | `benchmarks/PRA2017/add_lb_column.py` | `run_mcf_lb_4()` 로 전환 + 주석 업데이트 ✅ |
 | repo 내부의 `profile_fix_by_machine` 참조 | `rg` 기준 0건 잔존 (config/코드 모두 정리됨) ✅ |
-| 외부(리포 밖) 캡처된 config | 소유자가 직접 마이그레이션 필요 — `repeat_pf_cp_while_improving`, `solver_thread_cnt`, `profile_fix_by_machine`, `machine_precedence_stride` 를 보유한 YAML 은 업데이트 대상 |
+| 외부(리포 밖) 캡처된 config | 소유자가 직접 마이그레이션 필요 — `repeat_full_cp_while_improving`, `solver_thread_cnt`, `profile_fix_by_machine`, `machine_precedence_stride` 를 보유한 YAML 은 업데이트 대상 |
 
 ---
 

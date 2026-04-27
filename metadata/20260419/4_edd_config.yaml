@@ -2,7 +2,7 @@ run_mode: FULL_RUN        # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-# ins_index: [0, 1439]
+ins_index: [0, 1439]
 
 output_dir: output
 
@@ -19,16 +19,16 @@ scenarios:
     output_subdir: edd
     subroutine_flow:
       - method: initialize_by_edd
-        criteria: makespan
-  - name: edd_profile_fixed_ns
-    timelimit: 600.0
-    output_subdir: profile_fixed_ns
-    subroutine_flow:
-      - method: initialize_by_edd
-        criteria: makespan
-      - method: run_profile_fixed_ns
-        params:
-          computational_time: 300.0
-          solver_thread_cnt: 1
-          last_stage_only_cp_pf_method: "PF1"
-          full_cp_pf_method: "PF1"
+        dispatching_criteria: makespan
+  # - name: edd_profile_fixed_ns
+  #   timelimit: 600.0
+  #   output_subdir: profile_fixed_ns
+  #   subroutine_flow:
+  #     - method: initialize_by_edd
+  #       dispatching_criteria: makespan
+  #     - method: run_profile_fixed_ns
+  #       params:
+  #         cp_tl: 300.0
+  #         solver_thread_cnt: 1
+  #         last_stage_only_cp_pf_method: "PF1"
+  #         full_cp_pf_method: "PF1"

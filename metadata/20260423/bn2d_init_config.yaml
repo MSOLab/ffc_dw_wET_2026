@@ -1,0 +1,72 @@
+# BN2D dispatcher init experiment (makespan-driven bottleneck two-way dispatch).
+# Internal objective: minimize makespan (preserves the upstream BN2D goal).
+# Reported objective: weighted earliness + tardiness.
+# Ref: plans/20260423/bn2d-dispatcher-port.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1439 ]
+
+output_dir: output
+
+instance_worker_cnt: 48
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: bn2d_single_stage
+    timelimit: 60.0
+    output_subdir: bn2d_single_stage
+    subroutine_flow:
+      - method: run_bn2d
+        left_cap_portion: 0.25
+        right_cap_portion: 0.25
+        normalize_by_stage_cnt: false
+        mixed_schedule_for_former_stages: true
+        mixed_schedule_for_later_stages: true
+        machine_then_job: true
+        all_stages_as_bottleneck: false
+
+  - name: bn2d_all_stages
+    timelimit: 120.0
+    output_subdir: bn2d_all_stages
+    subroutine_flow:
+      - method: run_bn2d
+        left_cap_portion: 0.25
+        right_cap_portion: 0.25
+        normalize_by_stage_cnt: false
+        mixed_schedule_for_former_stages: true
+        mixed_schedule_for_later_stages: true
+        machine_then_job: true
+        all_stages_as_bottleneck: true
+
+  - name: bn2d_single_stage_iit
+    timelimit: 60.0
+    output_subdir: bn2d_single_stage
+    subroutine_flow:
+      - method: run_bn2d
+        left_cap_portion: 0.25
+        right_cap_portion: 0.25
+        normalize_by_stage_cnt: false
+        mixed_schedule_for_former_stages: true
+        mixed_schedule_for_later_stages: true
+        machine_then_job: true
+        all_stages_as_bottleneck: false
+        iit_after_dispatch: true
+
+  - name: bn2d_all_stages_iit
+    timelimit: 120.0
+    output_subdir: bn2d_all_stages
+    subroutine_flow:
+      - method: run_bn2d
+        left_cap_portion: 0.25
+        right_cap_portion: 0.25
+        normalize_by_stage_cnt: false
+        mixed_schedule_for_former_stages: true
+        mixed_schedule_for_later_stages: true
+        machine_then_job: true
+        all_stages_as_bottleneck: true
+        iit_after_dispatch: true

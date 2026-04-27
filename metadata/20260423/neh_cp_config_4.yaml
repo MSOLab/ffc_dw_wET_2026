@@ -1,0 +1,32 @@
+# NEH-CP incremental constructor experiment.
+# Job sequence decided up-front by (max(w-,w+) desc, w-+w+ desc, d+-d- asc);
+# first batch size = max(added_batch_size, max_m_per_stage * 2).
+# Reported objective: weighted earliness + tardiness.
+# Ref: plans/20260423/neh_cp.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0 ]
+
+output_dir: output/20260423
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: neh_cp_b5_pf1_below_cmax
+    timelimit: 120.0
+    output_subdir: neh_cp_b5_pf1_below_cmax
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "weight-due-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 5
+        cp_tl: "0.15c"
+        apply_cumulative_tl: true
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"

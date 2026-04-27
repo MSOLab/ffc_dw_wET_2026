@@ -69,7 +69,7 @@ Shape your step method like `run_mcf_lb`:
 
 ```python
 def run_<new_step>(self, ...) -> SubroutineReport:
-    start_elapsed = self.timer.elapsed_sec
+    start_elapsed = time.monotonic()
 
     # ... algorithm body produces `schedule: FFcSchedule` ...
 
@@ -77,7 +77,7 @@ def run_<new_step>(self, ...) -> SubroutineReport:
     obj_value = float(sum_e + sum_t)
     obj_bound = float(<lb_if_available> or 0.0)
 
-    elapsed = self.timer.elapsed_sec - start_elapsed
+    elapsed = time.monotonic() - start_elapsed
     report = SubroutineReport(
         elapsed_time=elapsed, obj_value=obj_value, obj_bound=obj_bound,
     )

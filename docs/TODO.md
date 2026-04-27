@@ -30,3 +30,18 @@ boilerplate is repeated with no meaningful variation.
 timer/context management, consider overriding `_call_method` instead — see
 hybridflowshop's `hybridflowshop/controller/controller_core.py:467` for an
 existing precedent of extending the routix step hook.
+
+## Hardcoded TL (time limit) formula in analysis_long sheet
+
+The `analysis_long` Excel sheet computes `TL = 0.09 * job_count * stage_count`
+as a reference time limit. The `time%` column is then `(elapsedSec / TL) * 100`.
+The coefficient `0.09` is hardcoded in `src/ffc_ddw_sum_et/orchestration/reporting.py`
+in the `_write_analysis_sheets` method.
+
+**Why:** The coefficient is experimentally determined and may need adjustment
+for different instance families or solver configurations. Making it
+configurable adds complexity (config key, validation, default) for a single
+reporting column.
+
+**When to act:** When the coefficient needs to change, or when multiple
+teams use different TL thresholds and want to configure it per experiment.

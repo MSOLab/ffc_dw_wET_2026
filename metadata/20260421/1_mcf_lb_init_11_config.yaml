@@ -41,5 +41,6 @@ scenarios:
           - "due_date_star_plus_half_p"
           - "due_date_star_plus_p"
         last_stage_only_cp_pf_method: "PF1"
+        repeat_last_stage_only_cp_while_improving: true
         full_cp_pf_method: "PF1"
-        repeat_pf_cp_while_improving: true
+        repeat_full_cp_while_improving: true

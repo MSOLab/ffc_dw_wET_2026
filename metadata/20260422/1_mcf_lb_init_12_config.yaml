@@ -29,7 +29,7 @@ scenarios:
           - "start_time"
         last_stage_only_cp_pf_method: null
         last_stage_only_cp_solver_thread_cnt: 4
-        last_stage_only_cp_tl: "0.03nc"
+        last_stage_only_tl: "0.03nc"
         repeat_last_stage_only_cp_while_improving: false
         log_last_stage_only_cp_search_progress: true
         full_cp_pf_method: null

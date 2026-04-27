@@ -196,6 +196,7 @@ class FFcDDWMultiScenarioRunner(
         draw_gantt: bool = True,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
+        bks_table_csv_path: Path | None = None,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -205,6 +206,7 @@ class FFcDDWMultiScenarioRunner(
         self.draw_gantt = draw_gantt
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = ins_index_source
+        self.bks_table_csv_path = bks_table_csv_path
 
     def run(self):
         runner_cnt = len(self.runners)
@@ -258,6 +260,7 @@ class FFcDDWMultiScenarioRunner(
             draw_gantt=self.draw_gantt,
             painter_thread_cnt=self.painter_thread_cnt,
             ins_index_source=self.ins_index_source,
+            bks_table_csv_path=self.bks_table_csv_path,
         ).generate()
 
         return FinalResult(scenario_results=scenario_results)
@@ -274,6 +277,7 @@ class FFcDDWReporter:
         draw_gantt: bool = True,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
+        bks_table_csv_path: Path | None = None,
     ):
         self.output_dir = output_dir or Path("output")
         self.scenario_results = scenario_results
@@ -281,6 +285,9 @@ class FFcDDWReporter:
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = (
             Path(ins_index_source) if ins_index_source is not None else None
+        )
+        self.bks_table_csv_path = (
+            Path(bks_table_csv_path) if bks_table_csv_path is not None else None
         )
         self._filename_to_index: dict[str, int] = self._load_filename_to_index()
         self._index_to_meta: dict[int, dict[str, Any]] = self._load_index_to_meta()
@@ -335,9 +342,33 @@ class FFcDDWReporter:
 
         self._write_summary_csv()
         self._write_mcf_lb_analysis_csv()
+        self._write_mcf_lb_pivot_artifacts()
+        self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
+        self._write_mcf_lb_last_stage_only_obj_bks_wintie_table()
         self._write_statistics_yaml()
         self._write_excel_report()
+        self._write_post_run_pivot_artifacts()
         self._generate_gantt_charts()
+
+    def _write_post_run_pivot_artifacts(self) -> None:
+        """Emit long-format RPDf comparison CSV + 3 PivotTable.js HTML files."""
+        if not self.ins_index_source or not self.ins_index_source.exists():
+            return
+        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
+            return
+
+        from .post_run_pivot import write_post_run_pivot_artifacts
+
+        summary_csv = self.output_dir / self.generate_summary_filename("csv")
+        if not summary_csv.exists():
+            return
+        write_post_run_pivot_artifacts(
+            summary_csv=summary_csv,
+            output_dir=self.output_dir,
+            run_id=self.output_dir.name,
+            hybrid_match_csv=self.ins_index_source,
+            bks_table_csv=self.bks_table_csv_path,
+        )
 
     def generate_summary_filename(self, extension: str) -> str:
         return f"{self.output_dir.name}_summary.{extension}"
@@ -626,6 +657,238 @@ class FFcDDWReporter:
                 writer.writerow([name, best_counts[name], lt_bks_counts[name]])
         logger.info("Last-stage-only-obj count CSV written to %s", count_path)
 
+    _MCF_LB_REF_OBJ_COLUMNS: tuple[str, ...] = (
+        "lastStageOnlyBound",
+        "lastStageOnlyObj",
+        "dispatchedObj",
+        "profileFixObj",
+        "profileFixBound",
+    )
+    _MCF_LB_STEP_SEC_COLUMNS: tuple[str, ...] = (
+        "mcfSolveSec",
+        "lastStageCpSatSec",
+        "dispatchSec",
+        "profileFixCpSatSec",
+    )
+    _MCF_LB_REF_BLANK_COLUMNS: tuple[str, ...] = (
+        *_MCF_LB_STEP_SEC_COLUMNS,
+        "mcfLbSec",
+        "time%",
+    )
+    # Mirrors post_run_pivot.build_rpdf_comparison_df's timelimit_factor.
+    _MCF_LB_TIMELIMIT_FACTOR: float = 0.09
+
+    def _write_mcf_lb_pivot_artifacts(self) -> None:
+        """Render an MCF-LB-only PivotTable.js dashboard from the per-scenario
+        ``<scenario_name>_mcf_lb_analysis.csv`` files.
+
+        Concatenates each scenario's analysis CSV (with ``scenarioName``
+        prepended) and appends two synthetic reference rows per instance —
+        ``scenarioName="mcfLb"`` and ``scenarioName="bks"`` — whose
+        objective-style columns carry the instance's ``mcfLb``/``bks`` value
+        so the heatmap can show LB/BKS reference rows alongside scenarios.
+        Time/count columns on the synthetic rows are blanked. Returns
+        silently when no MCF-LB analysis CSV exists for this run.
+        """
+        import pandas as pd
+
+        from .post_run_pivot import DEFAULT_AGGREGATORS_JS, write_pivot_html
+
+        frames: list[pd.DataFrame] = []
+        for sc in self.scenario_results:
+            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            if not csv_path.exists():
+                continue
+            df = pd.read_csv(csv_path)
+            df.insert(0, "scenarioName", sc.name)
+            frames.append(df)
+
+        if not frames:
+            return
+
+        combined = pd.concat(frames, ignore_index=True)
+        combined["mcfLbSec"] = combined[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
+            axis=1, min_count=1
+        )
+        combined["timelimit"] = (
+            combined["n"] * combined["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+        )
+        combined["time%"] = combined["mcfLbSec"] / combined["timelimit"]
+        combined = pd.concat(
+            [combined, *self._build_mcf_lb_reference_rows(combined)],
+            ignore_index=True,
+        )
+
+        initial_state = {
+            "rows": ["scenarioName", "R"],
+            "cols": ["T"],
+            "vals": ["lastStageOnlyObj"],
+            "aggregatorName": "Average",
+            "rendererName": "Heatmap",
+        }
+
+        path = self.output_dir / f"{self.output_dir.name}_mcf_lb_dashboard.html"
+        write_pivot_html(
+            combined,
+            path,
+            initial_state=initial_state,
+            aggregators_js=DEFAULT_AGGREGATORS_JS,
+            title="MCF-LB Pivot",
+        )
+        logger.info("MCF-LB pivot dashboard written to %s", path)
+
+    def _build_mcf_lb_reference_rows(self, combined: Any) -> list[Any]:
+        """Build synthetic ``scenarioName="mcfLb"`` and ``"bks"`` reference rows."""
+        unique = combined.drop_duplicates(subset=["insIndex"]).copy()
+        unique["error"] = ""
+        nan = float("nan")
+
+        def _ref_rows(name: str, source_col: str):
+            df = unique.copy()
+            df["scenarioName"] = name
+            for col in self._MCF_LB_REF_OBJ_COLUMNS:
+                df[col] = df[source_col]
+            for col in self._MCF_LB_REF_BLANK_COLUMNS:
+                df[col] = nan
+            return df
+
+        return [_ref_rows("mcfLb", "mcfLb"), _ref_rows("bks", "bks")]
+
+    def _write_mcf_lb_last_stage_only_obj_bks_wintie_pivot(self) -> None:
+        """Render a focused win/tie + RPDf dashboard comparing each scenario's
+        ``lastStageOnlyObj`` against ``BKS``.
+
+        Drops every column except scenario/instance dimensions and the five
+        comparison metrics: ``lastStageOnlyObj``, ``BKS``, ``RPDf``, ``win``,
+        ``tie``. ``win=1`` when ``lastStageOnlyObj < BKS``, ``tie=1`` when
+        equal, otherwise both default to 0. Returns silently when no MCF-LB
+        analysis CSV exists.
+        """
+        import pandas as pd
+
+        from .post_run_pivot import WIN_TIE_AGGREGATORS_JS, write_pivot_html
+
+        keep_cols = [
+            "scenarioName",
+            "insIndex",
+            "n",
+            "c",
+            "totalMcCount",
+            "T",
+            "R",
+            "W",
+            "lastStageOnlyObj",
+            "BKS",
+            "RPDf",
+            "win",
+            "tie",
+            "time%",
+        ]
+
+        frames: list[pd.DataFrame] = []
+        for sc in self.scenario_results:
+            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            if not csv_path.exists():
+                continue
+            df = pd.read_csv(csv_path)
+            df.insert(0, "scenarioName", sc.name)
+            df = df.rename(columns={"bks": "BKS"})
+            _denom = df["lastStageOnlyObj"] + df["BKS"]
+            df["RPDf"] = (
+                2 * (df["lastStageOnlyObj"] - df["BKS"])
+            ).where(_denom != 0, 0.0) / _denom.where(_denom != 0, 1.0)
+            df["win"] = (df["lastStageOnlyObj"] < df["BKS"]).astype(int)
+            df["tie"] = (df["lastStageOnlyObj"] == df["BKS"]).astype(int)
+            mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
+                axis=1, min_count=1
+            )
+            timelimit = df["n"] * df["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+            df["time%"] = mcf_lb_sec / timelimit
+            frames.append(df[keep_cols])
+
+        if not frames:
+            return
+
+        combined = pd.concat(frames, ignore_index=True)
+
+        initial_state = {
+            "rows": ["scenarioName", "R"],
+            "cols": ["T"],
+            "vals": ["win", "tie"],
+            "aggregatorName": "Win / Tie sum",
+            "rendererName": "Table",
+        }
+
+        path = (
+            self.output_dir
+            / f"{self.output_dir.name}_mcf_lb_lastStageOnlyObj_BKS_wintie_pivot.html"
+        )
+        write_pivot_html(
+            combined,
+            path,
+            initial_state=initial_state,
+            aggregators_js=WIN_TIE_AGGREGATORS_JS,
+            title="MCF-LB lastStageOnlyObj vs BKS Win/Tie",
+        )
+        logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie pivot written to %s", path)
+
+    def _write_mcf_lb_last_stage_only_obj_bks_wintie_table(self) -> None:
+        """Write a static HTML table with per-scenario ``time%`` average plus
+        ``win``/``tie`` counts over all instances. One row per scenario, no
+        interactivity. Returns silently when no MCF-LB analysis CSV exists.
+        """
+        import pandas as pd
+
+        rows: list[dict[str, Any]] = []
+        for sc in self.scenario_results:
+            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            if not csv_path.exists():
+                continue
+            df = pd.read_csv(csv_path)
+            mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
+                axis=1, min_count=1
+            )
+            timelimit = df["n"] * df["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+            time_pct = mcf_lb_sec / timelimit
+            rows.append(
+                {
+                    "scenarioName": sc.name,
+                    "timePctAverage": float(time_pct.mean()),
+                    "winCount": int((df["lastStageOnlyObj"] < df["bks"]).sum()),
+                    "tieCount": int((df["lastStageOnlyObj"] == df["bks"]).sum()),
+                }
+            )
+
+        if not rows:
+            return
+
+        summary = pd.DataFrame(rows).set_index("scenarioName")
+        table_html = summary.to_html(
+            float_format=lambda x: f"{x:.4f}",
+            border=0,
+        )
+        payload = (
+            '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n'
+            "<title>MCF-LB lastStageOnlyObj vs BKS Win/Tie</title>\n"
+            "<style>\n"
+            "body { font-family: Verdana, sans-serif; margin: 24px; }\n"
+            "table { border-collapse: collapse; }\n"
+            "th, td { padding: 6px 12px; border: 1px solid #ccc; "
+            "text-align: right; }\n"
+            "th { background: #f4f4f4; }\n"
+            "td:first-child, th:first-child { text-align: left; }\n"
+            "</style>\n</head>\n<body>\n"
+            "<h2>MCF-LB lastStageOnlyObj vs BKS — per-scenario summary</h2>\n"
+            f"{table_html}\n"
+            "</body>\n</html>\n"
+        )
+        path = (
+            self.output_dir
+            / f"{self.output_dir.name}_mcf_lb_lastStageOnlyObj_BKS_wintie_table.html"
+        )
+        path.write_text(payload, encoding="utf8")
+        logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie table written to %s", path)
+
     def _mcf_lb_analysis_row(self, ir: InstanceResult) -> list[str]:
         diag = ir.mcf_lb_diagnostic or {}
         ins_index = self._resolve_ins_index(ir.instance_name)
@@ -762,10 +1025,10 @@ class FFcDDWReporter:
                 "Scenario",
                 "insIndex",
                 "insFileName",
-                "Obj Value",
-                "Elapsed (s)",
-                "Work Status",
-                "Reports",
+                "workStatus",
+                "reports",
+                "elapsed_sec",
+                "objValue",
             ],
             header_fmt,
         )
@@ -780,10 +1043,10 @@ class FFcDDWReporter:
                         sc.name,
                         ins_index if ins_index is not None else "",
                         ir.instance_name,
-                        ir.obj_value,
-                        round(ir.elapsed_time, 3),
                         ir.work_status,
                         ir.report_count,
+                        round(ir.elapsed_time, 3),
+                        ir.obj_value,
                     ],
                     cell_fmt,
                 )
@@ -794,7 +1057,7 @@ class FFcDDWReporter:
         has_meta = bool(self._index_to_meta)
         meta_cols = ["n", "c", "totalMcCount", "T", "R", "W", "BKS"] if has_meta else []
         header = (
-            ["insIndex", "insFileName"]
+            ["Scenario", "insIndex"]
             + meta_cols
             + [
                 "Best Obj",
@@ -803,6 +1066,7 @@ class FFcDDWReporter:
                 "First Bound",
                 "Improvement %",
                 "Total Elapsed",
+                "makespan",
                 "Report Count",
             ]
         )
@@ -828,8 +1092,8 @@ class FFcDDWReporter:
                     else {}
                 )
                 values: list[Any] = [
+                    sc.name,
                     ins_index if ins_index is not None else "",
-                    ir.instance_name,
                 ]
                 if has_meta:
                     for key in meta_cols:
@@ -843,6 +1107,7 @@ class FFcDDWReporter:
                         ir.first_obj_bound,
                         improvement,
                         round(ir.elapsed_time, 3),
+                        ir.makespan,
                         ir.report_count,
                     ]
                 )
@@ -855,55 +1120,120 @@ class FFcDDWReporter:
             return
 
         long_sheet = workbook.add_worksheet("analysis_long")
+        meta_keys = ["n", "c", "totalMcCount", "T", "R", "W"]
         long_sheet.write_row(
             "A1",
-            ["insIndex", "insFileName", "Scenario", "Obj Value", "BKS", "RPDf"],
+            ["Scenario", "insIndex"]
+            + meta_keys
+            + ["TL", "elapsedSec", "time%", "ObjValue", "BKS", "RPDf", "Win", "Tie"],
             header_fmt,
         )
 
-        entries: list[tuple[int | None, str, str, float | None, float | None]] = []
+        entries = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
                 ins_index = self._resolve_ins_index(ir.instance_name)
-                bks = None
-                if ins_index is not None:
-                    bks = self._index_to_meta.get(ins_index, {}).get("BKS")
+                meta = (
+                    self._index_to_meta.get(ins_index, {})
+                    if ins_index is not None
+                    else {}
+                )
+                bks = meta.get("BKS")
+                # TL = 0.09 * job_count * stage_count (hardcoded, see docs/TODO.md)
+                tl = None
+                if ir.job_count is not None and ir.stage_count is not None:
+                    tl = 0.09 * ir.job_count * ir.stage_count
                 entries.append(
-                    (ins_index, ir.instance_name, sc.name, ir.obj_value, bks)
+                    {
+                        "ins_index": ins_index,
+                        "sc_name": sc.name,
+                        "meta": meta,
+                        "tl": tl,
+                        "elapsed": ir.elapsed_time,
+                        "obj": ir.obj_value,
+                        "bks": bks,
+                    }
                 )
 
         entries.sort(
             key=lambda e: (
-                e[0] if e[0] is not None else 10**9,
-                e[2],
+                e["ins_index"] if e["ins_index"] is not None else 10**9,
+                e["sc_name"],
             )
         )
 
         row = 1
-        for ins_index, ins_name, sc_name, obj, bks in entries:
+        for entry in entries:
+            col = 0
+            long_sheet.write(row, col, entry["sc_name"], cell_fmt)
+            col += 1
             long_sheet.write(
-                row, 0, ins_index if ins_index is not None else "", cell_fmt
+                row,
+                col,
+                entry["ins_index"] if entry["ins_index"] is not None else "",
+                cell_fmt,
             )
-            long_sheet.write(row, 1, ins_name, cell_fmt)
-            long_sheet.write(row, 2, sc_name, cell_fmt)
-            if obj is not None:
-                long_sheet.write_number(row, 3, float(obj), cell_fmt)
+            col += 1
+            for key in meta_keys:
+                val = entry["meta"].get(key)
+                if val is not None:
+                    long_sheet.write(row, col, val, cell_fmt)
+                else:
+                    long_sheet.write_blank(row, col, None, cell_fmt)
+                col += 1
+            if entry["tl"] is not None:
+                long_sheet.write_number(row, col, entry["tl"], cell_fmt)
             else:
-                long_sheet.write_blank(row, 3, None, cell_fmt)
-            if bks is not None:
-                long_sheet.write_number(row, 4, float(bks), cell_fmt)
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            elapsed_rounded = round(entry["elapsed"], 3)
+            long_sheet.write_number(row, col, elapsed_rounded, cell_fmt)
+            col += 1
+            if entry["tl"] is not None and entry["tl"] != 0:
+                time_pct = (elapsed_rounded / entry["tl"]) * 100
+                long_sheet.write_number(row, col, time_pct, cell_fmt)
             else:
-                long_sheet.write_blank(row, 4, None, cell_fmt)
-            rpdf = _compute_rpdf(obj, bks)
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            if entry["obj"] is not None:
+                long_sheet.write_number(row, col, float(entry["obj"]), cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            if entry["bks"] is not None:
+                long_sheet.write_number(row, col, float(entry["bks"]), cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            rpdf = _compute_rpdf(entry["obj"], entry["bks"])
             if rpdf is not None:
-                long_sheet.write_number(row, 5, rpdf, rpdf_fmt)
+                long_sheet.write_number(row, col, rpdf, rpdf_fmt)
             else:
-                long_sheet.write_blank(row, 5, None, rpdf_fmt)
+                long_sheet.write_blank(row, col, None, rpdf_fmt)
+            col += 1
+            # Win: 1 if BKS > ObjValue, else blank
+            if entry["obj"] is not None and entry["bks"] is not None:
+                if entry["bks"] > entry["obj"]:
+                    long_sheet.write_number(row, col, 1, cell_fmt)
+                else:
+                    long_sheet.write_blank(row, col, None, cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
+            # Tie: 1 if BKS == ObjValue, else blank
+            if entry["obj"] is not None and entry["bks"] is not None:
+                if entry["bks"] == entry["obj"]:
+                    long_sheet.write_number(row, col, 1, cell_fmt)
+                else:
+                    long_sheet.write_blank(row, col, None, cell_fmt)
+            else:
+                long_sheet.write_blank(row, col, None, cell_fmt)
             row += 1
 
         wide_sheet = workbook.add_worksheet("analysis_wide")
         scenario_names = [sc.name for sc in self.scenario_results]
-        wide_header: list[str] = ["insIndex", "insFileName", "BKS"]
+        wide_meta_keys = ["n", "c", "totalMcCount", "T", "R", "W"]
+        wide_header: list[str] = ["insIndex"] + wide_meta_keys + ["BKS"]
         for sc_name in scenario_names:
             wide_header.append(f"obj_{sc_name}")
             wide_header.append(f"RPDf_{sc_name}")
@@ -915,10 +1245,15 @@ class FFcDDWReporter:
                 ins_index = self._resolve_ins_index(ir.instance_name)
                 row_data = per_instance.setdefault(
                     ins_index,
-                    {"insFileName": ir.instance_name, "BKS": None, "by_sc": {}},
+                    {
+                        "meta": {},
+                        "BKS": None,
+                        "by_sc": {},
+                    },
                 )
-                if row_data["BKS"] is None and ins_index is not None:
-                    row_data["BKS"] = self._index_to_meta.get(ins_index, {}).get("BKS")
+                if not row_data["meta"] and ins_index is not None:
+                    row_data["meta"] = self._index_to_meta.get(ins_index, {})
+                    row_data["BKS"] = row_data["meta"].get("BKS")
                 row_data["by_sc"][sc.name] = ir.obj_value
 
         ordered_indices = sorted(
@@ -928,16 +1263,24 @@ class FFcDDWReporter:
         row = 1
         for ins_index in ordered_indices:
             data = per_instance[ins_index]
+            col = 0
             wide_sheet.write(
-                row, 0, ins_index if ins_index is not None else "", cell_fmt
+                row, col, ins_index if ins_index is not None else "", cell_fmt
             )
-            wide_sheet.write(row, 1, data["insFileName"], cell_fmt)
+            col += 1
+            for key in wide_meta_keys:
+                val = data["meta"].get(key)
+                if val is not None:
+                    wide_sheet.write(row, col, val, cell_fmt)
+                else:
+                    wide_sheet.write_blank(row, col, None, cell_fmt)
+                col += 1
             bks = data["BKS"]
             if bks is not None:
-                wide_sheet.write_number(row, 2, float(bks), cell_fmt)
+                wide_sheet.write_number(row, col, float(bks), cell_fmt)
             else:
-                wide_sheet.write_blank(row, 2, None, cell_fmt)
-            col = 3
+                wide_sheet.write_blank(row, col, None, cell_fmt)
+            col += 1
             for sc_name in scenario_names:
                 obj = data["by_sc"].get(sc_name)
                 if obj is not None:

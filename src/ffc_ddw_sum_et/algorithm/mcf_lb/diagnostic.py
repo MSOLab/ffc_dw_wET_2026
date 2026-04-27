@@ -38,4 +38,11 @@ class MCFLBDiagnostic:
     # Per-seed last-stage diagnostics.
     ls_status_per_seed: dict[str, str] = field(default_factory=dict)
     last_stage_obj_per_seed: dict[str, float] = field(default_factory=dict)
+    # Per-seed (elapsed_time, obj_value) trajectory when Phase 2 runs the
+    # cumulative heuristic. Empty when Phase 2 uses CP-SAT.
+    heuristic_progress_per_seed: dict[str, list[tuple[float, float]]] = field(
+        default_factory=dict
+    )
+    # Per-seed per-job-scan timing stats: {"mean_sec", "max_sec", "n_scans"}.
+    heuristic_scan_stats_per_seed: dict[str, dict] = field(default_factory=dict)
     chosen_seed_tag: str | None = None

@@ -1,10 +1,10 @@
-# Plan: Add `last_stage_only_cp_tl` / `full_cp_tl` to `run_mcf_lb_4`
+# Plan: Add `last_stage_only_tl` / `full_cp_tl` to `run_mcf_lb_4`
 
 ## Goal
 
 Add two optional time-limit parameters to `run_mcf_lb_4`:
 
-- `last_stage_only_cp_tl: float | str | None = None` — per-solve wall-clock cap for the Phase 2 last-stage-only CP-SAT model.
+- `last_stage_only_tl: float | str | None = None` — per-solve wall-clock cap for the Phase 2 last-stage-only CP-SAT model.
 - `full_cp_tl: float | str | None = None` — per-solve wall-clock cap for the Phase 4 full CP-SAT model.
 
 ### `float | str | None` resolution rules
@@ -41,7 +41,7 @@ run_mcf_lb_4                            (controller.py)
 ### 1. `controller.py`
 
 - Add module-level helper `_resolve_cp_tl(tl_raw: float | str | None, job_count: int, stage_count: int) -> float | None`.
-- Add `last_stage_only_cp_tl: float | str | None = None` and `full_cp_tl: float | str | None = None` to `run_mcf_lb_4` signature.
+- Add `last_stage_only_tl: float | str | None = None` and `full_cp_tl: float | str | None = None` to `run_mcf_lb_4` signature.
 - Resolve both early in the body (before Phase 1).
 - Pass resolved values to `run_phase2(..., cp_tl=resolved_ls_tl)` and `run_phase4(..., cp_tl=resolved_full_tl)`.
 

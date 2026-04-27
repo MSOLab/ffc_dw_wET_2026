@@ -1,0 +1,37 @@
+# NEH-CP incremental constructor experiment.
+# Single scenario: due2-weight-pos priority.
+#   sorting: due2-weight-pos (max(r_j, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc)
+#   profile fix: PF1
+# total_timelimit: "0.024nc" derives cp_tl = 0.024 * c * added_batch_size per batch.
+# Reported objective: weighted earliness + tardiness.
+# Ref: plans/20260423/neh_cp.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
+
+output_dir: output/20260426
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: neh_cp_b20_single_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_b20_single_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 20
+        total_timelimit: "0.024nc"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false

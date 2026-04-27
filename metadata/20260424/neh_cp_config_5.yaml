@@ -1,0 +1,40 @@
+# NEH-CP incremental constructor experiment.
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0 ]
+
+output_dir: output/20260424
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: neh_cp_b5_pf1_below_cmax_cml
+    timelimit: 120.0
+    output_subdir: neh_cp_b5_pf1_below_cmax_cml
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 5
+        cp_tl: "0.15c"
+        apply_cumulative_tl: true
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+  - name: neh_cp_b5_pf1_below_cmax_idv
+    timelimit: 120.0
+    output_subdir: neh_cp_b5_pf1_below_cmax_idv
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 5
+        cp_tl: "0.15c"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
