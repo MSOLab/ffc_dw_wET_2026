@@ -9,8 +9,7 @@ BN2D / Johnson / CDS / Gupta / Palmer variants.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, Sequence
 
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.objectives import compute_weighted_earliness_tardiness

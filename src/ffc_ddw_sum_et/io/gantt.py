@@ -11,8 +11,8 @@ layout, and axes finalization.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Mapping, Sequence
 
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt

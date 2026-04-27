@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import Sequence
 
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffc_schedule import FFcSchedule

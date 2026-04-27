@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Mapping
 
 from ...solution.ffc_schedule import FFcSchedule
 from .alg_option import AlgOption

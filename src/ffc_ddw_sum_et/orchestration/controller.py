@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, Sequence
 
 from ortools.sat.python import cp_model
 from routix.io import dump_yaml

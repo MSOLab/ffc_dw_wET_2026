@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal, Mapping, Sequence
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule

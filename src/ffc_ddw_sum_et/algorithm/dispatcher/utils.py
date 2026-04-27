@@ -7,8 +7,7 @@ post-run pass that reads `*_schedule.yaml`).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import TypeVar
+from typing import Mapping, Sequence, TypeVar
 
 from ...solution.ffc_schedule import FFcSchedule
 
