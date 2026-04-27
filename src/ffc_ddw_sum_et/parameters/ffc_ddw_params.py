@@ -630,6 +630,69 @@ class FFcDDWParameters(FFcParameters):
 
         return sorted(early, key=early_key) + sorted(late, key=late_key)
 
+    def get_wxd2_job_sequence(self) -> list[str]:
+        """
+        Get the "wxd2" priority job sequence.
+        Partition criterion uses additive scores:
+
+        - Earliness aversion score = w⁻_j + (d⁻_j - d̄)
+        (larger means more averse to early completion)
+        - Tardiness aversion score = w⁺_j + (d̄  - d⁺_j)
+        (larger means more averse to late completion)
+
+        where d̄ = mean of job midpoints (d⁻+d⁺)/2.
+
+        - "early" group: Tardiness aversion score > Earliness aversion score,
+        sort ascending by (w⁺_j - 2·w⁻_j + 2·ew_max) * (d⁻_j - d̄)
+        - "late"  group: Tardiness aversion score <= Earliness aversion score,
+        sort ascending by (w⁻_j - 2·w⁺_j + 2·tw_max) * (d⁺_j - d̄)
+
+        where ew_max = max(w⁻_j), tw_max = max(w⁺_j).
+        Ties break by native position.
+        Returned sequence is early-list ++ late-list.
+        """
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list}
+        d_bar = sum(d_mid.values()) / len(d_mid)
+        ew_max = max(ewt.values())
+        tw_max = max(twt.values())
+
+        earliness_aversion_score = {
+            j: ewt[j] + (ddw[j][0] - d_bar) for j in self._job_id_list
+        }
+        tardiness_aversion_score = {
+            j: twt[j] + (d_bar - ddw[j][1]) for j in self._job_id_list
+        }
+
+        early = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion_score[j] < tardiness_aversion_score[j]
+        ]
+        late = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion_score[j] >= tardiness_aversion_score[j]
+        ]
+
+        def early_key(j: str) -> tuple[float, int]:
+            return (
+                (twt[j] - 2 * ewt[j] + 2 * ew_max) * (ddw[j][0] - d_bar),
+                job_2_pos[j],
+            )
+
+        def late_key(j: str) -> tuple[float, int]:
+            return (
+                (ewt[j] - 2 * twt[j] + 2 * tw_max) * (ddw[j][1] - d_bar),
+                job_2_pos[j],
+            )
+
+        return sorted(early, key=early_key) + sorted(late, key=late_key)
+
     def get_due_star_weight_pos_job_sequence(self) -> list[str]:
         """
         Get the "due-star-weight-pos" priority job sequence.

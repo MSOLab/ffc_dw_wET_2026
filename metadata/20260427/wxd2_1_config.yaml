@@ -1,0 +1,36 @@
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1, 2, 3 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260427
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: wxd2
+    timelimit: 300.0
+    output_subdir: wxd2
+    subroutine_flow:
+      - method: initialize_by_wxd2
+  - name: neh_cp_bs12_plus_004n_dplus2_pf1
+    timelimit: 120.0
+    output_subdir: neh_cp_bs12_plus_004n_dplus2_pf1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "wxd2"
+        solver_thread_cnt: 8
+        added_batch_size: 12
+        extra_batch_size_expr: "0.04n"
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "constant"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false

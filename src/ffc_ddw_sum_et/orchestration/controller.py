@@ -1001,6 +1001,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self.instance.get_wxd1_job_sequence
         )
 
+    def initialize_by_wxd2(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``wxd2`` order — partition by aversion scores
+        (ea = w⁻_j + (d⁻_j - d̄), ta = w⁺_j + (d̄ - d⁺_j)):
+        early group (ta > ea) sorted ascending by
+        ``(w⁺_j - 2·w⁻_j + 2·ew_max) * (d⁻_j - d̄)``, late group
+        (ta ≤ ea) sorted ascending by
+        ``(w⁻_j - 2·w⁺_j + 2·tw_max) * (d⁺_j - d̄)``, concatenated
+        early ++ late — via the reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_wxd2_job_sequence
+        )
+
     def run_profile_fixed_ns(
         self,
         cp_tl: float | str | None = None,
