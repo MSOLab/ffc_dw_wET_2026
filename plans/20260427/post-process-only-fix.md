@@ -92,7 +92,19 @@ thing that runs in POST_PROCESS_ONLY.
 Single file per instance, written as the **last** step of
 `_persist_run_artifacts` so its presence implies every other artifact for
 that instance has been written. Schema = the `InstanceResult` dataclass
-serialized via `dataclasses.asdict` + `routix.io.dump_yaml`.
+serialized via `dataclasses.asdict` + `routix.io.dump_yaml` (the same
+`PrettyKeyDumper` used by existing `*_statistics.yaml` /
+`*_mcf_lb_diagnostic.yaml` artifacts; multi-line `error` tracebacks
+survive cleanly via block scalars).
+
+**Atomic write**: dump to `<ins_name>_instance_result.yaml.tmp` first, then
+`os.replace` to the final name. SIGKILL/OOM mid-write must not leave a
+partial YAML that crashes the next POST_PROCESS_ONLY load. The loader
+ignores any `.tmp` siblings.
+
+**Schema versioning**: include `_schema_version: 1` as the top-level YAML
+key alongside the field dict. Future breaking changes get a clean branch
+point in the loader. Cost: 1 line; value: high.
 
 Why a dedicated manifest instead of reconstructing `InstanceResult` from
 existing artifacts:
@@ -136,19 +148,40 @@ must round-trip through YAML. Audit:
 | `mcf_lb_diagnostic` | dict \| None | ✓ | already serialized via asdict today |
 | `makespan` | int \| None | ✓ | |
 
-No new types needed; `dump_yaml(asdict(instance_result), …)` and
-`InstanceResult(**load_yaml(path))` should suffice. (`load_yaml` returning
-unknown extra keys would break `InstanceResult(**…)`; either filter to
-known fields or use `dataclasses.fields(InstanceResult)` to project — keep
-forward-compat in mind.)
+No new types needed for serialization, but two design points must land in
+the first implementation:
 
-### Multi-instance / multi-scenario layer (no change required)
+- **Forward-compat projection (loader)** — day-one requirement.
+  `InstanceResult(**load_yaml(path))` breaks both on unknown keys (older
+  manifest before a field was removed/renamed) and missing keys (older
+  manifest before a field was added). Loader must project: drop keys not
+  in `dataclasses.fields(InstanceResult)`, fall back to field
+  default/`None` for missing ones. Day-one cost: small; retroactive cost:
+  a migration script. Do it now.
+- **Enum coercion (dumper)**. `dataclasses.asdict` does **not** unwrap
+  enums; `work_status` is a string today only because
+  `_post_run_process_inner` passes `.value` explicitly (line 271).
+  `_persist_run_artifacts` must keep that contract — write a small helper
+  `_to_serializable(d)` that maps enum values to `.value` before
+  `dump_yaml`, so future enum fields don't silently break safe-dumping.
+
+### Multi-instance / multi-scenario layer (mostly no change)
 
 `FFcDDWMultiInstanceRunner.post_run_process()` already just collects
 `self.results` (list of InstanceResult). `MultiInstanceConcurrentRunner`
 (routix) calls each single-instance runner's `run()`; in POST_PROCESS_ONLY
 that path now correctly produces real `InstanceResult`s loaded from disk,
-so nothing above the single-instance runner needs to change.
+so nothing above the single-instance runner needs structural change.
+
+**One small addition**: in POST_PROCESS_ONLY, if every per-instance
+`_load_instance_result` raises (e.g. wrong dir specified, or pre-manifest
+old run), the multi-scenario aggregation will silently produce empty
+output. Add a fail-fast at scenario aggregation time: if **all**
+`InstanceResult`s carry only the error placeholder (no real fields),
+raise `RuntimeError("no instance manifests found in <dir> — was this dir
+created before the manifest feature, or is the path wrong?")`. Triggered
+once at scenario level, not per-instance, so transient single-instance
+errors don't false-fire.
 
 `FFcDDWMultiScenarioRunner.run()` (reporting.py:211) and `post_run_process`
 (line 236) likewise need no logic changes — they just consume
@@ -160,10 +193,13 @@ No structural change required once `InstanceResult`s are real in
 POST_PROCESS_ONLY mode. Two safety improvements worth bundling:
 
 1. `_write_summary_csv` currently `path.unlink()`s before any rows are
-   written. If `scenario_results` is somehow empty (no instances loaded),
-   we'd still nuke the prior summary. Defensive change: skip the unlink
-   when no instance_results would be written. Small, cheap, removes an
-   entire class of foot-gun.
+   written, then appends row-by-row (lines 388, 427 of `reporting.py`).
+   This pattern destroys the prior CSV both on empty input AND on
+   mid-loop crashes. **Fix: write to a sibling tmpfile, then `os.replace`
+   to the final path** when the loop finishes cleanly. The unlink
+   disappears entirely; race/crash classes both go away; the empty-input
+   case naturally writes a header-only CSV that the pivot stage already
+   early-returns on.
 2. `_write_post_run_pivot_artifacts` already early-returns if
    `summary_csv` doesn't exist — fine, no change needed.
 
@@ -223,8 +259,22 @@ follow-up fix in routix or a glob-based fallback in the loader.
 4. `uv run ruff check` / `uv run ruff format --check`.
 
 5. `uv run pytest` — existing tests for the reporter and single-instance
-   runner should still pass; add a minimal test that round-trips
-   `InstanceResult → manifest YAML → InstanceResult`.
+   runner should still pass. Add round-trip tests covering:
+   - Multi-line `error` traceback (newlines, special chars, indentation
+     — verifies block-scalar round-trip).
+   - `mcf_lb_diagnostic=None` and `mcf_lb_diagnostic={"foo": {"bar": 1}}`
+     (nested dict).
+   - Forward-compat: load a manifest YAML dict that **lacks** a field
+     (simulating a future `InstanceResult` with a new field) and assert
+     the loader fills with default/None; load one that has an **extra**
+     unknown key and assert it's dropped without raising.
+   - Atomic write: create a `<ins_name>_instance_result.yaml.tmp` file
+     manually and assert the loader does NOT pick it up.
+
+6. **Atomic write end-to-end**: FULL_RUN, then `kill -9` a worker mid-run.
+   Re-run with POST_PROCESS_ONLY on the same dir. Crashed instance must
+   either have a complete manifest (write happened before kill) or no
+   manifest file (`os.replace` did not run); never a partial YAML.
 
 ## Out of scope
 
@@ -243,16 +293,16 @@ follow-up fix in routix or a glob-based fallback in the loader.
 
 ## Open questions
 
-- **routix per-instance working_dir resolution under POST_PROCESS_ONLY.**
-  Confirm during implementation that `working_dir` lands on the existing
-  per-instance folder without re-creating or renaming. If it doesn't, a
-  small adapter is needed (likely in routix).
-- **Manifest format (YAML vs JSON).** YAML is consistent with existing
-  per-instance artifacts (`*_statistics.yaml`, `*_mcf_lb_diagnostic.yaml`)
-  and supports block scalars for multi-line `error` tracebacks cleanly.
-  Lean YAML; revisit only if load-time parsing dominates.
-- **Forward-compat for new InstanceResult fields.** Once a manifest from
-  an older run lacks a newly added field, `InstanceResult(**fields)` will
-  break. Project the loaded dict through `dataclasses.fields(InstanceResult)`
-  with `default`/`default_factory` fall-back to keep old manifests
-  loadable. Worth doing on day one even at small cost.
+All three originally listed questions resolved during plan review:
+
+- ~~routix per-instance working_dir under POST_PROCESS_ONLY~~ —
+  **resolved**: `routix/runner/single_instance_runner.py:68-77` always
+  resolves `working_dir = output_dir / ins_name` regardless of mode, so
+  no adapter needed.
+- ~~Manifest format (YAML vs JSON)~~ — **resolved**: YAML via
+  `routix.io.dump_yaml` (the same `PrettyKeyDumper` used by the existing
+  `*_statistics.yaml` / `*_mcf_lb_diagnostic.yaml` artifacts). Multi-line
+  `error` tracebacks survive cleanly via block scalars.
+- ~~Forward-compat for new InstanceResult fields~~ — **resolved**:
+  promoted to §Design `InstanceResult field coverage` as a day-one
+  requirement.
