@@ -12,6 +12,8 @@ can pick up the same architectural intent.
 
 ## Architecture Docs
 
+- **Problem definition** (parameters, variables, constraints, objective):
+  `docs/problem-description.md`
 - IO extraction and import rules:
   `docs/io-principles.md`
 - Algorithm execution contract rules:
@@ -19,6 +21,9 @@ can pick up the same architectural intent.
 
 ## Working Agreement
 
+- Before any domain-level work (objective, scheduling logic, algorithm design),
+  read `docs/problem-description.md` to understand the main problem and confirm
+  symbol usage.
 - If a change touches `src/ffc_ddw_sum_et/io/` or code that imports from it,
   read `docs/architecture/io-principles.md` first.
 - If a change touches `src/ffc_ddw_sum_et/algorithm/` or code that imports from

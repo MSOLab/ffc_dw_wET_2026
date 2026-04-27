@@ -28,8 +28,8 @@ Source: Pan, Ruiz, Alfaro-Fernández (2017). *Computers and Operations Research*
 | ------ | ----------- |
 | $C_{ij}$ | Completion time of job $j \in \mathcal{J}$ at stage $i \in \mathcal{I}$ $\forall i \in \mathcal{I}, j \in \mathcal{J}$ |
 | $C_j = C_{cj}$ | Completion time of job $j$ at the last stage $c$ (used in objective) $\forall j \in \mathcal{J}$ |
-| $E^-_j$ | Earliness of job $j$; $E^-_j = \max\{d^-_j - C_j,\ 0\}$ $\forall j \in \mathcal{J}$ |
-| $E^+_j$ | Tardiness of job $j$; $E^+_j = \max\{C_j - d^+_j,\ 0\}$ $\forall j \in \mathcal{J}$ |
+| $E_j$ | Earliness of job $j$; $E_j = \max\{d^-_j - C_j,\ 0\}$ $\forall j \in \mathcal{J}$ |
+| $T_j$ | Tardiness of job $j$; $T_j = \max\{C_j - d^+_j,\ 0\}$ $\forall j \in \mathcal{J}$ |
 
 ---
 
@@ -46,7 +46,7 @@ Source: Pan, Ruiz, Alfaro-Fernández (2017). *Computers and Operations Research*
 
 Minimize the **Total Weighted Earliness and Tardiness from the due window**:
 
-$$\text{TWET}^{\text{dw}} = \sum_{j \in \mathcal{J}} \left( w^-_j \cdot E^-_j + w^+_j \cdot E^+_j \right)$$
+$$\text{TWET}^{\text{dw}} = \sum_{j \in \mathcal{J}} \left( w^-_j \cdot E_j + w^+_j \cdot T_j \right)$$
 
 A job $j$ is **on time** if $d^-_j \le C_j \le d^+_j$, incurring zero penalty.
 Different weights $w^-_j$ (earliness) and $w^+_j$ (tardiness) allow asymmetric penalties per job.
