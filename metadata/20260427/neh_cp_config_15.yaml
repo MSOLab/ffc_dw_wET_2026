@@ -2,6 +2,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1, 2, 3 ]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
 
 output_dir: output/20260427
@@ -17,7 +18,7 @@ scenarios:
     output_subdir: neh_cp_bs12_plus_004n_dplus2_pf1
     subroutine_flow:
       - method: neh_cp
-        job_priority: "wxd3"
+        job_priority: "wxd1"
         solver_thread_cnt: 8
         added_batch_size: 12
         extra_batch_size_expr: "0.04n"

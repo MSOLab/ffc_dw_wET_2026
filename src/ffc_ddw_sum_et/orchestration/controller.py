@@ -991,33 +991,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def initialize_by_wxd1(self) -> SubroutineReport:
         """Step method: seed an incumbent by dispatching jobs in the
-        ``wxd1`` order — ascending by ``abs(w⁺_j - w⁻_j) * (d_j - d_bar)``
-        with ``d_j = (d⁻_j + d⁺_j) / 2`` and ``d_bar`` the mean over jobs —
-        via the reverse-instance + IIT pipeline.
+        ``wxd1`` order — early group (``d_j - d_bar < 0``) sorted ascending
+        by ``(w⁺_j - 2·w⁻_j + 2·w_max) * (d_j - d_bar)``, late group
+        (``>= 0``) sorted ascending by
+        ``(w⁻_j - 2·w⁺_j + 2·w_max) * (d_j - d_bar)``, concatenated
+        early ++ late — via the reverse-instance + IIT pipeline.
         """
         return self._initialize_by_reversed_sequence(
             self.instance.get_wxd1_job_sequence
-        )
-
-    def initialize_by_wxd2(self) -> SubroutineReport:
-        """Step method: seed an incumbent by dispatching jobs in the
-        ``wxd2`` order — early group (``d_j - d_bar < 0``) sorted ascending
-        by ``w⁺_j - 2·w⁻_j + 2·w_max``, late group (``>= 0``) sorted
-        ascending by ``w⁻_j - 2·w⁺_j + 2·w_max``, concatenated early ++ late
-        — via the reverse-instance + IIT pipeline.
-        """
-        return self._initialize_by_reversed_sequence(
-            self.instance.get_wxd2_job_sequence
-        )
-
-    def initialize_by_wxd3(self) -> SubroutineReport:
-        """Step method: seed an incumbent by dispatching jobs in the
-        ``wxd3`` order — same split as ``wxd2`` but each group's sort key
-        is multiplied by ``(d_j - d_bar)`` — via the reverse-instance + IIT
-        pipeline.
-        """
-        return self._initialize_by_reversed_sequence(
-            self.instance.get_wxd3_job_sequence
         )
 
     def run_profile_fixed_ns(

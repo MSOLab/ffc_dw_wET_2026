@@ -593,59 +593,6 @@ class FFcDDWParameters(FFcParameters):
     def get_wxd1_job_sequence(self) -> list[str]:
         """
         Get the "wxd1" priority job sequence.
-        Sort ascending by abs(w⁺_j - w⁻_j) * (d_j - d_bar), then by position,
-        where d_j = (d⁻_j + d⁺_j) / 2 and d_bar = mean over jobs.
-        """
-        ewt = self._job_2_ewt_map
-        twt = self._job_2_twt_map
-        ddw = self._job_2_due_window_map
-        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
-
-        d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list}
-        d_bar = sum(d_mid.values()) / len(d_mid)
-
-        def key(j: str) -> tuple[float, int]:
-            return (abs(twt[j] - ewt[j]) * (d_mid[j] - d_bar), job_2_pos[j])
-
-        return sorted(self.job_id_list, key=key)
-
-    def get_wxd2_job_sequence(self) -> list[str]:
-        """
-        Get the "wxd2" priority job sequence.
-
-        Split jobs by the sign of ``d_j - d_bar`` where ``d_j`` is the
-        midpoint of the due window and ``d_bar`` is the mean of ``d_j``
-        over jobs:
-          - "early" group: ``d_j - d_bar < 0``,
-                           sort ascending by w⁺_j - 2·w⁻_j + 2·w_max
-          - "late"  group: ``d_j - d_bar >= 0``,
-                           sort ascending by w⁻_j - 2·w⁺_j + 2·w_max
-        with ``w_max = max(max(w⁻_j), max(w⁺_j))``. Ties break by
-        native position. Returned sequence is early-list ++ late-list.
-        """
-        ewt = self._job_2_ewt_map
-        twt = self._job_2_twt_map
-        ddw = self._job_2_due_window_map
-        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
-
-        d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list}
-        d_bar = sum(d_mid.values()) / len(d_mid)
-        w_max = max(max(ewt.values()), max(twt.values()))
-
-        early = [j for j in self._job_id_list if d_mid[j] - d_bar < 0]
-        late = [j for j in self._job_id_list if d_mid[j] - d_bar >= 0]
-
-        def early_key(j: str) -> tuple[int, int]:
-            return (twt[j] - 2 * ewt[j] + 2 * w_max, job_2_pos[j])
-
-        def late_key(j: str) -> tuple[int, int]:
-            return (ewt[j] - 2 * twt[j] + 2 * w_max, job_2_pos[j])
-
-        return sorted(early, key=early_key) + sorted(late, key=late_key)
-
-    def get_wxd3_job_sequence(self) -> list[str]:
-        """
-        Get the "wxd3" priority job sequence.
 
         Same split as ``wxd2`` but each group's sort key is multiplied by
         ``(d_j - d_bar)`` (negative inside the early group, non-negative
