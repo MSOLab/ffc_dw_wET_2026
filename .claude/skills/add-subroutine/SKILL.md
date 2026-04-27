@@ -1,12 +1,6 @@
 ---
 name: add-subroutine
-description: Add a new algorithm subroutine (e.g. an LB seeder, a dispatcher integration) to FFcDDWSubroutineController with the full project convention stack — plan file, optional dispatcher port, incumbent registration, two-phase Gantt emission, hfs_summary-style CSV, and a dedicated experiment config wired into main.py.
-when_to_use: |
-  Invoke when the user asks to "add a new step", "port a dispatcher from
-  hybridflowshop", "seed an incumbent from <something>", "integrate <algorithm>
-  into run_*", or otherwise introduces a new subroutine to the FFcDDW flow.
-  Keywords: subroutine, dispatcher, run_mcf_lb, run_fam, incumbent, LB-init,
-  integrate algorithm, new step.
+description: Add a new algorithm subroutine (e.g. an LB seeder, a dispatcher integration) to FFcDDWSubroutineController with the full project convention stack — plan file, optional dispatcher port, incumbent registration, two-phase Gantt emission, hfs_summary-style CSV, and a dedicated experiment config wired into main.py. Invoke when the user asks to "add a new step", "port a dispatcher from hybridflowshop", "seed an incumbent from <something>", "integrate <algorithm> into run_*", or otherwise introduces a new subroutine to the FFcDDW flow. Keywords: subroutine, dispatcher, run_mcf_lb, run_fam, incumbent, LB-init, integrate algorithm, new step.
 ---
 
 # Add a new algorithm subroutine to FFcDDW
