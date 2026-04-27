@@ -22,6 +22,9 @@ from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
 
 logger = logging.getLogger(__name__)
 
+# TODO: Consider making this a parameter or deriving it from the observed solve times.
+TIMELIMIT_NC_MULTIPLIER = 0.09
+
 
 def _last_non_empty_line(text: str | None) -> str | None:
     """Return the last non-empty line, or None when text is empty."""
@@ -675,8 +678,6 @@ class FFcDDWReporter:
         "mcfLbSec",
         "time%",
     )
-    # Mirrors post_run_pivot.build_rpdf_comparison_df's timelimit_factor.
-    _MCF_LB_TIMELIMIT_FACTOR: float = 0.09
 
     def _write_mcf_lb_pivot_artifacts(self) -> None:
         """Render an MCF-LB-only PivotTable.js dashboard from the per-scenario
@@ -710,9 +711,7 @@ class FFcDDWReporter:
         combined["mcfLbSec"] = combined[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
             axis=1, min_count=1
         )
-        combined["timelimit"] = (
-            combined["n"] * combined["c"] * self._MCF_LB_TIMELIMIT_FACTOR
-        )
+        combined["timelimit"] = combined["n"] * combined["c"] * TIMELIMIT_NC_MULTIPLIER
         combined["time%"] = combined["mcfLbSec"] / combined["timelimit"]
         combined = pd.concat(
             [combined, *self._build_mcf_lb_reference_rows(combined)],
@@ -794,9 +793,9 @@ class FFcDDWReporter:
             df.insert(0, "scenarioName", sc.name)
             df = df.rename(columns={"bks": "BKS"})
             _denom = df["lastStageOnlyObj"] + df["BKS"]
-            df["RPDf"] = (
-                2 * (df["lastStageOnlyObj"] - df["BKS"])
-            ).where(_denom != 0, 0.0) / _denom.where(_denom != 0, 1.0)
+            df["RPDf"] = (2 * (df["lastStageOnlyObj"] - df["BKS"])).where(
+                _denom != 0, 0.0
+            ) / _denom.where(_denom != 0, 1.0)
             df["win"] = (df["lastStageOnlyObj"] < df["BKS"]).astype(int)
             df["tie"] = (df["lastStageOnlyObj"] == df["BKS"]).astype(int)
             mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
@@ -1139,10 +1138,9 @@ class FFcDDWReporter:
                     else {}
                 )
                 bks = meta.get("BKS")
-                # TL = 0.09 * job_count * stage_count (hardcoded, see docs/TODO.md)
                 tl = None
                 if ir.job_count is not None and ir.stage_count is not None:
-                    tl = 0.09 * ir.job_count * ir.stage_count
+                    tl = TIMELIMIT_NC_MULTIPLIER * ir.job_count * ir.stage_count
                 entries.append(
                     {
                         "ins_index": ins_index,

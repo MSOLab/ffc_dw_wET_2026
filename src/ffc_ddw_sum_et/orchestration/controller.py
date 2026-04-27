@@ -723,7 +723,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(0.01 * n * c)
-        solver.parameters.num_search_workers = solver_thread_cnt
+        solver.parameters.num_workers = solver_thread_cnt
         status = solver.Solve(pm_mdl)
 
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)

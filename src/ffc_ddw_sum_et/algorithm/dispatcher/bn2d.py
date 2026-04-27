@@ -340,17 +340,13 @@ class BN2DDispatcher:
         right_cap_job_id_list: list[str] = []
 
         if left_cap_op_cnt > 0 or right_cap_op_cnt > 0:
-            if spec.option is None or not isinstance(spec.option, BN2DOption):
-                solver_thread_cnt = 1
-            else:
-                solver_thread_cnt = spec.option.solver_thread_cnt
             result = solve_selection_problem(
                 jobs=base.job_id_list,
                 r=r_dict,
                 t=tr_dict,
                 K_L=left_cap_op_cnt,
                 K_R=right_cap_op_cnt,
-                solver_thread_cnt=solver_thread_cnt,
+                solver_thread_cnt=option.solver_thread_cnt,
             )
 
             if result["status"] in ("OPTIMAL", "FEASIBLE"):
