@@ -9,7 +9,7 @@ from ...parameters.ffc_ddw_params import FFcDDWParameters
 __all__ = ["NehCpJobPriority", "neh_cp_job_sequence"]
 
 NehCpJobPriority = Literal[
-    "weight-due-pos", "due-weight-pos", "due*-weight-pos", "due2-weight-pos"
+    "weight-due-pos", "due-weight-pos", "due*-weight-pos", "due2-weight-pos", "wxd3"
 ]
 
 
@@ -24,4 +24,6 @@ def neh_cp_job_sequence(
         return instance.get_due_star_weight_pos_job_sequence()
     if job_priority == "due2-weight-pos":
         return instance.get_due2_weight_pos_job_sequence()
+    if job_priority == "wxd3":
+        return instance.get_wxd3_job_sequence()
     raise ValueError(f"Unknown job_priority: {job_priority!r}")
