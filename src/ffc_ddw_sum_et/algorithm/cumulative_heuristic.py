@@ -60,7 +60,11 @@ def solve_last_stage_by_cumulative_heuristic(
             beginning of the sequence as soon as one job is moved to a better
             position. When False (default), complete a full pass over the
             sequence and restart only if any move was made.
-        insert_radius
+        insert_radius: Maximum number of positions a job may move from its
+            current position during a single reinsertion scan. ``None`` (the
+            default) lets each job consider every other position in the
+            sequence; setting a finite radius bounds the per-job work and
+            biases moves to be local.
 
     Returns:
         ``(result, solve_sec, status_name, progress, scan_stats)`` where

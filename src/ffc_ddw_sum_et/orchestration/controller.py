@@ -414,17 +414,25 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 completes a full pass over the sequence and restarts only if
                 any move was made; ``True`` restarts immediately when the
                 first improving move is found.
-            last_stage_only_heuristic_insert_radius
+            last_stage_only_heuristic_insert_radius: Maximum number of
+                positions a job may move from its current position during a
+                single reinsertion scan in the cumulative heuristic. Accepts
+                a ``float``, a ``"<n>n"`` / ``"<n>nc"`` / ``"<n>c"`` /
+                ``"<n>m"`` expression (resolved against the instance's
+                ``n``/``c``/``m``), or ``None`` to allow unlimited radius.
             last_stage_only_cp_pf_method: Profile-fix precedence policy for the
                 Phase 2 last-stage CP-SAT solve. ``None`` (default) skips the
                 precedence-arc pass entirely while keeping warm-start / ET
                 hints. Previously the implicit default was ``"PF0"``
                 (stage-level time-based selection); set explicitly to restore
                 that behaviour.
-            last_stage_only_cp_solver_thread_cnt
+            last_stage_only_cp_solver_thread_cnt: Number of CP-SAT solver
+                threads for the Phase 2 last-stage-only CP-SAT solve.
             repeat_last_stage_only_cp_while_improving: If ``True``, Phase 2
                 re-solves with the updated profile until no improvement.
-            log_last_stage_only_cp_search_progress
+            log_last_stage_only_cp_search_progress: When ``True``, the Phase 2
+                last-stage CP-SAT solver writes its search-progress log to a
+                file under the subroutine output directory.
             last_stage_only_tl: Per-solve time limit (seconds) for the
                 Phase 2 last-stage-only CP-SAT model. Accepts a ``float``,
                 a ``"<n>nc"`` string (resolves to ``n * job_count *
@@ -436,7 +444,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 Phase 4 full CP-SAT solve.
             repeat_full_cp_while_improving: If ``True``, Phase 4 re-solves
                 with the updated profile until no improvement.
-            log_full_cp_search_progress
+            log_full_cp_search_progress: When ``True``, the Phase 4 full
+                CP-SAT solver writes its search-progress log to a file under
+                the subroutine output directory.
             full_cp_tl: Same for the Phase 4 full CP-SAT model.
 
         Returns:
@@ -598,7 +608,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         elapsed = time.monotonic() - start_elapsed
         if phase4.final_schedule is None:
-            # Infeasible profile-fix: keep the phase-3 incumbent, bound upgraded.
+            # Infeasible profile-fix: keep the phase-3 incumbent; the
+            # profile-fix bound is not a valid global bound, so report
+            # the MCF LB instead.
             return SubroutineReport(
                 elapsed_time=elapsed,
                 obj_value=phase3.dispatched_obj,

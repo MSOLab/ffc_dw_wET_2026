@@ -178,7 +178,7 @@ class NehCpConstructor:
                 the incremental batches. ``"weight-due-pos"`` (default) sorts by
                 ``(max(w⁻, w⁺) desc, w⁻+w⁺ desc, due-window width asc, position
                 asc)``. ``"due-weight-pos"`` sorts by
-                ``(max(0, d⁺-p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ asc, position
+                ``(max(0, d⁺-p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc, position
                 asc)``. Defaults to ``"weight-due-pos"``.
             solver_thread_cnt (int, optional): CP-SAT solver threads per batch solve.
                 Defaults to 1.

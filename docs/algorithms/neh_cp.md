@@ -71,10 +71,11 @@ Let `n = instance.job_count`, `c = instance.stage_count`.
   resolve_cp_tl(cp_tl_2nd_obj ?? cp_tl, n, c)`; otherwise `None`.
 - **Horizon.** `horizon = sum(params.p.values())` over the full instance —
   used for **every** stage-1 model build. Stage 2 tightens it per batch.
-- **Job ordering.** `job_sequence = ctx._neh_cp_job_sequence(job_priority)`.
+- **Job ordering.** `job_sequence = _neh_cp_job_sequence(instance, job_priority)`
+  (module helper in `ffc_ddw_sum_et.orchestration.neh_cp`).
   - `"weight-due-pos"`: `(max(w⁻, w⁺) desc, w⁻+w⁺ desc, d⁺−d⁻ asc,
     position asc)`.
-  - `"due-weight-pos"`: `(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ asc,
+  - `"due-weight-pos"`: `(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc,
     position asc)`.
 - **Batch shape.** `first_batch_size = max(added_batch_size,
   max_m_per_stage · 2)`. Batch 0 is `job_sequence[:first_batch_size]`;
