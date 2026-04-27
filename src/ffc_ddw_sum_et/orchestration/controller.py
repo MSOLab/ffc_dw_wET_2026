@@ -438,8 +438,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 file under the subroutine output directory.
             last_stage_only_tl: Per-solve time limit (seconds) for the
                 Phase 2 last-stage-only CP-SAT model. Accepts a ``float``,
-                a ``"<n>nc"`` string (resolves to ``n * job_count *
-                stage_count``), or ``None`` for no limit.
+                or any expression supported by ``resolve_value_expr``
+                (``"<n>nc"``, ``"<n>n"``, ``"<n>c"``, ``"<n>m"``),
+                or ``None`` for no limit.
             machine_then_job: Passed to Phase 3 reverse-dispatch ordering.
             full_cp_pf_method: Same policy for the Phase 4 full CP-SAT solve.
                 Same ``None`` / ``"PF0"`` distinction applies.

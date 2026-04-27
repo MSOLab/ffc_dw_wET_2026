@@ -793,11 +793,10 @@ class FFcDDWReporter:
             df = pd.read_csv(csv_path)
             df.insert(0, "scenarioName", sc.name)
             df = df.rename(columns={"bks": "BKS"})
+            _denom = df["lastStageOnlyObj"] + df["BKS"]
             df["RPDf"] = (
-                2
-                * (df["lastStageOnlyObj"] - df["BKS"])
-                / (df["lastStageOnlyObj"] + df["BKS"])
-            )
+                2 * (df["lastStageOnlyObj"] - df["BKS"])
+            ).where(_denom != 0, 0.0) / _denom.where(_denom != 0, 1.0)
             df["win"] = (df["lastStageOnlyObj"] < df["BKS"]).astype(int)
             df["tie"] = (df["lastStageOnlyObj"] == df["BKS"]).astype(int)
             mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(

@@ -75,3 +75,59 @@ def test_neh_cp_job_sequence_due_weight_pos() -> None:
         "j1",
         "j0",
     ]
+
+
+def test_neh_cp_job_sequence_due_star_weight_pos() -> None:
+    # d* = (w_e * d_lower + w_t * d_upper) / (w_e + w_t)
+    # j0: d=(0,10), w_e=1, w_t=3 -> d* = 30/4 = 7.5
+    # j1: d=(0,8),  w_e=2, w_t=2 -> d* = 16/4 = 4.0
+    # j2: d=(0,6),  w_e=1, w_t=1 -> d* =  6/2 = 3.0
+    # Sorted by (d* asc, d+ asc, -(w_e+w_t) asc, pos asc): j2, j1, j0
+    instance = FFcDDWParameters(
+        name="due_star_weight_pos_instance",
+        job_id_list=["j0", "j1", "j2"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="due_star_weight_pos_instance_p",
+            df=pd.DataFrame([[1], [1], [1]]),
+        ),
+        job_2_due_window_map={"j0": (0, 10), "j1": (0, 8), "j2": (0, 6)},
+        job_2_ewt_map={"j0": 1, "j1": 2, "j2": 1},
+        job_2_twt_map={"j0": 3, "j1": 2, "j2": 1},
+    )
+
+    assert neh_cp_job_sequence(instance, job_priority="due*-weight-pos") == [
+        "j2",
+        "j1",
+        "j0",
+    ]
+
+
+def test_neh_cp_job_sequence_due2_weight_pos() -> None:
+    # Two stages; key = (max(r_j, d+ - p_last) asc, d+ asc, d- asc, w_sum desc, pos asc)
+    # p = [[3,2],[5,2],[6,3]] (rows=jobs, cols=stages)
+    # r_j: j0=3, j1=5, j2=6  |  p_last: j0=2, j1=2, j2=3
+    # j0: (max(3,10-2)=8, 10, 0, -2, 0)
+    # j1: (max(5,8-2)=6,   8, 0, -4, 1)
+    # j2: (max(6,8-3)=6,   8, 2, -2, 2)
+    # Sorted: j1 (6,8,0), j2 (6,8,2), j0 (8,...)
+    instance = FFcDDWParameters(
+        name="due2_weight_pos_instance",
+        job_id_list=["j0", "j1", "j2"],
+        stage_id_list=["s0", "s1"],
+        stage_2_machines_map={"s0": ["s0_0"], "s1": ["s1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="due2_weight_pos_instance_p",
+            df=pd.DataFrame([[3, 2], [5, 2], [6, 3]]),
+        ),
+        job_2_due_window_map={"j0": (0, 10), "j1": (0, 8), "j2": (2, 8)},
+        job_2_ewt_map={"j0": 1, "j1": 2, "j2": 1},
+        job_2_twt_map={"j0": 1, "j1": 2, "j2": 1},
+    )
+
+    assert neh_cp_job_sequence(instance, job_priority="due2-weight-pos") == [
+        "j1",
+        "j2",
+        "j0",
+    ]

@@ -114,8 +114,8 @@ def solve_last_stage_by_cumulative_heuristic(
     def _contribution(job: str, sch: FFcSchedule) -> float:
         c_j = sch.get_job_end_time(last_stage_id, job)
         d_lb, d_ub = due_window_map[job]
-        w_e = ewt_map.get(job, 1)
-        w_t = twt_map.get(job, 1)
+        w_e = ewt_map[job]
+        w_t = twt_map[job]
         return float(w_e * max(d_lb - c_j, 0) + w_t * max(c_j - d_ub, 0))
 
     current_obj, current_sch = _evaluate(sequence)
