@@ -27,31 +27,31 @@
 
 ## Run index
 
-| # | timestamp | machine | config file | source commit |
-|---|---|---|---|---|
-| 1 | 20260423T114900_417063 | mso02 | `20260423/1_mcf_lb_init_13_config.yaml` | `ad4a023` |
-| 2 | 20260423T171935_897548 | mso02 | `20260423/cmax_init_pfns_config.yaml` | `6619d1f` |
-| 3 | 20260423T173918_198369 | mso02 | `20260423/cmax_init_pfns_config.yaml`* | `97849df` (commit body) |
-| 4 | 20260423T174736_400968 | mso02 | `20260423/cmax_init_pfns_config_2.yaml` | `f7102b9` |
-| 5 | 20260423T221248_575301 | mso02 | `20260423/1_mcf_lb_init_13_config.yaml` | `10b1a5d` |
-| 6 | 20260424T041848_326215 | mso02 | `20260423/neh_cp_config_4.yaml` | `7cbbb4b` |
-| 7 | 20260424T213007_556893 | mso02 | `20260424/neh_cp_config_5.yaml` | `8195d63` |
-| 8 | 20260425T034449_338686 | mso02 | `20260424/neh_cp_config_8.yaml` | `333dad3` (commit body) |
-| 9 | 20260425T200857_851387 | mso02 | `20260425/neh_cp_config_9.yaml` | `5bb35cc` |
-| 10 | 20260425T205244_871000 | mso02 | `20260425/neh_cp_config_9.yaml` | `ba0f8d9` |
-| 11 | 20260425T232836_063038 | mso02 | `20260425/neh_cp_config_10.yaml` | `4b52002` |
-| 12 | 20260426T014532_241012 | mso02 | `20260425/neh_cp_config_11.yaml` | `9e636c2` |
-| 13 | 20260426T174905_399637 | mso02 | `20260426/neh_cp_config_12.yaml` | `d4f0379` |
-| 14 | 20260426T185350_366559 | mso02 | `20260426/neh_cp_config_13.yaml` | `8ee39b7` |
-| 15 | 20260426T212121_069773 | hjt5950x | `20260426/mcf_lb_init_14_config.yaml` | `0bea6a1` |
-| 16 | 20260427T025803_513725 | mso02 | `20260426/20260426_config.yaml` | `4ddbfda` |
-| 17 | 20260427T123656_726782 | mso02 | `20260427/mcf_lb_init_16_config.yaml` | `409a00e` |
-| 18 | 20260427T173735_407299 | mso02 | `20260427/mcf_lb_init_17_config.yaml` | `fa4e16f` |
-| 19 | 20260428T022941_371229 | mso02 | `20260427/wxd2_1_config.yaml` | `d9a0905` |
-| 20 | 20260428T130925_989218 | mso02 | `20260428/mcf_lb_only_config.yaml` | `c0682f1` |
-| 21 | 20260428T165900_623730 | mso02 | `20260428/neh_cp_config_16.yaml` | `2883b04` |
-| 22 | 20260428T214400_957643 | mso02 | `20260428/mcf_lb_init_18_config.yaml` | `8c8723c` |
-| 23 | 20260428T234426_736253 | mso02 | `20260428/dispatch_wxd1_1_config.yaml` | `848f725` |
+| # | timestamp | machine | config file | source commit | scope | output_dir |
+|---|---|---|---|---|---|---|
+| 1 | 20260423T114900_417063 | mso02 | `20260423/1_mcf_lb_init_13_config.yaml` | `ad4a023` | full (1440) | `output/20260423/` |
+| 2 | 20260423T171935_897548 | mso02 | `20260423/cmax_init_pfns_config.yaml` | `6619d1f` | full (1440) | `output/20260423/` |
+| 3 | 20260423T173918_198369 | mso02 | `20260423/cmax_init_pfns_config.yaml`* | `97849df` (commit body) | full (1440) | `output/20260423/` |
+| 4 | 20260423T174736_400968 | mso02 | `20260423/cmax_init_pfns_config_2.yaml` | `f7102b9` | full (1440) | `output/20260423/` |
+| 5 | 20260423T221248_575301 | mso02 | `20260423/1_mcf_lb_init_13_config.yaml` | `10b1a5d` | full (1440) | `output/20260423/` |
+| 6 | 20260424T041848_326215 | mso02 | `20260423/neh_cp_config_4.yaml` | `7cbbb4b` | full (1440) | `output/20260423/` |
+| 7 | 20260424T213007_556893 | mso02 | `20260424/neh_cp_config_5.yaml` | `8195d63` | full (1440) | `output/20260424/` |
+| 8 | 20260425T034449_338686 | mso02 | `20260424/neh_cp_config_8.yaml` | `333dad3` (commit body) | full (1440) | `output/20260424/` |
+| 9 | 20260425T200857_851387 | mso02 | `20260425/neh_cp_config_9.yaml` | `5bb35cc` | full (1440) | `output/20260425/` |
+| 10 | 20260425T205244_871000 | mso02 | `20260425/neh_cp_config_9.yaml` | `ba0f8d9` | full (1440) | `output/20260425/` |
+| 11 | 20260425T232836_063038 | mso02 | `20260425/neh_cp_config_10.yaml` | `4b52002` | full (1440) | `output/20260425/` |
+| 12 | 20260426T014532_241012 | mso02 | `20260425/neh_cp_config_11.yaml` | `9e636c2` | full (1440) | `output/20260425/` |
+| 13 | 20260426T174905_399637 | mso02 | `20260426/neh_cp_config_12.yaml` | `d4f0379` | full (1440) | `output/20260426/` |
+| 14 | 20260426T185350_366559 | mso02 | `20260426/neh_cp_config_13.yaml` | `8ee39b7` | full (1440) | `output/20260426/` |
+| 15 | 20260426T212121_069773 | hjt5950x | `20260426/mcf_lb_init_14_config.yaml` | `0bea6a1` | full (1440) | hjt5950x (별도 머신) |
+| 16 | 20260427T025803_513725 | mso02 | `20260426/20260426_config.yaml` | `4ddbfda` | full (1440) | `output/20260426/` |
+| 17 | 20260427T123656_726782 | mso02 | `20260427/mcf_lb_init_16_config.yaml` | `409a00e` | full (1440) | `output/20260427/` |
+| 18 | 20260427T173735_407299 | mso02 | `20260427/mcf_lb_init_17_config.yaml` | `fa4e16f` | tail 5 (`[1435..1439]`) | `output/20260427/` |
+| 19 | 20260428T022941_371229 | mso02 | `20260427/wxd2_1_config.yaml` | `d9a0905` | full (1440) | `output/20260427/` |
+| 20 | 20260428T130925_989218 | mso02 | `20260428/mcf_lb_only_config.yaml` | `c0682f1` | full (1440) | `output/20260428/` |
+| 21 | 20260428T165900_623730 | mso02 | `20260428/neh_cp_config_16.yaml` | `2883b04` | full (1440) | `output/20260428/` |
+| 22 | 20260428T214400_957643 | mso02 | `20260428/mcf_lb_init_18_config.yaml` | `8c8723c` | full (1440) | `output/20260428/` |
+| 23 | 20260428T234426_736253 | mso02 | `20260428/dispatch_wxd1_1_config.yaml` | `848f725` | full (1440) | `output/20260428/` |
 
 \* 동일 yaml에 `iit_after_each_dispatch` 제거(`97849df`)가 적용된 직후의 런.
 
@@ -353,3 +353,137 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 7. **Phase 7 (4/27 후반~4/28 새벽)**: 5종 디스패처(W1/Wxd1~3/due2_wp) 도입 후 wxd3 → wxd1 통합 + wxd2 재정의 → wxd2 풀 런(RUN 19; `665000e` 세션과 `20260428T001347_389139` 폐기).
 8. **Phase 8 (4/28 후반)**: `apply_lb_by_mcf` LB-only 진단 → MPF23 profile-fix → preemption-MCF half_time seed 스윕(RUN 20~22).
 9. **Phase 9 (4/28 23:44)**: `665000e`의 wxd3 결과를 동일 dispatch 조건으로 재측정해 갈음(RUN 23).
+
+---
+
+## Appendix A — Output layout
+
+각 RUN의 산출물은 `<output_dir>/<timestamp>/` 아래에 모인다 (예: `output/20260428/20260428T234426_736253/`).
+
+표준 파일 (모든 RUN 공통)
+
+- `<timestamp>_main.log` — 단일 마스터 로그.
+- `<timestamp>_summary.csv` — **per-(instance × scenario) 메인 결과**. 컬럼은 Appendix B 참고.
+- `<timestamp>_report.xlsx` — `FFcDDWReporter`가 생성한 분석 시트 (per-scenario stats, 비교 시트 등).
+- `<scenario>_statistics.yaml` — 시나리오 단위 집계 (mean/min/max obj, completed/error count, methodCallCounts).
+- `<scenario>/<instance_name>/` — 인스턴스별 schedule/log/solution (`*_obj_log.yaml`, `*_schedule.yaml`, `*_solution.json`, `*_statistics.{json,yaml}`).
+
+`f0b49ab`(2026-04-25 20:08) 이후 RUN (RUN 9~)에서 추가 생성
+
+- `<timestamp>_rpdf_comparison.csv` — `summary.csv` + `pra2017_bks_table.csv` join + `RPDf_BKS_data` 미리 계산된 long-form CSV. **결과 비교의 1차 입력**.
+- `<timestamp>_rpdf_dashboard.html`, `<timestamp>_win_tie_dashboard.html`, `<timestamp>_time_p_dashboard.html` — `post_run_pivot.py`가 생성한 PivotTable.js 대시보드.
+- `<scenario>_mcf_lb_analysis.csv` (MCF-LB 계열 시나리오) — `mcfLb`, `lastStageOnlyObj` 등 MCF-LB 전용 메트릭 추출.
+- `<timestamp>_mcf_lb_*.{html,csv}` — `fa4e16f`(2026-04-27 17:38) 이후 RUN (RUN 18~)에서 `(rows=[scenarioName,R], cols=[T])` 축으로 정정된 dashboards/tables. RUN 17 이전 산출물은 axes가 다르므로 비교 시 주의.
+
+비고
+
+- RUN 15는 **hjt5950x** 머신에서 실행되어 본 저장소의 `output/`에 산출물이 없을 수 있음. 비교 시 별도 머신에서 가져오거나 mso02 RUN 16의 MCF-LB 블록과 대치.
+- RUN 18(`mcf_lb_init_17`)은 `ins_index: [1435..1439]` 5개 인스턴스만 — 풀-벤치 RUN과 `(R, T)` 축으로 직접 평균 비교 불가, 인스턴스 단위 비교만 의미 있음.
+
+---
+
+## Appendix B — Result columns / metric definitions
+
+**`<timestamp>_summary.csv`** (per-(instance × scenario))
+
+| 컬럼 | 의미 |
+|---|---|
+| `instanceName` | `Instance_<n>_<m>_<stage>_<R>_<T>_<W>_Rep<k>` 형식 — `pra2017_hybrid_match.csv`의 `ffc_ddw_sum_et_filename`에서 `.txt` 제거한 값과 일치 |
+| `scenarioName` | 해당 RUN의 config에 정의된 시나리오 이름 |
+| `workStatus` | `feasible` / `optimal` / `infeasible` / `error` |
+| `bestObj` | **wET 기준 최종 obj_value** (`AlgRecord.obj_value`, 외부 목적함수) |
+| `bestBound` | reportable lower bound (있으면) |
+| `initObj` / `initBound` | 첫 incumbent 시점 값 |
+| `improvementRatio` | `(initObj - bestObj) / initObj` |
+| `bks` | `pra2017_bks_table.csv`의 `BKS_data` 컬럼 — primary BKS reference |
+| `mcfLb` | MCF LB 값 (run_mcf_lb_* 계열에서만 채워짐) |
+| `lastStageOnlyObj`, `lastStageOnlyBound` | MCF-LB phase2 결과 |
+| `dispatchedObj` | dispatch-only 단계 obj (BN2D / WxD 계열) |
+| `profileFixObj`, `profileFixBound` | profile-fix 단계 obj/bound |
+| `*MinusBksGap` 등 | 단계별 gap 진단 컬럼 (예: `profileFixMinusBksGap = profileFixObj - bks`) |
+| `mcfSolveSec`, `lastStageCpSatSec`, `dispatchSec`, `profileFixCpSatSec` | 단계별 wall time |
+| `mcfLbReachedPhase` | run_mcf_lb_* 진행 단계 (예: `phase4`) |
+
+**`<timestamp>_rpdf_comparison.csv`** (BKS-joined)
+
+| 컬럼 | 의미 |
+|---|---|
+| `insIndex` | `pra2017_hybrid_match.csv` 기준 0000~1439 정수 키 |
+| `n`, `c`, `totalMcCount`, `T`, `R`, `W` | 인스턴스 그리드 축 (n=jobs, c=stages, T=tightness, R=range, W=earliness weight ratio 등) |
+| `BKS_data` | best-known objective (= `bks`) |
+| `bestObj` | summary.csv와 동일 |
+| `RPDf_BKS_data` | **`(bestObj - BKS_data) / BKS_data`** (lower is better; primary 비교 메트릭) |
+| `elapsedTime`, `timelimit`, `time%` | wall time 진행률 (`time% = elapsedTime / timelimit`) |
+
+집계 메트릭 (대시보드/스크립트에서 자주 쓰는 것)
+
+- **mean RPDf** — `RPDf_BKS_data`를 인스턴스 전체(또는 (R, T) 셀) 평균.
+- **win / tie count** — 두 시나리오 페어 내에서 `bestObj`가 더 작은(=win) / 같은(=tie) 인스턴스 수.
+- **time%** — 시간 예산 대비 첫 best 도달 시점 비율 (낮을수록 빨리 수렴).
+
+비고
+
+- `obj_value`는 항상 **weighted earliness + tardiness**. CP-SAT 내부 목적이 makespan(예: BN2D)인 경우에도 reporter는 wET로 다시 계산해 기록 — `feedback_alg_record_obj_value` 룰.
+- Profile-fix가 끝나도 `bestObj < bks`이면 `profileFixMinusBksGap < 0` (BKS 갱신 후보).
+- `mcf_lb_only` RUN(20)은 `bestObj = mcfLb`로 채워지며 schedule은 만들어지지 않음 → `dispatchedObj`/`profileFixObj`는 비어 있음.
+
+---
+
+## Appendix C — Cross-RUN scenario equivalence map
+
+같은 알고리즘 구성이 여러 RUN에 걸쳐 등장하는 경우의 매핑 (이름은 다르지만 비교 가능).
+
+**MCF-LB phase2 budget**
+
+| 알고리즘 구성 | RUN 16 (`20260426_config`) | RUN 17 (`mcf_lb_init_16_config`) | RUN 18 (`mcf_lb_init_17_config`) |
+|---|---|---|---|
+| heu phase2, P2/P4 = 0.005nc/0.005nc | `best_mcf_lb_p2_005nc_p4_005nc` | `best_mcf_lb_heu_p2_005nc_p4_005nc` | `best_mcf_lb_heu_p2_005nc_p4_005nc` (FIR=true) |
+| heu phase2, P2/P4 = 0.010nc/0.005nc | `best_mcf_lb_p2_010nc_p4_005nc` | `best_mcf_lb_heu_p2_010nc_p4_005nc` | — |
+| heu phase2, P2/P4 = 0.010nc/0.010nc | `best_mcf_lb_p2_010nc_p4_010nc` | `best_mcf_lb_heu_p2_010nc_p4_010nc` | — |
+| CP phase2, asis | — | `best_mcf_lb_cp_asis` | — |
+| CP phase2, P2 cap 0.010nc | — | `best_mcf_lb_cp_p2_010nc` | — |
+| half_time seed | — | — | RUN 22 (`mcf_lb_init_18_config`)에서 시작 — RUN 17과는 seed tag 차이만 |
+
+- RUN 18은 `last_stage_only_heuristic_first_improvement_restart=true` 옵션 검증용 단일 시나리오 + `[1435..1439]` 5개 인스턴스로만 돌렸음. RUN 17과 직접 평균 비교 X — 인스턴스별 비교만.
+- `b39ed49`의 첫 런(별도 timestamp 없음)은 RUN 16의 `best_mcf_lb_*` 3 시나리오와 동치로 흡수됨 (Tracked timestamps 처리 절 참고).
+
+**NEH-CP batch / TL 스윕**
+
+| 알고리즘 구성 | RUN 11 | RUN 13 | RUN 14 | RUN 16 |
+|---|---|---|---|---|
+| batch=20, single, due-weight-pos, PF1, `tl=0.024nc` | `neh_cp_b15_single_dplus_pf1` (config_10, batch=20 실제) | — | — | — |
+| batch=20, single, due2-weight-pos, PF1, `tl=0.024nc`, `linear` | — | `b20_single_dplus2_pf1` | (`config_13` 시나리오들) | `neh_cp_bs20_linear_dplus2_pf1_tl024nc` |
+| batch=15, due2, PF1, linear, `tl=0.024nc` | — | — | — | `neh_cp_bs15_linear_dplus2_pf1_tl024nc` |
+| batch=12+0.04n, due2, PF1, linear | — | — | — | `neh_cp_bs12_plus_004n_dplus2_pf1_tl024nc` |
+| batch=20, TL=0.01nc | — | — | — | `neh_cp_bs20_linear_dplus2_pf1_tl010nc` |
+| batch=20, TL=0.02nc | — | — | — | `neh_cp_bs20_linear_dplus2_pf1_tl020nc` |
+
+- RUN 11~14는 단일 변형 풀 런으로 batch/priority/TL을 점진적으로 바꿈. 직전 결과를 보고 다음 RUN 설정을 정한 흐름이라 fair pairwise 비교에 주의.
+- RUN 16(`20260426_config`)이 같은 1440 인스턴스 위에서 NEH-CP 배치/TL 스윕 5개 시나리오를 한 config로 돌렸음 — **NEH-CP batch/TL 비교의 1차 비교 기준**.
+
+**Dispatch (initialize_by_*)**
+
+| 알고리즘 구성 | RUN 19 (`wxd2_1_config`) | RUN 23 (`dispatch_wxd1_1_config`) | `665000e` 세션 (TBD) |
+|---|---|---|---|
+| `initialize_by_wxd2` (재정의 후) | `wxd2_dispatch` | — | — |
+| NEH-CP(wxd2) | `wxd2` | — | — |
+| `initialize_by_wxd1` (rename 후 = 옛 wxd3) | — | `wxd1` | `wxd3` (rename 전 라벨; 폐기 — RUN 23으로 갈음) |
+| W1 / 옛 wxd1 / 옛 wxd2 / due2_weight_pos | — | — | 폐기 |
+
+비고
+
+- RUN 17 (`20260428T001347_389139` `neh_cp_config_15`, **wxd3** priority NEH-CP)는 폐기 — `f40b0e3` rename 이후 의미 없음.
+- RUN 19의 `wxd2`는 NEH-CP에 wxd2 priority를 적용한 결과 — Dispatch-only인 RUN 23 wxd1과 직접 비교 불가 (전자는 NEH-CP CP-SAT까지 돌아간 결과).
+
+---
+
+## Appendix D — 결과 인덱스 빌더
+
+`scripts/build_results_index.py` — 위 23개 RUN의 `<timestamp>_summary.csv`(+ `pra2017_hybrid_match.csv` + `pra2017_bks_table.csv` join + RPDf 계산)를 long-form 단일 CSV로 합쳐 `analysis/results_index_20260428.csv`로 저장. 새 대화에서 결과 분석을 시작할 때 첫 입력으로 이 CSV 한 장만 읽으면 됨.
+
+```
+uv run python scripts/build_results_index.py
+# → analysis/results_index_20260428.csv (long-form: timestamp × scenario × instance)
+```
+
+산출 컬럼: `runNumber`, `timestamp`, `sourceCommit`, `machine`, `scope`, `configFile`, `outputDir`, `scenarioName` + `summary.csv` 컬럼 + `insIndex`, `n`, `c`, `T`, `R`, `W`, `BKS_data`, `RPDf_BKS_data`.
