@@ -111,6 +111,7 @@ class BaseModelBuilder:
         obj_lb: float | None = None,
         minimize_makespan_lex: bool = False,
         et_ub: float | None = None,
+        mcf_window_per_job: dict[str, tuple[int, int]] | None = None,
     ) -> tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]:
         """Build a CP-SAT model for the FFc DDW sum E/T problem with cumulative constraints.
 
@@ -133,6 +134,16 @@ class BaseModelBuilder:
             et_ub (float | None, optional): Upper bound on the weighted E/T sum
                 for the secondary stage. Required when
                 ``minimize_makespan_lex=True``. Defaults to None.
+            mcf_window_per_job (dict[str, tuple[int, int]] | None, optional):
+                Per-job ``(lo, hi)`` time window from an MCF preemptive
+                schedule. When provided, the last-stage interval variable
+                domains are tightened to fit within ``[lo, hi]``: start_var
+                in ``[max(release_t, lo), hi - p]`` and end_var in
+                ``[max(release_t, lo) + p, hi]``. Raises ``ValueError`` if
+                a job's window cannot accommodate a contiguous interval of
+                length ``p``. Applies only to the last stage in
+                ``params.i_list``; other stages keep the loose
+                ``[release_t, horizon]`` bounds. Defaults to None.
 
         Returns:
             tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]: The built
@@ -145,6 +156,7 @@ class BaseModelBuilder:
             params,
             horizon,
             job_2_release=job_2_release,
+            mcf_window_per_job=mcf_window_per_job,
         )
         self._add_structural_constraints(mdl, params, ops_vars)
         obj_vars = self._define_objective(
@@ -202,10 +214,14 @@ class BaseModelBuilder:
         params: Params,
         horizon: int,
         job_2_release: dict[str, int] | None = None,
+        mcf_window_per_job: dict[str, tuple[int, int]] | None = None,
     ) -> OperationVars:
         op_start: dict[tuple[str, str], IntVar] = {}
         op_end: dict[tuple[str, str], IntVar] = {}
         op_intvl: dict[tuple[str, str], IntervalVar] = {}
+
+        last_i = params.i_list[-1]
+        max_p = max(params.p.values())
 
         for j in params.j_list:
             for i in params.i_list:
@@ -227,10 +243,27 @@ class BaseModelBuilder:
                             f"for job {j} at stage {i} exceeds horizon {horizon}."
                         )
                 else:
-                    release_t = 0
+                    release_t = 0  # TODO: minimum은 1로 정의해야 할 것 같은데
 
-                start_var = mdl.new_int_var(release_t, horizon - p, f"start_{j}_{i}")
-                end_var = mdl.new_int_var(release_t + p, horizon, f"end_{j}_{i}")
+                if mcf_window_per_job is not None and i == last_i:
+                    win_lo, win_hi = mcf_window_per_job[j]
+                    slack = 4 * max_p # infeasible if multipler is 3
+                    lo = max(release_t, win_lo - slack)
+                    hi = win_hi + slack
+                    if lo + p > hi:
+                        raise ValueError(
+                            f"MCF preemptive window for job {j} at stage {i} is "
+                            f"too tight: lo={lo}, hi={hi}, p={p}; cannot fit a "
+                            f"contiguous interval."
+                        )
+                    # print(f"Applying MCF window for job {j} at stage {i}: [{lo}, {hi}) with p={p}")
+                    start_var = mdl.new_int_var(lo, hi - p, f"start_{j}_{i}")
+                    end_var = mdl.new_int_var(lo + p, hi, f"end_{j}_{i}")
+                else:
+                    start_var = mdl.new_int_var(
+                        release_t, horizon - p, f"start_{j}_{i}"
+                    )
+                    end_var = mdl.new_int_var(release_t + p, horizon, f"end_{j}_{i}")
                 interval_var = mdl.new_interval_var(
                     start_var, p, end_var, f"interval_{j}_{i}"
                 )

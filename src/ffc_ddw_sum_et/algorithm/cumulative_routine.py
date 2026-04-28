@@ -63,6 +63,7 @@ def solve_last_stage_with_profile_fix(
     max_time_in_seconds: float | None = None,
     log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
+    mcf_window_per_job: dict[str, tuple[int, int]] | None = None,
 ) -> tuple[LastStageSolveResult | None, float, str]:
     """Build and solve a last-stage-only CP-SAT model, optionally looping.
 
@@ -128,6 +129,7 @@ def solve_last_stage_with_profile_fix(
             last_stage_only=True,
             job_2_release=job_2_release,
             obj_lb=obj_lb,
+            mcf_window_per_job=mcf_window_per_job,
         )
         if pf_method is not None:
             by_machine, stride_set = decode_pf_method(pf_method)
@@ -139,9 +141,10 @@ def solve_last_stage_with_profile_fix(
                 profile_fix_by_machine=by_machine,
                 machine_precedence_stride_set=stride_set,
             )
-        BaseModelBuilder.apply_hints_from_schedule(
-            ls_mdl, ls_params, ls_ops_vars, ls_et_vars, current_schedule
-        )
+        if mcf_window_per_job is None:
+            BaseModelBuilder.apply_hints_from_schedule(
+                ls_mdl, ls_params, ls_ops_vars, ls_et_vars, current_schedule
+            )
 
         ls_solver = get_solver(
             CpsatSolverOptions(

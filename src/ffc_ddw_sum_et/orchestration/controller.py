@@ -461,6 +461,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         last_stage_only_heuristic_insert_radius: int | None = None,
         last_stage_only_cp_pf_method: PFMethod | None = None,
         last_stage_only_cp_solver_thread_cnt: int = 1,
+        last_stage_only_cp_use_mcf_window: bool = False,
         repeat_last_stage_only_cp_while_improving: bool = False,
         log_last_stage_only_cp_search_progress: bool = False,
         last_stage_only_tl: float | str | None = None,
@@ -507,6 +508,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 that behaviour.
             last_stage_only_cp_solver_thread_cnt: Number of CP-SAT solver
                 threads for the Phase 2 last-stage-only CP-SAT solve.
+            last_stage_only_cp_use_mcf_window: If ``True``, the Phase 2
+                last-stage CP-SAT model tightens each job's interval-variable
+                domain to the ``[lo, hi]`` window from the MCF preemptive
+                schedule and skips all warm-start hints (start/end/E/T).
+                Per-seed profile-fix arcs are still added when
+                ``last_stage_only_cp_pf_method`` is set. Raises
+                ``ValueError`` if any job's window cannot fit a contiguous
+                interval, or ``RuntimeError`` if CP-SAT proves the
+                tightened model infeasible. Ignored when
+                ``last_stage_only_use_heuristic=True``. Defaults to
+                ``False``.
             repeat_last_stage_only_cp_while_improving: If ``True``, Phase 2
                 re-solves with the updated profile until no improvement.
             log_last_stage_only_cp_search_progress: When ``True``, the Phase 2
@@ -600,6 +612,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             use_heuristic=last_stage_only_use_heuristic,
             heuristic_first_improvement_restart=last_stage_only_heuristic_first_improvement_restart,
             heuristic_insert_radius=last_stage_only_heuristic_insert_radius_count,
+            use_mcf_window=last_stage_only_cp_use_mcf_window,
         )
         if phase2 is None:
             elapsed = time.monotonic() - start_elapsed

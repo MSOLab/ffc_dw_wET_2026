@@ -75,6 +75,7 @@ def run_phase2(
     use_heuristic: bool = False,
     heuristic_first_improvement_restart: bool = False,
     heuristic_insert_radius: int | None = None,
+    use_mcf_window: bool = False,
 ) -> Phase2State | None:
     """Solve the last-stage CP-SAT model per seed, pick the best.
 
@@ -100,8 +101,22 @@ def run_phase2(
     reinsertion heuristic is run on that single seed's schedule. All other
     seeds and all CP-SAT-related kwargs are ignored on that path.
 
+    When ``use_mcf_window=True``, every seed's CP-SAT solve tightens the
+    last-stage interval-variable domains to ``phase1.mcf_window_per_job``
+    and skips all warm-start hints (start/end/E/T). Mutually exclusive
+    with ``use_heuristic``. ``ValueError`` is raised at model-build time
+    if any job's MCF window cannot fit a contiguous interval of length
+    ``p``; ``RuntimeError`` is raised if CP-SAT proves the tightened
+    model infeasible.
+
     Returns ``None`` when no seed produces a feasible solution.
     """
+    if use_heuristic and use_mcf_window:
+        raise ValueError(
+            "use_heuristic and use_mcf_window are mutually exclusive: the MCF "
+            "window tightening only applies to the CP-SAT path."
+        )
+
     candidates: list[LastStageCandidate] = []
     total_solve_sec = 0.0
 
@@ -133,6 +148,7 @@ def run_phase2(
             use_heuristic=use_heuristic,
             heuristic_first_improvement_restart=heuristic_first_improvement_restart,
             heuristic_insert_radius=heuristic_insert_radius,
+            use_mcf_window=use_mcf_window,
         )
         total_solve_sec += solve_sec
         diagnostic.ls_status_per_seed[seed.tag] = status_name
@@ -191,6 +207,7 @@ def _solve_last_stage_for_seed(
     use_heuristic: bool = False,
     heuristic_first_improvement_restart: bool = False,
     heuristic_insert_radius: int | None = None,
+    use_mcf_window: bool = False,
 ) -> tuple[LastStageCandidate | None, float, str]:
     """Solve the last-stage-only model for one seed (CP-SAT or heuristic).
 
@@ -240,6 +257,7 @@ def _solve_last_stage_for_seed(
         max_time_in_seconds=tl_seconds,
         log_search_progress=log_search_progress,
         solver_log_path_getter=solver_log_path_getter,
+        mcf_window_per_job=phase1.mcf_window_per_job if use_mcf_window else None,
     )
     if result is None:
         return None, solve_sec, status_name

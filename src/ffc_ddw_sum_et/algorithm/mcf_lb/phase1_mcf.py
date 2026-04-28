@@ -119,6 +119,7 @@ class Phase1State:
     job_2_pos: dict[str, int]
     job_2_release_map: dict[str, int]
     mcf_preemptive_schedule: MCFPreemptiveSchedule
+    mcf_window_per_job: dict[str, tuple[int, int]]
     last_stage_seeds: list[LastStageSeed]
 
 
@@ -185,12 +186,19 @@ def run_phase1(
         for tag in last_stage_only_priority_tags
     ]
 
+    # mcf_window_per_job = mcf_preemptive_schedule.get_job_2_window()
+    # for job_id, (start_t, end_t) in mcf_window_per_job.items():
+    #     print(
+    #         f"Job {job_id} with p={duration_map[job_id]} has MCF preemptive window [{start_t}, {end_t})"
+    #     )
+
     return Phase1State(
         mcf_lb=mcf_lb,
         last_stage_id=last_stage_id,
         job_2_pos=job_2_pos,
         job_2_release_map=job_2_release_map,
         mcf_preemptive_schedule=mcf_preemptive_schedule,
+        mcf_window_per_job=mcf_preemptive_schedule.get_job_2_window(),
         last_stage_seeds=last_stage_seeds,
     )
 

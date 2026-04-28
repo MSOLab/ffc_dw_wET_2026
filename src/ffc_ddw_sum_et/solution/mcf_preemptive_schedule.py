@@ -122,6 +122,23 @@ class MCFPreemptiveSchedule:
             segments=tuple(merged),
         )
 
+    def get_job_2_window(self) -> dict[str, tuple[int, int]]:
+        """Per-job ``(earliest start_t, latest end_t)`` over all segments.
+
+        Aggregates segment endpoints — equivalently ``(min(t)-1, max(t))``
+        over the raw flow ``x[j][t]=1`` set — yielding the actual time
+        window during which the MCF preemptive schedule processes the
+        job. Jobs with no segments are omitted.
+        """
+        window: dict[str, tuple[int, int]] = {}
+        for _mc, job_id, start_t, end_t in self.segments:
+            prev = window.get(job_id)
+            if prev is None:
+                window[job_id] = (start_t, end_t)
+            else:
+                window[job_id] = (min(prev[0], start_t), max(prev[1], end_t))
+        return window
+
     def to_gantt_segments(self) -> list[tuple[str, str, str, int, int]]:
         """Emit ``(job, stage, machine, start, end)`` tuples for plotting.
 
