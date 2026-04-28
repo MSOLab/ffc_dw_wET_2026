@@ -1,0 +1,48 @@
+# MCF-LB phase2/phase4 budget sweep (run_mcf_lb_4, 300s each, 5 scenarios).
+# All scenarios: due2-weight-pos priority, PF1 profile-fix.
+#   sorting: due2-weight-pos (max(r_j, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc)
+# Phase2 = CP solver (2 scenarios, repeat_*_while_improving=true on both phases):
+#   asis        : (last_stage_only_tl, full_cp_tl) = (null,    null)
+#   cp_p2_010nc : (last_stage_only_tl, full_cp_tl) = (0.01nc,  null)
+# Phase2 = cumulative heuristic (3 scenarios, insert_radius=3m,
+#                                repeat_full_cp_while_improving=false):
+#   heu_p2_005nc_p4_005nc : (0.005nc, 0.005nc)
+#   heu_p2_010nc_p4_005nc : (0.01nc,  0.005nc)
+#   heu_p2_010nc_p4_010nc : (0.01nc,  0.01nc)
+# Goal: (1) CP-phase2 vs heuristic-phase2; (2) P2/P4 budget split under heuristic;
+#       (3) capping P2 at 0.01nc vs unbounded under CP-phase2.
+# Reported objective: weighted earliness + tardiness.
+# Refs: docs/algorithms/20260426_mcf_lb.md
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv  # optional; enables post-run pivot artifacts (RPDf / win-tie / time%)
+
+output_dir: output/20260427
+
+instance_worker_cnt: 12
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: best_mcf_lb_cp_asis
+    timelimit: 300.0
+    output_subdir: best_mcf_lb_cp_asis
+    subroutine_flow:
+      - method: run_mcf_lb_4
+        last_stage_only_priority_tags: [ "mcf_dag" ]
+        last_stage_only_cp_pf_method: "PF1"
+        last_stage_only_cp_solver_thread_cnt: 1
+        last_stage_only_tl: null
+        repeat_last_stage_only_cp_while_improving: true
+        log_last_stage_only_cp_search_progress: true
+        machine_then_job: false
+        full_cp_pf_method: "PF1"
+        full_cp_solver_thread_cnt: 1
+        full_cp_tl: null
+        repeat_full_cp_while_improving: true
+        log_full_cp_search_progress: false

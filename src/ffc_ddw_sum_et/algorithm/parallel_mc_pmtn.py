@@ -245,3 +245,37 @@ class ParallelMachinePreemptionMcf:
             completion_time = max(times)
             job_2_completion_minus_p[j] = completion_time - self.p[j]
         return job_2_completion_minus_p
+
+    def get_precedence_pairs_from_preemptive_schedule(self) -> list[tuple[str, str]]:
+        """Return DAG (predecessor, successor) pairs from the preemptive schedule.
+
+        For each job j, define
+            s_j = min{t : x_jt = 1},
+            e_j = max{t : x_jt = 1}.
+        Sort jobs by s_j descending. For each j (treated as the successor),
+        scan jobs that appear later in the sorted list (so smaller s_*); when
+        e_k < s_j, append (k, j) — k completes before j starts. Cap the
+        per-successor pair count at the last-stage machine count.
+        """
+        x_val = self.get_variable_value_dict()
+        s: dict[str, int] = {}
+        e: dict[str, int] = {}
+        for j in self.calJ:
+            times = x_val[j].keys()
+            if not times:
+                raise ValueError(
+                    f"Job {j} has no occupied slots; cannot compute precedence pairs"
+                )
+            s[j] = min(times)
+            e[j] = max(times)
+        sorted_jobs = sorted(self.calJ, key=lambda j: -s[j])
+        pairs: list[tuple[str, str]] = []
+        for idx, j in enumerate(sorted_jobs):
+            cnt = 0
+            for k in sorted_jobs[idx + 1 :]:
+                if e[k] < s[j]:
+                    pairs.append((k, j))
+                    cnt += 1
+                    if cnt >= self.mc_count:
+                        break
+        return pairs

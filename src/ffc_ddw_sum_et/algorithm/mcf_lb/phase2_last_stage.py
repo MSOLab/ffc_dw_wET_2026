@@ -18,6 +18,7 @@ from ffc_ddw_sum_et.algorithm.cumulative_heuristic import (
     solve_last_stage_by_cumulative_heuristic,
 )
 from ffc_ddw_sum_et.algorithm.cumulative_routine import (
+    solve_last_stage_with_dag_precedence,
     solve_last_stage_with_profile_fix,
 )
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
@@ -200,6 +201,35 @@ def _solve_last_stage_for_seed(
     consistent with the last-stage-only model). The heuristic path always
     yields a candidate.
     """
+    if seed.tag == "mcf_dag":
+        last_stage_p = instance.get_job_2_p_map_for_stage(phase1.last_stage_id)
+        horizon = max(phase1.job_2_release_map.values()) + sum(last_stage_p.values())
+        dag_result, solve_sec, status_name = solve_last_stage_with_dag_precedence(
+            instance,
+            phase1.last_stage_id,
+            phase1.job_2_release_map,
+            phase1.mcf_lb,
+            seed.pf_pairs,
+            horizon,
+            logger=logger,
+            solver_thread_cnt=solver_thread_cnt,
+            max_time_in_seconds=tl_seconds,
+            log_search_progress=log_search_progress,
+            solver_log_path_getter=solver_log_path_getter,
+        )
+        if dag_result is None:
+            return None, solve_sec, status_name
+        candidate = LastStageCandidate(
+            tag=seed.tag,
+            last_stage_only_schedule=dag_result.schedule,
+            last_stage_only_schedule_makespan=dag_result.makespan,
+            last_stage_only_obj=dag_result.objective,
+            last_stage_only_bound=dag_result.bound,
+            ls_status=dag_result.status_name,
+            ls_j_i_2_end=dag_result.j_i_2_end,
+        )
+        return candidate, solve_sec, status_name
+
     if use_heuristic:
         result, solve_sec, status_name, progress, scan_stats = (
             solve_last_stage_by_cumulative_heuristic(

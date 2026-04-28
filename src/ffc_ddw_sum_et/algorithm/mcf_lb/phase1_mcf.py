@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Mapping, Sequence
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
@@ -45,6 +45,7 @@ SeedTag = Literal[
     "due_date_star_plus_half_p",
     "due_date_star_plus_p",
     "due2-weight-pos",
+    "mcf_dag",
 ]
 
 # Fixed emission order across artifacts (diagnostic, gantt, CSV).
@@ -52,11 +53,18 @@ SeedTag = Literal[
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class LastStageSeed:
-    """One last-stage-only dispatch seed derived from an MCF priority map."""
+    """One last-stage-only dispatch seed derived from an MCF priority map.
+
+    ``pf_pairs`` carries an optional MCF-derived (predecessor, successor)
+    DAG: only the ``"mcf_dag"`` seed populates it, and Phase 2 routes such
+    seeds through a precedence-only solve (no profile-fix arcs, no hints,
+    no init-schedule reference).
+    """
 
     tag: SeedTag
     job_sequence: list[str]
     init_schedule: FFcSchedule
+    pf_pairs: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -168,22 +176,26 @@ def run_phase1(
     }
     if last_stage_only_priority_tags is None:
         last_stage_only_priority_tags = ["avg_time"]
-    last_stage_seeds = [
-        _build_seed(
-            tag=tag,
-            job_sequence=_resolve_job_sequence(
+    last_stage_seeds: list[LastStageSeed] = []
+    for tag in last_stage_only_priority_tags:
+        if tag == "mcf_dag":
+            last_stage_seeds.append(_build_mcf_dag_seed(mcf=mcf, instance=instance))
+            continue
+        last_stage_seeds.append(
+            _build_seed(
                 tag=tag,
+                job_sequence=_resolve_job_sequence(
+                    tag=tag,
+                    instance=instance,
+                    priority_map_by_tag=priority_map_by_tag,
+                    job_2_pos=job_2_pos,
+                ),
                 instance=instance,
-                priority_map_by_tag=priority_map_by_tag,
-                job_2_pos=job_2_pos,
-            ),
-            instance=instance,
-            last_stage_id=last_stage_id,
-            job_2_release=job_2_release_map,
-            duration_map=duration_map,
+                last_stage_id=last_stage_id,
+                job_2_release=job_2_release_map,
+                duration_map=duration_map,
+            )
         )
-        for tag in last_stage_only_priority_tags
-    ]
 
     return Phase1State(
         mcf_lb=mcf_lb,
@@ -245,4 +257,29 @@ def _build_seed(
     )
     return LastStageSeed(
         tag=tag, job_sequence=job_sequence, init_schedule=init_schedule
+    )
+
+
+def _build_mcf_dag_seed(
+    *,
+    mcf: ParallelMachinePreemptionMcf,
+    instance: FFcDDWParameters,
+) -> LastStageSeed:
+    """Build the precedence-only seed: MCF DAG pairs, no init schedule, no sequence.
+
+    Phase 2 detects ``tag == "mcf_dag"`` and routes the seed to the
+    DAG-precedence solve path; ``init_schedule`` is left empty so existing
+    Gantt-export sidecars stay schema-compatible.
+    """
+    pairs = mcf.get_precedence_pairs_from_preemptive_schedule()
+    empty_schedule = FFcSchedule(
+        jobs=instance.job_id_list,
+        stages=instance.stage_id_list,
+        machines_per_stage=instance.stage_2_machines_map,
+    )
+    return LastStageSeed(
+        tag="mcf_dag",
+        job_sequence=[],
+        init_schedule=empty_schedule,
+        pf_pairs=pairs,
     )

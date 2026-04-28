@@ -20,6 +20,7 @@ __all__ = [
     "FullCpSolveResult",
     "LastStageSolveResult",
     "solve_full_cp_with_profile_fix",
+    "solve_last_stage_with_dag_precedence",
     "solve_last_stage_with_profile_fix",
 ]
 HORIZON_MULTIPLIER = 2
@@ -223,6 +224,112 @@ def solve_last_stage_with_profile_fix(
         loop_index += 1
 
     return best_result, total_solve_sec, best_status or status_name
+
+
+def solve_last_stage_with_dag_precedence(
+    instance: FFcDDWParameters,
+    last_stage_id: str,
+    job_2_release: dict[str, int],
+    obj_lb: float,
+    pf_pairs: list[tuple[str, str]],
+    horizon: int,
+    *,
+    logger: logging.Logger | None = None,
+    solver_thread_cnt: int = 1,
+    max_time_in_seconds: float | None = None,
+    log_search_progress: bool = False,
+    solver_log_path_getter: Callable[[str], Path] | None = None,
+) -> tuple[LastStageSolveResult | None, float, str]:
+    """Build and solve a last-stage-only CP-SAT model with DAG precedence only.
+
+    Unlike :func:`solve_last_stage_with_profile_fix`, this routine takes no
+    reference schedule: precedence is supplied explicitly as a list of
+    ``(predecessor, successor)`` job pairs (typically the MCF preemptive
+    schedule's DAG), translated into ``op_end[k] <= op_start[j]`` arcs at
+    ``last_stage_id``. No warm-start or ET hints are applied — the solver
+    explores from scratch under the DAG.
+
+    Args:
+        horizon: CP-SAT operation horizon. Caller passes
+            ``max(job_2_release.values()) + sum(p_last_stage)`` so the
+            bound matches the MCF model's time grid.
+
+    Raises:
+        RuntimeError: ``INFEASIBLE`` (the DAG should not contradict the LB).
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    ls_builder = BaseModelBuilder()
+    ls_mdl, ls_params, ls_ops_vars, _ = ls_builder.build(
+        instance=instance,
+        horizon=horizon,
+        last_stage_only=True,
+        job_2_release=job_2_release,
+        obj_lb=obj_lb,
+    )
+    for j_pred, j_succ in pf_pairs:
+        BaseModelBuilder.add_fixed_operation_precedence_constraint(
+            ls_mdl, ls_params, ls_ops_vars, j_pred, j_succ, last_stage_id
+        )
+
+    ls_solver = get_solver(
+        CpsatSolverOptions(
+            log_search_progress=log_search_progress,
+            log_to_stdout=False if log_search_progress else None,
+            log_to_response=True if log_search_progress else None,
+            num_workers=solver_thread_cnt,
+            max_time_in_seconds=max_time_in_seconds,
+        )
+    )
+
+    t0 = time.monotonic()
+    status = ls_solver.solve(ls_mdl)
+    status_name = ls_solver.status_name(status)
+    solve_sec = time.monotonic() - t0
+
+    if log_search_progress:
+        solve_log = ls_solver.response_proto.solve_log
+        if solve_log and solver_log_path_getter is not None:
+            try:
+                solve_log_path = solver_log_path_getter("_cp_sat_mcf_lb_phase2_dag.log")
+                with solve_log_path.open("w", encoding="utf-8") as fp:
+                    fp.write(solve_log)
+                    if not solve_log.endswith("\n"):
+                        fp.write("\n")
+            except Exception as err:
+                logger.warning("Failed to write CP-SAT search log: %s", err)
+
+    if status == cp_model.INFEASIBLE:
+        raise RuntimeError(
+            "Last-stage CP-SAT model is infeasible under the MCF DAG; "
+            "check pair-list construction"
+        )
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return None, solve_sec, status_name
+
+    ls_j_i_2_start = {
+        (j, last_stage_id): int(ls_solver.Value(ls_ops_vars.op_start[j, last_stage_id]))
+        for j in ls_params.j_list
+    }
+    ls_j_i_2_end = {
+        (j, last_stage_id): int(ls_solver.Value(ls_ops_vars.op_end[j, last_stage_id]))
+        for j in ls_params.j_list
+    }
+    new_schedule = build_schedule_from_op_starts(
+        instance, ls_j_i_2_start, ls_j_i_2_end, stages=[last_stage_id]
+    )
+    new_obj = float(ls_solver.objective_value)
+
+    result = LastStageSolveResult(
+        status_name=status_name,
+        schedule=new_schedule,
+        objective=new_obj,
+        bound=float(ls_solver.best_objective_bound),
+        j_i_2_end=ls_j_i_2_end,
+        makespan=max(ls_j_i_2_end.values()),
+    )
+    return result, solve_sec, status_name
 
 
 def solve_full_cp_with_profile_fix(
