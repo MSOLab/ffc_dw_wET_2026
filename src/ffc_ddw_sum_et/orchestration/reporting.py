@@ -137,10 +137,9 @@ def _render_heatmap_from_yaml(yaml_path: Path) -> None:
     if not data.y_labels or not data.t_axis or data.Z.size == 0:
         return
 
-    instance_name = yaml_path.stem.replace("_C_heatmap", "")
     html_path = yaml_path.with_suffix(".html")
     try:
-        fig = make_figure(data, title=heatmap_title(instance_name))
+        fig = make_figure(data, title=heatmap_title(data))
         fig.write_html(str(html_path), include_plotlyjs="cdn")
     except Exception:
         logger.exception("Failed to render heatmap for %s", yaml_path)

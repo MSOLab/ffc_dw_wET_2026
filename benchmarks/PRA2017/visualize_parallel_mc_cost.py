@@ -69,8 +69,9 @@ def main() -> None:
         instance,
         sort=args.sort,
         x_jt_map=mcf.get_variable_value_dict(),
+        obj_value=float(mcf.get_obj_value()),
     )
-    fig = make_figure(data, title=heatmap_title(instance_path.stem))
+    fig = make_figure(data, title=heatmap_title(data))
 
     out_path = (
         args.output

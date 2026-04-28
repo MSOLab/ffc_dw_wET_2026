@@ -433,12 +433,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     self.instance,
                     sort=heatmap_sort,
                     x_jt_map=mcf_result.mcf.get_variable_value_dict(),
+                    obj_value=obj_bound_by_mcf,
                 )
-                dump_signed_cost_heatmap_yaml(
-                    yaml_path,
-                    heatmap_data,
-                    instance_name=self.instance.name,
-                )
+                dump_signed_cost_heatmap_yaml(yaml_path, heatmap_data)
                 self.logger.info(
                     "apply_lb_by_mcf: wrote heatmap YAML to %s "
                     "(jobs=%d, t-range=[%d..%d], x_jt cells=%d)",
