@@ -1123,14 +1123,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         builder = BaseModelBuilder()
         mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
 
-        by_machine, stride = decode_pf_method(pf_method)
+        by_machine, stride_set = decode_pf_method(pf_method)
         BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
             mdl,
             params,
             op_vars,
             incumbent.schedule,
             profile_fix_by_machine=by_machine,
-            machine_precedence_stride=stride,
+            machine_precedence_stride_set=stride_set,
         )
         start_map = incumbent.schedule.get_jik_2_start_time_map()
         end_map = incumbent.schedule.get_jik_2_end_time_map()
