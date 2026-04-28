@@ -245,3 +245,17 @@ class ParallelMachinePreemptionMcf:
             completion_time = max(times)
             job_2_completion_minus_p[j] = completion_time - self.p[j]
         return job_2_completion_minus_p
+
+    def get_job_priority_by_half_time(self) -> dict[str, float | None]:
+        """Get job priority by (start_time + completion_time) / 2."""
+        start_time_map = self.get_job_2_start_time_map()
+        completion_time_map = self.get_job_2_completion_time_map()
+        job_2_half_time: dict[str, float | None] = {}
+        for j in self.calJ:
+            start_time = start_time_map[j]
+            completion_time = completion_time_map[j]
+            if start_time is None or completion_time is None:
+                job_2_half_time[j] = None
+            else:
+                job_2_half_time[j] = (start_time + completion_time) / 2
+        return job_2_half_time
