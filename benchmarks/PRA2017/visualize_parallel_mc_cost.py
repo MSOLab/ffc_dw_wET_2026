@@ -12,114 +12,15 @@ src/ffc_ddw_sum_et/algorithm/parallel_mc_pmtn.py:113-125
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
-from typing import Literal
 
-import numpy as np
-import plotly.graph_objects as go
-
+from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
+from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import (
+    build_signed_cost_matrix,
+    heatmap_title,
+    make_figure,
+)
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
-
-CLIP_QUANTILE = 0.25
-
-
-def _weights_or_default(raw: dict[str, int], jobs: list[str]) -> dict[str, int]:
-    # Matches _resolve_weight_map in parallel_mc_pmtn.py: empty map -> all 1s.
-    return dict.fromkeys(jobs, 1) if not raw else raw
-
-
-def _sort_jobs(
-    instance: FFcDDWParameters,
-    sort: Literal["due-window", "neh-cp"] = "due-window",
-) -> list[str]:
-    if sort == "neh-cp":
-        return instance.get_weight_due_pos_job_sequence()
-    return instance.get_due_weight_pos_job_sequence()
-
-
-def build_signed_cost_matrix(
-    instance: FFcDDWParameters,
-    sort: Literal["due-window", "neh-cp"] = "due-window",
-) -> tuple[list[str], list[int], np.ndarray, list[tuple[float, float, int]]]:
-    calJ = _sort_jobs(instance, sort=sort)
-    last_stage = instance.stage_id_list[-1]
-    p = instance.get_job_2_p_map_for_stage(last_stage)
-    ddw = instance.job_2_due_window_map
-    w_minus = _weights_or_default(instance.job_2_ewt_map, calJ)
-    w_plus = _weights_or_default(instance.job_2_twt_map, calJ)
-
-    p_max = max(p[j] for j in calJ)
-    t_min = max(0, min(ddw[j][0] - p[j] for j in calJ) - p_max)
-    t_max = max(ddw[j][1] for j in calJ) + p_max
-    t_axis = list(range(t_min, t_max + 1))
-
-    Z = np.zeros((len(calJ), len(t_axis)), dtype=float)
-    rects: list[tuple[float, float, int]] = []
-    y_labels: list[str] = []
-    for i, j in enumerate(calJ):
-        pj = p[j]
-        d_minus, d_plus = ddw[j]
-        wm, wp = w_minus[j], w_plus[j]
-        for k, t in enumerate(t_axis):
-            if t <= d_minus - pj:
-                Z[i, k] = -wm * math.ceil((d_minus - pj - t + 1) / pj)
-            elif t > d_plus:
-                Z[i, k] = wp * math.ceil((t - d_plus) / pj)
-        x0 = max(0.0, d_plus - pj)
-        rects.append((x0, x0 + pj, i))
-        y_labels.append(f"{j}({pj:>3})")
-    threshold = float(np.quantile(np.abs(Z), CLIP_QUANTILE))
-    Z = np.clip(Z, -threshold, threshold)
-    return y_labels, t_axis, Z, rects
-
-
-def make_figure(
-    y_labels: list[str],
-    t_axis: list[int],
-    Z: np.ndarray,
-    rects: list[tuple[float, float, int]],
-    title: str,
-) -> go.Figure:
-    z_abs = max(1.0, float(np.abs(Z).max()))
-    fig = go.Figure(
-        go.Heatmap(
-            z=Z,
-            x=t_axis,
-            y=y_labels,
-            colorscale="RdBu_r",
-            zmid=0,
-            zmin=-z_abs,
-            zmax=z_abs,
-            xgap=0,
-            ygap=0,
-            colorbar={"title": "signed C"},
-            hovertemplate=("job=%{y}<br>t=%{x}<br>signed C=%{z}<extra></extra>"),
-        )
-    )
-    fig.update_layout(
-        title=title,
-        xaxis_title="time t",
-        yaxis_title="job (p)",
-        yaxis={
-            "autorange": "reversed",
-            "tickfont": {"family": "Courier New, monospace"},
-        },
-        width=max(900, len(t_axis) + 200),
-        height=max(400, 18 * len(y_labels) + 120),
-    )
-    for x0, x1, i in rects:
-        fig.add_shape(
-            type="rect",
-            x0=x0,
-            x1=x1,
-            y0=i - 0.5,
-            y1=i + 0.5,
-            line={"color": "black", "width": 1},
-            fillcolor="rgba(0,0,0,0)",
-            layer="above",
-        )
-    return fig
 
 
 def main() -> None:
@@ -141,13 +42,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--sort",
-        choices=["due-window", "neh-cp"],
-        default="due-window",
+        choices=["due2-window", "neh-cp"],
+        default="due2-window",
         help=(
             "Job row ordering in the heatmap. "
-            "'due-window' sorts by max(0, d⁺−p) asc, then d⁺ asc, then d⁻ asc. "
+            "'due2-window' sorts by max(r_j, d⁺−p) asc, then d⁺ asc, then d⁻ asc. "
             "'neh-cp' sorts by (max(w⁻,w⁺) desc, w⁻+w⁺ desc, window width asc, position). "
-            "Defaults to 'due-window'."
+            "Defaults to 'due2-window'."
         ),
     )
     args = parser.parse_args()
@@ -159,14 +60,17 @@ def main() -> None:
     with instance_path.open() as fh:
         instance = FFcDDWParameters.from_pra_2017_data(instance_path.stem, fh)
 
-    y_labels, t_axis, Z, rects = build_signed_cost_matrix(instance, sort=args.sort)
-    fig = make_figure(
-        y_labels,
-        t_axis,
-        Z,
-        rects,
-        title=f"parallel_mc_pmtn C heatmap — {instance_path.stem}",
+    mcf = ParallelMachinePreemptionMcf.from_instance(instance)
+    mcf.solve()
+    if not mcf.is_optimal():
+        parser.error(f"MCF not optimal for instance {instance.name}")
+
+    data = build_signed_cost_matrix(
+        instance,
+        sort=args.sort,
+        x_jt_map=mcf.get_variable_value_dict(),
     )
+    fig = make_figure(data, title=heatmap_title(instance_path.stem))
 
     out_path = (
         args.output
@@ -177,8 +81,9 @@ def main() -> None:
     fig.write_html(str(out_path), include_plotlyjs="cdn")
 
     print(
-        f"Wrote {out_path} — jobs={len(y_labels)}, "
-        f"t-range=[{t_axis[0]}..{t_axis[-1]}] ({len(t_axis)} cells/row)"
+        f"Wrote {out_path} — jobs={len(data.y_labels)}, "
+        f"t-range=[{data.t_axis[0]}..{data.t_axis[-1]}] "
+        f"({len(data.t_axis)} cells/row), x_jt cells={len(data.x_cells)}"
     )
 
 

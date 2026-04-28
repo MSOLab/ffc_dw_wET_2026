@@ -22,7 +22,11 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
 )
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import (
+    SeedTag,
+    run_phase1,
+    solve_mcf_lb,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
@@ -376,6 +380,81 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             FFcDDWSolution(schedule=best_sch, obj_value=obj_value, obj_bound=None),
         )
         return report
+
+    def apply_lb_by_mcf(
+        self,
+        draw_heatmap: bool = False,
+        heatmap_sort: Literal["due2-window", "neh-cp"] = "due2-window",
+    ) -> SubroutineReport:
+        """Step method: compute the MCF preemptive lower bound and report it
+        without constructing a feasible full schedule.
+
+        Solves the MCF relaxation, records ``mcf_lb`` on the diagnostic, and
+        returns a :class:`SubroutineReport` with ``obj_value=None`` and
+        ``obj_bound = mcf_lb``. No incumbent is registered with the solution
+        manager (this subroutine produces no full schedule), so no Gantt or
+        ``*_schedule.yaml`` is emitted for this step. The MCF preemptive
+        schedule is still stored on ``self.mcf_preemptive_schedule`` and
+        appended to ``self.mcf_lb_phase_schedules`` so downstream diagnostics
+        keyed off those attributes continue to work.
+
+        Args:
+            draw_heatmap: When ``True``, build the parallel-machine signed
+                C-cost matrix for the instance and dump it to
+                ``<ins>_C_heatmap.yaml`` next to the other per-instance
+                artifacts. The post-run reporter (gated by ``draw_gantt``)
+                renders the matching HTML.
+            heatmap_sort: Row ordering for the heatmap. ``"due2-window"``
+                sorts by ``max(r_j, d⁺-p)`` then ``d⁺`` then ``d⁻``;
+                ``"neh-cp"`` sorts by ``(max(w⁻, w⁺), w⁻+w⁺, window width)``.
+                Ignored when ``draw_heatmap`` is ``False``.
+        """
+        start_elapsed = time.monotonic()
+        diag = MCFLBDiagnostic()
+        self.mcf_lb_diagnostic = diag
+
+        mcf_result = solve_mcf_lb(self.instance, diag)
+        obj_bound_by_mcf = mcf_result.mcf_lb
+
+        self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
+        self.mcf_lb_phase_schedules.clear()
+        self.mcf_lb_phase_schedules.append(
+            ("1_mcf_preemptive_schedule", mcf_result.mcf_preemptive_schedule)
+        )
+
+        self.logger.info("apply_lb_by_mcf: MCF LB = %d", int(obj_bound_by_mcf))
+
+        if draw_heatmap:
+            from ..io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
+
+            yaml_path = self.try_get_file_path_for_subroutine("_C_heatmap.yaml")
+            if yaml_path is not None:
+                heatmap_data = build_signed_cost_matrix(
+                    self.instance,
+                    sort=heatmap_sort,
+                    x_jt_map=mcf_result.mcf.get_variable_value_dict(),
+                )
+                dump_signed_cost_heatmap_yaml(
+                    yaml_path,
+                    heatmap_data,
+                    instance_name=self.instance.name,
+                )
+                self.logger.info(
+                    "apply_lb_by_mcf: wrote heatmap YAML to %s "
+                    "(jobs=%d, t-range=[%d..%d], x_jt cells=%d)",
+                    yaml_path,
+                    len(heatmap_data.y_labels),
+                    heatmap_data.t_axis[0],
+                    heatmap_data.t_axis[-1],
+                    len(heatmap_data.x_cells),
+                )
+
+        elapsed = time.monotonic() - start_elapsed
+        return SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=None,
+            obj_bound=obj_bound_by_mcf,
+        )
 
     def run_mcf_lb_4(
         self,
