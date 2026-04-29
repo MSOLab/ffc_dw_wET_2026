@@ -79,6 +79,12 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - 변경: `ins_index: [0, 1439]` 주석 처리 + `log_*_search_progress` 모두 끔
 - 의도: MCF-LB 파라미터 정리 직후 PRA2017 large 풀 벤치. 로그 부담 감소를 위해 search progress 끔.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | mcf_lb_4_4cores_no_pf | 0.6836 | 156,263 | 1440 |
+
 ---
 
 ## Phase 2 — BN2D 디스패처 포팅 + best-of-dispatches 초기화 (4/23 오후)
@@ -100,22 +106,46 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - Config: `20260423/cmax_init_pfns_config.yaml` (ins_index 풀 활성화)
 - 의도: Cmax 초기화 → PF1+NS 라인의 best-of-dispatches 포팅 결과 첫 풀 벤치.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | cmax_init_pf1ns | 1.2657 | 348,267 | 1440 |
+
 ### RUN 3 — `20260423T173918_198369` (mso02, commit body)
 
 - Config: 동일 (`cmax_init_pfns_config.yaml`)
 - 직전 변경: `97849df`이 yaml에서 `iit_after_each_dispatch` 제거 + mixed dispatch 내부 비교 makespan으로 고정.
 - 의도: criterion 결정(내부=makespan) 반영 후 재현성 확인.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | cmax_init_pf1ns | 1.3112 | 377,392 | 1440 |
+
 ### RUN 4 — `20260423T174736_400968` (mso02)
 
 - Config: `20260423/cmax_init_pfns_config_2.yaml` (config 신규 복제 후 main.py 스위치)
 - 의도: v2 config로 풀 벤치 재시작.
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | cmax_init_pf1ns | 1.2761 | 353,004 | 1440 |
 
 ### RUN 5 — `20260423T221248_575301` (mso02)
 
 - Config: `20260423/1_mcf_lb_init_13_config.yaml` (BN2D 라인에서 다시 MCF-LB 라인으로 복귀)
 - 직전: `5c5d620`(`InstanceResult.makespan`).
 - 의도: BN2D 라인 일단락하고 MCF-LB 라인 재개.
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | mcf_lb_4_4cores_no_pf | 0.6810 | 156,081 | 1440 |
 
 ---
 
@@ -136,11 +166,24 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - Config: `20260423/neh_cp_config_4.yaml` 신규 (batch=5, `cp_tl=0.15c`, `skip_pf_below_obj=makespan`).
 - 의도: NEH-CP 점진형 + makespan-기반 PF skip 첫 풀 런.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_b5_pf1_below_cmax | 0.5355 | 152,325 | 1440 |
+
 ### RUN 7 — `20260424T213007_556893` (mso02)
 
 - Config: `20260424/neh_cp_config_5.yaml` (ins_index 풀)
 - 직전: `4696f12`(`job_priority`).
 - 의도: `job_priority` 인자 추가 후 첫 풀 런.
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_b5_pf1_below_cmax_cml | 0.3897 | 143,019 | 1440 |
+  | neh_cp_b5_pf1_below_cmax_idv | 0.4097 | 143,520 | 1440 |
 
 ---
 
@@ -165,10 +208,37 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - cp_tl 페어: batch 5 → (0.12c, 0.03c); batch 10 → (0.24c, 0.06c).
 - 의도: NEH-CP 설계 공간 첫 전수 스윕.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_b10_lex_dplus_pf1 | 0.3444 | 136,092 | 1440 |
+  | neh_cp_b10_lex_dplus_pf2 | 0.4638 | 163,087 | 1440 |
+  | neh_cp_b10_lex_dstar_pf1 | 0.4263 | 145,052 | 1440 |
+  | neh_cp_b10_lex_dstar_pf2 | 0.5510 | 174,445 | 1440 |
+  | neh_cp_b10_single_dplus_pf1 | 0.3443 | 135,793 | 1440 |
+  | neh_cp_b10_single_dplus_pf2 | 0.4846 | 165,045 | 1440 |
+  | neh_cp_b10_single_dstar_pf1 | 0.4275 | 145,892 | 1440 |
+  | neh_cp_b10_single_dstar_pf2 | 0.5653 | 174,753 | 1440 |
+  | neh_cp_b5_lex_dplus_pf1 | 0.3855 | 150,138 | 1440 |
+  | neh_cp_b5_lex_dplus_pf2 | 0.4990 | 173,933 | 1440 |
+  | neh_cp_b5_lex_dstar_pf1 | 0.4704 | 159,907 | 1440 |
+  | neh_cp_b5_lex_dstar_pf2 | 0.5904 | 185,120 | 1440 |
+  | neh_cp_b5_single_dplus_pf1 | 0.3906 | 151,412 | 1440 |
+  | neh_cp_b5_single_dplus_pf2 | 0.5189 | 175,069 | 1440 |
+  | neh_cp_b5_single_dstar_pf1 | 0.4774 | 160,038 | 1440 |
+  | neh_cp_b5_single_dstar_pf2 | 0.6035 | 186,132 | 1440 |
+
 ### RUN 9 — `20260425T200857_851387` (mso02)
 
 - Config: `20260425/neh_cp_config_9.yaml` (ins_index 풀, 두 번째 시나리오 `_2` 삭제)
 - 의도: 16-시나리오 스윕 결과를 보고 batch 15·due-weight-pos·PF1·single 단일 변형만 남겨 풀 런.
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_b15_single_dplus_pf1 | 0.4142 | 143,724 | 1440 |
 
 ### RUN 10 — `20260425T205244_871000` (mso02) — 정정 런
 
@@ -176,10 +246,18 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - commit 메시지: *"Former config.yaml had unintendedly short cp_tl value. Intension: cp_tl / c / added_batch_size = 0.024"*
 - 의도: 의도된 비율 0.024 회복 (RUN 9의 cp_tl 오설정 정정).
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_b15_single_dplus_pf1 | 0.3101 | 128,481 | 1440 |
+
 ### RUN 11 — `20260425T232836_063038` (mso02)
 
 - Config: `20260425/neh_cp_config_10.yaml` 신규 (batch=20, `total_timelimit: 0.024nc`)
 - 의도: "총 TL = 0.024 × n × c, batch에 분배" 패러다임 전환 후 첫 풀 런.
+
+- **결과**: output 미수집 (로컬에 summary.csv 없음)
 
 ---
 
@@ -205,22 +283,47 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - Config: `20260425/neh_cp_config_11.yaml` (ins_index 풀)
 - 의도: 분석 시트·RPDf 피벗 갖춰진 상태로 또 하나의 NEH-CP 변형 풀 런.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_b15_single_dplus_pf1 | 0.3231 | 124,763 | 1440 |
+
 ### RUN 13 — `20260426T174905_399637` (mso02)
 
 - Config: `20260426/neh_cp_config_12.yaml`
   - `b25_single_due2_pf1` → `b20_single_dplus2_pf1` (batch 25 → 20)
 - 의도: 직전 RPDf 분석으로 batch 25는 과대 → batch 20으로 내리고 `due2-weight-pos` 도입.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_b20_single_dplus2_pf1 | 0.3082 | 125,315 | 1440 |
+
 ### RUN 14 — `20260426T185350_366559` (mso02)
 
 - Config: `20260426/neh_cp_config_13.yaml` (ins_index 풀, 마지막 시나리오에 `batch_tl_offset_seconds: 0.1`)
 - 의도: `batch_tl_mode` 신규 + 시나리오 끝에 작은 offset 부여한 풀 런.
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_bs20_constant_dplus2_pf1 | 0.3125 | 125,571 | 1440 |
+  | neh_cp_bs20_linear_dplus2_pf1 | 0.3105 | 125,064 | 1440 |
+  | neh_cp_nb10_constant_dplus2_pf1 | 0.3279 | 127,066 | 1440 |
+  | neh_cp_nb3_constant_dplus2_pf1 | 0.3496 | 125,654 | 1440 |
+  | neh_cp_nb4_constant_dplus2_pf1 | 0.3344 | 124,446 | 1440 |
+  | neh_cp_nb5_constant_dplus2_pf1 | 0.3226 | 123,599 | 1440 |
 
 ### RUN 15 — `20260426T212121_069773` (hjt5950x) — 병렬 머신
 
 - Config: `20260426/mcf_lb_init_14_config.yaml`
 - 직전: `7a4b293`(global LB 수정), `242dfa5`(due2 seed).
 - 의도: MCF-LB 정정 직후 mso02와 **병렬**로 hjt5950x에서 풀 런.
+
+- **결과**: output 미수집 (로컬에 summary.csv 없음)
 
 ---
 
@@ -245,6 +348,19 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
   - (last_stage_only_tl, full_cp_tl) 페어: (0.005,0.005) / (0.01,0.005) / (0.01,0.01) nc
 - 의도: 같은 1440 인스턴스에서 NEH-CP batch/TL 스윕과 MCF-LB phase2 budget 스윕을 한 config로 묶어 비교. **`b39ed49`의 첫 런 결과는 이 RUN 16의 MCF-LB 블록과 동치로 흡수.**
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | best_mcf_lb_p2_005nc_p4_005nc | 0.9834 | 175,088 | 1440 |
+  | best_mcf_lb_p2_010nc_p4_005nc | 0.9793 | 174,194 | 1440 |
+  | best_mcf_lb_p2_010nc_p4_010nc | 0.9794 | 174,229 | 1440 |
+  | neh_cp_bs12_plus_004n_dplus2_pf1_tl024nc | 0.3078 | 125,918 | 1440 |
+  | neh_cp_bs15_linear_dplus2_pf1_tl024nc | 0.3024 | 126,768 | 1440 |
+  | neh_cp_bs20_linear_dplus2_pf1_tl010nc | 0.4140 | 135,650 | 1440 |
+  | neh_cp_bs20_linear_dplus2_pf1_tl020nc | 0.3330 | 127,438 | 1440 |
+  | neh_cp_bs20_linear_dplus2_pf1_tl024nc | 0.3069 | 125,402 | 1440 |
+
 ### RUN 17 — `20260427T123656_726782` (mso02)
 
 - Config: `20260427/mcf_lb_init_16_config.yaml` 신규 (5 시나리오, 300s, run_mcf_lb_4)
@@ -252,11 +368,27 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - Phase2=cumulative heuristic (3 시나리오, insert_radius=3m, repeat_full_cp_while_improving=false): heu_p2_005nc_p4_005nc / heu_p2_010nc_p4_005nc / heu_p2_010nc_p4_010nc
 - 의도: (1) CP-phase2 vs heuristic-phase2; (2) heuristic 하 P2/P4 budget 분할; (3) CP-phase2 하에서 P2를 0.01nc로 캡 vs unbounded.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | best_mcf_lb_cp_asis | 1.0017 | 178,168 | 1440 |
+  | best_mcf_lb_cp_p2_010nc | 1.0017 | 178,168 | 1440 |
+  | best_mcf_lb_heu_p2_005nc_p4_005nc | 0.9937 | 177,421 | 1440 |
+  | best_mcf_lb_heu_p2_010nc_p4_005nc | 0.9906 | 176,794 | 1440 |
+  | best_mcf_lb_heu_p2_010nc_p4_010nc | 0.9903 | 176,695 | 1440 |
+
 ### RUN 18 — `20260427T173735_407299` (mso02)
 
 - Config: `20260427/mcf_lb_init_17_config.yaml` 신규 (`ins_index: [1435..1439]` 큰 인스턴스 5개만)
 - 동시에 reporting/post_run_pivot의 initial_state를 `(rows=[scenarioName,R], cols=[T])`로 정정.
 - 의도: 큰 인스턴스 phase2-heuristic 시나리오 1개를 길게 돌려 first-improvement-restart 옵션 검증 + 피벗 축 정정 적용.
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | best_mcf_lb_heu_p2_005nc_p4_005nc | 0.6344 | 610,264 | 5 (tail 5) |
 
 ---
 
@@ -292,6 +424,13 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - 의도: wxd 계열을 wxd1로 통합한 뒤, 새로 정의된 wxd2(early/late split + window-endpoint scaled key)로 풀 런.
 - 비고: `dddef72`의 첫 런(샘플)은 본 풀-벤치 런으로 흡수.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_bs12_plus_004n_dplus2_pf1 | 0.3731 | 127,390 | 1440 |
+  | wxd2 | 1.0041 | 184,129 | 1440 |
+
 ---
 
 ## Phase 8 — LB-only 진단 → MPF23 → half_time seed (4/28 후반)
@@ -311,17 +450,35 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - 의도: 인스턴스별 MCF LB와 cost heatmap을 단독으로 추출(스케줄 X) — LB 품질·해석성 진단.
 - 비고: `056f476`의 첫 런(샘플)은 본 풀-벤치 런으로 흡수.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | mcf_lb_only | — | — | 1440 |
+
 ### RUN 21 — `20260428T165900_623730` (mso02)
 
 - Config: `20260428/neh_cp_config_16.yaml` (`ins_index: [0..11]` → 풀)
 - 의도: 새 PF 메서드 MPF23를 NEH-CP에 적용해 풀 런.
 - 비고: `96bc1fa`의 첫 런(샘플 12개)은 본 풀-벤치 런으로 흡수.
 
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | neh_cp_bs12_plus_004n_dplus2_pf1 | 0.4285 | 145,539 | 1440 |
+
 ### RUN 22 — `20260428T214400_957643` (mso02)
 
-- Config: `20260428/mcf_lb_init_18_config.yaml` (`ins_index: [0..3]` → 풀, 5 시나리오 300s)
+- Config: `20260428/mcf_lb_init_18_config.yaml` (`ins_index: [0..3]` → 풀, 1 시나리오 실제 실행 — config 주석에 5 시나리오 계획이 있으나 `best_mcf_lb_cp_asis` 1개만 정의됨)
 - 의도: preemption-MCF의 새 seed tag `half_time`로 phase2/phase4 budget 스윕 풀 런.
 - 비고: `8e34fb3`의 첫 런(샘플 4개)은 본 풀-벤치 런으로 흡수.
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | best_mcf_lb_cp_asis | 1.0079 | 183,803 | 1440 |
 
 ---
 
@@ -339,6 +496,67 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 - Config: `20260428/dispatch_wxd1_1_config.yaml` (ins_index 풀)
 - 의도: `665000e` 세션의 wxd3 결과(현재 라벨 wxd1)를 동일 조건으로 재측정해 갈음.
 - 비고: 평가 조건은 `dispatch_20260427_config.yaml`과 동일(timelimit=300s, instance_worker_cnt=48, dispatch-only).
+
+- **결과**:
+
+  | scenarioName | mean RPDf | mean bestObj | n |
+  |---|---|---|---|
+  | wxd1 | 1.0142 | 186,374 | 1440 |
+
+---
+
+## 결과 요약
+
+### NEH-CP 순위 (mean RPDf, 1440 인스턴스 기준, 낮을수록 우수)
+
+| 순위 | RUN | timestamp | scenarioName | mean RPDf | mean bestObj |
+|---|---|---|---|---|---|
+| 1 | 16 | 20260427T025803_513725 | neh_cp_bs15_linear_dplus2_pf1_tl024nc | 0.3024 | 126,768 |
+| 2 | 16 | 20260427T025803_513725 | neh_cp_bs20_linear_dplus2_pf1_tl024nc | 0.3069 | 125,402 |
+| 3 | 16 | 20260427T025803_513725 | neh_cp_bs12_plus_004n_dplus2_pf1_tl024nc | 0.3078 | 125,918 |
+| 4 | 13 | 20260426T174905_399637 | neh_cp_b20_single_dplus2_pf1 | 0.3082 | 125,315 |
+| 5 | 10 | 20260425T205244_871000 | neh_cp_b15_single_dplus_pf1 | 0.3101 | 128,481 |
+| 6 | 14 | 20260426T185350_366559 | neh_cp_bs20_linear_dplus2_pf1 | 0.3105 | 125,064 |
+| 7 | 14 | 20260426T185350_366559 | neh_cp_bs20_constant_dplus2_pf1 | 0.3125 | 125,571 |
+| 8 | 14 | 20260426T185350_366559 | neh_cp_nb5_constant_dplus2_pf1 | 0.3226 | 123,599 |
+| 9 | 12 | 20260426T014532_241012 | neh_cp_b15_single_dplus_pf1 | 0.3231 | 124,763 |
+| 10 | 14 | 20260426T185350_366559 | neh_cp_nb10_constant_dplus2_pf1 | 0.3279 | 127,066 |
+| 11 | 16 | 20260427T025803_513725 | neh_cp_bs20_linear_dplus2_pf1_tl020nc | 0.3330 | 127,438 |
+| 12 | 14 | 20260426T185350_366559 | neh_cp_nb4_constant_dplus2_pf1 | 0.3344 | 124,446 |
+
+### MCF-LB 순위
+
+| 순위 | RUN | timestamp | scenarioName | mean RPDf | mean bestObj |
+|---|---|---|---|---|---|
+| 1 | 18 | 20260427T173735_407299 | best_mcf_lb_heu_p2_005nc_p4_005nc | 0.6344 | 610,264 | ← tail 5 인스턴스만 (풀 비교 불가) |
+| 2 | 16 | 20260427T025803_513725 | best_mcf_lb_p2_010nc_p4_005nc | 0.9793 | 174,194 |
+| 3 | 16 | 20260427T025803_513725 | best_mcf_lb_p2_010nc_p4_010nc | 0.9794 | 174,229 |
+| 4 | 16 | 20260427T025803_513725 | best_mcf_lb_p2_005nc_p4_005nc | 0.9834 | 175,088 |
+| 5 | 17 | 20260427T123656_726782 | best_mcf_lb_heu_p2_010nc_p4_010nc | 0.9903 | 176,695 |
+| 6 | 17 | 20260427T123656_726782 | best_mcf_lb_heu_p2_010nc_p4_005nc | 0.9906 | 176,794 |
+| 7 | 17 | 20260427T123656_726782 | best_mcf_lb_heu_p2_005nc_p4_005nc | 0.9937 | 177,421 |
+| 8 | 17 | 20260427T123656_726782 | best_mcf_lb_cp_asis | 1.0017 | 178,168 |
+| 9 | 17 | 20260427T123656_726782 | best_mcf_lb_cp_p2_010nc | 1.0017 | 178,168 |
+| 10 | 22 | 20260428T214400_957643 | best_mcf_lb_cp_asis | 1.0079 | 183,803 |
+
+### Dispatch-only 비교
+
+| RUN | timestamp | scenarioName | mean RPDf | mean bestObj |
+|---|---|---|---|---|
+| 19 | 20260428T022941_371229 | wxd2 | 1.0041 | 184,129 |
+| 23 | 20260428T234426_736253 | wxd1 | 1.0142 | 186,374 |
+
+### 주요 관찰
+
+- **최우수 NEH-CP**: RUN 16 `neh_cp_bs15_linear_dplus2_pf1_tl024nc` (mean RPDf **0.3024**). RUN 16의 batch/TL 스윕에서 bs15+linear+0.024nc 조합이 bs20+bs12+0.04n 대비 소폭 우위.
+- **cp_tl 설정 영향**: RUN 9(0.4142) → RUN 10(0.3101). cp_tl 오설정 정정만으로 mean RPDf가 0.104 개선됨. TL 예산 설정이 NEH-CP 품질의 핵심 요인임을 확인.
+- **PF1 vs PF2**: RUN 8 스윕 결과 PF2가 모든 조합에서 PF1 대비 현저히 열위 (b10·single·dplus 기준 PF1=0.3443 vs PF2=0.4846). 이후 PF1로 고정.
+- **dplus vs dstar**: dplus/dplus2 priority가 dstar 대비 일관되게 우위. RUN 8에서 b10·single·dplus_pf1=0.3443 vs b10·single·dstar_pf1=0.4275.
+- **TL 스윕 인사이트** (RUN 16): tl=0.010nc 기준 0.4140로 급락. tl≥0.020nc에서 수렴. 최적 구간은 0.020nc~0.024nc.
+- **MPF23 회귀** (RUN 21): 동일 시나리오 명에도 MPF23 적용 후 mean RPDf 0.4285 (RUN 16 동치 시나리오 0.3078 대비 +0.121). 현 config에서 성능 저하 → 추가 튜닝 필요.
+- **MCF-LB vs NEH-CP**: MCF-LB 단독(~1.00)은 NEH-CP(~0.30) 대비 현격히 열위. heuristic phase2(0.9903)가 CP phase2(1.0017)보다 소폭 우수하나 격차 미미.
+- **Dispatch-only**: wxd2(1.0041) < wxd1(1.0142). 둘 다 NEH-CP 대비 압도적으로 열위 — dispatch는 초기화 수단으로만 유효.
+- **RUN 11·15 미수집**: RUN 11(`output/20260425/20260425T232836_063038`)은 로컬 output 없음. RUN 15(hjt5950x 머신)는 별도 머신 결과 미이전.
 
 ---
 
@@ -412,7 +630,7 @@ mso02·hjt5950x는 동시에 병렬로 실험을 진행한 두 머신.
 | `n`, `c`, `totalMcCount`, `T`, `R`, `W` | 인스턴스 그리드 축 (n=jobs, c=stages, T=tightness, R=range, W=earliness weight ratio 등) |
 | `BKS_data` | best-known objective (= `bks`) |
 | `bestObj` | summary.csv와 동일 |
-| `RPDf_BKS_data` | **`(bestObj - BKS_data) / BKS_data`** (lower is better; primary 비교 메트릭) |
+| `RPDf_BKS_data` | **`(bestObj - BKS_data) / ((bestObj + BKS_data) / 2)`** (lower is better; primary 비교 메트릭) |
 | `elapsedTime`, `timelimit`, `time%` | wall time 진행률 (`time% = elapsedTime / timelimit`) |
 
 집계 메트릭 (대시보드/스크립트에서 자주 쓰는 것)
