@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 import logging
 import os
 import traceback
@@ -21,8 +20,8 @@ from routix.runner.single_instance_runner import (
 )
 from routix.type_defs import RunMode
 
+from ..io import dump_preemptive_schedule_yaml, dump_schedule_yaml, dump_solution_json
 from ..logging_setup import get_logging_args, setup_logging
-from ..io import dump_preemptive_schedule_yaml, dump_schedule_yaml
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from .controller import FFcDDWSubroutineController
@@ -32,19 +31,6 @@ logger = logging.getLogger(__name__)
 
 _MANIFEST_SCHEMA_VERSION = 1
 _SC_LOGGER_PREFIX = "ffc_ddw_sum_et.orchestration.controller"
-
-
-def _json_default(obj):
-    """Handle numpy/pandas types for JSON serialization."""
-    import numpy as np
-
-    if isinstance(obj, (np.integer,)):
-        return int(obj)
-    if isinstance(obj, (np.floating,)):
-        return float(obj)
-    if hasattr(obj, "tolist"):
-        return obj.tolist()
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -426,43 +412,19 @@ class FFcDDWSingleInstanceRunner(
     def _save_solution(self, solution: FFcDDWSolution) -> str:
         """Save best solution as JSON."""
         layout: ArtifactLayout = self.layout  # type: ignore[assignment]
-        schedule = solution.schedule
-        data = {
-            "instance_name": self.ins_name,
-            "obj_value": solution.obj_value,
-            "obj_bound": solution.obj_bound,
-            "jobs": list(schedule.jobs),
-            "stages": list(schedule.stages),
-            "machines_per_stage": {
-                stage: list(mcs) for stage, mcs in schedule.machines_per_stage.items()
-            },
-            "operations": self._extract_operations(schedule),
-        }
         path = layout.artifact_path(
             "solution_json",
             scenario_name=self._scenario_name,
             instance_name=self.ins_name,
         )
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2, default=_json_default)
+        dump_solution_json(
+            solution.schedule,
+            path,
+            instance_name=self.ins_name,
+            obj_value=solution.obj_value,
+            obj_bound=solution.obj_bound,
+        )
         return str(path)
-
-    def _extract_operations(self, schedule) -> list[dict]:
-        """Extract operation-level data from schedule for JSON serialization."""
-        start_map = schedule.get_jik_2_start_time_map()
-        end_map = schedule.get_jik_2_end_time_map()
-        operations = []
-        for (job_id, stage_id, mc_id), start in sorted(start_map.items()):
-            operations.append(
-                {
-                    "stage": stage_id,
-                    "machine": mc_id,
-                    "job": job_id,
-                    "start": start,
-                    "end": end_map.get((job_id, stage_id, mc_id)),
-                }
-            )
-        return operations
 
     def _save_obj_log(self, history) -> None:
         """Save objective value trajectory as YAML."""

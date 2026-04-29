@@ -19,6 +19,7 @@ from routix.runner.multi_instance_concurrent_runner import (
 from routix.runner.multi_scenario_runner import MultiScenarioRunner
 from routix.type_defs import RunMode
 
+from ..io import schedule_keys as K
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
@@ -88,26 +89,26 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
         logger.exception("Failed to load solution json %s", solution_path)
         return
 
-    operations = data.get("operations") or []
+    operations = data.get(K.OPERATIONS) or []
     if not operations:
         return
 
     start_map: dict[tuple[str, str, str], int] = {}
     end_map: dict[tuple[str, str, str], int] = {}
     for op in operations:
-        key = (op["job"], op["stage"], op["machine"])
-        start_map[key] = int(op["start"])
-        end_map[key] = int(op["end"])
+        key = (op[K.OP_JOB], op[K.OP_STAGE], op[K.OP_MACHINE])
+        start_map[key] = int(op[K.OP_START])
+        end_map[key] = int(op[K.OP_END])
 
     try:
         GanttPlotter().export(
             png_path,
             start_map,
             end_map,
-            job_list=data.get("jobs"),
-            stage_list=data.get("stages"),
-            machine_list_per_stage=data.get("machines_per_stage"),
-            all_job_list=data.get("jobs"),
+            job_list=data.get(K.JOBS),
+            stage_list=data.get(K.STAGES),
+            machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
+            all_job_list=data.get(K.JOBS),
         )
     except Exception:
         logger.exception("Failed to render Gantt for %s", solution_path)
@@ -137,29 +138,29 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
         logger.exception("Failed to peek yaml %s", yaml_path)
         return
 
-    is_preemptive = "segments" in peek
+    is_preemptive = K.SEGMENTS in peek
 
     try:
         if is_preemptive:
             data = load_preemptive_schedule_yaml(yaml_path)
-            segment_records = data.get("segments") or []
+            segment_records = data.get(K.SEGMENTS) or []
             if not segment_records:
                 return
             segments: list[tuple[str, str, str, int, int]] = [
                 (
-                    seg["job"],
-                    seg["stage"],
-                    seg["machine"],
-                    int(seg["start"]),
-                    int(seg["end"]),
+                    seg[K.OP_JOB],
+                    seg[K.OP_STAGE],
+                    seg[K.OP_MACHINE],
+                    int(seg[K.OP_START]),
+                    int(seg[K.OP_END]),
                 )
                 for seg in segment_records
             ]
-            stage_id = data.get("stageId")
-            machines_per_stage = data.get("machinesPerStage") or {}
+            stage_id = data.get(K.STAGE_ID)
+            machines_per_stage = data.get(K.MACHINES_PER_STAGE) or {}
             machines = machines_per_stage.get(stage_id, []) if stage_id else []
-            jobs = data.get("jobs")
-            all_jobs = data.get("allJobs") or jobs
+            jobs = data.get(K.JOBS)
+            all_jobs = data.get(K.ALL_JOBS) or jobs
             PreemptiveGanttPlotter().export(
                 png_path,
                 segments,
@@ -170,23 +171,23 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
             )
         else:
             data = load_schedule_yaml(yaml_path)
-            operations = data.get("operations") or []
+            operations = data.get(K.OPERATIONS) or []
             if not operations:
                 return
             start_map: dict[tuple[str, str, str], int] = {}
             end_map: dict[tuple[str, str, str], int] = {}
             for op in operations:
-                key = (op["job"], op["stage"], op["machine"])
-                start_map[key] = int(op["start"])
-                end_map[key] = int(op["end"])
+                key = (op[K.OP_JOB], op[K.OP_STAGE], op[K.OP_MACHINE])
+                start_map[key] = int(op[K.OP_START])
+                end_map[key] = int(op[K.OP_END])
             GanttPlotter().export(
                 png_path,
                 start_map,
                 end_map,
-                job_list=data.get("jobs"),
-                stage_list=data.get("stages"),
-                machine_list_per_stage=data.get("machinesPerStage"),
-                all_job_list=data.get("jobs"),
+                job_list=data.get(K.JOBS),
+                stage_list=data.get(K.STAGES),
+                machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
+                all_job_list=data.get(K.JOBS),
             )
     except Exception:
         logger.exception("Failed to render Gantt for %s", yaml_path)
@@ -252,8 +253,7 @@ class FFcDDWMultiScenarioRunner(
                 "Construct one via init_ffc_artifact_layout() in main.py."
             )
         self.scenario_names = scenario_names or [
-            f"scenario_{i + 1}"
-            for i in range(len(kwargs.get("scenario_configs", [])))
+            f"scenario_{i + 1}" for i in range(len(kwargs.get("scenario_configs", [])))
         ]
         super().__init__(**kwargs)
         self.draw_gantt = draw_gantt
@@ -951,9 +951,7 @@ class FFcDDWReporter:
             "rendererName": "Table",
         }
 
-        path = self.layout.artifact_path(
-            "mcf_lb_lastStageOnlyObj_BKS_wintie_pivot"
-        )
+        path = self.layout.artifact_path("mcf_lb_lastStageOnlyObj_BKS_wintie_pivot")
         write_pivot_html(
             combined,
             path,
@@ -1015,9 +1013,7 @@ class FFcDDWReporter:
             f"{table_html}\n"
             "</body>\n</html>\n"
         )
-        path = self.layout.artifact_path(
-            "mcf_lb_lastStageOnlyObj_BKS_wintie_table"
-        )
+        path = self.layout.artifact_path("mcf_lb_lastStageOnlyObj_BKS_wintie_table")
         path.write_text(payload, encoding="utf8")
         logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie table written to %s", path)
 
