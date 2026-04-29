@@ -86,13 +86,13 @@ class FFcDDWSingleInstanceRunner(
                 "It is forwarded by FFcDDWMultiInstanceRunner."
             )
         self._scenario_name: str = scenario_name
+        super().__init__(*args, **kwargs)
         if self.ins_name is None:
             raise ValueError(
                 "FFcDDWSingleInstanceRunner requires an instance_name. "
                 "It is forwarded by FFcDDWMultiInstanceRunner."
             )
         self._ins_name: str = self.ins_name
-        super().__init__(*args, **kwargs)
         if kwargs.get("logger") is None:
             self.logger = logging.getLogger(
                 "ffc_ddw_sum_et.orchestration.FFcDDWSingleInstanceRunner."
@@ -116,8 +116,12 @@ class FFcDDWSingleInstanceRunner(
         if getattr(self, "layout", None) is None:
             super()._init_working_dir()
             return
-        self.working_dir = self._layout.instance_dir(
-            self._scenario_name, self._ins_name
+        if self.layout is None:
+            raise ValueError("layout is required for FFcDDWSingleInstanceRunner")
+        if self.ins_name is None:
+            raise ValueError("instance_name is required for FFcDDWSingleInstanceRunner")
+        self.working_dir = self.layout.instance_dir(
+            self._scenario_name, self.ins_name
         )
 
     def run(self):
