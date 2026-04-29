@@ -22,8 +22,8 @@ scenarios:
     output_subdir: due2_weight_pos
     subroutine_flow:
       - method: initialize_by_due2_weight_pos
-  - name: wxd3
+  - name: wxd1
     timelimit: 300.0
-    output_subdir: wxd3
+    output_subdir: wxd1
     subroutine_flow:
-      - method: initialize_by_wxd3
+      - method: initialize_by_wxd1
