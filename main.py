@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from routix.io.path import init_timestamped_working_dir
+from routix.io import RunRoot, init_run_root
 from routix.type_defs import RunMode
 
 from ffc_ddw_sum_et.logging_setup import setup_logging
@@ -19,9 +19,11 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWMultiInstanceRunner,
     FFcDDWMultiScenarioRunner,
     FFcDDWSingleInstanceRunner,
+    init_ffc_artifact_layout,
+    restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260427/neh_cp_config_15.yaml")
+CONFIG_PATH = Path("metadata/20260429/smoke_io_log.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -58,18 +60,26 @@ def main() -> None:
     mode = _parse_run_mode(config.get("run_mode", "FULL_RUN"))
     base_output_dir = Path(config.get("output_dir", "output"))
     if mode == RunMode.POST_PROCESS_ONLY:
-        output_dir = _resolve_post_process_dir(config, base_output_dir)
+        existing_dir = _resolve_post_process_dir(config, base_output_dir)
+        run_root = RunRoot(path=existing_dir, run_id=existing_dir.name)
     else:
-        output_dir = init_timestamped_working_dir(base_output_dir=base_output_dir)
-        shutil.copy2(config_path, output_dir / config_path.name)
+        run_root = init_run_root(base_output_dir=base_output_dir)
+        shutil.copy2(config_path, run_root.path / config_path.name)
 
-    setup_logging(None, quiet=args.quiet, verbose=args.verbose)
+    _validate_scenario_uniqueness(config.get("scenarios", []))
+    if mode == RunMode.POST_PROCESS_ONLY:
+        layout = restore_layout_from_run_dir(run_root)
+    else:
+        layout = init_ffc_artifact_layout(run_root)
+        layout.stamp()
+
+    setup_logging(layout.log_path("main"), quiet=args.quiet, verbose=args.verbose)
     logger = logging.getLogger("ffc_ddw_sum_et.main")
     logger.info("Starting main() at %s with run mode: %s", main_start_dt, mode.name)
     if mode == RunMode.POST_PROCESS_ONLY:
-        logger.info("Post-processing existing output directory: %s", output_dir)
+        logger.info("Post-processing existing output directory: %s", run_root.path)
     else:
-        logger.info("Run output directory: %s", output_dir)
+        logger.info("Run output directory: %s", run_root.path)
 
     instance_worker_cnt = config.get("instance_worker_cnt", 1)
     draw_gantt = bool(config.get("draw_gantt", True))
@@ -108,9 +118,10 @@ def main() -> None:
         instances=instances,
         shared_param_dict={},
         scenario_configs=scenario_configs,
-        output_dir=output_dir,
+        output_dir=run_root.path,
         base_output_metadata=output_metadata,
         mode=mode,
+        layout=layout,
         scenario_names=scenario_names,
         instance_worker_cnt=instance_worker_cnt,
         draw_gantt=draw_gantt,
@@ -183,6 +194,36 @@ def _resolve_post_process_dir(config: dict[str, Any], base_output_dir: Path) -> 
         "POST_PROCESS_ONLY requires 'analysis_dir_path' or 'analysis_timestamp' "
         "in the config YAML."
     )
+
+
+def _validate_scenario_uniqueness(scenarios: list[dict[str, Any]]) -> None:
+    """Fail-fast on duplicated scenario `name` or `output_subdir`.
+
+    Two scenarios sharing either coordinate would silently overwrite each
+    other's output directory; doc § 7.3 captures the prior incident.
+    """
+    seen_names: dict[str, list[int]] = {}
+    seen_subdirs: dict[str, list[int]] = {}
+    for i, sc in enumerate(scenarios):
+        name = sc.get("name", f"scenario_{i + 1}")
+        seen_names.setdefault(name, []).append(i)
+        subdir = sc.get("output_subdir") or name
+        seen_subdirs.setdefault(subdir, []).append(i)
+    dups: list[tuple[str, list[int]]] = []
+    for k, v in seen_names.items():
+        if len(v) > 1:
+            dups.append((f"name={k!r}", v))
+    for k, v in seen_subdirs.items():
+        if len(v) > 1:
+            dups.append((f"output_subdir={k!r}", v))
+    if dups:
+        details = "; ".join(f"{k} at indices {v}" for k, v in dups)
+        raise ValueError(
+            f"duplicate scenario coordinates: {details}. Each scenario must "
+            "have a unique name AND unique output_subdir to prevent silent "
+            "overwrite of experiment results (see docs/io/"
+            "20260429_artifact_manager.md § 7.3)."
+        )
 
 
 if __name__ == "__main__":

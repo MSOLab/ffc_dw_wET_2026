@@ -22,9 +22,11 @@ class FFcDDWMultiInstanceRunner(
         self,
         instance_worker_cnt: int = 2,
         setup_logging_args: tuple | None = None,
+        scenario_name: str | None = None,
         **kwargs: Any,
     ):
         self._setup_logging_args = setup_logging_args
+        self._scenario_name = scenario_name
         if kwargs.get("logger") is None:
             kwargs["logger"] = logging.getLogger(
                 "ffc_ddw_sum_et.orchestration.FFcDDWMultiInstanceRunner"
@@ -40,7 +42,7 @@ class FFcDDWMultiInstanceRunner(
         )
 
     def _init_single_instance_runners(self) -> None:
-        """Pass process-local logging args to each single-instance runner."""
+        """Pass layout + scenario_name + logging args to each single-instance runner."""
         self.runners.clear()
         self.results.clear()
 
@@ -54,6 +56,8 @@ class FFcDDWMultiInstanceRunner(
                 output_metadata=self.output_metadata,
                 mode=self.mode,
                 logger=self._make_runner_logger(instance),
+                layout=self.layout,
+                scenario_name=self._scenario_name,
                 setup_logging_args=self._setup_logging_args,
             )
             self.runners.append(runner)

@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+from routix.io import ArtifactLayout
 
 logger = logging.getLogger(__name__)
 
@@ -202,12 +203,11 @@ def write_pivot_html(
 
 def write_post_run_pivot_artifacts(
     summary_csv: Path,
-    output_dir: Path,
-    run_id: str,
+    layout: ArtifactLayout,
     hybrid_match_csv: Path,
     bks_table_csv: Path,
 ) -> None:
-    """Build the comparison CSV and three pivot HTMLs in ``output_dir``.
+    """Build the comparison CSV and three pivot HTMLs at run scope.
 
     Skipped silently when ``hybrid_match_csv`` or ``bks_table_csv`` does not
     exist.
@@ -222,7 +222,7 @@ def write_post_run_pivot_artifacts(
     summary_df = pd.read_csv(summary_csv)
     comp_df = build_rpdf_comparison_df(summary_df, hybrid_match_csv, bks_table_csv)
 
-    comp_path = output_dir / f"{run_id}_rpdf_comparison.csv"
+    comp_path = layout.artifact_path("rpdf_comparison_csv")
     comp_df.to_csv(comp_path, index=False)
     logger.info("Wrote %s (%d rows)", comp_path, len(comp_df))
 
@@ -230,7 +230,7 @@ def write_post_run_pivot_artifacts(
 
     write_pivot_html(
         comp_df,
-        output_dir / f"{run_id}_rpdf_dashboard.html",
+        layout.artifact_path("rpdf_dashboard"),
         initial_state={
             **common_axes,
             "vals": ["RPDf_BKS_data"],
@@ -247,7 +247,7 @@ def write_post_run_pivot_artifacts(
     win_tie_df = win_tie_df.drop(columns=["bestObj", "BKS_data", "RPDf_BKS_data"])
     write_pivot_html(
         win_tie_df,
-        output_dir / f"{run_id}_win_tie_dashboard.html",
+        layout.artifact_path("win_tie_dashboard"),
         initial_state={
             **common_axes,
             "vals": ["won", "tied"],
@@ -260,7 +260,7 @@ def write_post_run_pivot_artifacts(
 
     write_pivot_html(
         comp_df,
-        output_dir / f"{run_id}_time_p_dashboard.html",
+        layout.artifact_path("time_p_dashboard"),
         initial_state={
             **common_axes,
             "vals": ["time%"],

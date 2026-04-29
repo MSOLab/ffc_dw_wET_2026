@@ -10,8 +10,12 @@ import traceback
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from routix.io import dump_yaml, load_yaml
-from routix.report import SubroutineReportStatistics
+from routix.io import ArtifactLayout, dump_yaml, load_yaml
+from routix.logging import (
+    PrefixLevelFilter,
+    attach_fh_to_logger,
+    detach_fh_from_logger,
+)
 from routix.runner.single_instance_runner import (
     SingleInstanceRunner,
 )
@@ -27,6 +31,7 @@ from .solution_manager import FFcDDWSolution
 logger = logging.getLogger(__name__)
 
 _MANIFEST_SCHEMA_VERSION = 1
+_SC_LOGGER_PREFIX = "ffc_ddw_sum_et.orchestration.controller"
 
 
 def _json_default(obj):
@@ -88,32 +93,75 @@ class FFcDDWSingleInstanceRunner(
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._setup_logging_args = kwargs.pop("setup_logging_args", None)
+        self._scenario_name: str | None = kwargs.pop("scenario_name", None)
         super().__init__(*args, **kwargs)
         if kwargs.get("logger") is None:
             self.logger = logging.getLogger(
                 "ffc_ddw_sum_et.orchestration.FFcDDWSingleInstanceRunner."
                 f"{self.ins_name}"
             )
+        if self.layout is None:
+            raise ValueError(
+                "FFcDDWSingleInstanceRunner requires a non-None ArtifactLayout. "
+                "It is forwarded by FFcDDWMultiInstanceRunner."
+            )
+        if self._scenario_name is None:
+            raise ValueError(
+                "FFcDDWSingleInstanceRunner requires a scenario_name. "
+                "It is forwarded by FFcDDWMultiInstanceRunner."
+            )
+
+    def _init_working_dir(self) -> None:
+        """Resolve working_dir through the layout when one is bound, else fall
+        back to the routix base behavior.
+
+        The layout call is gated so that test fixtures constructing a runner
+        directly without a layout can still rely on the legacy
+        `output_dir / ins_name` directory.
+        """
+        if getattr(self, "layout", None) is None or self._scenario_name is None:
+            super()._init_working_dir()
+            return
+        layout: ArtifactLayout = self.layout
+        self.working_dir = layout.instance_dir(self._scenario_name, self.ins_name)
 
     def run(self):
         self._run_error: str | None = None
         previous_logging_args = get_logging_args()
         restore_logging = False
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
+        sc_logger_name = f"{_SC_LOGGER_PREFIX}.{self.ins_name}"
 
         if self.mode == RunMode.FULL_RUN and self._setup_logging_args is not None:
             _, quiet, verbose = self._setup_logging_args
-            setup_logging(
-                self.working_dir / f"{self.ins_name}_solve.log",
-                quiet,
-                verbose,
+            sir_log_path = layout.log_path(
+                "single_instance_runner",
+                scenario_name=self._scenario_name,
+                instance_name=self.ins_name,
             )
+            setup_logging(sir_log_path, quiet, verbose)
+            self._attach_sc_filter_to_root()
             restore_logging = True
 
         try:
             if self.mode == RunMode.FULL_RUN:
-                self.ctrlr = self.get_controller()
-                self.ctrlr.set_working_dir(self.working_dir)
-                self.ctrlr.run()
+                sc_log_path = layout.log_path(
+                    "subroutine_controller",
+                    scenario_name=self._scenario_name,
+                    instance_name=self.ins_name,
+                )
+                attach_fh_to_logger(sc_logger_name, sc_log_path)
+                try:
+                    self.ctrlr = self.get_controller()
+                    self.ctrlr.set_artifact_layout(
+                        layout,
+                        scenario_name=self._scenario_name,
+                        instance_name=self.ins_name,
+                    )
+                    self.ctrlr.set_working_dir(self.working_dir)
+                    self.ctrlr.run()
+                finally:
+                    detach_fh_from_logger(sc_logger_name)
         except Exception:
             self._run_error = traceback.format_exc()
             self.logger.exception("Error running instance %s", self.ins_name)
@@ -123,6 +171,27 @@ class FFcDDWSingleInstanceRunner(
             finally:
                 if restore_logging:
                     setup_logging(*previous_logging_args)
+
+    def _attach_sc_filter_to_root(self) -> None:
+        """Attach a `PrefixLevelFilter` for the SC namespace to every managed
+        file handler on the root logger that lacks one.
+
+        Idempotent across SIR.run calls in the same process: each handler is
+        tagged after the filter is attached, and we skip handlers already
+        carrying our filter. Stream handlers are left untouched so console
+        output keeps SC INFO/DEBUG records.
+        """
+        root = logging.getLogger()
+        for h in root.handlers:
+            if not isinstance(h, logging.FileHandler):
+                continue
+            if any(
+                isinstance(f, PrefixLevelFilter)
+                and getattr(f, "_prefix", None) == _SC_LOGGER_PREFIX
+                for f in h.filters
+            ):
+                continue
+            h.addFilter(PrefixLevelFilter(_SC_LOGGER_PREFIX))
 
     def get_controller(self) -> FFcDDWSubroutineController:
         return FFcDDWSubroutineController(
@@ -159,6 +228,12 @@ class FFcDDWSingleInstanceRunner(
         """Write every per-instance file then build + atomically write the
         manifest. Returns the same ``InstanceResult`` that's saved to disk.
         """
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
+        scope: dict[str, str] = {
+            "scenario_name": self._scenario_name,  # type: ignore[dict-item]
+            "instance_name": self.ins_name,
+        }
+
         solution_manager = controller.solution_manager
 
         first_report = (
@@ -198,31 +273,18 @@ class FFcDDWSingleInstanceRunner(
         )
 
         solution_path = None
-        if incumbent is not None and self.working_dir is not None:
+        if incumbent is not None:
             try:
                 solution_path = self._save_solution(incumbent)
             except Exception:
                 self.logger.exception("Error saving solution for %s", self.ins_name)
-            try:
-                dump_schedule_yaml(
-                    incumbent.schedule,
-                    self.working_dir / f"{self.ins_name}_schedule.yaml",
-                    instance_name=self.ins_name,
-                    obj_value=incumbent.obj_value,
-                    obj_bound=incumbent.obj_bound,
-                )
-            except Exception:
-                self.logger.exception(
-                    "Error saving schedule yaml for %s", self.ins_name
-                )
 
         last_stage_cp_sat = getattr(controller, "last_stage_cp_sat_solution", None)
-        if last_stage_cp_sat is not None and self.working_dir is not None:
+        if last_stage_cp_sat is not None:
             try:
                 dump_schedule_yaml(
                     last_stage_cp_sat.schedule,
-                    self.working_dir
-                    / f"{self.ins_name}_last_stage_cp_sat_schedule.yaml",
+                    layout.artifact_path("last_stage_cp_sat_schedule", **scope),
                     instance_name=f"{self.ins_name}_last_stage_cp_sat",
                     obj_value=last_stage_cp_sat.obj_value,
                     obj_bound=last_stage_cp_sat.obj_bound,
@@ -234,40 +296,41 @@ class FFcDDWSingleInstanceRunner(
                 )
 
         phase_schedules = getattr(controller, "mcf_lb_phase_schedules", None) or []
-        if phase_schedules and self.working_dir is not None:
-            for name, sched in phase_schedules:
-                if sched is None:
-                    continue
-                yaml_path = self.working_dir / f"{self.ins_name}_{name}.yaml"
-                try:
-                    if isinstance(sched, MCFPreemptiveSchedule):
-                        dump_preemptive_schedule_yaml(
-                            yaml_path,
-                            instance_name=f"{self.ins_name}_{name}",
-                            stage_id=sched.stage_id,
-                            machines=sched.machines,
-                            jobs=self.instance.job_id_list,
-                            segments=sched.to_gantt_segments(),
-                            all_jobs=self.instance.job_id_list,
-                        )
-                    else:
-                        dump_schedule_yaml(
-                            sched,
-                            yaml_path,
-                            instance_name=f"{self.ins_name}_{name}",
-                        )
-                except Exception:
-                    self.logger.exception(
-                        "Error saving %s yaml for %s", name, self.ins_name
+        for name, sched in phase_schedules:
+            if sched is None:
+                continue
+            yaml_path = layout.artifact_path(
+                "mcf_lb_phase_schedule", phase_name=name, **scope
+            )
+            try:
+                if isinstance(sched, MCFPreemptiveSchedule):
+                    dump_preemptive_schedule_yaml(
+                        yaml_path,
+                        instance_name=f"{self.ins_name}_{name}",
+                        stage_id=sched.stage_id,
+                        machines=sched.machines,
+                        jobs=self.instance.job_id_list,
+                        segments=sched.to_gantt_segments(),
+                        all_jobs=self.instance.job_id_list,
                     )
+                else:
+                    dump_schedule_yaml(
+                        sched,
+                        yaml_path,
+                        instance_name=f"{self.ins_name}_{name}",
+                    )
+            except Exception:
+                self.logger.exception(
+                    "Error saving %s yaml for %s", name, self.ins_name
+                )
 
         diag = getattr(controller, "mcf_lb_diagnostic", None)
         diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None
-        if diag_dict is not None and self.working_dir is not None:
+        if diag_dict is not None:
             try:
                 dump_yaml(
                     diag_dict,
-                    self.working_dir / f"{self.ins_name}_mcf_lb_diagnostic.yaml",
+                    layout.artifact_path("mcf_lb_diagnostic", **scope),
                 )
             except Exception:
                 self.logger.exception(
@@ -276,17 +339,11 @@ class FFcDDWSingleInstanceRunner(
 
         makespan = int(incumbent.schedule.makespan) if incumbent is not None else None
 
-        if self.working_dir is not None and last_report is not None:
+        if last_report is not None:
             try:
                 self._save_obj_log(solution_manager.history)
             except Exception:
                 self.logger.exception("Error saving obj_log for %s", self.ins_name)
-            try:
-                self._save_statistics(
-                    controller.method_call_counts, solution_manager.history
-                )
-            except Exception:
-                self.logger.exception("Error saving statistics for %s", self.ins_name)
 
         machines = self.instance.stage_2_machines_map
         first_stage = (
@@ -321,13 +378,12 @@ class FFcDDWSingleInstanceRunner(
             makespan=makespan,
         )
 
-        if self.working_dir is not None:
-            try:
-                self._write_instance_result_manifest(result)
-            except Exception:
-                self.logger.exception(
-                    "Error writing instance_result manifest for %s", self.ins_name
-                )
+        try:
+            self._write_instance_result_manifest(result)
+        except Exception:
+            self.logger.exception(
+                "Error writing instance_result manifest for %s", self.ins_name
+            )
 
         return result
 
@@ -337,20 +393,28 @@ class FFcDDWSingleInstanceRunner(
         Written last in ``_persist_run_artifacts`` so its presence implies
         every other per-instance artifact has been written.
         """
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
         payload = {
             "_schema_version": _MANIFEST_SCHEMA_VERSION,
             **_to_serializable(asdict(result)),
         }
-        final = self.working_dir / f"{self.ins_name}_instance_result.yaml"
+        final = layout.artifact_path(
+            "instance_result_manifest",
+            scenario_name=self._scenario_name,
+            instance_name=self.ins_name,
+        )
         tmp = final.with_suffix(".yaml.tmp")
         dump_yaml(payload, tmp)
         os.replace(tmp, final)
 
     def _load_instance_result(self) -> InstanceResult:
         """Load manifest and project to current ``InstanceResult`` schema."""
-        if self.working_dir is None:
-            raise RuntimeError("working_dir is None")
-        path = self.working_dir / f"{self.ins_name}_instance_result.yaml"
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
+        path = layout.artifact_path(
+            "instance_result_manifest",
+            scenario_name=self._scenario_name,
+            instance_name=self.ins_name,
+        )
         raw = load_yaml(path)
         if not isinstance(raw, dict):
             raise RuntimeError(f"manifest is not a mapping: {path}")
@@ -361,6 +425,7 @@ class FFcDDWSingleInstanceRunner(
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:
         """Save best solution as JSON."""
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
         schedule = solution.schedule
         data = {
             "instance_name": self.ins_name,
@@ -373,7 +438,11 @@ class FFcDDWSingleInstanceRunner(
             },
             "operations": self._extract_operations(schedule),
         }
-        path = self.working_dir / f"{self.ins_name}_solution.json"
+        path = layout.artifact_path(
+            "solution_json",
+            scenario_name=self._scenario_name,
+            instance_name=self.ins_name,
+        )
         with open(path, "w") as f:
             json.dump(data, f, indent=2, default=_json_default)
         return str(path)
@@ -395,33 +464,9 @@ class FFcDDWSingleInstanceRunner(
             )
         return operations
 
-    def _save_statistics(self, method_call_counts, history) -> None:
-        """Save per-instance subroutine-flow statistics as JSON and YAML.
-
-        Aggregates the per-step ``SubroutineReport`` entries from this instance's
-        trajectory. ``SubroutineReportStatistics`` is designed for a single
-        instance's history; using one object per instance keeps
-        ``improvementRatio`` semantically correct (best vs first in THIS instance).
-        """
-        reports = [r.report for r in history if r.report is not None]
-        if not reports:
-            return
-        stats = SubroutineReportStatistics(
-            name=self.ins_name,
-            reports=reports,
-            method_call_counts=dict(method_call_counts),
-        )
-        stats.to_yaml(
-            self.working_dir / f"{self.ins_name}_statistics.yaml", is_maximize=False
-        )
-        stats.to_json(
-            self.working_dir / f"{self.ins_name}_statistics.json", is_maximize=False
-        )
-
     def _save_obj_log(self, history) -> None:
         """Save objective value trajectory as YAML."""
-        from routix.io import dump_yaml
-
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
         entries = []
         for i, record in enumerate(history):
             if record.report is not None:
@@ -438,4 +483,11 @@ class FFcDDWSingleInstanceRunner(
                     }
                 )
         if entries:
-            dump_yaml(entries, self.working_dir / f"{self.ins_name}_obj_log.yaml")
+            dump_yaml(
+                entries,
+                layout.artifact_path(
+                    "obj_log",
+                    scenario_name=self._scenario_name,
+                    instance_name=self.ins_name,
+                ),
+            )

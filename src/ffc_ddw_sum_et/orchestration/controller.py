@@ -504,11 +504,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         # Phase 2: solve the last-stage CP-SAT model for each seed, pick best.
+        _tl_suffix = (
+            f" with time limit {last_stage_only_tl_seconds:.2f} seconds"
+            if last_stage_only_tl_seconds is not None
+            else ""
+        )
         self.logger.info(
-            "Phase 1 MCF LB: %d; preparing Phase 2 last-stage-only CP-SAT solves "
-            "with time limit %.2f seconds",
+            "Phase 1 MCF LB: %d; preparing Phase 2 last-stage-only CP-SAT solves%s",
             int(obj_bound_by_mcf),
-            last_stage_only_tl_seconds,
+            _tl_suffix,
         )
         phase2 = run_phase2(
             phase1,
@@ -591,10 +595,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         # Phase 4: profile-fix CP-SAT full solve.
+        _tl_suffix = (
+            f" with time limit {full_cp_tl_seconds:.2f} seconds"
+            if full_cp_tl_seconds is not None
+            else ""
+        )
         self.logger.info(
-            "Phase 3 dispatched objective: %d; preparing Phase 4 full CP-SAT solve with time limit %.2f seconds",
+            "Phase 3 dispatched objective: %d; preparing Phase 4 full CP-SAT solve%s",
             int(phase3.dispatched_obj),
-            full_cp_tl_seconds,
+            _tl_suffix,
         )
         phase4 = run_phase4(
             phase1,

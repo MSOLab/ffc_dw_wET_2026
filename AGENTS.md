@@ -16,13 +16,15 @@ can pick up the same architectural intent.
   `docs/io-principles.md`
 - Algorithm execution contract rules:
   `docs/algorithm-principles.md`
+- Output directory schema (`ArtifactLayout`) and SC log lifecycle:
+  `docs/io/20260429_artifact_manager.md`
 
 ## Working Agreement
 
 - If a change touches `src/ffc_ddw_sum_et/io/` or code that imports from it,
-  read `docs/architecture/io-principles.md` first.
+  read `docs/io-principles.md` first.
 - If a change touches `src/ffc_ddw_sum_et/algorithm/` or code that imports from
-  it, read `docs/architecture/algorithm-principles.md` first.
+  it, read `docs/algorithm-principles.md` first.
 - Treat the IO subtree as an extractable package candidate. Avoid introducing
   new dependencies from `io` into parent or sibling domain packages.
 - Treat the algorithm boundary as a stable execution contract candidate. Avoid
