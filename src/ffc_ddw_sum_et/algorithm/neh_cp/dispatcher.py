@@ -133,14 +133,14 @@ class NehCpDispatcher:
                 if last_obj_value <= criteria_value:
                     skip_pf = True
             if partial_sol is not None and not skip_pf:
-                by_machine, stride = decode_pf_method(option.pf_method)
+                by_machine, stride_set = decode_pf_method(option.pf_method)
                 BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
                     mdl,
                     params,
                     op_vars,
                     partial_sol,
                     profile_fix_by_machine=by_machine,
-                    machine_precedence_stride=stride,
+                    machine_precedence_stride_set=stride_set,
                 )
 
             base = (
@@ -278,14 +278,14 @@ class NehCpDispatcher:
                     minimize_makespan_lex=True,
                     et_ub=stage1_obj,
                 )
-                by_machine, stride = decode_pf_method(option.pf_method)
+                by_machine, stride_set = decode_pf_method(option.pf_method)
                 BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
                     mdl_2,
                     params_2,
                     op_vars_2,
                     partial_sol,
                     profile_fix_by_machine=by_machine,
-                    machine_precedence_stride=stride,
+                    machine_precedence_stride_set=stride_set,
                 )
                 BaseModelBuilder.apply_hints_from_schedule(
                     mdl_2, params_2, op_vars_2, et_vars_2, partial_sol

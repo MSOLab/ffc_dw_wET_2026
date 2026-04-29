@@ -112,6 +112,39 @@ def _render_gantt_from_yaml(yaml_path: Path) -> None:
         logger.exception("Failed to render Gantt for %s", yaml_path)
 
 
+def _render_heatmap_from_yaml(yaml_path: Path) -> None:
+    """Render the signed C-cost HTML heatmap from one heatmap YAML.
+
+    Module-level so it's picklable by ``ProcessPoolExecutor``. plotly is
+    imported inside the worker to keep the algorithm process clean.
+    """
+    try:
+        from ..io import (
+            heatmap_title,
+            load_signed_cost_heatmap_yaml,
+            make_figure,
+        )
+    except ImportError:
+        logger.warning("plotly/numpy not available, skipping %s", yaml_path)
+        return
+
+    try:
+        data = load_signed_cost_heatmap_yaml(yaml_path)
+    except Exception:
+        logger.exception("Failed to load heatmap yaml %s", yaml_path)
+        return
+
+    if not data.y_labels or not data.t_axis or data.Z.size == 0:
+        return
+
+    html_path = yaml_path.with_suffix(".html")
+    try:
+        fig = make_figure(data, title=heatmap_title(data))
+        fig.write_html(str(html_path), include_plotlyjs="cdn")
+    except Exception:
+        logger.exception("Failed to render heatmap for %s", yaml_path)
+
+
 def _render_preemptive_gantt_from_yaml(yaml_path: Path) -> None:
     """Render a preemptive Gantt PNG from one MCF-preemptive schedule YAML."""
     try:
@@ -801,7 +834,7 @@ class FFcDDWReporter:
             mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
                 axis=1, min_count=1
             )
-            timelimit = df["n"] * df["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+            timelimit = df["n"] * df["c"] * TIMELIMIT_NC_MULTIPLIER
             df["time%"] = mcf_lb_sec / timelimit
             frames.append(df[keep_cols])
 
@@ -847,7 +880,7 @@ class FFcDDWReporter:
             mcf_lb_sec = df[list(self._MCF_LB_STEP_SEC_COLUMNS)].sum(
                 axis=1, min_count=1
             )
-            timelimit = df["n"] * df["c"] * self._MCF_LB_TIMELIMIT_FACTOR
+            timelimit = df["n"] * df["c"] * TIMELIMIT_NC_MULTIPLIER
             time_pct = mcf_lb_sec / timelimit
             rows.append(
                 {
@@ -935,14 +968,18 @@ class FFcDDWReporter:
             logger.info("Statistics YAML written to %s", path)
 
     def _generate_gantt_charts(self) -> None:
-        """Render Gantt PNGs from every `*_schedule.yaml` under output_dir.
+        """Render Gantt PNGs from every `*_schedule.yaml` under output_dir, plus
+        signed C-cost HTML heatmaps from every `*_C_heatmap.yaml`.
 
         Gated by ``draw_gantt``. When enabled, rendering fans out across a
-        ``ProcessPoolExecutor`` sized by ``painter_thread_cnt``; matplotlib is
-        imported inside the worker so the algorithm path still pays nothing.
+        ``ProcessPoolExecutor`` sized by ``painter_thread_cnt``; matplotlib /
+        plotly are imported inside the worker so the algorithm path still
+        pays nothing.
 
         Preemptive schedule YAMLs (``*_mcf_preemptive_schedule.yaml``) use a
-        different schema and a dedicated renderer.
+        different schema and a dedicated renderer. Heatmap YAMLs
+        (``*_C_heatmap.yaml``) are written by ``apply_lb_by_mcf`` when its
+        ``draw_heatmap`` kwarg is True.
         """
         if not self.draw_gantt:
             logger.info("draw_gantt=False; skipping Gantt chart rendering")
@@ -955,19 +992,24 @@ class FFcDDWReporter:
             if p.name.endswith("_mcf_preemptive_schedule.yaml")
         ]
         regular_paths = [p for p in all_yaml_paths if p not in preemptive_paths]
+        heatmap_paths = sorted(self.output_dir.rglob("*_C_heatmap.yaml"))
 
-        jobs: list[tuple[Path, Any]] = [
-            (p, _render_gantt_from_yaml) for p in regular_paths
-        ] + [(p, _render_preemptive_gantt_from_yaml) for p in preemptive_paths]
+        jobs: list[tuple[Path, Any]] = (
+            [(p, _render_gantt_from_yaml) for p in regular_paths]
+            + [(p, _render_preemptive_gantt_from_yaml) for p in preemptive_paths]
+            + [(p, _render_heatmap_from_yaml) for p in heatmap_paths]
+        )
         if not jobs:
             return
 
         worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
         logger.info(
-            "Rendering %d Gantt charts (%d regular, %d preemptive) with %d worker(s)",
+            "Rendering %d artifacts (%d Gantt, %d preemptive, %d heatmap) "
+            "with %d worker(s)",
             len(jobs),
             len(regular_paths),
             len(preemptive_paths),
+            len(heatmap_paths),
             worker_cnt,
         )
         if worker_cnt == 1:

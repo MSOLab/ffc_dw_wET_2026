@@ -1,0 +1,26 @@
+# LB-only experiment: report MCF preemptive lower bound without building a
+# feasible full schedule. SubroutineReport returns obj_value=None,
+# obj_bound=mcf_lb. No incumbent is registered, so no Gantt / *_schedule.yaml
+# artifacts are emitted; only the per-subroutine report log carries the bound.
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0, 1439 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260428
+
+instance_worker_cnt: 48
+
+draw_gantt: true
+painter_thread_cnt: 48
+
+scenarios:
+  - name: mcf_lb_only
+    timelimit: 60.0
+    output_subdir: mcf_lb_only
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true

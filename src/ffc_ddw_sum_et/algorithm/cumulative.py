@@ -15,28 +15,31 @@ from ffc_ddw_sum_et.solution.ffc_schedule import (
     StageIdType,
 )
 
-PFMethod = Literal["PF0", "PF1", "PF2"]
+PFMethod = Literal["PF0", "PF1", "PF2", "MPF23"]
 """Profile-fix precedence policy applied after dispatch:
 
 - ``"PF0"``: stage-level time-based successor selection (no per-machine chain).
 - ``"PF1"``: per-machine precedence chain with stride 1 (adjacent).
 - ``"PF2"``: per-machine precedence chain with stride 2 (every-other).
+- ``"MPF23"``: combined per-machine precedence chains with strides 2 and 3.
 
 Callers use ``None`` in place of a ``PFMethod`` to skip profile-fix precedence constraints
 and allow the solver full freedom to explore.
 """
 
 
-def decode_pf_method(pf_method: PFMethod) -> tuple[bool, int]:
-    """Decode ``PFMethod`` into (profile_fix_by_machine, machine_precedence_stride)."""
+def decode_pf_method(pf_method: PFMethod) -> tuple[bool, frozenset[int]]:
+    """Decode ``PFMethod`` into (profile_fix_by_machine, machine_precedence_stride_set)."""
     if pf_method == "PF0":
-        return (False, 1)
+        return (False, frozenset([1]))
     if pf_method == "PF1":
-        return (True, 1)
+        return (True, frozenset([1]))
     if pf_method == "PF2":
-        return (True, 2)
+        return (True, frozenset([2]))
+    if pf_method == "MPF23":
+        return (True, frozenset([2, 3]))
     raise ValueError(
-        f"Unknown pf_method: {pf_method!r}; expected 'PF0', 'PF1', or 'PF2'."
+        f"Unknown pf_method: {pf_method!r}; expected 'PF0', 'PF1', 'PF2', or 'MPF23'."
     )
 
 
@@ -416,7 +419,7 @@ class BaseModelBuilder:
         variables: OperationVars,
         current_schedule: FFcSchedule,
         profile_fix_by_machine: bool = False,
-        machine_precedence_stride: int = 1,
+        machine_precedence_stride_set: frozenset[int] = frozenset([1]),
     ) -> None:
         """
         Add precedence constraints from a reference dispatch schedule.
@@ -439,15 +442,15 @@ class BaseModelBuilder:
             profile_fix_by_machine (bool, optional): If True, fix precedence by machine
                 sequence; otherwise apply stage-level time-based selection.
                 Defaults to False.
-            machine_precedence_stride (int, optional): Gap between predecessor and
+            machine_precedence_stride_set (frozenset[int], optional): Set of gaps between predecessor and
                 successor positions when ``profile_fix_by_machine=True``.
                 - 1: adjacent precedence (default), e.g. 1->2->3->4->5
                 - 2: every-other precedence, e.g. 1->3->5 and 2->4
                 Ignored when ``profile_fix_by_machine=False``.
-                Defaults to 1.
+                Defaults to frozenset([1]).
         """
-        if machine_precedence_stride < 1:
-            raise ValueError("machine_precedence_stride must be >= 1")
+        if not machine_precedence_stride_set:
+            raise ValueError("machine_precedence_stride_set must be a non-empty set")
 
         start_time_map = current_schedule.get_jik_2_start_time_map()
         end_time_map = current_schedule.get_jik_2_end_time_map()
@@ -458,12 +461,13 @@ class BaseModelBuilder:
                     job_tuple_seq = current_schedule.get_job_sequence(i, m)
                     seq_len = len(job_tuple_seq)
 
-                    for idx in range(seq_len - machine_precedence_stride):
-                        j1 = job_tuple_seq[idx][0]
-                        j2 = job_tuple_seq[idx + machine_precedence_stride][0]
-                        BaseModelBuilder.add_fixed_operation_precedence_constraint(
-                            mdl, params, variables, j1, j2, i
-                        )
+                    for stride in machine_precedence_stride_set:
+                        for idx in range(seq_len - stride):
+                            j1 = job_tuple_seq[idx][0]
+                            j2 = job_tuple_seq[idx + stride][0]
+                            BaseModelBuilder.add_fixed_operation_precedence_constraint(
+                                mdl, params, variables, j1, j2, i
+                            )
             else:
                 current_j_set = {j for j, ip, _ in start_time_map if ip == i}
                 current_j_list = [j for j in params.j_list if j in current_j_set]
