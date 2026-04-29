@@ -130,14 +130,14 @@ def solve_last_stage_with_profile_fix(
             obj_lb=obj_lb,
         )
         if pf_method is not None:
-            by_machine, stride = decode_pf_method(pf_method)
+            by_machine, stride_set = decode_pf_method(pf_method)
             BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
                 ls_mdl,
                 ls_params,
                 ls_ops_vars,
                 current_schedule,
                 profile_fix_by_machine=by_machine,
-                machine_precedence_stride=stride,
+                machine_precedence_stride_set=stride_set,
             )
         BaseModelBuilder.apply_hints_from_schedule(
             ls_mdl, ls_params, ls_ops_vars, ls_et_vars, current_schedule
@@ -296,14 +296,14 @@ def solve_full_cp_with_profile_fix(
             instance, horizon=horizon, obj_lb=obj_lb
         )
         if pf_method is not None:
-            by_machine, stride = decode_pf_method(pf_method)
+            by_machine, stride_set = decode_pf_method(pf_method)
             BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
                 pf_mdl,
                 pf_params,
                 pf_op_vars,
                 current_schedule,
                 profile_fix_by_machine=by_machine,
-                machine_precedence_stride=stride,
+                machine_precedence_stride_set=stride_set,
             )
         BaseModelBuilder.apply_hints_from_schedule(
             pf_mdl, pf_params, pf_op_vars, pf_et_vars, current_schedule

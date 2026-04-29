@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Literal, Sequence
+from typing import Callable, Literal, Sequence
 
 from ortools.sat.python import cp_model
 from routix.io import dump_yaml
@@ -22,7 +22,11 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
 )
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import (
+    SeedTag,
+    run_phase1,
+    solve_mcf_lb,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
@@ -376,6 +380,78 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             FFcDDWSolution(schedule=best_sch, obj_value=obj_value, obj_bound=None),
         )
         return report
+
+    def apply_lb_by_mcf(
+        self,
+        draw_heatmap: bool = False,
+        heatmap_sort: Literal["due2-window", "neh-cp"] = "due2-window",
+    ) -> SubroutineReport:
+        """Step method: compute the MCF preemptive lower bound and report it
+        without constructing a feasible full schedule.
+
+        Solves the MCF relaxation, records ``mcf_lb`` on the diagnostic, and
+        returns a :class:`SubroutineReport` with ``obj_value=None`` and
+        ``obj_bound = mcf_lb``. No incumbent is registered with the solution
+        manager (this subroutine produces no full schedule), so no Gantt or
+        ``*_schedule.yaml`` is emitted for this step. The MCF preemptive
+        schedule is still stored on ``self.mcf_preemptive_schedule`` and
+        appended to ``self.mcf_lb_phase_schedules`` so downstream diagnostics
+        keyed off those attributes continue to work.
+
+        Args:
+            draw_heatmap: When ``True``, build the parallel-machine signed
+                C-cost matrix for the instance and dump it to
+                ``<ins>_C_heatmap.yaml`` next to the other per-instance
+                artifacts. The post-run reporter (gated by ``draw_gantt``)
+                renders the matching HTML.
+            heatmap_sort: Row ordering for the heatmap. ``"due2-window"``
+                sorts by ``max(r_j, d⁺-p)`` then ``d⁺`` then ``d⁻``;
+                ``"neh-cp"`` sorts by ``(max(w⁻, w⁺), w⁻+w⁺, window width)``.
+                Ignored when ``draw_heatmap`` is ``False``.
+        """
+        start_elapsed = time.monotonic()
+        diag = MCFLBDiagnostic()
+        self.mcf_lb_diagnostic = diag
+
+        mcf_result = solve_mcf_lb(self.instance, diag)
+        obj_bound_by_mcf = mcf_result.mcf_lb
+
+        self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
+        self.mcf_lb_phase_schedules.clear()
+        self.mcf_lb_phase_schedules.append(
+            ("1_mcf_preemptive_schedule", mcf_result.mcf_preemptive_schedule)
+        )
+
+        self.logger.info("apply_lb_by_mcf: MCF LB = %d", int(obj_bound_by_mcf))
+
+        if draw_heatmap:
+            from ..io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
+
+            yaml_path = self.try_get_file_path_for_subroutine("_C_heatmap.yaml")
+            if yaml_path is not None:
+                heatmap_data = build_signed_cost_matrix(
+                    self.instance,
+                    sort=heatmap_sort,
+                    x_jt_map=mcf_result.mcf.get_variable_value_dict(),
+                    obj_value=obj_bound_by_mcf,
+                )
+                dump_signed_cost_heatmap_yaml(yaml_path, heatmap_data)
+                self.logger.info(
+                    "apply_lb_by_mcf: wrote heatmap YAML to %s "
+                    "(jobs=%d, t-range=[%d..%d], x_jt cells=%d)",
+                    yaml_path,
+                    len(heatmap_data.y_labels),
+                    heatmap_data.t_axis[0],
+                    heatmap_data.t_axis[-1],
+                    len(heatmap_data.x_cells),
+                )
+
+        elapsed = time.monotonic() - start_elapsed
+        return SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=None,
+            obj_bound=obj_bound_by_mcf,
+        )
 
     def run_mcf_lb_4(
         self,
@@ -833,6 +909,92 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         return schedule, obj_value
 
+    def _dispatch_by_reversed_sequence_with_iit(
+        self, job_sequence: Sequence[str]
+    ) -> tuple[FFcSchedule, float]:
+        """Dispatch ``job_sequence`` via the reverse-instance + IIT pipeline.
+
+        Steps: stage-reverse the instance, dispatch ``reversed(job_sequence)``
+        with :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`
+        minimising makespan, unflip the result with
+        :meth:`FFcSchedule.as_reversed`, push left to semi-active form, then
+        insert idle time on the last stage.
+        """
+        instance = self.instance
+        reversed_instance = FFcDDWParameters.reverse_stages(instance)
+        rev_seq = list(reversed(job_sequence))
+
+        rev_dispatcher = MixedDispatcher(reversed_instance, logger=self.logger)
+        reversed_full_1 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
+            rev_seq,
+            machine_then_job=True,
+            criteria="makespan",
+        )
+        reversed_full_2 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
+            rev_seq,
+            machine_then_job=False,
+            criteria="makespan",
+        )
+        if reversed_full_1 is None and reversed_full_2 is None:
+            raise RuntimeError(
+                f"_dispatch_by_reversed_sequence_with_iit: MixedDispatcher "
+                f"produced no schedule for {instance.name}"
+            )
+        if reversed_full_1 is not None:
+            schedule_1 = reversed_full_1.as_reversed()
+        else:
+            schedule_1 = None
+        if reversed_full_2 is not None:
+            schedule_2 = reversed_full_2.as_reversed()
+        else:
+            schedule_2 = None
+
+        if schedule_1 is not None and schedule_2 is not None:
+            sum_e_1, sum_t_1 = compute_weighted_earliness_tardiness(
+                schedule_1, instance
+            )
+            obj_1 = float(sum_e_1 + sum_t_1)
+
+            sum_e_2, sum_t_2 = compute_weighted_earliness_tardiness(
+                schedule_2, instance
+            )
+            obj_2 = float(sum_e_2 + sum_t_2)
+
+            if obj_1 <= obj_2:
+                schedule = schedule_1
+                self.logger.info(
+                    "_dispatch_by_reversed_sequence_with_iit: "
+                    "machine_then_job=True better (obj=%s) than "
+                    "machine_then_job=False (obj=%s)",
+                    obj_1,
+                    obj_2,
+                )
+            else:
+                schedule = schedule_2
+                self.logger.info(
+                    "_dispatch_by_reversed_sequence_with_iit: "
+                    "machine_then_job=False better (obj=%s) than "
+                    "machine_then_job=True (obj=%s)",
+                    obj_2,
+                    obj_1,
+                )
+        else:
+            schedule = schedule_1 or schedule_2
+
+        if schedule is None:
+            raise RuntimeError(
+                f"_dispatch_by_reversed_sequence_with_iit: no schedule after "
+                f"unflipping for {instance.name}"
+            )
+        schedule.make_semi_active(instance.stage_2_job_2_p_map)
+        schedule.insert_idle_time(
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+        )
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+        return schedule, float(sum_e + sum_t)
+
     def initialize_by_edd(
         self,
         dispatcher: Literal["mixed", "fam"] = "mixed",
@@ -873,6 +1035,71 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
+    def _initialize_by_reversed_sequence(
+        self, sequence_getter: Callable[[], Sequence[str]]
+    ) -> SubroutineReport:
+        """Time ``sequence_getter()``, dispatch via the reverse-instance + IIT
+        pipeline (:meth:`_dispatch_by_reversed_sequence_with_iit`), then
+        register the resulting incumbent.
+        """
+        start_elapsed = time.monotonic()
+        job_sequence = sequence_getter()
+        schedule, obj_value = self._dispatch_by_reversed_sequence_with_iit(job_sequence)
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        self.solution_manager.register(
+            report,
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
+        )
+        return report
+
+    def initialize_by_due2_weight_pos(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in
+        ``due2-weight-pos`` order (see
+        :meth:`FFcDDWParameters.get_due2_weight_pos_job_sequence`) via the
+        reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_due2_weight_pos_job_sequence
+        )
+
+    def initialize_by_w1(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``w1`` order — descending by ``(w⁺_j - w⁻_j)`` — via the
+        reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(self.instance.get_w1_job_sequence)
+
+    def initialize_by_wxd1(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``wxd1`` order — early group (``d_j - d_bar < 0``) sorted ascending
+        by ``(w⁺_j - 2·w⁻_j + 2·w_max) * (d_j - d_bar)``, late group
+        (``>= 0``) sorted ascending by
+        ``(w⁻_j - 2·w⁺_j + 2·w_max) * (d_j - d_bar)``, concatenated
+        early ++ late — via the reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_wxd1_job_sequence
+        )
+
+    def initialize_by_wxd2(self) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in the
+        ``wxd2`` order — partition by aversion scores
+        (ea = w⁻_j + (d⁻_j - d̄), ta = w⁺_j + (d̄ - d⁺_j)):
+        early group (ta > ea) sorted ascending by
+        ``(w⁺_j - 2·w⁻_j + 2·ew_max) * (d⁻_j - d̄)``, late group
+        (ta ≤ ea) sorted ascending by
+        ``(w⁻_j - 2·w⁺_j + 2·tw_max) * (d⁺_j - d̄)``, concatenated
+        early ++ late — via the reverse-instance + IIT pipeline.
+        """
+        return self._initialize_by_reversed_sequence(
+            self.instance.get_wxd2_job_sequence
+        )
+
     def run_profile_fixed_ns(
         self,
         cp_tl: float | str | None = None,
@@ -905,14 +1132,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         builder = BaseModelBuilder()
         mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
 
-        by_machine, stride = decode_pf_method(pf_method)
+        by_machine, stride_set = decode_pf_method(pf_method)
         BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
             mdl,
             params,
             op_vars,
             incumbent.schedule,
             profile_fix_by_machine=by_machine,
-            machine_precedence_stride=stride,
+            machine_precedence_stride_set=stride_set,
         )
         start_map = incumbent.schedule.get_jik_2_start_time_map()
         end_map = incumbent.schedule.get_jik_2_end_time_map()

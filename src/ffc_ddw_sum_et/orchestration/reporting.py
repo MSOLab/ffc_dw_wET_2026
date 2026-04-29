@@ -114,6 +114,38 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
         logger.exception("Failed to render Gantt for %s", solution_path)
 
 
+def _render_heatmap_from_yaml(yaml_path: Path, html_path: Path) -> None:
+    """Render the signed C-cost HTML heatmap from one heatmap YAML.
+
+    Module-level so it's picklable by ``ProcessPoolExecutor``. plotly is
+    imported inside the worker to keep the algorithm process clean.
+    """
+    try:
+        from ..io import (
+            heatmap_title,
+            load_signed_cost_heatmap_yaml,
+            make_figure,
+        )
+    except ImportError:
+        logger.warning("plotly/numpy not available, skipping %s", yaml_path)
+        return
+
+    try:
+        data = load_signed_cost_heatmap_yaml(yaml_path)
+    except Exception:
+        logger.exception("Failed to load heatmap yaml %s", yaml_path)
+        return
+
+    if not data.y_labels or not data.t_axis or data.Z.size == 0:
+        return
+
+    try:
+        fig = make_figure(data, title=heatmap_title(data))
+        fig.write_html(str(html_path), include_plotlyjs="cdn")
+    except Exception:
+        logger.exception("Failed to render heatmap for %s", yaml_path)
+
+
 def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
     """Render a phase Gantt PNG from a phase schedule YAML.
 
@@ -1066,14 +1098,19 @@ class FFcDDWReporter:
             logger.info("Statistics YAML written to %s", path)
 
     def _generate_gantt_charts(self) -> None:
-        """Render Gantt PNGs into the per-instance `report/` zone.
+        """Render Gantt PNGs into the per-instance `report/` zone, plus
+        signed C-cost HTML heatmaps next to their YAML sources.
 
         For each instance: render the main solution Gantt from
         `<ins>_solution.json`, plus one Gantt per phase schedule yaml in
         `progress/`, plus the last_stage_cp_sat schedule when present.
+        Heatmap YAMLs (``*_C_heatmap.yaml``, written by ``apply_lb_by_mcf``
+        when its ``draw_heatmap`` kwarg is True) are also rendered.
+
         Gated by ``draw_gantt``. Rendering fans out across a
-        ``ProcessPoolExecutor`` sized by ``painter_thread_cnt``; matplotlib is
-        imported inside the worker so the algorithm path still pays nothing.
+        ``ProcessPoolExecutor`` sized by ``painter_thread_cnt``; matplotlib /
+        plotly are imported inside the worker so the algorithm path still
+        pays nothing.
         """
         if not self.draw_gantt:
             logger.info("draw_gantt=False; skipping Gantt chart rendering")
@@ -1125,12 +1162,28 @@ class FFcDDWReporter:
                         )
                     )
 
+        gantt_count = len(jobs)
+        # Heatmap YAMLs aren't registered in ArtifactLayout yet; rglob fallback.
+        for hm_yaml in sorted(self.output_dir.rglob("*_C_heatmap.yaml")):
+            jobs.append(
+                (
+                    _render_heatmap_from_yaml,
+                    hm_yaml,
+                    hm_yaml.with_suffix(".html"),
+                )
+            )
+        heatmap_count = len(jobs) - gantt_count
+
         if not jobs:
             return
 
         worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
         logger.info(
-            "Rendering %d Gantt charts with %d worker(s)", len(jobs), worker_cnt
+            "Rendering %d artifacts (%d Gantt, %d heatmap) with %d worker(s)",
+            len(jobs),
+            gantt_count,
+            heatmap_count,
+            worker_cnt,
         )
         if worker_cnt == 1:
             for render_fn, src, dst in jobs:
