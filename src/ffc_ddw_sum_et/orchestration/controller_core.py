@@ -46,7 +46,9 @@ class FFcDDWSubroutineControllerCore(
         stopping_criteria: StoppingCriteria | dict,
     ):
         self._instance_name = instance.name
-        self.logger = logging.getLogger(f"ffc_ddw_sum_et.{self._instance_name}")
+        self.logger = logging.getLogger(
+            f"ffc_ddw_sum_et.orchestration.controller.{self._instance_name}"
+        )
         converted_flow = _to_ddo(subroutine_flow)
         if isinstance(stopping_criteria, dict):
             converted_stopping = StoppingCriteria(stopping_criteria)
@@ -56,6 +58,7 @@ class FFcDDWSubroutineControllerCore(
             name=instance.name,
             subroutine_flow=converted_flow,
             stopping_criteria=converted_stopping,
+            logger=self.logger,
         )
         self.instance = instance
         self.solution_manager = FFcDDWSolutionManager()

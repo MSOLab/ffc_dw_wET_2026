@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 import shutil
 import time
@@ -12,6 +13,7 @@ from typing import Any
 from routix.io.path import init_timestamped_working_dir
 from routix.type_defs import RunMode
 
+from ffc_ddw_sum_et.logging_setup import setup_logging
 from ffc_ddw_sum_et.orchestration import (
     BenchmarkLoader,
     FFcDDWMultiInstanceRunner,
@@ -19,56 +21,56 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
 )
 
-CONFIG_PATH = Path("metadata/20260426/neh_cp_config_12.yaml")
+CONFIG_PATH = Path("metadata/20260427/neh_cp_config_15.yaml")
 
 
-def _setup_main_logger(output_dir: Path) -> logging.Logger:
-    timestamp = output_dir.name
-    log_path = output_dir / f"{timestamp}_main.log"
-
-    fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="ffc_ddw_sum_et")
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress INFO/WARNING on terminal (file logs unaffected).",
     )
-
-    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    file_handler.setFormatter(fmt)
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(fmt)
-
-    logger = logging.getLogger("ffc_ddw_sum_et.main")
-    logger.setLevel(logging.INFO)
-    # 재실행/재호출 시 핸들러 중복 부착 방지
-    if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
-        logger.addHandler(file_handler)
-        logger.addHandler(stream_handler)
-    logger.propagate = False
-    return logger
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase terminal verbosity. -v: INFO, -vv: DEBUG. Default: WARNING.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=CONFIG_PATH,
+        help="Path to experiment YAML config.",
+    )
+    return parser.parse_args()
 
 
 def main() -> None:
+    args = _parse_args()
+    config_path = args.config
+
     main_start_dt = datetime.now()
     time_main_start = time.monotonic()
-    # Load config and set up output directory based on run mode
-    config = _load_config(CONFIG_PATH)
+    config = _load_config(config_path)
     mode = _parse_run_mode(config.get("run_mode", "FULL_RUN"))
     base_output_dir = Path(config.get("output_dir", "output"))
     if mode == RunMode.POST_PROCESS_ONLY:
         output_dir = _resolve_post_process_dir(config, base_output_dir)
     else:
         output_dir = init_timestamped_working_dir(base_output_dir=base_output_dir)
-        shutil.copy2(CONFIG_PATH, output_dir / CONFIG_PATH.name)
+        shutil.copy2(config_path, output_dir / config_path.name)
 
-    # Set up logger after determining output directory
-    logger = _setup_main_logger(output_dir)
+    setup_logging(None, quiet=args.quiet, verbose=args.verbose)
+    logger = logging.getLogger("ffc_ddw_sum_et.main")
     logger.info("Starting main() at %s with run mode: %s", main_start_dt, mode.name)
     if mode == RunMode.POST_PROCESS_ONLY:
         logger.info("Post-processing existing output directory: %s", output_dir)
     else:
         logger.info("Run output directory: %s", output_dir)
 
-    # Load instances and prepare scenario configs
     instance_worker_cnt = config.get("instance_worker_cnt", 1)
     draw_gantt = bool(config.get("draw_gantt", True))
     painter_thread_cnt = int(config.get("painter_thread_cnt", 1))
@@ -115,6 +117,7 @@ def main() -> None:
         painter_thread_cnt=painter_thread_cnt,
         ins_index_source=ins_index_source,
         bks_table_csv_path=bks_table_csv_path,
+        setup_logging_args=(None, args.quiet, args.verbose),
     )
 
     logger.info(

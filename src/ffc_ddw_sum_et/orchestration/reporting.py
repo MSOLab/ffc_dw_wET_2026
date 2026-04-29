@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -15,7 +16,9 @@ from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
 from routix.runner.multi_scenario_runner import MultiScenarioRunner
+from routix.type_defs import RunMode
 
+from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
@@ -184,6 +187,18 @@ class FinalResult:
     scenario_results: list[ScenarioResult] = field(default_factory=list)
 
 
+def _is_placeholder_result(ir: InstanceResult) -> bool:
+    """Heuristic for the all-None ``InstanceResult`` produced by the failure
+    fallback in ``post_run_process``.
+    """
+    return (
+        ir.obj_value is None
+        and ir.work_status is None
+        and not ir.has_incumbent
+        and ir.report_count == 0
+    )
+
+
 class FFcDDWMultiScenarioRunner(
     MultiScenarioRunner[
         FFcDDWParameters,
@@ -200,8 +215,16 @@ class FFcDDWMultiScenarioRunner(
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
+        setup_logging_args: tuple | None = None,
         **kwargs: Any,
     ):
+        if kwargs.get("logger") is None:
+            kwargs["logger"] = logging.getLogger(
+                "ffc_ddw_sum_et.orchestration.FFcDDWMultiScenarioRunner"
+            )
+        if setup_logging_args is not None:
+            # Forwarded through self.kwargs -> m_i_runner_class(**self.kwargs)
+            kwargs["setup_logging_args"] = setup_logging_args
         super().__init__(**kwargs)
         self.scenario_names = scenario_names or [
             f"scenario_{i + 1}" for i in range(len(self.scenario_configs))
@@ -210,6 +233,16 @@ class FFcDDWMultiScenarioRunner(
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = ins_index_source
         self.bks_table_csv_path = bks_table_csv_path
+        self._setup_logging_args = setup_logging_args
+
+    def _benchmark_log_path(
+        self, scenario_name: str, scenario_output_dir: Path
+    ) -> Path:
+        return scenario_output_dir / f"{scenario_name}_benchmark.log"
+
+    def _scoped_logging_args(self, log_path: Path) -> tuple[Path, bool, int]:
+        _, quiet, verbose = self._setup_logging_args or get_logging_args()
+        return log_path, quiet, verbose
 
     def run(self):
         runner_cnt = len(self.runners)
@@ -219,6 +252,21 @@ class FFcDDWMultiScenarioRunner(
                 self.scenario_names[i]
                 if i < len(self.scenario_names)
                 else f"scenario_{i + 1}"
+            )
+            scenario_output_dir = getattr(
+                multi_instance_runner,
+                "output_dir",
+                self.output_dir / scenario_name,
+            )
+            if not isinstance(scenario_output_dir, Path):
+                scenario_output_dir = self.output_dir / scenario_name
+            setup_logging(
+                *self._scoped_logging_args(
+                    self._benchmark_log_path(
+                        scenario_name,
+                        scenario_output_dir,
+                    )
+                )
             )
             logger.info(
                 "--- Starting Scenario %d/%d: %s ---", i + 1, runner_cnt, scenario_name
@@ -257,6 +305,27 @@ class FFcDDWMultiScenarioRunner(
             scenario_results.append(scenario_result)
             all_instance_results.extend(instance_results)
 
+        if (
+            self.mode == RunMode.POST_PROCESS_ONLY
+            and all_instance_results
+            and all(_is_placeholder_result(ir) for ir in all_instance_results)
+        ):
+            raise RuntimeError(
+                f"no instance manifests found in {self.output_dir} — "
+                "was this dir created before the manifest feature, or is the "
+                "path wrong?"
+            )
+
+        if len(scenario_results) == 1 and scenario_results[0].output_dir is not None:
+            report_log_path = self._benchmark_log_path(
+                scenario_results[0].name,
+                scenario_results[0].output_dir,
+            )
+        else:
+            report_log_path = self.output_dir / "benchmark.log"
+        report_logging_args = self._scoped_logging_args(report_log_path)
+        setup_logging(*report_logging_args)
+
         FFcDDWReporter(
             self.output_dir,
             scenario_results,
@@ -264,6 +333,7 @@ class FFcDDWMultiScenarioRunner(
             painter_thread_cnt=self.painter_thread_cnt,
             ins_index_source=self.ins_index_source,
             bks_table_csv_path=self.bks_table_csv_path,
+            setup_logging_args=report_logging_args,
         ).generate()
 
         return FinalResult(scenario_results=scenario_results)
@@ -281,6 +351,7 @@ class FFcDDWReporter:
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
+        setup_logging_args: tuple | None = None,
     ):
         self.output_dir = output_dir or Path("output")
         self.scenario_results = scenario_results
@@ -292,6 +363,7 @@ class FFcDDWReporter:
         self.bks_table_csv_path = (
             Path(bks_table_csv_path) if bks_table_csv_path is not None else None
         )
+        self._setup_logging_args = setup_logging_args
         self._filename_to_index: dict[str, int] = self._load_filename_to_index()
         self._index_to_meta: dict[int, dict[str, Any]] = self._load_index_to_meta()
 
@@ -382,10 +454,15 @@ class FFcDDWReporter:
         Uses the ``FFcDDWSummary`` append-per-row layout shaped after
         ``hybridflowshop/hfs_summary.py`` so downstream analysis scripts
         line up across projects.
+
+        Atomic: rows are appended to a sibling ``.csv.tmp`` and ``os.replace``
+        renames it onto the final path only after every row succeeded. A
+        crash mid-loop leaves the prior summary CSV intact.
         """
         path = self.output_dir / self.generate_summary_filename("csv")
-        if path.exists():
-            path.unlink()
+        tmp = path.with_suffix(".csv.tmp")
+        if tmp.exists():
+            tmp.unlink()
         for sc in self.scenario_results:
             for ir in sc.instance_results:
                 improvement = None
@@ -424,7 +501,11 @@ class FFcDDWReporter:
                         "error": _last_non_empty_line(ir.error) or "",
                     },
                 )
-                summary.save(path)
+                summary.save(tmp)
+        if not tmp.exists():
+            logger.warning("No instance results to write for summary CSV at %s", path)
+            return
+        os.replace(tmp, path)
         logger.info("Summary CSV written to %s", path)
 
     def _build_mcf_lb_extras(self, ir: InstanceResult) -> dict[str, Any]:
@@ -975,7 +1056,11 @@ class FFcDDWReporter:
                 render_fn(yaml_path)
             return
 
-        with ProcessPoolExecutor(max_workers=worker_cnt) as executor:
+        pool_kwargs: dict[str, Any] = {"max_workers": worker_cnt}
+        if self._setup_logging_args is not None:
+            pool_kwargs["initializer"] = setup_logging
+            pool_kwargs["initargs"] = self._setup_logging_args
+        with ProcessPoolExecutor(**pool_kwargs) as executor:
             futures = [
                 executor.submit(render_fn, yaml_path) for yaml_path, render_fn in jobs
             ]

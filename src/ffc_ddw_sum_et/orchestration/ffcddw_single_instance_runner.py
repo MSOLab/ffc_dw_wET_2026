@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
+import os
 import traceback
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from routix.io import dump_yaml
+from routix.io import dump_yaml, load_yaml
 from routix.report import SubroutineReportStatistics
 from routix.runner.single_instance_runner import (
     SingleInstanceRunner,
 )
 from routix.type_defs import RunMode
 
+from ..logging_setup import get_logging_args, setup_logging
 from ..io import dump_preemptive_schedule_yaml, dump_schedule_yaml
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
@@ -22,6 +25,8 @@ from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
 
 logger = logging.getLogger(__name__)
+
+_MANIFEST_SCHEMA_VERSION = 1
 
 
 def _json_default(obj):
@@ -61,13 +66,48 @@ class InstanceResult:
     makespan: float | None = None
 
 
+def _to_serializable(value: Any) -> Any:
+    """Recursively coerce enums to ``.value`` for safe YAML dump."""
+    import enum
+
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {k: _to_serializable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_serializable(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_to_serializable(v) for v in value)
+    return value
+
+
 class FFcDDWSingleInstanceRunner(
     SingleInstanceRunner[FFcDDWParameters, FFcDDWSubroutineController]
 ):
     """Runs on one FFcDDW instance and saves results."""
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._setup_logging_args = kwargs.pop("setup_logging_args", None)
+        super().__init__(*args, **kwargs)
+        if kwargs.get("logger") is None:
+            self.logger = logging.getLogger(
+                "ffc_ddw_sum_et.orchestration.FFcDDWSingleInstanceRunner."
+                f"{self.ins_name}"
+            )
+
     def run(self):
         self._run_error: str | None = None
+        previous_logging_args = get_logging_args()
+        restore_logging = False
+
+        if self.mode == RunMode.FULL_RUN and self._setup_logging_args is not None:
+            _, quiet, verbose = self._setup_logging_args
+            setup_logging(
+                self.working_dir / f"{self.ins_name}_solve.log",
+                quiet,
+                verbose,
+            )
+            restore_logging = True
 
         try:
             if self.mode == RunMode.FULL_RUN:
@@ -76,9 +116,13 @@ class FFcDDWSingleInstanceRunner(
                 self.ctrlr.run()
         except Exception:
             self._run_error = traceback.format_exc()
-            logger.exception("Error running instance %s", self.ins_name)
+            self.logger.exception("Error running instance %s", self.ins_name)
         finally:
-            return self.post_run_process()
+            try:
+                return self.post_run_process()
+            finally:
+                if restore_logging:
+                    setup_logging(*previous_logging_args)
 
     def get_controller(self) -> FFcDDWSubroutineController:
         return FFcDDWSubroutineController(
@@ -89,10 +133,12 @@ class FFcDDWSingleInstanceRunner(
 
     def post_run_process(self) -> InstanceResult:
         try:
-            return self._post_run_process_inner()
+            if self.mode == RunMode.FULL_RUN and getattr(self, "ctrlr", None):
+                return self._persist_run_artifacts(self.ctrlr)
+            return self._load_instance_result()
         except Exception:
             post_error = traceback.format_exc()
-            logger.exception("Error in post_run_process for %s", self.ins_name)
+            self.logger.exception("Error in post_run_process for %s", self.ins_name)
             combined_error = (
                 f"{self._run_error}\n---\npost_run_process:\n{post_error}"
                 if getattr(self, "_run_error", None)
@@ -107,18 +153,12 @@ class FFcDDWSingleInstanceRunner(
                 error=combined_error,
             )
 
-    def _post_run_process_inner(self) -> InstanceResult:
-        controller = getattr(self, "ctrlr", None)
-        if controller is None:
-            return InstanceResult(
-                instance_name=self.ins_name,
-                elapsed_time=0.0,
-                obj_value=None,
-                obj_bound=None,
-                work_status=None,
-                error=getattr(self, "_run_error", None),
-            )
-
+    def _persist_run_artifacts(
+        self, controller: FFcDDWSubroutineController
+    ) -> InstanceResult:
+        """Write every per-instance file then build + atomically write the
+        manifest. Returns the same ``InstanceResult`` that's saved to disk.
+        """
         solution_manager = controller.solution_manager
 
         first_report = (
@@ -162,7 +202,7 @@ class FFcDDWSingleInstanceRunner(
             try:
                 solution_path = self._save_solution(incumbent)
             except Exception:
-                logger.exception("Error saving solution for %s", self.ins_name)
+                self.logger.exception("Error saving solution for %s", self.ins_name)
             try:
                 dump_schedule_yaml(
                     incumbent.schedule,
@@ -172,7 +212,9 @@ class FFcDDWSingleInstanceRunner(
                     obj_bound=incumbent.obj_bound,
                 )
             except Exception:
-                logger.exception("Error saving schedule yaml for %s", self.ins_name)
+                self.logger.exception(
+                    "Error saving schedule yaml for %s", self.ins_name
+                )
 
         last_stage_cp_sat = getattr(controller, "last_stage_cp_sat_solution", None)
         if last_stage_cp_sat is not None and self.working_dir is not None:
@@ -186,7 +228,7 @@ class FFcDDWSingleInstanceRunner(
                     obj_bound=last_stage_cp_sat.obj_bound,
                 )
             except Exception:
-                logger.exception(
+                self.logger.exception(
                     "Error saving last_stage_cp_sat schedule yaml for %s",
                     self.ins_name,
                 )
@@ -215,7 +257,9 @@ class FFcDDWSingleInstanceRunner(
                             instance_name=f"{self.ins_name}_{name}",
                         )
                 except Exception:
-                    logger.exception("Error saving %s yaml for %s", name, self.ins_name)
+                    self.logger.exception(
+                        "Error saving %s yaml for %s", name, self.ins_name
+                    )
 
         diag = getattr(controller, "mcf_lb_diagnostic", None)
         diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None
@@ -226,7 +270,7 @@ class FFcDDWSingleInstanceRunner(
                     self.working_dir / f"{self.ins_name}_mcf_lb_diagnostic.yaml",
                 )
             except Exception:
-                logger.exception(
+                self.logger.exception(
                     "Error saving mcf_lb_diagnostic yaml for %s", self.ins_name
                 )
 
@@ -236,13 +280,13 @@ class FFcDDWSingleInstanceRunner(
             try:
                 self._save_obj_log(solution_manager.history)
             except Exception:
-                logger.exception("Error saving obj_log for %s", self.ins_name)
+                self.logger.exception("Error saving obj_log for %s", self.ins_name)
             try:
                 self._save_statistics(
                     controller.method_call_counts, solution_manager.history
                 )
             except Exception:
-                logger.exception("Error saving statistics for %s", self.ins_name)
+                self.logger.exception("Error saving statistics for %s", self.ins_name)
 
         machines = self.instance.stage_2_machines_map
         first_stage = (
@@ -252,7 +296,7 @@ class FFcDDWSingleInstanceRunner(
         stopping = getattr(self, "stopping_criteria", None) or {}
         timelimit = float(stopping["timelimit"]) if "timelimit" in stopping else None
 
-        return InstanceResult(
+        result = InstanceResult(
             instance_name=self.ins_name,
             elapsed_time=elapsed_time,
             obj_value=obj_value,
@@ -276,6 +320,44 @@ class FFcDDWSingleInstanceRunner(
             mcf_lb_diagnostic=diag_dict,
             makespan=makespan,
         )
+
+        if self.working_dir is not None:
+            try:
+                self._write_instance_result_manifest(result)
+            except Exception:
+                self.logger.exception(
+                    "Error writing instance_result manifest for %s", self.ins_name
+                )
+
+        return result
+
+    def _write_instance_result_manifest(self, result: InstanceResult) -> None:
+        """Atomic-write ``<ins_name>_instance_result.yaml``.
+
+        Written last in ``_persist_run_artifacts`` so its presence implies
+        every other per-instance artifact has been written.
+        """
+        payload = {
+            "_schema_version": _MANIFEST_SCHEMA_VERSION,
+            **_to_serializable(asdict(result)),
+        }
+        final = self.working_dir / f"{self.ins_name}_instance_result.yaml"
+        tmp = final.with_suffix(".yaml.tmp")
+        dump_yaml(payload, tmp)
+        os.replace(tmp, final)
+
+    def _load_instance_result(self) -> InstanceResult:
+        """Load manifest and project to current ``InstanceResult`` schema."""
+        if self.working_dir is None:
+            raise RuntimeError("working_dir is None")
+        path = self.working_dir / f"{self.ins_name}_instance_result.yaml"
+        raw = load_yaml(path)
+        if not isinstance(raw, dict):
+            raise RuntimeError(f"manifest is not a mapping: {path}")
+        raw.pop("_schema_version", None)
+        valid = {f.name for f in dataclasses.fields(InstanceResult)}
+        projected = {k: v for k, v in raw.items() if k in valid}
+        return InstanceResult(**projected)
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:
         """Save best solution as JSON."""

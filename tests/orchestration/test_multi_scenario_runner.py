@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from routix.type_defs import RunMode
+
 from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import InstanceResult
 from ffc_ddw_sum_et.orchestration.reporting import (
     FFcDDWMultiScenarioRunner,
@@ -14,10 +16,12 @@ def _bare_runner(tmp_path: Path) -> FFcDDWMultiScenarioRunner:
     runner = FFcDDWMultiScenarioRunner.__new__(FFcDDWMultiScenarioRunner)
     runner.output_dir = tmp_path
     runner.results = []
+    runner.mode = RunMode.FULL_RUN
     runner.draw_gantt = False
     runner.painter_thread_cnt = 1
     runner.ins_index_source = None
     runner.bks_table_csv_path = None
+    runner._setup_logging_args = None
     return runner
 
 

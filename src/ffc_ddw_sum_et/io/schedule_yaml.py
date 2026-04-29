@@ -8,12 +8,15 @@ matplotlib.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Sequence
 
 from routix.io import dump_yaml, load_yaml
 
 from ..solution.ffc_schedule import FFcSchedule
+
+logger = logging.getLogger(__name__)
 
 
 def dump_schedule_yaml(
@@ -53,6 +56,12 @@ def dump_schedule_yaml(
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     dump_yaml(data, path)
+    logger.info(
+        "Schedule YAML written: %s (jobs=%d, ops=%d)",
+        path,
+        len(data["jobs"]),
+        len(operations),
+    )
 
 
 def load_schedule_yaml(path: Path) -> dict[str, Any]:
@@ -102,6 +111,12 @@ def dump_preemptive_schedule_yaml(
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     dump_yaml(data, path)
+    logger.info(
+        "Preemptive schedule YAML written: %s (stage=%s, segments=%d)",
+        path,
+        stage_id,
+        len(segment_records),
+    )
 
 
 def load_preemptive_schedule_yaml(path: Path) -> dict[str, Any]:
