@@ -79,7 +79,19 @@ class FFcDDWSingleInstanceRunner(
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._setup_logging_args = kwargs.pop("setup_logging_args", None)
-        self._scenario_name: str | None = kwargs.pop("scenario_name", None)
+        scenario_name = kwargs.pop("scenario_name", None)
+        if scenario_name is None:
+            raise ValueError(
+                "FFcDDWSingleInstanceRunner requires a scenario_name. "
+                "It is forwarded by FFcDDWMultiInstanceRunner."
+            )
+        self._scenario_name: str = scenario_name
+        if self.ins_name is None:
+            raise ValueError(
+                "FFcDDWSingleInstanceRunner requires an instance_name. "
+                "It is forwarded by FFcDDWMultiInstanceRunner."
+            )
+        self._ins_name: str = self.ins_name
         super().__init__(*args, **kwargs)
         if kwargs.get("logger") is None:
             self.logger = logging.getLogger(
@@ -91,11 +103,7 @@ class FFcDDWSingleInstanceRunner(
                 "FFcDDWSingleInstanceRunner requires a non-None ArtifactLayout. "
                 "It is forwarded by FFcDDWMultiInstanceRunner."
             )
-        if self._scenario_name is None:
-            raise ValueError(
-                "FFcDDWSingleInstanceRunner requires a scenario_name. "
-                "It is forwarded by FFcDDWMultiInstanceRunner."
-            )
+        self._layout = self.layout
 
     def _init_working_dir(self) -> None:
         """Resolve working_dir through the layout when one is bound, else fall
@@ -105,25 +113,25 @@ class FFcDDWSingleInstanceRunner(
         directly without a layout can still rely on the legacy
         `output_dir / ins_name` directory.
         """
-        if getattr(self, "layout", None) is None or self._scenario_name is None:
+        if getattr(self, "layout", None) is None:
             super()._init_working_dir()
             return
-        layout: ArtifactLayout = self.layout
-        self.working_dir = layout.instance_dir(self._scenario_name, self.ins_name)
+        self.working_dir = self._layout.instance_dir(
+            self._scenario_name, self._ins_name
+        )
 
     def run(self):
         self._run_error: str | None = None
         previous_logging_args = get_logging_args()
         restore_logging = False
-        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
-        sc_logger_name = f"{_SC_LOGGER_PREFIX}.{self.ins_name}"
+        sc_logger_name = f"{_SC_LOGGER_PREFIX}.{self._ins_name}"
 
         if self.mode == RunMode.FULL_RUN and self._setup_logging_args is not None:
             _, quiet, verbose = self._setup_logging_args
-            sir_log_path = layout.log_path(
+            sir_log_path = self._layout.log_path(
                 "single_instance_runner",
                 scenario_name=self._scenario_name,
-                instance_name=self.ins_name,
+                instance_name=self._ins_name,
             )
             setup_logging(sir_log_path, quiet, verbose)
             self._attach_sc_filter_to_root()
@@ -131,18 +139,18 @@ class FFcDDWSingleInstanceRunner(
 
         try:
             if self.mode == RunMode.FULL_RUN:
-                sc_log_path = layout.log_path(
+                sc_log_path = self._layout.log_path(
                     "subroutine_controller",
                     scenario_name=self._scenario_name,
-                    instance_name=self.ins_name,
+                    instance_name=self._ins_name,
                 )
                 attach_fh_to_logger(sc_logger_name, sc_log_path)
                 try:
                     self.ctrlr = self.get_controller()
                     self.ctrlr.set_artifact_layout(
-                        layout,
+                        self._layout,
                         scenario_name=self._scenario_name,
-                        instance_name=self.ins_name,
+                        instance_name=self._ins_name,
                     )
                     self.ctrlr.set_working_dir(self.working_dir)
                     self.ctrlr.run()
@@ -150,7 +158,7 @@ class FFcDDWSingleInstanceRunner(
                     detach_fh_from_logger(sc_logger_name)
         except Exception:
             self._run_error = traceback.format_exc()
-            self.logger.exception("Error running instance %s", self.ins_name)
+            self.logger.exception("Error running instance %s", self._ins_name)
         finally:
             try:
                 return self.post_run_process()
@@ -193,14 +201,14 @@ class FFcDDWSingleInstanceRunner(
             return self._load_instance_result()
         except Exception:
             post_error = traceback.format_exc()
-            self.logger.exception("Error in post_run_process for %s", self.ins_name)
+            self.logger.exception("Error in post_run_process for %s", self._ins_name)
             combined_error = (
                 f"{self._run_error}\n---\npost_run_process:\n{post_error}"
                 if getattr(self, "_run_error", None)
                 else post_error
             )
             return InstanceResult(
-                instance_name=self.ins_name,
+                instance_name=self._ins_name,
                 elapsed_time=0.0,
                 obj_value=None,
                 obj_bound=None,
@@ -214,10 +222,10 @@ class FFcDDWSingleInstanceRunner(
         """Write every per-instance file then build + atomically write the
         manifest. Returns the same ``InstanceResult`` that's saved to disk.
         """
-        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
+        layout: ArtifactLayout = self._layout
         scope: dict[str, str] = {
-            "scenario_name": self._scenario_name,  # type: ignore[dict-item]
-            "instance_name": self.ins_name,
+            "scenario_name": self._scenario_name,
+            "instance_name": self._ins_name,
         }
 
         solution_manager = controller.solution_manager
@@ -340,7 +348,7 @@ class FFcDDWSingleInstanceRunner(
         timelimit = float(stopping["timelimit"]) if "timelimit" in stopping else None
 
         result = InstanceResult(
-            instance_name=self.ins_name,
+            instance_name=self._ins_name,
             elapsed_time=elapsed_time,
             obj_value=obj_value,
             obj_bound=obj_bound,
@@ -379,12 +387,11 @@ class FFcDDWSingleInstanceRunner(
         Written last in ``_persist_run_artifacts`` so its presence implies
         every other per-instance artifact has been written.
         """
-        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
         payload = {
             "_schema_version": _MANIFEST_SCHEMA_VERSION,
             **_to_serializable(asdict(result)),
         }
-        final = layout.artifact_path(
+        final = self._layout.artifact_path(
             "instance_result_manifest",
             scenario_name=self._scenario_name,
             instance_name=self.ins_name,
@@ -395,8 +402,7 @@ class FFcDDWSingleInstanceRunner(
 
     def _load_instance_result(self) -> InstanceResult:
         """Load manifest and project to current ``InstanceResult`` schema."""
-        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
-        path = layout.artifact_path(
+        path = self._layout.artifact_path(
             "instance_result_manifest",
             scenario_name=self._scenario_name,
             instance_name=self.ins_name,
@@ -411,8 +417,7 @@ class FFcDDWSingleInstanceRunner(
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:
         """Save best solution as JSON."""
-        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
-        path = layout.artifact_path(
+        path = self._layout.artifact_path(
             "solution_json",
             scenario_name=self._scenario_name,
             instance_name=self.ins_name,
@@ -420,7 +425,7 @@ class FFcDDWSingleInstanceRunner(
         dump_solution_json(
             solution.schedule,
             path,
-            instance_name=self.ins_name,
+            instance_name=self._ins_name,
             obj_value=solution.obj_value,
             obj_bound=solution.obj_bound,
         )
@@ -428,7 +433,6 @@ class FFcDDWSingleInstanceRunner(
 
     def _save_obj_log(self, history) -> None:
         """Save objective value trajectory as YAML."""
-        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
         entries = []
         for i, record in enumerate(history):
             if record.report is not None:
@@ -447,7 +451,7 @@ class FFcDDWSingleInstanceRunner(
         if entries:
             dump_yaml(
                 entries,
-                layout.artifact_path(
+                self._layout.artifact_path(
                     "obj_log",
                     scenario_name=self._scenario_name,
                     instance_name=self.ins_name,
