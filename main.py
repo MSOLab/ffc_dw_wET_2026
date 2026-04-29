@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260429/smoke_io_log.yaml")
+CONFIG_PATH = Path("metadata/20260429/20260429_config.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
