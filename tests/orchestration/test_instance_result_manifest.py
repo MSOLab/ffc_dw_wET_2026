@@ -42,6 +42,7 @@ def _make_runner(
     runner.ins_name = ins_name
     runner.instance = SimpleNamespace(name=ins_name)
     runner.layout = layout
+    runner._layout = layout
     runner._scenario_name = _SCENARIO
     return runner, instance_dir
 

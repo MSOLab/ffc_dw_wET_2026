@@ -57,8 +57,10 @@ def _bare_sir(
     layout = FFcArtifactLayout(run_root=tmp_path / "run", run_id="run")
     runner: Any = FFcDDWSingleInstanceRunner.__new__(FFcDDWSingleInstanceRunner)
     runner.layout = layout
+    runner._layout = layout
     runner._scenario_name = "sc"
     runner.ins_name = ins_name
+    runner._ins_name = ins_name
     runner.instance = SimpleNamespace(name=ins_name)
     runner.mode = RunMode.FULL_RUN
     runner._setup_logging_args = (None, False, 0)
