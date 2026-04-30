@@ -73,7 +73,8 @@ def main() -> None:
         layout = init_ffc_artifact_layout(run_root)
         layout.stamp()
 
-    setup_logging(layout.log_path("main"), quiet=args.quiet, verbose=args.verbose)
+    main_logging_args = (layout.log_path("main"), args.quiet, args.verbose)
+    setup_logging(*main_logging_args, is_main=True)
     logger = logging.getLogger("ffc_ddw_sum_et.main")
     logger.info("Starting main() at %s with run mode: %s", main_start_dt, mode.name)
     if mode == RunMode.POST_PROCESS_ONLY:
@@ -139,8 +140,10 @@ def main() -> None:
     )
     try:
         runner.run()
+        setup_logging(*main_logging_args, is_main=True)
         logger.info("Experiment run completed successfully.")
     finally:
+        setup_logging(*main_logging_args, is_main=True)
         time_main_end = time.monotonic()
         logger.info(
             "Finished main() at %s. Total elapsed time: %f seconds",

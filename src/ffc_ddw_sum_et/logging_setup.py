@@ -36,10 +36,20 @@ def _terminal_level(quiet: bool, verbose: int) -> int:
     return logging.WARNING
 
 
+def _main_log_terminal_level(quiet: bool, verbose: int) -> int:
+    if quiet:
+        return logging.WARNING
+    if verbose >= 2:
+        return logging.DEBUG
+    return logging.INFO
+
+
 def setup_logging(
     log_path: Path | str | None = None,
     quiet: bool = False,
     verbose: int = 0,
+    *,
+    is_main: bool = False,
 ) -> None:
     """Attach one optional file handler + one terminal handler to root.
 
@@ -72,7 +82,8 @@ def setup_logging(
         root.addHandler(fh)
 
     sh = logging.StreamHandler()
-    sh.setLevel(_terminal_level(quiet, verbose))
+    level_fn = _main_log_terminal_level if is_main else _terminal_level
+    sh.setLevel(level_fn(quiet, verbose))
     sh.setFormatter(logging.Formatter(_TERMINAL_FMT, datefmt="%H:%M:%S"))
     setattr(sh, _MANAGED_TAG, True)
     root.addHandler(sh)

@@ -118,3 +118,24 @@ def test_default_terminal_level_is_warning(tmp_path: Path) -> None:
     streams = _managed_stream_handlers()
 
     assert streams[0].level == logging.WARNING
+
+
+def test_main_log_default_terminal_level_is_info(tmp_path: Path) -> None:
+    setup_logging(tmp_path / "main.log", is_main=True)
+    streams = _managed_stream_handlers()
+
+    assert streams[0].level == logging.INFO
+
+
+def test_main_log_verbose_terminal_level_is_debug(tmp_path: Path) -> None:
+    setup_logging(tmp_path / "main.log", verbose=2, is_main=True)
+    streams = _managed_stream_handlers()
+
+    assert streams[0].level == logging.DEBUG
+
+
+def test_main_log_quiet_terminal_level_is_warning(tmp_path: Path) -> None:
+    setup_logging(tmp_path / "main.log", quiet=True, is_main=True)
+    streams = _managed_stream_handlers()
+
+    assert streams[0].level == logging.WARNING
