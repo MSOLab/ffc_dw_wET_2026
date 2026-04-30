@@ -116,11 +116,9 @@ class FFcDDWSingleInstanceRunner(
         if getattr(self, "layout", None) is None:
             super()._init_working_dir()
             return
-        if self.layout is None:
-            raise ValueError("layout is required for FFcDDWSingleInstanceRunner")
         if self.ins_name is None:
             raise ValueError("instance_name is required for FFcDDWSingleInstanceRunner")
-        self.working_dir = self.layout.instance_dir(
+        self.working_dir = self._layout.instance_dir(
             self._scenario_name, self.ins_name
         )
 
