@@ -13,7 +13,7 @@ dependencies = [
     "plotly>=6.7.0",
     "statsmodels>=0.14.6",
     "seaborn>=0.13.2",
-    "routix",
+    "routix>=0.0.17",
 ]
 
 [build-system]
@@ -34,6 +34,3 @@ line-length = 88
 
 [tool.ty.environment]
 python = ".venv"
-
-[tool.uv.sources]
-routix = { path = "../routix", editable = true }

@@ -132,7 +132,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.1" },
     { name = "plotly", specifier = ">=6.7.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "routix", editable = "../routix" },
+    { name = "routix", specifier = ">=0.0.17" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "statsmodels", specifier = ">=0.14.6" },
     { name = "xlsxwriter", specifier = ">=3.2.0" },
@@ -721,15 +721,10 @@ wheels = [
 [[package]]
 name = "routix"
 version = "0.0.17"
-source = { editable = "../routix" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.4.2" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20250402" },
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/83/27a2d4257b08e6082a34eba7e6a3a83c6fe02881f530d35d6c8dfa1b0ba8/routix-0.0.17.tar.gz", hash = "sha256:fe3a5227d1115cc28b5b1f9297b1dd30ef4c8759ef423ea78c93745fb2f720dc", size = 35912, upload-time = "2026-04-30T01:59:52.068Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/28/61a74cc2cddba69074b36fc9f6e7813bbb8c94239d90483fa063009a1ca6/routix-0.0.17-py3-none-any.whl", hash = "sha256:16c1a652590e66f711eeb0342db75c88286b3aad917783a62a4024082f1e9cfa", size = 49980, upload-time = "2026-04-30T01:59:53.179Z" },
 ]
 
 [[package]]
