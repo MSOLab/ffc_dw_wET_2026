@@ -1,0 +1,58 @@
+# Smoke test for io domain logging — small + draw_gantt true to exercise both
+# schedule_yaml.dump_* and gantt.export paths.
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1 ]
+
+output_dir: output/20260429_smoke_io
+
+instance_worker_cnt: 2
+
+draw_gantt: true
+painter_thread_cnt: 2
+
+scenarios:
+  - name: smoke_io_1
+    timelimit: 5.0
+    output_subdir: smoke_io_1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.024nc"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+  - name: smoke_io_2
+    timelimit: 5.0
+    output_subdir: smoke_io_2
+    subroutine_flow:
+      - method: run_mcf_lb_4
+        last_stage_only_priority_tags: [ "start_time", "due2-weight-pos" ]
+        last_stage_only_cp_pf_method: "PF1"
+        last_stage_only_cp_solver_thread_cnt: 1
+        last_stage_only_tl: null
+        repeat_last_stage_only_cp_while_improving: true
+        log_last_stage_only_cp_search_progress: false
+        machine_then_job: false
+        full_cp_pf_method: "PF1"
+        full_cp_solver_thread_cnt: 1
+        full_cp_tl: null
+        repeat_full_cp_while_improving: true
+        log_full_cp_search_progress: false
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.024nc"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false

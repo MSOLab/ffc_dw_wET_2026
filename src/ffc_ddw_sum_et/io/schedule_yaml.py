@@ -8,12 +8,16 @@ matplotlib.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Sequence
 
 from routix.io import dump_yaml, load_yaml
 
 from ..solution.ffc_schedule import FFcSchedule
+from . import schedule_keys as K
+
+logger = logging.getLogger(__name__)
 
 
 def dump_schedule_yaml(
@@ -32,27 +36,34 @@ def dump_schedule_yaml(
     ):
         operations.append(
             {
-                "job": job_id,
-                "stage": stage_id,
-                "machine": mc_id,
-                "start": int(start_time),
-                "end": int(end_map[(job_id, stage_id, mc_id)]),
+                K.OP_JOB: job_id,
+                K.OP_STAGE: stage_id,
+                K.OP_MACHINE: mc_id,
+                K.OP_START: int(start_time),
+                K.OP_END: int(end_map[(job_id, stage_id, mc_id)]),
             }
         )
+    jobs = list(schedule.jobs)
     data = {
-        "instanceName": instance_name,
-        "objValue": None if obj_value is None else float(obj_value),
-        "objBound": None if obj_bound is None else float(obj_bound),
-        "jobs": list(schedule.jobs),
-        "stages": list(schedule.stages),
-        "machinesPerStage": {
+        K.INSTANCE_NAME: instance_name,
+        K.OBJ_VALUE: None if obj_value is None else float(obj_value),
+        K.OBJ_BOUND: None if obj_bound is None else float(obj_bound),
+        K.JOBS: jobs,
+        K.STAGES: list(schedule.stages),
+        K.MACHINES_PER_STAGE: {
             stage_id: list(mc_ids)
             for stage_id, mc_ids in schedule.machines_per_stage.items()
         },
-        "operations": operations,
+        K.OPERATIONS: operations,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     dump_yaml(data, path)
+    logger.info(
+        "Schedule YAML written: %s (jobs=%d, ops=%d)",
+        path,
+        len(jobs),
+        len(operations),
+    )
 
 
 def load_schedule_yaml(path: Path) -> dict[str, Any]:
@@ -83,25 +94,31 @@ def dump_preemptive_schedule_yaml(
     ):
         segment_records.append(
             {
-                "job": job_id,
-                "stage": stage_i,
-                "machine": mc_id,
-                "start": int(start_time),
-                "end": int(end_time),
+                K.OP_JOB: job_id,
+                K.OP_STAGE: stage_i,
+                K.OP_MACHINE: mc_id,
+                K.OP_START: int(start_time),
+                K.OP_END: int(end_time),
             }
         )
     data = {
-        "instanceName": instance_name,
-        "objValue": None if obj_value is None else float(obj_value),
-        "objBound": None if obj_bound is None else float(obj_bound),
-        "stageId": stage_id,
-        "jobs": list(jobs),
-        "allJobs": list(all_jobs) if all_jobs is not None else list(jobs),
-        "machinesPerStage": {stage_id: list(machines)},
-        "segments": segment_records,
+        K.INSTANCE_NAME: instance_name,
+        K.OBJ_VALUE: None if obj_value is None else float(obj_value),
+        K.OBJ_BOUND: None if obj_bound is None else float(obj_bound),
+        K.STAGE_ID: stage_id,
+        K.JOBS: list(jobs),
+        K.ALL_JOBS: list(all_jobs) if all_jobs is not None else list(jobs),
+        K.MACHINES_PER_STAGE: {stage_id: list(machines)},
+        K.SEGMENTS: segment_records,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     dump_yaml(data, path)
+    logger.info(
+        "Preemptive schedule YAML written: %s (stage=%s, segments=%d)",
+        path,
+        stage_id,
+        len(segment_records),
+    )
 
 
 def load_preemptive_schedule_yaml(path: Path) -> dict[str, Any]:

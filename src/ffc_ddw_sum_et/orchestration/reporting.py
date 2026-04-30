@@ -5,17 +5,22 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from routix.io import ArtifactLayout
 from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
 from routix.runner.multi_scenario_runner import MultiScenarioRunner
+from routix.type_defs import RunMode
 
+from ..io import schedule_keys as K
+from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
@@ -62,8 +67,8 @@ def _compute_rpdf(obj: float | None, bks: float | None) -> float | None:
     return (obj - bks) / denom
 
 
-def _render_gantt_from_yaml(yaml_path: Path) -> None:
-    """Render a single Gantt PNG from one schedule YAML.
+def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> None:
+    """Render the main Gantt PNG from `<ins>_solution.json`.
 
     Module-level so it's picklable by ``ProcessPoolExecutor``. Imports
     matplotlib inside the worker to keep the algorithm process clean.
@@ -72,47 +77,44 @@ def _render_gantt_from_yaml(yaml_path: Path) -> None:
         import matplotlib
 
         matplotlib.use("Agg")
-        from ..io import load_schedule_yaml
         from ..io.gantt import GanttPlotter
     except ImportError:
-        logger.warning("matplotlib not available, skipping %s", yaml_path)
+        logger.warning("matplotlib not available, skipping %s", solution_path)
         return
 
     try:
-        data = load_schedule_yaml(yaml_path)
+        with open(solution_path) as f:
+            data = json.load(f)
     except Exception:
-        logger.exception("Failed to load schedule yaml %s", yaml_path)
+        logger.exception("Failed to load solution json %s", solution_path)
         return
 
-    operations = data.get("operations") or []
+    operations = data.get(K.OPERATIONS) or []
     if not operations:
         return
 
     start_map: dict[tuple[str, str, str], int] = {}
     end_map: dict[tuple[str, str, str], int] = {}
     for op in operations:
-        key = (op["job"], op["stage"], op["machine"])
-        start_map[key] = int(op["start"])
-        end_map[key] = int(op["end"])
+        key = (op[K.OP_JOB], op[K.OP_STAGE], op[K.OP_MACHINE])
+        start_map[key] = int(op[K.OP_START])
+        end_map[key] = int(op[K.OP_END])
 
-    png_path = yaml_path.with_name(
-        yaml_path.stem.replace("_schedule", "_gantt") + ".png"
-    )
     try:
         GanttPlotter().export(
             png_path,
             start_map,
             end_map,
-            job_list=data.get("jobs"),
-            stage_list=data.get("stages"),
-            machine_list_per_stage=data.get("machinesPerStage"),
-            all_job_list=data.get("jobs"),
+            job_list=data.get(K.JOBS),
+            stage_list=data.get(K.STAGES),
+            machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
+            all_job_list=data.get(K.JOBS),
         )
     except Exception:
-        logger.exception("Failed to render Gantt for %s", yaml_path)
+        logger.exception("Failed to render Gantt for %s", solution_path)
 
 
-def _render_heatmap_from_yaml(yaml_path: Path) -> None:
+def _render_heatmap_from_yaml(yaml_path: Path, html_path: Path) -> None:
     """Render the signed C-cost HTML heatmap from one heatmap YAML.
 
     Module-level so it's picklable by ``ProcessPoolExecutor``. plotly is
@@ -137,7 +139,6 @@ def _render_heatmap_from_yaml(yaml_path: Path) -> None:
     if not data.y_labels or not data.t_axis or data.Z.size == 0:
         return
 
-    html_path = yaml_path.with_suffix(".html")
     try:
         fig = make_figure(data, title=heatmap_title(data))
         fig.write_html(str(html_path), include_plotlyjs="cdn")
@@ -145,60 +146,83 @@ def _render_heatmap_from_yaml(yaml_path: Path) -> None:
         logger.exception("Failed to render heatmap for %s", yaml_path)
 
 
-def _render_preemptive_gantt_from_yaml(yaml_path: Path) -> None:
-    """Render a preemptive Gantt PNG from one MCF-preemptive schedule YAML."""
+def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
+    """Render a phase Gantt PNG from a phase schedule YAML.
+
+    Auto-detects regular vs preemptive content from the yaml top-level keys
+    and dispatches to the matching plotter.
+    """
     try:
         import matplotlib
 
         matplotlib.use("Agg")
-        from ..io import load_preemptive_schedule_yaml
-        from ..io.gantt import PreemptiveGanttPlotter
+        from ..io import load_preemptive_schedule_yaml, load_schedule_yaml
+        from ..io.gantt import GanttPlotter, PreemptiveGanttPlotter
     except ImportError:
         logger.warning("matplotlib not available, skipping %s", yaml_path)
         return
 
     try:
-        data = load_preemptive_schedule_yaml(yaml_path)
+        from routix.io import load_yaml as _load_yaml
+
+        peek = _load_yaml(yaml_path) or {}
     except Exception:
-        logger.exception("Failed to load preemptive schedule yaml %s", yaml_path)
+        logger.exception("Failed to peek yaml %s", yaml_path)
         return
 
-    segment_records = data.get("segments") or []
-    if not segment_records:
-        return
+    is_preemptive = K.SEGMENTS in peek
 
-    segments: list[tuple[str, str, str, int, int]] = [
-        (
-            seg["job"],
-            seg["stage"],
-            seg["machine"],
-            int(seg["start"]),
-            int(seg["end"]),
-        )
-        for seg in segment_records
-    ]
-
-    stage_id = data.get("stageId")
-    machines_per_stage = data.get("machinesPerStage") or {}
-    machines = machines_per_stage.get(stage_id, []) if stage_id else []
-    jobs = data.get("jobs")
-    all_jobs = data.get("allJobs") or jobs
-
-    png_path = yaml_path.with_name(
-        yaml_path.stem.replace("_mcf_preemptive_schedule", "_mcf_preemptive_gantt")
-        + ".png"
-    )
     try:
-        PreemptiveGanttPlotter().export(
-            png_path,
-            segments,
-            stage_id=stage_id,
-            machines=machines,
-            jobs=jobs,
-            all_jobs=all_jobs,
-        )
+        if is_preemptive:
+            data = load_preemptive_schedule_yaml(yaml_path)
+            segment_records = data.get(K.SEGMENTS) or []
+            if not segment_records:
+                return
+            segments: list[tuple[str, str, str, int, int]] = [
+                (
+                    seg[K.OP_JOB],
+                    seg[K.OP_STAGE],
+                    seg[K.OP_MACHINE],
+                    int(seg[K.OP_START]),
+                    int(seg[K.OP_END]),
+                )
+                for seg in segment_records
+            ]
+            stage_id = data.get(K.STAGE_ID)
+            machines_per_stage = data.get(K.MACHINES_PER_STAGE) or {}
+            machines = machines_per_stage.get(stage_id, []) if stage_id else []
+            jobs = data.get(K.JOBS)
+            all_jobs = data.get(K.ALL_JOBS) or jobs
+            PreemptiveGanttPlotter().export(
+                png_path,
+                segments,
+                stage_id=stage_id,
+                machines=machines,
+                jobs=jobs,
+                all_jobs=all_jobs,
+            )
+        else:
+            data = load_schedule_yaml(yaml_path)
+            operations = data.get(K.OPERATIONS) or []
+            if not operations:
+                return
+            start_map: dict[tuple[str, str, str], int] = {}
+            end_map: dict[tuple[str, str, str], int] = {}
+            for op in operations:
+                key = (op[K.OP_JOB], op[K.OP_STAGE], op[K.OP_MACHINE])
+                start_map[key] = int(op[K.OP_START])
+                end_map[key] = int(op[K.OP_END])
+            GanttPlotter().export(
+                png_path,
+                start_map,
+                end_map,
+                job_list=data.get(K.JOBS),
+                stage_list=data.get(K.STAGES),
+                machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
+                all_job_list=data.get(K.JOBS),
+            )
     except Exception:
-        logger.exception("Failed to render preemptive Gantt for %s", yaml_path)
+        logger.exception("Failed to render Gantt for %s", yaml_path)
 
 
 @dataclass
@@ -217,6 +241,18 @@ class FinalResult:
     scenario_results: list[ScenarioResult] = field(default_factory=list)
 
 
+def _is_placeholder_result(ir: InstanceResult) -> bool:
+    """Heuristic for the all-None ``InstanceResult`` produced by the failure
+    fallback in ``post_run_process``.
+    """
+    return (
+        ir.obj_value is None
+        and ir.work_status is None
+        and not ir.has_incumbent
+        and ir.report_count == 0
+    )
+
+
 class FFcDDWMultiScenarioRunner(
     MultiScenarioRunner[
         FFcDDWParameters,
@@ -233,25 +269,95 @@ class FFcDDWMultiScenarioRunner(
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
+        setup_logging_args: tuple | None = None,
         **kwargs: Any,
     ):
-        super().__init__(**kwargs)
+        if kwargs.get("logger") is None:
+            kwargs["logger"] = logging.getLogger(
+                "ffc_ddw_sum_et.orchestration.FFcDDWMultiScenarioRunner"
+            )
+        if setup_logging_args is not None:
+            # Forwarded through self.kwargs -> m_i_runner_class(**self.kwargs)
+            kwargs["setup_logging_args"] = setup_logging_args
+        if kwargs.get("layout") is None:
+            raise ValueError(
+                "FFcDDWMultiScenarioRunner requires a non-None ArtifactLayout. "
+                "Construct one via init_ffc_artifact_layout() in main.py."
+            )
         self.scenario_names = scenario_names or [
-            f"scenario_{i + 1}" for i in range(len(self.scenario_configs))
+            f"scenario_{i + 1}" for i in range(len(kwargs.get("scenario_configs", [])))
         ]
+        super().__init__(**kwargs)
         self.draw_gantt = draw_gantt
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = ins_index_source
         self.bks_table_csv_path = bks_table_csv_path
+        self._setup_logging_args = setup_logging_args
+
+    def _init_multi_instance_runners(self) -> None:
+        """Override: route scenario directories through the layout and forward
+        layout + scenario_name to each MultiInstanceRunner.
+
+        Calling `layout.scenario_dir(name)` here is the stage-2 duplicate check
+        (doc § 7.3). The matching stage-1 check runs in `main._validate_
+        scenario_uniqueness` before we get this far.
+        """
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
+        self.runners.clear()
+        for i, scenario_config in enumerate(self.scenario_configs):
+            subroutine_flow = scenario_config.get("subroutine_flow")
+            stopping_criteria = scenario_config.get("stopping_criteria")
+            if subroutine_flow is None or stopping_criteria is None:
+                self.logger.warning(
+                    f"Skipping scenario {i + 1} due to missing 'subroutine_flow'"
+                    " or 'stopping_criteria'."
+                )
+                continue
+            scenario_name = (
+                self.scenario_names[i]
+                if i < len(self.scenario_names)
+                else f"scenario_{i + 1}"
+            )
+            scenario_output_dir = layout.scenario_dir(scenario_name)
+            multi_instance_runner = self.m_i_runner_class(
+                s_i_runner_class=self.s_i_runner_class,
+                instances=self.instances,
+                shared_param_dict=self.shared_param_dict,
+                subroutine_flow=subroutine_flow,
+                stopping_criteria=stopping_criteria,
+                output_dir=scenario_output_dir,
+                output_metadata=self.base_output_metadata.copy(),
+                mode=self.mode,
+                layout=layout,
+                scenario_name=scenario_name,
+                **self.kwargs,
+            )
+            if self.mode == RunMode.RESUME:
+                multi_instance_runner.set_flow_resume_idx(
+                    scenario_config.get("flow_resume_idx", 0)
+                )
+            self.runners.append(multi_instance_runner)
+
+    def _scoped_logging_args(self, log_path: Path) -> tuple[Path, bool, int]:
+        _, quiet, verbose = self._setup_logging_args or get_logging_args()
+        return log_path, quiet, verbose
 
     def run(self):
         runner_cnt = len(self.runners)
         self.results.clear()
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
         for i, multi_instance_runner in enumerate(self.runners):
             scenario_name = (
                 self.scenario_names[i]
                 if i < len(self.scenario_names)
                 else f"scenario_{i + 1}"
+            )
+            setup_logging(
+                *self._scoped_logging_args(
+                    layout.log_path(
+                        "multi_instance_runner", scenario_name=scenario_name
+                    )
+                )
             )
             logger.info(
                 "--- Starting Scenario %d/%d: %s ---", i + 1, runner_cnt, scenario_name
@@ -272,6 +378,7 @@ class FFcDDWMultiScenarioRunner(
     def post_run_process(self) -> FinalResult:
         scenario_results = []
         all_instance_results: list[InstanceResult] = []
+        layout: ArtifactLayout = self.layout  # type: ignore[assignment]
 
         for i, runner in enumerate(self.runners):
             scenario_name = (
@@ -290,13 +397,30 @@ class FFcDDWMultiScenarioRunner(
             scenario_results.append(scenario_result)
             all_instance_results.extend(instance_results)
 
+        if (
+            self.mode == RunMode.POST_PROCESS_ONLY
+            and all_instance_results
+            and all(_is_placeholder_result(ir) for ir in all_instance_results)
+        ):
+            raise RuntimeError(
+                f"no instance manifests found in {self.output_dir} — "
+                "was this dir created before the manifest feature, or is the "
+                "path wrong?"
+            )
+
+        report_log_path = layout.log_path("multi_scenario_runner")
+        report_logging_args = self._scoped_logging_args(report_log_path)
+        setup_logging(*report_logging_args)
+
         FFcDDWReporter(
             self.output_dir,
             scenario_results,
+            layout=layout,
             draw_gantt=self.draw_gantt,
             painter_thread_cnt=self.painter_thread_cnt,
             ins_index_source=self.ins_index_source,
             bks_table_csv_path=self.bks_table_csv_path,
+            setup_logging_args=report_logging_args,
         ).generate()
 
         return FinalResult(scenario_results=scenario_results)
@@ -310,13 +434,16 @@ class FFcDDWReporter:
         output_dir: Path | None,
         scenario_results: list[ScenarioResult],
         *,
+        layout: ArtifactLayout,
         draw_gantt: bool = True,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
+        setup_logging_args: tuple | None = None,
     ):
         self.output_dir = output_dir or Path("output")
         self.scenario_results = scenario_results
+        self.layout = layout
         self.draw_gantt = draw_gantt
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = (
@@ -325,6 +452,7 @@ class FFcDDWReporter:
         self.bks_table_csv_path = (
             Path(bks_table_csv_path) if bks_table_csv_path is not None else None
         )
+        self._setup_logging_args = setup_logging_args
         self._filename_to_index: dict[str, int] = self._load_filename_to_index()
         self._index_to_meta: dict[int, dict[str, Any]] = self._load_index_to_meta()
 
@@ -395,19 +523,15 @@ class FFcDDWReporter:
 
         from .post_run_pivot import write_post_run_pivot_artifacts
 
-        summary_csv = self.output_dir / self.generate_summary_filename("csv")
+        summary_csv = self.layout.artifact_path("summary_csv")
         if not summary_csv.exists():
             return
         write_post_run_pivot_artifacts(
             summary_csv=summary_csv,
-            output_dir=self.output_dir,
-            run_id=self.output_dir.name,
+            layout=self.layout,
             hybrid_match_csv=self.ins_index_source,
             bks_table_csv=self.bks_table_csv_path,
         )
-
-    def generate_summary_filename(self, extension: str) -> str:
-        return f"{self.output_dir.name}_summary.{extension}"
 
     def _write_summary_csv(self) -> None:
         """Write master summary CSV, one row per (scenario, instance).
@@ -415,10 +539,15 @@ class FFcDDWReporter:
         Uses the ``FFcDDWSummary`` append-per-row layout shaped after
         ``hybridflowshop/hfs_summary.py`` so downstream analysis scripts
         line up across projects.
+
+        Atomic: rows are appended to a sibling ``.csv.tmp`` and ``os.replace``
+        renames it onto the final path only after every row succeeded. A
+        crash mid-loop leaves the prior summary CSV intact.
         """
-        path = self.output_dir / self.generate_summary_filename("csv")
-        if path.exists():
-            path.unlink()
+        path = self.layout.artifact_path("summary_csv")
+        tmp = path.with_suffix(".csv.tmp")
+        if tmp.exists():
+            tmp.unlink()
         for sc in self.scenario_results:
             for ir in sc.instance_results:
                 improvement = None
@@ -457,7 +586,11 @@ class FFcDDWReporter:
                         "error": _last_non_empty_line(ir.error) or "",
                     },
                 )
-                summary.save(path)
+                summary.save(tmp)
+        if not tmp.exists():
+            logger.warning("No instance results to write for summary CSV at %s", path)
+            return
+        os.replace(tmp, path)
         logger.info("Summary CSV written to %s", path)
 
     def _build_mcf_lb_extras(self, ir: InstanceResult) -> dict[str, Any]:
@@ -585,7 +718,7 @@ class FFcDDWReporter:
             ]
             if not rows:
                 continue
-            path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            path = self.layout.artifact_path("mcf_lb_analysis", scenario_name=sc.name)
             with open(path, "w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(self._MCF_LB_ANALYSIS_COLUMNS)
@@ -644,9 +777,7 @@ class FFcDDWReporter:
         best_counts: dict[str, int] = {name: 0 for name in scenario_names}
         lt_bks_counts: dict[str, int] = {name: 0 for name in scenario_names}
 
-        path = (
-            self.output_dir / f"{self.output_dir.name}_mcf_lb_last_stage_only_obj.csv"
-        )
+        path = self.layout.artifact_path("mcf_lb_lastStageOnlyObj_summary")
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(header)
@@ -682,10 +813,7 @@ class FFcDDWReporter:
                 writer.writerow(row)
         logger.info("Last-stage-only-obj summary CSV written to %s", path)
 
-        count_path = (
-            self.output_dir
-            / f"{self.output_dir.name}_mcf_lb_last_stage_only_obj_count.csv"
-        )
+        count_path = self.layout.artifact_path("mcf_lb_lastStageOnlyObj_count")
         with open(count_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["scenarioName", "bestCount", "ltBksCount"])
@@ -730,7 +858,9 @@ class FFcDDWReporter:
 
         frames: list[pd.DataFrame] = []
         for sc in self.scenario_results:
-            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            csv_path = self.layout.artifact_path(
+                "mcf_lb_analysis", scenario_name=sc.name
+            )
             if not csv_path.exists():
                 continue
             df = pd.read_csv(csv_path)
@@ -759,7 +889,7 @@ class FFcDDWReporter:
             "rendererName": "Heatmap",
         }
 
-        path = self.output_dir / f"{self.output_dir.name}_mcf_lb_dashboard.html"
+        path = self.layout.artifact_path("mcf_lb_dashboard")
         write_pivot_html(
             combined,
             path,
@@ -819,7 +949,9 @@ class FFcDDWReporter:
 
         frames: list[pd.DataFrame] = []
         for sc in self.scenario_results:
-            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            csv_path = self.layout.artifact_path(
+                "mcf_lb_analysis", scenario_name=sc.name
+            )
             if not csv_path.exists():
                 continue
             df = pd.read_csv(csv_path)
@@ -851,10 +983,7 @@ class FFcDDWReporter:
             "rendererName": "Table",
         }
 
-        path = (
-            self.output_dir
-            / f"{self.output_dir.name}_mcf_lb_lastStageOnlyObj_BKS_wintie_pivot.html"
-        )
+        path = self.layout.artifact_path("mcf_lb_lastStageOnlyObj_BKS_wintie_pivot")
         write_pivot_html(
             combined,
             path,
@@ -873,7 +1002,9 @@ class FFcDDWReporter:
 
         rows: list[dict[str, Any]] = []
         for sc in self.scenario_results:
-            csv_path = self.output_dir / f"{sc.name}_mcf_lb_analysis.csv"
+            csv_path = self.layout.artifact_path(
+                "mcf_lb_analysis", scenario_name=sc.name
+            )
             if not csv_path.exists():
                 continue
             df = pd.read_csv(csv_path)
@@ -914,10 +1045,7 @@ class FFcDDWReporter:
             f"{table_html}\n"
             "</body>\n</html>\n"
         )
-        path = (
-            self.output_dir
-            / f"{self.output_dir.name}_mcf_lb_lastStageOnlyObj_BKS_wintie_table.html"
-        )
+        path = self.layout.artifact_path("mcf_lb_lastStageOnlyObj_BKS_wintie_table")
         path.write_text(payload, encoding="utf8")
         logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie table written to %s", path)
 
@@ -963,72 +1091,116 @@ class FFcDDWReporter:
             if not sc.instance_results:
                 continue
             data = self._aggregate_scenario(sc)
-            path = self.output_dir / f"{sc.name}_statistics.yaml"
+            path = self.layout.artifact_path(
+                "scenario_statistics", scenario_name=sc.name
+            )
             dump_yaml(data, path)
             logger.info("Statistics YAML written to %s", path)
 
     def _generate_gantt_charts(self) -> None:
-        """Render Gantt PNGs from every `*_schedule.yaml` under output_dir, plus
-        signed C-cost HTML heatmaps from every `*_C_heatmap.yaml`.
+        """Render Gantt PNGs into the per-instance `report/` zone, plus
+        signed C-cost HTML heatmaps next to their YAML sources.
 
-        Gated by ``draw_gantt``. When enabled, rendering fans out across a
+        For each instance: render the main solution Gantt from
+        `<ins>_solution.json`, plus one Gantt per phase schedule yaml in
+        `progress/`, plus the last_stage_cp_sat schedule when present.
+        Heatmap YAMLs (``*_C_heatmap.yaml``, written by ``apply_lb_by_mcf``
+        when its ``draw_heatmap`` kwarg is True) are also rendered.
+
+        Gated by ``draw_gantt``. Rendering fans out across a
         ``ProcessPoolExecutor`` sized by ``painter_thread_cnt``; matplotlib /
         plotly are imported inside the worker so the algorithm path still
         pays nothing.
-
-        Preemptive schedule YAMLs (``*_mcf_preemptive_schedule.yaml``) use a
-        different schema and a dedicated renderer. Heatmap YAMLs
-        (``*_C_heatmap.yaml``) are written by ``apply_lb_by_mcf`` when its
-        ``draw_heatmap`` kwarg is True.
         """
         if not self.draw_gantt:
             logger.info("draw_gantt=False; skipping Gantt chart rendering")
             return
 
-        all_yaml_paths = sorted(self.output_dir.rglob("*_schedule.yaml"))
-        preemptive_paths = [
-            p
-            for p in all_yaml_paths
-            if p.name.endswith("_mcf_preemptive_schedule.yaml")
-        ]
-        regular_paths = [p for p in all_yaml_paths if p not in preemptive_paths]
-        heatmap_paths = sorted(self.output_dir.rglob("*_C_heatmap.yaml"))
+        jobs: list[tuple[Any, Path, Path]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope: dict[str, str] = {
+                    "scenario_name": sc.name,
+                    "instance_name": ins,
+                }
+                solution_json = self.layout.artifact_path("solution_json", **scope)
+                if solution_json.exists():
+                    jobs.append(
+                        (
+                            _render_gantt_from_solution_json,
+                            solution_json,
+                            self.layout.artifact_path("gantt_png", **scope),
+                        )
+                    )
+                for phase_yaml in self.layout.find_artifacts(
+                    "mcf_lb_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
+                ):
+                    phase_name = phase_yaml.stem.removeprefix(f"{ins}_")
+                    jobs.append(
+                        (
+                            _render_phase_gantt_from_yaml,
+                            phase_yaml,
+                            self.layout.artifact_path(
+                                "phase_gantt_png", phase_name=phase_name, **scope
+                            ),
+                        )
+                    )
+                ls_cpsat = self.layout.artifact_path(
+                    "last_stage_cp_sat_schedule", **scope
+                )
+                if ls_cpsat.exists():
+                    jobs.append(
+                        (
+                            _render_phase_gantt_from_yaml,
+                            ls_cpsat,
+                            self.layout.artifact_path(
+                                "last_stage_cp_sat_gantt_png", **scope
+                            ),
+                        )
+                    )
 
-        jobs: list[tuple[Path, Any]] = (
-            [(p, _render_gantt_from_yaml) for p in regular_paths]
-            + [(p, _render_preemptive_gantt_from_yaml) for p in preemptive_paths]
-            + [(p, _render_heatmap_from_yaml) for p in heatmap_paths]
-        )
+        gantt_count = len(jobs)
+        # Heatmap YAMLs aren't registered in ArtifactLayout yet; rglob fallback.
+        for hm_yaml in sorted(self.output_dir.rglob("*_C_heatmap.yaml")):
+            jobs.append(
+                (
+                    _render_heatmap_from_yaml,
+                    hm_yaml,
+                    hm_yaml.with_suffix(".html"),
+                )
+            )
+        heatmap_count = len(jobs) - gantt_count
+
         if not jobs:
             return
 
         worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
         logger.info(
-            "Rendering %d artifacts (%d Gantt, %d preemptive, %d heatmap) "
-            "with %d worker(s)",
+            "Rendering %d artifacts (%d Gantt, %d heatmap) with %d worker(s)",
             len(jobs),
-            len(regular_paths),
-            len(preemptive_paths),
-            len(heatmap_paths),
+            gantt_count,
+            heatmap_count,
             worker_cnt,
         )
         if worker_cnt == 1:
-            for yaml_path, render_fn in jobs:
-                render_fn(yaml_path)
+            for render_fn, src, dst in jobs:
+                render_fn(src, dst)
             return
 
-        with ProcessPoolExecutor(max_workers=worker_cnt) as executor:
-            futures = [
-                executor.submit(render_fn, yaml_path) for yaml_path, render_fn in jobs
-            ]
+        pool_kwargs: dict[str, Any] = {"max_workers": worker_cnt}
+        if self._setup_logging_args is not None:
+            pool_kwargs["initializer"] = setup_logging
+            pool_kwargs["initargs"] = self._setup_logging_args
+        with ProcessPoolExecutor(**pool_kwargs) as executor:
+            futures = [executor.submit(fn, src, dst) for fn, src, dst in jobs]
             for future in futures:
                 try:
                     future.result()
                 except Exception:
                     logger.exception("Gantt worker failed")
-
-    def generate_report_filename(self, extension: str) -> str:
-        return f"{self.output_dir.name}_report.{extension}"
 
     def _write_excel_report(self) -> None:
         """Write Excel report with dashboard, statistics, and analysis sheets."""
@@ -1038,7 +1210,7 @@ class FFcDDWReporter:
             logger.warning("xlsxwriter not available, skipping Excel report")
             return
 
-        path = self.output_dir / self.generate_report_filename("xlsx")
+        path = self.layout.artifact_path("report_xlsx")
         workbook = xlsxwriter.Workbook(str(path))
         header_fmt = workbook.add_format(
             {

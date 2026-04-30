@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+logger = logging.getLogger(__name__)
+
 
 class PlotterBase:
     """Shared figure lifecycle, drawing primitives, and axes layout."""
@@ -218,7 +220,7 @@ class GanttPlotter(PlotterBase):
                 force_end=force_end,
             )
             self.fig.savefig(file_path, bbox_inches="tight", dpi=300)
-            logging.debug("Gantt chart saved to %s", file_path)
+            logger.info("Gantt chart saved to %s", file_path)
         finally:
             self.close()
 
@@ -386,7 +388,7 @@ class PreemptiveGanttPlotter(PlotterBase):
                 force_end=force_end,
             )
             self.fig.savefig(file_path, bbox_inches="tight", dpi=300)
-            logging.debug("Preemptive Gantt chart saved to %s", file_path)
+            logger.info("Preemptive Gantt chart saved to %s", file_path)
         finally:
             self.close()
 

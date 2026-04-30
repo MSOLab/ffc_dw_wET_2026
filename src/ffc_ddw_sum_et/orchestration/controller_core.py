@@ -46,7 +46,9 @@ class FFcDDWSubroutineControllerCore(
         stopping_criteria: StoppingCriteria | dict,
     ):
         self._instance_name = instance.name
-        self.logger = logging.getLogger(f"ffc_ddw_sum_et.{self._instance_name}")
+        self.logger = logging.getLogger(
+            f"ffc_ddw_sum_et.orchestration.controller.{self._instance_name}"
+        )
         converted_flow = _to_ddo(subroutine_flow)
         if isinstance(stopping_criteria, dict):
             converted_stopping = StoppingCriteria(stopping_criteria)
@@ -56,6 +58,7 @@ class FFcDDWSubroutineControllerCore(
             name=instance.name,
             subroutine_flow=converted_flow,
             stopping_criteria=converted_stopping,
+            logger=self.logger,
         )
         self.instance = instance
         self.solution_manager = FFcDDWSolutionManager()
@@ -71,15 +74,36 @@ class FFcDDWSubroutineControllerCore(
         """Stop when the timelimit is exceeded."""
         return self.timer.time_over(self.stopping_criteria.timelimit)
 
+    def get_file_path_for_subroutine(self, filename_suffix: str) -> Path:
+        """Override: when an `ArtifactLayout` is bound, route per-call-context
+        paths into the instance's `progress/` zone instead of the working
+        directory. Keeps dynamically-named per-step artifacts (step_log,
+        cp-sat solver logs) out of the SSOT-protected `final` zone.
+        """
+        layout = self._artifact_layout
+        if (
+            layout is not None
+            and self._artifact_scenario_name is not None
+            and self._artifact_instance_name is not None
+        ):
+            filename = self._get_call_context_of_current_method() + filename_suffix
+            zone_dir = layout.zone_dir(
+                "progress",
+                scenario_name=self._artifact_scenario_name,
+                instance_name=self._artifact_instance_name,
+            )
+            return zone_dir / filename
+        return super().get_file_path_for_subroutine(filename_suffix)
+
     def try_get_file_path_for_subroutine(self, suffix: str) -> Path | None:
         """Like ``get_file_path_for_subroutine`` but returns ``None`` instead
         of raising when no working directory is configured.
 
         Use for optional artifact emission (e.g. ``_step_log.yaml``) that
         should be silently skipped in tests or scripted runs without a
-        working directory.
+        working directory or layout.
         """
-        if self._working_dir_path is None:
+        if self._artifact_layout is None and self._working_dir_path is None:
             return None
         return self.get_file_path_for_subroutine(suffix)
 

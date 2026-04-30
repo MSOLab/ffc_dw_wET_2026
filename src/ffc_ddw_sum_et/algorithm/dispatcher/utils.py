@@ -2,7 +2,7 @@
 
 Targets `FFcSchedule` directly; the `draw_gantt_per_step` hooks from the
 upstream version are removed (the project defers all Gantt rendering to the
-post-run pass that reads `*_schedule.yaml`).
+post-run pass driven by `ArtifactLayout`).
 """
 
 from __future__ import annotations

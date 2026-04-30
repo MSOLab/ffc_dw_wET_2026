@@ -12,12 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ffc_ddw_sum_et.io.schedule_keys import INSTANCE_NAME, MACHINES_PER_STAGE
 
 INPUT_HEADERS = (
-    "instanceName",
+    INSTANCE_NAME,
     "jobCount",
     "stageCount",
-    "machinesPerStage",
+    MACHINES_PER_STAGE,
     "timelimit",
 )
 

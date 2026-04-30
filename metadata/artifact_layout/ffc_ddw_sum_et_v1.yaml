@@ -1,0 +1,83 @@
+schema_version: 1
+overlay_for: routix.io._default_artifact_layout
+
+# Project-specific artifact kinds for ffc_ddw_sum_et. Layered on top of
+# routix's default schema by FFcArtifactLayout which calls register_kind for
+# each entry.
+#
+# Zone rule (matches routix base, fail-fast):
+#   - scope=instance: zone REQUIRED, one of {final, progress, report}.
+#   - scope=run / scenario: zone FORBIDDEN.
+
+artifacts:
+  # ---- instance / progress (per-instance solve trajectory) ----
+  - scope: instance
+    zone: progress
+    kind: mcf_lb_diagnostic
+    file_template: "{instance_name}_mcf_lb_diagnostic.yaml"
+  - scope: instance
+    zone: progress
+    kind: mcf_lb_phase_schedule
+    file_template: "{instance_name}_{phase_name}.yaml"
+  - scope: instance
+    zone: progress
+    kind: last_stage_cp_sat_schedule
+    file_template: "{instance_name}_last_stage_cp_sat_schedule.yaml"
+
+  # ---- instance / report (post-run renderings) ----
+  # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
+  # the renderer is picked from the source yaml's content type, so a single
+  # kind suffices. `last_stage_cp_sat_gantt_png` is split out because its
+  # source yaml uses the dedicated `last_stage_cp_sat_schedule` kind.
+  - scope: instance
+    zone: report
+    kind: gantt_png
+    file_template: "{instance_name}_gantt.png"
+  - scope: instance
+    zone: report
+    kind: phase_gantt_png
+    file_template: "{instance_name}_{phase_name}_gantt.png"
+  - scope: instance
+    zone: report
+    kind: last_stage_cp_sat_gantt_png
+    file_template: "{instance_name}_last_stage_cp_sat_gantt.png"
+
+  # ---- scenario ----
+  - scope: scenario
+    kind: scenario_statistics
+    file_template: "{scenario_name}_statistics.yaml"
+  - scope: scenario
+    kind: mcf_lb_analysis
+    file_template: "{scenario_name}_mcf_lb_analysis.csv"
+
+  # ---- run ----
+  - scope: run
+    kind: report_xlsx
+    file_template: "{run_id}_report.xlsx"
+  - scope: run
+    kind: mcf_lb_dashboard
+    file_template: "{run_id}_mcf_lb_dashboard.html"
+  - scope: run
+    kind: mcf_lb_lastStageOnlyObj_summary
+    file_template: "{run_id}_mcf_lb_last_stage_only_obj.csv"
+  - scope: run
+    kind: mcf_lb_lastStageOnlyObj_count
+    file_template: "{run_id}_mcf_lb_last_stage_only_obj_count.csv"
+  - scope: run
+    kind: mcf_lb_lastStageOnlyObj_BKS_wintie_pivot
+    file_template: "{run_id}_mcf_lb_lastStageOnlyObj_BKS_wintie_pivot.html"
+  - scope: run
+    kind: mcf_lb_lastStageOnlyObj_BKS_wintie_table
+    file_template: "{run_id}_mcf_lb_lastStageOnlyObj_BKS_wintie_table.html"
+  - scope: run
+    kind: rpdf_comparison_csv
+    file_template: "{run_id}_rpdf_comparison.csv"
+  - scope: run
+    kind: rpdf_dashboard
+    file_template: "{run_id}_rpdf_dashboard.html"
+  - scope: run
+    kind: win_tie_dashboard
+    file_template: "{run_id}_win_tie_dashboard.html"
+  - scope: run
+    kind: time_p_dashboard
+    file_template: "{run_id}_time_p_dashboard.html"

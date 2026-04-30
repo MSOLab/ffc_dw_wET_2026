@@ -4,12 +4,17 @@ import csv
 import json
 from pathlib import Path
 
+from ffc_ddw_sum_et.orchestration.artifact_layout import FFcArtifactLayout
 from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import InstanceResult
 from ffc_ddw_sum_et.orchestration.reporting import (
     FFcDDWReporter,
     ScenarioResult,
     _last_non_empty_line,
 )
+
+
+def _layout(tmp_path: Path, run_id: str = "run_42") -> FFcArtifactLayout:
+    return FFcArtifactLayout(run_root=tmp_path / run_id, run_id=run_id)
 
 
 def _make_ir(
@@ -60,7 +65,7 @@ def test_aggregate_scenario_basic(tmp_path: Path) -> None:
             _make_ir("c", obj_value=8.0, first_obj_value=16.0),
         ],
     )
-    reporter = FFcDDWReporter(tmp_path, [sc])
+    reporter = FFcDDWReporter(tmp_path, [sc], layout=_layout(tmp_path))
 
     stats = reporter._aggregate_scenario(sc)
 
@@ -83,7 +88,7 @@ def test_aggregate_scenario_with_errors(tmp_path: Path) -> None:
             _make_ir("b", obj_value=None, first_obj_value=None, error="boom"),
         ],
     )
-    reporter = FFcDDWReporter(tmp_path, [sc])
+    reporter = FFcDDWReporter(tmp_path, [sc], layout=_layout(tmp_path))
 
     stats = reporter._aggregate_scenario(sc)
 
@@ -99,7 +104,7 @@ def test_aggregate_scenario_no_completed(tmp_path: Path) -> None:
             _make_ir("a", obj_value=None, first_obj_value=None, error="boom"),
         ],
     )
-    reporter = FFcDDWReporter(tmp_path, [sc])
+    reporter = FFcDDWReporter(tmp_path, [sc], layout=_layout(tmp_path))
 
     stats = reporter._aggregate_scenario(sc)
 
@@ -118,7 +123,7 @@ def test_aggregate_scenario_improvement_ratio_skips_none_first(tmp_path: Path) -
             _make_ir("b", obj_value=5.0, first_obj_value=None),
         ],
     )
-    reporter = FFcDDWReporter(tmp_path, [sc])
+    reporter = FFcDDWReporter(tmp_path, [sc], layout=_layout(tmp_path))
 
     stats = reporter._aggregate_scenario(sc)
 
@@ -134,7 +139,7 @@ def test_aggregate_scenario_improvement_ratio_skips_zero_first(tmp_path: Path) -
             _make_ir("b", obj_value=0.0, first_obj_value=0.0),
         ],
     )
-    reporter = FFcDDWReporter(tmp_path, [sc])
+    reporter = FFcDDWReporter(tmp_path, [sc], layout=_layout(tmp_path))
 
     stats = reporter._aggregate_scenario(sc)
 
@@ -149,14 +154,14 @@ def test_write_summary_csv(tmp_path: Path) -> None:
             _make_ir("b", method_call_counts={"run_fam": 2}),
         ],
     )
-    out_dir = tmp_path / "run_42"
-    out_dir.mkdir()
-    reporter = FFcDDWReporter(out_dir, [sc])
+    layout = _layout(tmp_path, run_id="run_42")
+    reporter = FFcDDWReporter(layout.run_dir(), [sc], layout=layout)
 
     reporter._write_summary_csv()
 
-    csv_path = out_dir / "run_42_summary.csv"
+    csv_path = layout.artifact_path("summary_csv")
     assert csv_path.exists()
+    assert csv_path.name == "run_42_summary.csv"
     with csv_path.open() as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 2
@@ -164,11 +169,3 @@ def test_write_summary_csv(tmp_path: Path) -> None:
     assert rows[0]["scenarioName"] == "s1"
     assert rows[0]["instanceName"] == "a"
     assert rows[1]["methodCallCounts"] == json.dumps({"run_fam": 2})
-
-
-def test_generate_summary_filename(tmp_path: Path) -> None:
-    out_dir = tmp_path / "run_42"
-    out_dir.mkdir()
-    reporter = FFcDDWReporter(out_dir, [])
-
-    assert reporter.generate_summary_filename("csv") == "run_42_summary.csv"
