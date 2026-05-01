@@ -56,6 +56,14 @@ class InstanceResult:
     mcf_lb_diagnostic: dict[str, Any] | None = None
     makespan: float | None = None
 
+    last_stage_cp_sat_obj: float | None = None
+    """
+    Weighted E+T of ``self.last_stage_cp_sat_solution`` when the
+    controller produced a last-stage-only schedule
+    (run_mcf_lb_4 / run_last_stage_cp_sat_lb /
+    neh_cp_last_stage_only_sch_from_mcf_lb). ``None`` otherwise.
+    """
+
 
 def _to_serializable(value: Any) -> Any:
     """Recursively coerce enums to ``.value`` for safe YAML dump."""
@@ -320,6 +328,12 @@ class FFcDDWSingleInstanceRunner(
 
         diag = getattr(controller, "mcf_lb_diagnostic", None)
         diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None
+        ls_cp_sol = getattr(controller, "last_stage_cp_sat_solution", None)
+        last_stage_cp_sat_obj = (
+            float(ls_cp_sol.obj_value)
+            if ls_cp_sol is not None and ls_cp_sol.obj_value is not None
+            else None
+        )
         if diag_dict is not None:
             try:
                 dump_yaml(
@@ -370,6 +384,7 @@ class FFcDDWSingleInstanceRunner(
             timelimit=timelimit,
             mcf_lb_diagnostic=diag_dict,
             makespan=makespan,
+            last_stage_cp_sat_obj=last_stage_cp_sat_obj,
         )
 
         try:

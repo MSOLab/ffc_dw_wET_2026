@@ -22,12 +22,15 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
 )
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import (
-    SeedTag,
-    run_phase1,
-    solve_mcf_lb,
+from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
+    neh_cp_last_stage_only_from_mcf_lb,
 )
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
+from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import solve_mcf_lb
+from ffc_ddw_sum_et.algorithm.mcf_lb.utils import (
+    jobs_sorted_by_normalized_window_width,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.neh_cp import (
@@ -384,7 +387,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def apply_lb_by_mcf(
         self,
         draw_heatmap: bool = False,
-        heatmap_sort: Literal["due2-window", "neh-cp"] = "due2-window",
+        heatmap_sort: Literal[
+            "due2-window", "neh-cp", "1_rj_prmp_rel_dev"
+        ] = "due2-window",
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
@@ -406,8 +411,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 renders the matching HTML.
             heatmap_sort: Row ordering for the heatmap. ``"due2-window"``
                 sorts by ``max(r_j, d⁺-p)`` then ``d⁺`` then ``d⁻``;
-                ``"neh-cp"`` sorts by ``(max(w⁻, w⁺), w⁻+w⁺, window width)``.
-                Ignored when ``draw_heatmap`` is ``False``.
+                ``"neh-cp"`` sorts by ``(max(w⁻, w⁺), w⁻+w⁺, window width)``;
+                ``"1_rj_prmp_rel_dev"`` reproduces the
+                ``neh_cp_last_stage_only_sch_from_mcf_lb`` step's job order
+                (ascending normalized MCF preemptive window width
+                ``(t_max - t_min) / p_{c,j}``, tie-break by total weight
+                DESC then native position ASC). Ignored when
+                ``draw_heatmap`` is ``False``.
         """
         start_elapsed = time.monotonic()
         diag = MCFLBDiagnostic()
@@ -451,6 +461,106 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             elapsed_time=elapsed,
             obj_value=None,
             obj_bound=obj_bound_by_mcf,
+        )
+
+    def neh_cp_last_stage_only_sch_from_mcf_lb(
+        self,
+        batch_size: int = 5,
+        cp_pf_method: PFMethod | None = "PF1",
+        cp_solver_thread_cnt: int = 1,
+        total_tl: float | str | None = None,
+        log_cp_search_progress: bool = False,
+    ) -> SubroutineReport:
+        """Step method: build a last-stage-only NEH-CP schedule from the
+        MCF preemptive LB stored on ``self.mcf_preemptive_schedule``.
+
+        Pre-conditions (else ``ValueError``):
+          - ``self.mcf_preemptive_schedule`` set by a prior
+            ``apply_lb_by_mcf`` (or compatible) step.
+          - ``self.mcf_lb_diagnostic`` set so the MCF LB can be used as
+            ``obj_bound``.
+
+        Args:
+            batch_size: Jobs added per NEH-CP step (in MCF window-width
+                priority order). Defaults to 5.
+            cp_pf_method: Profile-fix precedence policy for each batch's
+                last-stage CP-SAT solve. Defaults to ``"PF1"``; ``None``
+                skips the precedence-arc pass.
+            cp_solver_thread_cnt: ``num_search_workers`` per batch CP solve.
+            total_tl: Total time budget for the entire NEH-CP loop.
+                Accepts a float or a ``"<n>nc"`` / ``"<n>n"`` / ``"<n>c"``
+                / ``"<n>m"`` expression. When the budget is exhausted,
+                un-placed jobs are greedily re-dispatched onto the last
+                successful CP schedule so the returned schedule still
+                covers every job.
+            log_cp_search_progress: When ``True``, each batch's CP solver
+                writes its search-progress log under the subroutine
+                output directory.
+
+        Side effects:
+          - Stores the resulting full last-stage schedule on
+            ``self.last_stage_cp_sat_solution``.
+          - Appends per-batch and final schedules to
+            ``self.mcf_lb_phase_schedules`` for post-run diagnostics.
+        """
+        if self.mcf_preemptive_schedule is None:
+            raise ValueError(
+                "neh_cp_last_stage_only_sch_from_mcf_lb requires a prior "
+                "apply_lb_by_mcf step to populate self.mcf_preemptive_schedule."
+            )
+        if self.mcf_lb_diagnostic is None:
+            raise ValueError(
+                "neh_cp_last_stage_only_sch_from_mcf_lb requires self.mcf_lb_diagnostic "
+                "(set by apply_lb_by_mcf)."
+            )
+
+        instance = self.instance
+        total_tl_seconds = resolve_value_expr(
+            total_tl,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+
+        mcf_lb = self.mcf_lb_diagnostic.mcf_lb
+        result = neh_cp_last_stage_only_from_mcf_lb(
+            instance=instance,
+            mcf_preemptive_schedule=self.mcf_preemptive_schedule,
+            batch_size=batch_size,
+            cp_pf_method=cp_pf_method,
+            cp_solver_thread_cnt=cp_solver_thread_cnt,
+            total_tl_seconds=total_tl_seconds,
+            mcf_lb=mcf_lb,
+            log_cp_search_progress=log_cp_search_progress,
+            solver_log_path_getter=self.get_file_path_for_subroutine,
+            logger=self.logger,
+        )
+
+        # Publish the MCF LB as the global ``obj_bound``; ``result.obj_bound``
+        # is only the last NEH-CP iteration's sub-instance CP LB and is not
+        # a valid global lower bound (see NehCpLastStageOnlyResult docstring).
+        self.last_stage_cp_sat_solution = FFcDDWSolution(
+            schedule=result.schedule,
+            obj_value=result.obj_value,
+            obj_bound=mcf_lb,
+        )
+        self.mcf_lb_phase_schedules.extend(result.intermediate_schedules)
+
+        self.logger.info(
+            "neh_cp_last_stage_only_sch_from_mcf_lb: status=%s, obj=%.2f, "
+            "mcf_lb=%d, last_iter_cp_lb=%.2f, elapsed=%.2fs "
+            "(cp solves total=%.2fs).",
+            result.status,
+            result.obj_value,
+            int(mcf_lb),
+            result.obj_bound,
+            result.elapsed_time,
+            result.cp_solve_sec,
+        )
+        return SubroutineReport(
+            elapsed_time=result.elapsed_time,
+            obj_value=result.obj_value,
+            obj_bound=mcf_lb,
         )
 
     def run_mcf_lb_4(
@@ -1337,7 +1447,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
         draw_heatmap: bool = False,
-        heatmap_sort: Literal["due2-window", "neh-cp"] = "due2-window",
+        heatmap_sort: Literal[
+            "due2-window", "neh-cp", "1_rj_prmp_rel_dev"
+        ] = "due2-window",
         keep_step_schedules: bool = False,
     ) -> SubroutineReport:
         """Step method: solve the MCF preemptive relaxation, derive a job
@@ -1526,62 +1638,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """Order jobs by ascending MCF normalized window spread
         ``(t_max_j - t_min_j) / p_{c,j}``.
 
-        The ratio is dimensionless: it measures how much the job's
-        preemptive flow is spread out relative to its own last-stage
-        processing time. A smaller ratio means the job is packed into
-        a window close to its own length, so its placement in the
-        final schedule is more constrained.
-
-        Tie-breakers, in order: total due-window weight ``(w⁻+w⁺)``
-        DESC, native ``instance.job_id_list`` position ASC. Jobs with
-        no MCF flow (``window is None``) are placed last under the
-        ``window is None`` bucket — this should not occur for an
-        optimal MCF, but keeps the sort total.
-
-        Logs the sorted sequence to ``self.logger`` with one job per
-        line plus the sort-key components, so a reader can verify
-        the ordering.
+        Thin wrapper over
+        :func:`ffc_ddw_sum_et.algorithm.mcf_lb.utils.jobs_sorted_by_normalized_window_width`
+        that supplies the live MCF time-window map. The shared helper owns
+        the tie-break order and the rank-by-rank diagnostic log.
         """
-        window_map = mcf.get_job_2_time_window_map()
         last_stage_id = instance.stage_id_list[-1]
         p_map = instance.get_job_2_p_map_for_stage(last_stage_id)
-        job_id_list = instance.job_id_list
-        job_2_pos = {j: i for i, j in enumerate(job_id_list)}
-        ewt = instance.job_2_ewt_map or dict.fromkeys(job_id_list, 1)
-        twt = instance.job_2_twt_map or dict.fromkeys(job_id_list, 1)
-
-        def sort_key(j: str) -> tuple[int, float, int, int]:
-            window = window_map[j]
-            return (
-                0 if window is not None else 1,
-                ((window[1] - window[0]) / p_map[j]) if window is not None else 0.0,
-                -(ewt[j] + twt[j]),
-                job_2_pos[j],
-            )
-
-        sorted_jobs = sorted(job_id_list, key=sort_key)
-
-        id_w = max(len(j) for j in job_id_list)
-        self.logger.info(
-            "MCF-induced job sequence "
-            "(rank | %-*s | width | p_cj | width/p_cj | (w-+w+) | native_pos):",
-            id_w,
-            "job_id",
+        return jobs_sorted_by_normalized_window_width(
+            mcf.get_job_2_time_window_map(),
+            p_map,
+            instance,
+            logger=self.logger,
         )
-        for rank, j in enumerate(sorted_jobs):
-            window = window_map[j]
-            width = (window[1] - window[0]) if window is not None else None
-            ratio = (width / p_map[j]) if width is not None else None
-            self.logger.info(
-                "  %4d | %-*s | %s | %4d | %s | %4d | %4d",
-                rank,
-                id_w,
-                j,
-                f"{width:>5}" if width is not None else f"{'None':>5}",
-                p_map[j],
-                f"{ratio:>10.4f}" if ratio is not None else f"{'None':>10}",
-                ewt[j] + twt[j],
-                job_2_pos[j],
-            )
-
-        return sorted_jobs

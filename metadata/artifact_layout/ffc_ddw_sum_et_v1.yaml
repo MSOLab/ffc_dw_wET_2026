@@ -58,6 +58,12 @@ artifacts:
     kind: mcf_lb_dashboard
     file_template: "{run_id}_mcf_lb_dashboard.html"
   - scope: run
+    kind: mcf_preemptive_obj_csv
+    file_template: "{run_id}_mcf_preemptive_obj.csv"
+  - scope: run
+    kind: last_stage_cp_sat_obj_csv
+    file_template: "{run_id}_last_stage_cp_sat_obj.csv"
+  - scope: run
     kind: mcf_lb_lastStageOnlyObj_summary
     file_template: "{run_id}_mcf_lb_last_stage_only_obj.csv"
   - scope: run

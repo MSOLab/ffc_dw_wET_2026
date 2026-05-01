@@ -12,6 +12,7 @@ from routix.stopping_criteria import StoppingCriteria
 from routix.subroutine_controller import SubroutineController
 
 from ..algorithm.base.alg_record import WorkStatus
+from ..algorithm.mcf_lb.diagnostic import MCFLBDiagnostic
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
@@ -62,8 +63,13 @@ class FFcDDWSubroutineControllerCore(
         )
         self.instance = instance
         self.solution_manager = FFcDDWSolutionManager()
-        self.last_stage_cp_sat_solution: FFcDDWSolution | None = None
+        self._define_states()
+
+    def _define_states(self) -> None:
+        """Define all state attributes used across subroutine phases."""
         self.mcf_preemptive_schedule: MCFPreemptiveSchedule | None = None
+        self.mcf_lb_diagnostic: MCFLBDiagnostic | None = None
+        self.last_stage_cp_sat_solution: FFcDDWSolution | None = None
         # Ordered (name, schedule) pairs per MCF-LB phase, used by the
         # runner to emit numbered progress artifacts (1_mcf_preemptive,
         # 2_last_stage_only_init, ..., 7_final). Only populated entries

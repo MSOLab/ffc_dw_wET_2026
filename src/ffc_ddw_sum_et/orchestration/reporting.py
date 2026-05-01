@@ -505,6 +505,8 @@ class FFcDDWReporter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._write_summary_csv()
+        self._write_mcf_preemptive_obj_csv()
+        self._write_last_stage_cp_sat_obj_csv()
         self._write_mcf_lb_analysis_csv()
         self._write_mcf_lb_pivot_artifacts()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
@@ -734,6 +736,90 @@ class FFcDDWReporter:
             logger.info("MCF-LB analysis CSV written to %s", path)
 
         self._write_last_stage_only_obj_summary_csv()
+
+    def _write_mcf_preemptive_obj_csv(self) -> None:
+        """Run-scoped long-format CSV of MCF-preemptive objective values.
+
+        Columns: ``scenarioName, insIndex, objValue``. One row per
+        ``(scenario, instance)`` pair where ``mcf_lb_diagnostic.mcf_lb`` is
+        non-null. Rows are sorted by ``(scenarioName, insIndex)``. Skipped
+        entirely if no scenario produced an MCF LB.
+
+        Note: ``MCFPreemptiveSchedule`` does not carry a weighted-E+T
+        objective (it is preemptive and stage-disaggregated), so we use the
+        MCF lower-bound as the schedule's natural objective.
+        """
+        rows: list[tuple[str, int | None, float]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                diag = ir.mcf_lb_diagnostic
+                if diag is None:
+                    continue
+                mcf_lb = diag.get("mcf_lb")
+                if mcf_lb is None:
+                    continue
+                rows.append(
+                    (
+                        sc.name,
+                        self._resolve_ins_index(ir.instance_name),
+                        float(mcf_lb),
+                    )
+                )
+        if not rows:
+            return
+        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
+        path = self.layout.artifact_path("mcf_preemptive_obj_csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(("scenarioName", "insIndex", "objValue"))
+            for scenario_name, ins_index, obj_value in rows:
+                writer.writerow(
+                    (
+                        scenario_name,
+                        "" if ins_index is None else ins_index,
+                        obj_value,
+                    )
+                )
+        logger.info("MCF preemptive obj CSV written to %s", path)
+
+    def _write_last_stage_cp_sat_obj_csv(self) -> None:
+        """Run-scoped long-format CSV of ``last_stage_cp_sat_solution`` objs.
+
+        Columns: ``scenarioName, insIndex, objValue``. One row per
+        ``(scenario, instance)`` pair where the controller produced a
+        last-stage-only schedule (``run_mcf_lb_4`` /
+        ``run_last_stage_cp_sat_lb`` /
+        ``neh_cp_last_stage_only_sch_from_mcf_lb``). Skipped entirely if no
+        scenario produced one.
+        """
+        rows: list[tuple[str, int | None, float]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                if ir.last_stage_cp_sat_obj is None:
+                    continue
+                rows.append(
+                    (
+                        sc.name,
+                        self._resolve_ins_index(ir.instance_name),
+                        float(ir.last_stage_cp_sat_obj),
+                    )
+                )
+        if not rows:
+            return
+        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
+        path = self.layout.artifact_path("last_stage_cp_sat_obj_csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(("scenarioName", "insIndex", "objValue"))
+            for scenario_name, ins_index, obj_value in rows:
+                writer.writerow(
+                    (
+                        scenario_name,
+                        "" if ins_index is None else ins_index,
+                        obj_value,
+                    )
+                )
+        logger.info("last_stage_cp_sat obj CSV written to %s", path)
 
     def _write_last_stage_only_obj_summary_csv(self) -> None:
         """Cross-scenario summary of ``lastStageOnlyObj`` per instance.

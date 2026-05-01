@@ -1,23 +1,25 @@
 """Phase 1 of the MCF-LB pipeline.
 
-Computes the MCF preemptive LB and derives one last-stage dispatch seed
-per MCF-derived priority map (avg time, start time, completion time).
-Phase 2 picks up the seed list and builds an independent CP-SAT model
-per seed.
+Derives one last-stage dispatch seed per MCF-derived priority map
+(avg time, start time, completion time). Phase 2 picks up the seed list
+and builds an independent CP-SAT model per seed.
+
+The MCF preemptive LB itself (``solve_mcf_lb`` / ``McfLbResult``) lives in
+``mcf_lb.preemptive``; we re-export it here for backward compatibility
+with existing imports.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import Literal, Mapping, Sequence
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
-from ..parallel_mc_pmtn import ParallelMachinePreemptionMcf
 from .diagnostic import MCFLBDiagnostic
+from .preemptive import McfLbResult, solve_mcf_lb
 
 __all__ = [
     "LastStageSeed",
@@ -58,57 +60,6 @@ class LastStageSeed:
     tag: SeedTag
     job_sequence: list[str]
     init_schedule: FFcSchedule
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class McfLbResult:
-    """Bare result of solving the MCF relaxation: bound + preemptive schedule.
-
-    Used by ``run_phase1`` to seed the full 4-phase pipeline, and by
-    LB-only subroutines that report a global lower bound with no schedule.
-    The ``mcf`` handle is retained so callers can extract MCF-derived
-    priority maps without re-solving.
-    """
-
-    mcf_lb: float
-    mcf_preemptive_schedule: MCFPreemptiveSchedule
-    mcf: ParallelMachinePreemptionMcf
-
-
-def solve_mcf_lb(
-    instance: FFcDDWParameters,
-    diagnostic: MCFLBDiagnostic,
-) -> McfLbResult:
-    """Solve the MCF relaxation and record the bound on ``diagnostic``.
-
-    Mutates ``diagnostic`` in place: sets ``mcf_solve_sec``, ``mcf_lb``,
-    and advances ``reached_phase`` to ``"mcf"``.
-
-    Raises:
-        RuntimeError: if the MCF flow is not optimal for ``instance``.
-    """
-    last_stage_id = instance.stage_id_list[-1]
-
-    t_mcf = time.monotonic()
-    mcf = ParallelMachinePreemptionMcf.from_instance(instance)
-    mcf.solve()
-    if not mcf.is_optimal():
-        raise RuntimeError(f"MCF not optimal for instance {instance.name}")
-    mcf_lb = float(mcf.get_obj_value())
-    diagnostic.mcf_solve_sec = time.monotonic() - t_mcf
-    diagnostic.mcf_lb = mcf_lb
-    diagnostic.reached_phase = "mcf"
-
-    mcf_preemptive_schedule = MCFPreemptiveSchedule.from_flow_dict(
-        mcf.get_variable_value_dict(),
-        stage_id=last_stage_id,
-        machines=instance.stage_2_machines_map[last_stage_id],
-    )
-    return McfLbResult(
-        mcf_lb=mcf_lb,
-        mcf_preemptive_schedule=mcf_preemptive_schedule,
-        mcf=mcf,
-    )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
