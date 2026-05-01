@@ -1,27 +1,31 @@
-"""NEH-CP-style last-stage-only schedule construction from an MCF preemptive LB.
+"""Last-stage-only schedule construction starting from an MCF preemptive LB.
 
 Pure algorithm module — no controller / orchestration dependency. The
-controller wires this in via a thin step method that supplies the
-`mcf_preemptive_schedule` and `mcf_lb` from prior subroutine state.
+controller wires these in via thin step methods that supply the
+``mcf_preemptive_schedule`` and ``mcf_lb`` from prior subroutine state.
 
-Algorithm:
-  1. Sort jobs by ascending normalized window width
-     ``(t_max_j - t_min_j) / p_{c,j}`` derived from the preemptive
-     schedule's segments.
-  2. Partition into batches of ``batch_size``.
-  3. For each batch, solve the last-stage-only CP-SAT model on the
-     sub-instance restricted to jobs accumulated so far. The warm-start
-     places each new batch job at the midpoint of its MCF preemptive
-     window (``(t_min + t_max - p_j) // 2``); when that exact slot is
-     occupied, the placement falls back to whichever of the earliest
-     feasible start (after the desired time) or latest feasible end
-     (before the desired end) gives the smaller weighted ET
-     contribution. Step 0 builds an empty base schedule; step k>0
-     starts from step k-1's CP schedule.
-  4. If ``total_tl_seconds`` runs out before all jobs are placed, the
-     loop breaks early and any un-placed jobs are inserted onto the
-     last successful CP schedule using the same desired-start placement
-     so the returned schedule covers every job.
+Two algorithm entry points are exported:
+
+  - ``single_pass_last_stage_only_from_mcf_lb``: build a midpoint
+    warm-start across all jobs from the MCF preemptive window
+    (``desired_start = (t_min + t_max - p_j) // 2``), then run a single
+    profile-fix CP-SAT solve on the full job set. The midpoint
+    warm-start is the profile-fix schedule, so its placement directly
+    constrains the final solve.
+
+  - ``neh_cp_last_stage_only_from_mcf_lb``: NEH-style batched
+    construction. Jobs are sorted by ascending normalized window width
+    ``(t_max - t_min) / p_{c,j}`` and partitioned into batches of
+    ``batch_size``; each batch's CP-SAT solve is warm-started from the
+    previous batch's CP schedule plus midpoint placements for the new
+    batch. If the time budget is exhausted, un-placed jobs are
+    re-dispatched onto the last successful CP schedule so the returned
+    schedule still covers every job.
+
+Both entry points share the placement helper
+``_insert_jobs_at_desired_starts`` and use it with a configurable
+``placement_priority`` lex-tiebreak between weighted-ET contribution
+and start-time distance.
 """
 
 from __future__ import annotations
@@ -49,7 +53,7 @@ from .utils import (
 __all__ = [
     "NehCpLastStageOnlyResult",
     "neh_cp_last_stage_only_from_mcf_lb",
-    "improve_last_stage_only_dispatched_schedule_from_mcf_lb",
+    "single_pass_last_stage_only_from_mcf_lb",
 ]
 
 
@@ -86,7 +90,7 @@ class NehCpLastStageOnlyResult:
     """
 
 
-def dispatch_insert_idle_time(
+def single_pass_last_stage_only_from_mcf_lb(
     instance: FFcDDWParameters,
     mcf_preemptive_schedule: MCFPreemptiveSchedule,
     *,
@@ -95,7 +99,18 @@ def dispatch_insert_idle_time(
         "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
     ] = "1_rj_prmp_rel_dev",
     placement_priority: Literal["contrib", "dist"] = "contrib",
+    cp_pf_method: PFMethod | None = "PF1",
+    cp_solver_thread_cnt: int = 1,
+    total_tl_seconds: float | None = None,
+    mcf_lb: float | None = None,
+    log_cp_search_progress: bool = False,
+    solver_log_path_getter: Callable[[str], Path] | None = None,
 ) -> NehCpLastStageOnlyResult:
+    """Build a midpoint warm-start across all jobs from the MCF preemptive
+    LB and run one profile-fix CP-SAT solve. The midpoint placement is
+    the profile-fix schedule, so ``placement_priority`` directly steers
+    the final solve (not just a hint).
+    """
     log = logger or logging.getLogger(__name__)
     start = time.monotonic()
 
@@ -125,76 +140,6 @@ def dispatch_insert_idle_time(
         placement_priority=placement_priority,
     )
 
-    ref.make_semi_active(
-        instance.stage_2_job_2_p_map,
-        start_from_stage=last_stage_id,
-        job_2_release_map=job_2_release_map,
-    )
-    ref.insert_idle_time(
-        instance.job_2_due_window_map, instance.job_2_ewt_map, instance.job_2_twt_map
-    )
-    sum_we, sum_wt = compute_weighted_earliness_tardiness(ref, instance)
-    obj_value = float(sum_we + sum_wt)
-
-    elapsed = time.monotonic() - start
-    return NehCpLastStageOnlyResult(
-        schedule=ref,
-        obj_value=obj_value,
-        # See dataclass docstring: this is the LAST NEH-CP iteration's
-        # sub-instance CP LB, not a global bound on the full problem.
-        obj_bound=0,
-        elapsed_time=elapsed,
-        cp_solve_sec=elapsed,
-        status="heuristic",
-        intermediate_schedules=[],
-    )
-
-
-def improve_last_stage_only_dispatched_schedule_from_mcf_lb(
-    instance: FFcDDWParameters,
-    mcf_preemptive_schedule: MCFPreemptiveSchedule,
-    *,
-    logger: logging.Logger | None = None,
-    job_priority: Literal[
-        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
-    ] = "1_rj_prmp_rel_dev",
-    hint_placement_priority: Literal["contrib", "dist"] = "contrib",
-    cp_pf_method: PFMethod | None = "PF1",
-    cp_solver_thread_cnt: int = 1,
-    total_tl_seconds: float | None = None,
-    mcf_lb: float | None = None,
-    log_cp_search_progress: bool = False,
-    solver_log_path_getter: Callable[[str], Path] | None = None,
-) -> NehCpLastStageOnlyResult:
-    log = logger or logging.getLogger(__name__)
-    start = time.monotonic()
-
-    last_stage_id = instance.stage_id_list[-1]
-    duration_map = instance.get_job_2_p_map_for_stage(last_stage_id)
-    job_2_release_map = instance.get_job_2_p_sum_except_last_stage()
-
-    window_map = window_map_from_preemptive_schedule(
-        mcf_preemptive_schedule, instance.job_id_list
-    )
-    job_sequence = jobs_sorted_by_normalized_window_width(
-        window_map,
-        duration_map,
-        instance,
-        logger=log,
-        job_priority=job_priority,
-    )
-
-    ref = _insert_jobs_at_desired_starts(
-        None,
-        instance,
-        last_stage_id=last_stage_id,
-        job_2_release=job_2_release_map,
-        duration_map=duration_map,
-        window_map=window_map,
-        appended=job_sequence,
-        placement_priority=hint_placement_priority,
-    )
-
     result, solve_sec, status_name = solve_last_stage_with_profile_fix(
         ref,
         instance,
@@ -212,7 +157,7 @@ def improve_last_stage_only_dispatched_schedule_from_mcf_lb(
     )
     if result is None:
         raise RuntimeError(
-            f"improve_last_stage_only_dispatched_schedule_from_mcf_lb: "
+            f"single_pass_last_stage_only_from_mcf_lb: "
             f"CP returned {status_name} on the full job set."
         )
 
@@ -220,8 +165,8 @@ def improve_last_stage_only_dispatched_schedule_from_mcf_lb(
     return NehCpLastStageOnlyResult(
         schedule=result.schedule,
         obj_value=result.objective,
-        # See dataclass docstring: this is the LAST NEH-CP iteration's
-        # sub-instance CP LB, not a global bound on the full problem.
+        # CP-SAT best_objective_bound from the single profile-fix solve;
+        # valid against result.objective on the full instance.
         obj_bound=float(result.bound),
         elapsed_time=elapsed,
         cp_solve_sec=solve_sec,
@@ -236,7 +181,7 @@ def neh_cp_last_stage_only_from_mcf_lb(
     *,
     logger: logging.Logger | None = None,
     job_priority: Literal[
-        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"
+        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
     ] = "1_rj_prmp_rel_dev",
     hint_placement_priority: Literal["contrib", "dist"] = "contrib",
     batch_size: int = 5,
@@ -421,8 +366,13 @@ def _insert_jobs_at_desired_starts(
     2. Otherwise, build two candidates across machines:
        (A) earliest feasible start ``>= desired_start``;
        (B) latest feasible end ``<= desired_start + p_j`` (may be missing).
-       Pick the candidate with the smaller weighted ET contribution; on
-       ties, prefer the one whose start is closer to ``desired_start``.
+       Pick between them by lex-tiebreak on ``placement_priority``:
+         - ``"contrib"``: ``(weighted_ET_contrib, start_distance)`` —
+           minimize the weighted-ET contribution first, break ties by
+           start distance from ``desired_start``.
+         - ``"dist"``: ``(start_distance, weighted_ET_contrib)`` —
+           minimize start distance first, break ties by weighted-ET
+           contribution.
 
     Jobs whose ``window_map[j]`` is ``None`` skip the desired-start logic
     and are appended via greedy tail-dispatch at the end.

@@ -61,7 +61,8 @@ class InstanceResult:
     Weighted E+T of ``self.last_stage_cp_sat_solution`` when the
     controller produced a last-stage-only schedule
     (run_mcf_lb_4 / run_last_stage_cp_sat_lb /
-    neh_cp_last_stage_only_sch_from_mcf_lb). ``None`` otherwise.
+    neh_cp_last_stage_only_sch_from_mcf_lb /
+    single_pass_last_stage_only_sch_from_mcf_lb). ``None`` otherwise.
     """
 
 

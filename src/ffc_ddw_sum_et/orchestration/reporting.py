@@ -789,8 +789,9 @@ class FFcDDWReporter:
         ``(scenario, instance)`` pair where the controller produced a
         last-stage-only schedule (``run_mcf_lb_4`` /
         ``run_last_stage_cp_sat_lb`` /
-        ``neh_cp_last_stage_only_sch_from_mcf_lb``). Skipped entirely if no
-        scenario produced one.
+        ``neh_cp_last_stage_only_sch_from_mcf_lb`` /
+        ``single_pass_last_stage_only_sch_from_mcf_lb``). Skipped
+        entirely if no scenario produced one.
         """
         rows: list[tuple[str, int | None, float]] = []
         for sc in self.scenario_results:

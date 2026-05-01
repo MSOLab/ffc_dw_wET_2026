@@ -23,7 +23,8 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
 from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
-    improve_last_stage_only_dispatched_schedule_from_mcf_lb,
+    neh_cp_last_stage_only_from_mcf_lb,
+    single_pass_last_stage_only_from_mcf_lb,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
@@ -412,8 +413,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             heatmap_sort: Row ordering for the heatmap. ``"due2-window"``
                 sorts by ``max(r_j, d⁺-p)`` then ``d⁺`` then ``d⁻``;
                 ``"neh-cp"`` sorts by ``(max(w⁻, w⁺), w⁻+w⁺, window width)``;
-                ``"1_rj_prmp_rel_dev"`` reproduces the
-                ``neh_cp_last_stage_only_sch_from_mcf_lb`` step's job order
+                ``"1_rj_prmp_rel_dev"`` reproduces the job order used by
+                the ``neh_cp_last_stage_only_sch_from_mcf_lb`` and
+                ``single_pass_last_stage_only_sch_from_mcf_lb`` steps
                 (ascending normalized MCF preemptive window width
                 ``(t_max - t_min) / p_{c,j}``, tie-break by total weight
                 DESC then native position ASC). Ignored when
@@ -527,12 +529,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         mcf_lb = self.mcf_lb_diagnostic.mcf_lb
-        result = improve_last_stage_only_dispatched_schedule_from_mcf_lb(
+        result = neh_cp_last_stage_only_from_mcf_lb(
             instance,
             self.mcf_preemptive_schedule,
             logger=self.logger,
             job_priority=job_priority,
             hint_placement_priority=hint_placement_priority,
+            batch_size=batch_size,
             cp_pf_method=cp_pf_method,
             cp_solver_thread_cnt=cp_solver_thread_cnt,
             total_tl_seconds=total_tl_seconds,
@@ -561,6 +564,110 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             result.obj_bound,
             result.elapsed_time,
             result.cp_solve_sec,
+        )
+        return SubroutineReport(
+            elapsed_time=result.elapsed_time,
+            obj_value=result.obj_value,
+            obj_bound=mcf_lb,
+        )
+
+    def single_pass_last_stage_only_sch_from_mcf_lb(
+        self,
+        job_priority: Literal[
+            "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
+        ] = "1_rj_prmp_rel_dev",
+        placement_priority: Literal["contrib", "dist"] = "contrib",
+        cp_pf_method: PFMethod | None = "PF1",
+        cp_solver_thread_cnt: int = 1,
+        total_tl: float | str | None = None,
+        log_cp_search_progress: bool = False,
+    ) -> SubroutineReport:
+        """Step method: midpoint warm-start across all jobs from the MCF
+        preemptive LB, then a single profile-fix CP-SAT solve.
+
+        Pre-conditions (else ``ValueError``):
+          - ``self.mcf_preemptive_schedule`` set by a prior
+            ``apply_lb_by_mcf`` (or compatible) step.
+          - ``self.mcf_lb_diagnostic`` set so the MCF LB can be used as
+            ``obj_bound``.
+
+        Args:
+            job_priority: Job-ordering priority used by the midpoint
+                warm-start placement (only affects the warm-start, not
+                the CP solve itself, since the CP model treats jobs
+                interchangeably).
+            placement_priority: Lex-tiebreak between weighted-ET
+                contribution and start-time distance when the midpoint
+                slot is occupied; see ``_insert_jobs_at_desired_starts``
+                for semantics. Unlike the NEH-CP step, the placement IS
+                the profile-fix schedule, so this directly steers the
+                final CP solve.
+            cp_pf_method: Profile-fix precedence policy for the CP-SAT
+                solve. Defaults to ``"PF1"``; ``None`` skips the
+                precedence-arc pass.
+            cp_solver_thread_cnt: ``num_search_workers`` for the CP solve.
+            total_tl: Time budget for the single CP solve. Accepts a
+                float or a ``"<n>nc"`` / ``"<n>n"`` / ``"<n>c"`` /
+                ``"<n>m"`` expression.
+            log_cp_search_progress: When ``True``, the CP solver writes
+                its search-progress log under the subroutine output
+                directory.
+
+        Side effects:
+          - Stores the resulting full last-stage schedule on
+            ``self.last_stage_cp_sat_solution``.
+          - Does NOT append intermediate schedules to
+            ``self.mcf_lb_phase_schedules`` (single CP solve, no
+            per-batch snapshots).
+        """
+        if self.mcf_preemptive_schedule is None:
+            raise ValueError(
+                "single_pass_last_stage_only_sch_from_mcf_lb requires a prior "
+                "apply_lb_by_mcf step to populate self.mcf_preemptive_schedule."
+            )
+        if self.mcf_lb_diagnostic is None:
+            raise ValueError(
+                "single_pass_last_stage_only_sch_from_mcf_lb requires "
+                "self.mcf_lb_diagnostic (set by apply_lb_by_mcf)."
+            )
+
+        instance = self.instance
+        total_tl_seconds = resolve_value_expr(
+            total_tl,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+
+        mcf_lb = self.mcf_lb_diagnostic.mcf_lb
+        result = single_pass_last_stage_only_from_mcf_lb(
+            instance,
+            self.mcf_preemptive_schedule,
+            logger=self.logger,
+            job_priority=job_priority,
+            placement_priority=placement_priority,
+            cp_pf_method=cp_pf_method,
+            cp_solver_thread_cnt=cp_solver_thread_cnt,
+            total_tl_seconds=total_tl_seconds,
+            mcf_lb=mcf_lb,
+            log_cp_search_progress=log_cp_search_progress,
+            solver_log_path_getter=self.get_file_path_for_subroutine,
+        )
+
+        self.last_stage_cp_sat_solution = FFcDDWSolution(
+            schedule=result.schedule,
+            obj_value=result.obj_value,
+            obj_bound=mcf_lb,
+        )
+
+        self.logger.info(
+            "single_pass_last_stage_only_sch_from_mcf_lb: status=%s, "
+            "obj=%.2f, mcf_lb=%d, cp_lb=%.2f, elapsed=%.2fs.",
+            result.status,
+            result.obj_value,
+            int(mcf_lb),
+            result.obj_bound,
+            result.elapsed_time,
         )
         return SubroutineReport(
             elapsed_time=result.elapsed_time,
