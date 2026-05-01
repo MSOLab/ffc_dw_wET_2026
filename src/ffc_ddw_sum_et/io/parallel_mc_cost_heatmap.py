@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from ..parameters.ffc_ddw_params import FFcDDWParameters
 
 
-HeatmapSort = Literal["due2-window", "neh-cp", "1_rj_prmp_rel_dev"]
+HeatmapSort = Literal["due2-window", "neh-cp", "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,11 +74,18 @@ def _sort_jobs(
                 'Heatmap sort "1_rj_prmp_rel_dev" requires x_jt_map to derive '
                 "the per-job MCF preemptive time window."
             )
-        return _sort_by_neh_cp_normalized_window_width(instance, x_jt_map)
+        return _sort_by_neh_cp_rel_normalized_window_width(instance, x_jt_map)
+    if sort == "1_rj_prmp_abs_dev":
+        if x_jt_map is None:
+            raise ValueError(
+                'Heatmap sort "1_rj_prmp_abs_dev" requires x_jt_map to derive '
+                "the per-job MCF preemptive time window."
+            )
+        return _sort_by_neh_cp_abs_normalized_window_width(instance, x_jt_map)
     return instance.get_due2_weight_pos_job_sequence()
 
 
-def _sort_by_neh_cp_normalized_window_width(
+def _sort_by_neh_cp_rel_normalized_window_width(
     instance: "FFcDDWParameters",
     x_jt_map: Mapping[str, Mapping[int, int]],
 ) -> list[str]:
@@ -109,6 +116,44 @@ def _sort_by_neh_cp_normalized_window_width(
         return (
             0 if window is not None else 1,
             ((window[1] - window[0]) / p_map[j]) if window is not None else 0.0,
+            -(ewt[j] + twt[j]),
+            job_2_pos[j],
+        )
+
+    return sorted(job_id_list, key=sort_key)
+
+
+def _sort_by_neh_cp_abs_normalized_window_width(
+    instance: "FFcDDWParameters",
+    x_jt_map: Mapping[str, Mapping[int, int]],
+) -> list[str]:
+    """Mirror the NEH-CP last-stage step's job-sort order.
+
+    Reproduces ``algorithm.mcf_lb.utils.jobs_sorted_by_normalized_window_width``
+    applied to ``window_map_from_preemptive_schedule(...)``: per-job window
+    is taken as ``(min(t with flow>0) - 1, max(t with flow>0))`` so it
+    matches the half-open ``[t-1, t)`` segment semantics used by
+    ``MCFPreemptiveSchedule.from_flow_dict``. Tie-breaks: weight DESC,
+    native job position ASC.
+    """
+    job_id_list = instance.job_id_list
+    last_stage = instance.stage_id_list[-1]
+    p_map = instance.get_job_2_p_map_for_stage(last_stage)
+    job_2_pos = {j: i for i, j in enumerate(job_id_list)}
+    ewt = _weights_or_default(instance.job_2_ewt_map, job_id_list)
+    twt = _weights_or_default(instance.job_2_twt_map, job_id_list)
+
+    window_map: dict[str, tuple[int, int] | None] = {j: None for j in job_id_list}
+    for j in job_id_list:
+        ts = [t for t, flow in x_jt_map.get(j, {}).items() if flow > 0]
+        if ts:
+            window_map[j] = (min(ts) - 1, max(ts))
+
+    def sort_key(j: str) -> tuple[int, float, int, int]:
+        window = window_map[j]
+        return (
+            0 if window is not None else 1,
+            (window[1] - window[0] - p_map[j]) if window is not None else 0.0,
             -(ewt[j] + twt[j]),
             job_2_pos[j],
         )

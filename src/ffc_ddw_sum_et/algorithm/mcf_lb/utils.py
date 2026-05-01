@@ -12,7 +12,7 @@ sort that takes any pre-computed window map.
 from __future__ import annotations
 
 import logging
-from typing import Mapping, Sequence
+from typing import Literal, Mapping, Sequence
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
@@ -49,6 +49,9 @@ def jobs_sorted_by_normalized_window_width(
     instance: FFcDDWParameters,
     *,
     logger: logging.Logger | None = None,
+    job_priority: Literal[
+        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"
+    ] = "1_rj_prmp_rel_dev",
 ) -> list[str]:
     """Sort jobs by ascending ``(t_max - t_min) / p_{c,j}``.
 
@@ -67,9 +70,18 @@ def jobs_sorted_by_normalized_window_width(
 
     def sort_key(j: str) -> tuple[int, float, int, int]:
         window = window_map[j]
+        if job_priority == "1_rj_prmp_rel_dev":
+            return (
+                0 if window is not None else 1,
+                ((window[1] - window[0]) / duration_map[j])
+                if window is not None
+                else 0.0,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
         return (
             0 if window is not None else 1,
-            ((window[1] - window[0]) / duration_map[j]) if window is not None else 0.0,
+            ((window[1] - window[0]) - duration_map[j]) if window is not None else 0.0,
             -(ewt[j] + twt[j]),
             job_2_pos[j],
         )

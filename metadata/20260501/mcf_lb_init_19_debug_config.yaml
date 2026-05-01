@@ -10,7 +10,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [ 0 ]   # single instance for clean trace inspection
+ins_index: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]   # single instance for clean trace inspection
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260501
@@ -29,6 +29,7 @@ scenarios:
         draw_heatmap: true
         heatmap_sort: "1_rj_prmp_rel_dev"
       - method: neh_cp_last_stage_only_sch_from_mcf_lb
+        job_priority: "1_rj_prmp_rel_dev"
         batch_size: 15
         cp_pf_method: "PF1"
         cp_solver_thread_cnt: 8

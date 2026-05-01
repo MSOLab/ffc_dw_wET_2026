@@ -465,6 +465,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
         self,
+        job_priority: Literal["1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"] = "1_rj_prmp_rel_dev",
         batch_size: int = 5,
         cp_pf_method: PFMethod | None = "PF1",
         cp_solver_thread_cnt: int = 1,
@@ -526,6 +527,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         result = neh_cp_last_stage_only_from_mcf_lb(
             instance=instance,
             mcf_preemptive_schedule=self.mcf_preemptive_schedule,
+            job_priority=job_priority,
             batch_size=batch_size,
             cp_pf_method=cp_pf_method,
             cp_solver_thread_cnt=cp_solver_thread_cnt,

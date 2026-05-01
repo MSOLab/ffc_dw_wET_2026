@@ -10,14 +10,18 @@ Algorithm:
      schedule's segments.
   2. Partition into batches of ``batch_size``.
   3. For each batch, solve the last-stage-only CP-SAT model on the
-     sub-instance restricted to jobs accumulated so far. Step 0
-     warm-starts from a dispatch on the first batch's jobs only;
-     step k>0 warm-starts from step k-1's CP schedule with the new
-     batch dispatched onto its tail.
+     sub-instance restricted to jobs accumulated so far. The warm-start
+     places each new batch job at the midpoint of its MCF preemptive
+     window (``(t_min + t_max - p_j) // 2``); when that exact slot is
+     occupied, the placement falls back to whichever of the earliest
+     feasible start (after the desired time) or latest feasible end
+     (before the desired end) gives the smaller weighted ET
+     contribution. Step 0 builds an empty base schedule; step k>0
+     starts from step k-1's CP schedule.
   4. If ``total_tl_seconds`` runs out before all jobs are placed, the
-     loop breaks early and any un-placed jobs are dispatched onto the
-     last successful CP schedule so the returned schedule covers every
-     job.
+     loop breaks early and any un-placed jobs are inserted onto the
+     last successful CP schedule using the same desired-start placement
+     so the returned schedule covers every job.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Literal, Mapping, Sequence
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
@@ -86,6 +90,9 @@ def neh_cp_last_stage_only_from_mcf_lb(
     mcf_preemptive_schedule: MCFPreemptiveSchedule,
     *,
     logger: logging.Logger | None = None,
+    job_priority: Literal[
+        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"
+    ] = "1_rj_prmp_rel_dev",
     batch_size: int = 5,
     cp_pf_method: PFMethod | None = "PF1",
     cp_solver_thread_cnt: int = 1,
@@ -113,7 +120,11 @@ def neh_cp_last_stage_only_from_mcf_lb(
         mcf_preemptive_schedule, instance.job_id_list
     )
     job_sequence = jobs_sorted_by_normalized_window_width(
-        window_map, duration_map, instance, logger=log
+        window_map,
+        duration_map,
+        instance,
+        logger=log,
+        job_priority=job_priority,
     )
     n = len(job_sequence)
     batches = [job_sequence[i : i + batch_size] for i in range(0, n, batch_size)]
@@ -130,6 +141,7 @@ def neh_cp_last_stage_only_from_mcf_lb(
         batch_tl_seconds = total_tl_seconds / max_step_count
     else:
         batch_tl_seconds = None
+
     for step, batch in enumerate(batches):
         is_first_step = step == 0
         is_last_step = step == max_step_count - 1
@@ -140,28 +152,15 @@ def neh_cp_last_stage_only_from_mcf_lb(
         )
         sub_job_2_release = {j: job_2_release_map[j] for j in current_jobs}
 
-        if last_cp_schedule is None:
-            ref = FFcSchedule(
-                jobs=sub_instance.job_id_list,
-                stages=sub_instance.stage_id_list,
-                machines_per_stage=sub_instance.stage_2_machines_map,
-            )
-            ref.dispatch_stage_by_jobs(
-                last_stage_id,
-                current_jobs,
-                duration_map,
-                job_2_release=sub_job_2_release,
-                force_job_id_seq_as_priority=True,
-            )
-        else:
-            ref = _extend_last_stage_schedule(
-                last_cp_schedule,
-                sub_instance,
-                last_stage_id=last_stage_id,
-                job_2_release=sub_job_2_release,
-                duration_map=duration_map,
-                appended=batch,
-            )
+        ref = _insert_jobs_at_desired_starts(
+            last_cp_schedule,
+            sub_instance,
+            last_stage_id=last_stage_id,
+            job_2_release=sub_job_2_release,
+            duration_map=duration_map,
+            window_map=window_map,
+            appended=current_jobs if last_cp_schedule is None else batch,
+        )
 
         result, batch_solve_sec, batch_status = solve_last_stage_with_profile_fix(
             ref,
@@ -212,12 +211,13 @@ def neh_cp_last_stage_only_from_mcf_lb(
     placed = set(current_jobs)
     remaining_jobs = [j for j in job_sequence if j not in placed]
     if remaining_jobs:
-        final_schedule = _extend_last_stage_schedule(
+        final_schedule = _insert_jobs_at_desired_starts(
             last_cp_schedule,
             instance,
             last_stage_id=last_stage_id,
             job_2_release=job_2_release_map,
             duration_map=duration_map,
+            window_map=window_map,
             appended=remaining_jobs,
         )
         se, st = compute_weighted_earliness_tardiness(final_schedule, instance)
@@ -248,47 +248,168 @@ def neh_cp_last_stage_only_from_mcf_lb(
     )
 
 
-def _extend_last_stage_schedule(
-    base_sch: FFcSchedule,
+def _insert_jobs_at_desired_starts(
+    base_sch: FFcSchedule | None,
     instance_for_extension: FFcDDWParameters,
+    *,
     last_stage_id: str,
     job_2_release: Mapping[str, int],
     duration_map: Mapping[str, int],
+    window_map: Mapping[str, tuple[int, int] | None],
     appended: Sequence[str],
 ) -> FFcSchedule:
-    """Build a fresh FFcSchedule on ``instance_for_extension``'s wider job
-    set, copy ``base_sch``'s last-stage operations for the jobs already in
-    ``base_sch.jobs``, then dispatch ``appended`` greedily onto the tail
-    of the last stage in the given order.
+    """Build a fresh FFcSchedule on ``instance_for_extension``'s job set,
+    copy ``base_sch``'s last-stage operations (when provided), then place
+    each ``appended`` job at the midpoint of its MCF preemptive window.
 
-    Used for batch step k>0 (where the new sub_instance has more jobs than
-    the previous batch's CP schedule) and for the budget-exhausted
-    re-dispatch fallback (where the parent instance has all jobs and we
-    append whatever's left).
+    For job ``j`` with preemptive window ``(t_min, t_max)`` and last-stage
+    duration ``p_j``:
+
+      desired_start = max((t_min + t_max - p_j) // 2, 0)
+
+    1. If ``[desired_start, desired_start + p_j)`` is free on at least one
+       machine (in ``machines_per_stage`` order), place there.
+    2. Otherwise, build two candidates across machines:
+       (A) earliest feasible start ``>= desired_start``;
+       (B) latest feasible end ``<= desired_start + p_j`` (may be missing).
+       Pick the candidate with the smaller weighted ET contribution; on
+       ties, prefer the one whose start is closer to ``desired_start``.
+
+    Jobs whose ``window_map[j]`` is ``None`` skip the desired-start logic
+    and are appended via greedy tail-dispatch at the end.
     """
     new_sch = FFcSchedule(
         jobs=instance_for_extension.job_id_list,
         stages=instance_for_extension.stage_id_list,
         machines_per_stage=instance_for_extension.stage_2_machines_map,
     )
-    base_jobs = set(base_sch.jobs)
-    for mc_id in base_sch.machines_per_stage[last_stage_id]:
-        for job_id, start_time, end_time in base_sch.get_job_sequence(
-            last_stage_id, mc_id
-        ):
-            if job_id in base_jobs:
-                new_sch.add_ops_times_2_mc(
-                    stage_id=last_stage_id,
-                    mc_id=mc_id,
-                    job_id=job_id,
-                    start_time=start_time,
-                    end_time=end_time,
+    if base_sch is not None:
+        base_jobs = set(base_sch.jobs)
+        for mc_id in base_sch.machines_per_stage[last_stage_id]:
+            for job_id, start_time, end_time in base_sch.get_job_sequence(
+                last_stage_id, mc_id
+            ):
+                if job_id in base_jobs:
+                    new_sch.add_ops_times_2_mc(
+                        stage_id=last_stage_id,
+                        mc_id=mc_id,
+                        job_id=job_id,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+
+    machine_ids = instance_for_extension.stage_2_machines_map[last_stage_id]
+    ewt_map = instance_for_extension.job_2_ewt_map
+    twt_map = instance_for_extension.job_2_twt_map
+    due_map = instance_for_extension.job_2_due_window_map
+
+    no_window_jobs: list[str] = []
+    for job_id in appended:
+        window = window_map[job_id]
+        p_j = duration_map[job_id]
+        if window is None:
+            no_window_jobs.append(job_id)
+            continue
+        t_min, t_max = window
+        desired_start = max((t_min + t_max - p_j) // 2, 0)
+        desired_end = desired_start + p_j
+
+        chosen_mc: str | None = None
+        for mc_id in machine_ids:
+            if _interval_free(
+                new_sch, last_stage_id, mc_id, desired_start, desired_end
+            ):
+                chosen_mc = mc_id
+                break
+        if chosen_mc is not None:
+            new_sch.add_ops_times_2_mc(
+                stage_id=last_stage_id,
+                mc_id=chosen_mc,
+                job_id=job_id,
+                start_time=desired_start,
+                end_time=desired_end,
+            )
+            continue
+
+        # 2-2-1: best earliest-start across machines (>= desired_start).
+        es_best: tuple[int, int, str] | None = None
+        for idx, mc_id in enumerate(machine_ids):
+            es = new_sch.get_machine_earliest_start_time(
+                last_stage_id, mc_id, p_j, release_t=desired_start
+            )
+            cand = (es, idx, mc_id)
+            if es_best is None or cand < es_best:
+                es_best = cand
+        assert es_best is not None
+        es_start, _, es_mc = es_best
+        end_a = es_start + p_j
+
+        # 2-2-2: best latest-end across machines (<= desired_end), or None.
+        # Tuple shape: (-le_end, idx, le_start, le_end, mc_id) so that the
+        # smallest tuple corresponds to the largest le_end with machine
+        # list order as tie-break.
+        le_best: tuple[int, int, int, int, str] | None = None
+        for idx, mc_id in enumerate(machine_ids):
+            try:
+                le_start, le_end = new_sch._get_latest_feasible_slot_on_machine(
+                    last_stage_id, mc_id, p_j, upper_bound=desired_end
                 )
-    new_sch.dispatch_stage_by_jobs(
-        last_stage_id,
-        list(appended),
-        duration_map,
-        job_2_release=job_2_release,
-        force_job_id_seq_as_priority=True,
-    )
+            except ValueError:
+                continue
+            if le_start < job_2_release[job_id]:
+                # If the latest feasible slot starts before the job's release time,
+                # it won't be a valid candidate.
+                continue
+            cand = (-le_end, idx, le_start, le_end, mc_id)
+            if le_best is None or cand < le_best:
+                le_best = cand
+
+        ewt = ewt_map[job_id]
+        twt = twt_map[job_id]
+        d_lo, d_hi = due_map[job_id]
+        contrib_a = ewt * max(d_lo - end_a, 0) + twt * max(end_a - d_hi, 0)
+        dist_a = abs(es_start - desired_start)
+
+        if le_best is None:
+            chosen_start, chosen_end, chosen_mc = es_start, end_a, es_mc
+        else:
+            _, _, le_start, le_end, le_mc = le_best
+            contrib_b = ewt * max(d_lo - le_end, 0) + twt * max(le_end - d_hi, 0)
+            dist_b = abs(le_start - desired_start)
+            if (contrib_a, dist_a) <= (contrib_b, dist_b):
+                chosen_start, chosen_end, chosen_mc = es_start, end_a, es_mc
+            else:
+                chosen_start, chosen_end, chosen_mc = le_start, le_end, le_mc
+
+        new_sch.add_ops_times_2_mc(
+            stage_id=last_stage_id,
+            mc_id=chosen_mc,
+            job_id=job_id,
+            start_time=chosen_start,
+            end_time=chosen_end,
+        )
+
+    if no_window_jobs:
+        new_sch.dispatch_stage_by_jobs(
+            last_stage_id,
+            no_window_jobs,
+            duration_map,
+            job_2_release=job_2_release,
+            force_job_id_seq_as_priority=True,
+        )
     return new_sch
+
+
+def _interval_free(
+    sch: FFcSchedule,
+    stage_id: str,
+    mc_id: str,
+    start: int,
+    end: int,
+) -> bool:
+    for _, op_start, op_end in sch.get_job_sequence(stage_id, mc_id):
+        if op_start >= end:
+            break
+        if op_end > start:
+            return False
+    return True
