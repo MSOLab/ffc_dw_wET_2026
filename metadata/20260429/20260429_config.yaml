@@ -1,6 +1,7 @@
 # Best(NEH-CP, MCF-LB) experiment.
 # NEH-CP: neh_cp_bs15_linear_dplus2_pf1_tl024nc from 20260427T025803_513725
 # MCF-LB: best_mcf_lb_cp_asis from 20260427T123656_726782
+# best: best of the above two, with MCF-LB first
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
