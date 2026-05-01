@@ -23,16 +23,16 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
 from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
-    neh_cp_last_stage_only_from_mcf_lb, improve_last_stage_only_dispatched_schedule_from_mcf_lb,
+    improve_last_stage_only_dispatched_schedule_from_mcf_lb,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import solve_mcf_lb
 from ffc_ddw_sum_et.algorithm.mcf_lb.utils import (
     jobs_sorted_by_normalized_window_width,
 )
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpBatchTlMode,
     NehCpDispatcher,
@@ -465,8 +465,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
         self,
-        job_priority: Literal["1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"] = "1_rj_prmp_rel_dev",
+        job_priority: Literal[
+            "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
+        ] = "1_rj_prmp_rel_dev",
         batch_size: int = 5,
+        hint_placement_priority: Literal["contrib", "dist"] = "contrib",
         cp_pf_method: PFMethod | None = "PF1",
         cp_solver_thread_cnt: int = 1,
         total_tl: float | str | None = None,
@@ -525,16 +528,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         mcf_lb = self.mcf_lb_diagnostic.mcf_lb
         result = improve_last_stage_only_dispatched_schedule_from_mcf_lb(
-            instance=instance,
-            mcf_preemptive_schedule=self.mcf_preemptive_schedule,
+            instance,
+            self.mcf_preemptive_schedule,
+            logger=self.logger,
             job_priority=job_priority,
+            hint_placement_priority=hint_placement_priority,
             cp_pf_method=cp_pf_method,
             cp_solver_thread_cnt=cp_solver_thread_cnt,
             total_tl_seconds=total_tl_seconds,
             mcf_lb=mcf_lb,
             log_cp_search_progress=log_cp_search_progress,
             solver_log_path_getter=self.get_file_path_for_subroutine,
-            logger=self.logger,
         )
 
         # Publish the MCF LB as the global ``obj_bound``; ``result.obj_bound``

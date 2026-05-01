@@ -94,6 +94,7 @@ def dispatch_insert_idle_time(
     job_priority: Literal[
         "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
     ] = "1_rj_prmp_rel_dev",
+    placement_priority: Literal["contrib", "dist"] = "contrib",
 ) -> NehCpLastStageOnlyResult:
     log = logger or logging.getLogger(__name__)
     start = time.monotonic()
@@ -121,6 +122,7 @@ def dispatch_insert_idle_time(
         duration_map=duration_map,
         window_map=window_map,
         appended=job_sequence,
+        placement_priority=placement_priority,
     )
 
     ref.make_semi_active(
@@ -154,8 +156,9 @@ def improve_last_stage_only_dispatched_schedule_from_mcf_lb(
     *,
     logger: logging.Logger | None = None,
     job_priority: Literal[
-        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"
+        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
     ] = "1_rj_prmp_rel_dev",
+    hint_placement_priority: Literal["contrib", "dist"] = "contrib",
     cp_pf_method: PFMethod | None = "PF1",
     cp_solver_thread_cnt: int = 1,
     total_tl_seconds: float | None = None,
@@ -189,6 +192,7 @@ def improve_last_stage_only_dispatched_schedule_from_mcf_lb(
         duration_map=duration_map,
         window_map=window_map,
         appended=job_sequence,
+        placement_priority=hint_placement_priority,
     )
 
     result, solve_sec, status_name = solve_last_stage_with_profile_fix(
@@ -234,6 +238,7 @@ def neh_cp_last_stage_only_from_mcf_lb(
     job_priority: Literal[
         "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"
     ] = "1_rj_prmp_rel_dev",
+    hint_placement_priority: Literal["contrib", "dist"] = "contrib",
     batch_size: int = 5,
     cp_pf_method: PFMethod | None = "PF1",
     cp_solver_thread_cnt: int = 1,
@@ -301,6 +306,7 @@ def neh_cp_last_stage_only_from_mcf_lb(
             duration_map=duration_map,
             window_map=window_map,
             appended=current_jobs if last_cp_schedule is None else batch,
+            placement_priority=hint_placement_priority,
         )
 
         result, batch_solve_sec, batch_status = solve_last_stage_with_profile_fix(
@@ -360,6 +366,7 @@ def neh_cp_last_stage_only_from_mcf_lb(
             duration_map=duration_map,
             window_map=window_map,
             appended=remaining_jobs,
+            placement_priority=hint_placement_priority,
         )
         se, st = compute_weighted_earliness_tardiness(final_schedule, instance)
         final_obj = float(se + st)
@@ -398,6 +405,7 @@ def _insert_jobs_at_desired_starts(
     duration_map: Mapping[str, int],
     window_map: Mapping[str, tuple[int, int] | None],
     appended: Sequence[str],
+    placement_priority: Literal["contrib", "dist"] = "contrib",
 ) -> FFcSchedule:
     """Build a fresh FFcSchedule on ``instance_for_extension``'s job set,
     copy ``base_sch``'s last-stage operations (when provided), then place
@@ -419,6 +427,12 @@ def _insert_jobs_at_desired_starts(
     Jobs whose ``window_map[j]`` is ``None`` skip the desired-start logic
     and are appended via greedy tail-dispatch at the end.
     """
+    if placement_priority not in ("contrib", "dist"):
+        raise ValueError(
+            f"Invalid placement_priority {placement_priority}; "
+            "must be 'contrib' or 'dist'."
+        )
+
     new_sch = FFcSchedule(
         jobs=instance_for_extension.job_id_list,
         stages=instance_for_extension.stage_id_list,
@@ -517,7 +531,13 @@ def _insert_jobs_at_desired_starts(
             _, _, le_start, le_end, le_mc = le_best
             contrib_b = ewt * max(d_lo - le_end, 0) + twt * max(le_end - d_hi, 0)
             dist_b = abs(le_start - desired_start)
-            if (contrib_a, dist_a) <= (contrib_b, dist_b):
+            if placement_priority == "contrib":
+                criteria_a = (contrib_a, dist_a)
+                criteria_b = (contrib_b, dist_b)
+            elif placement_priority == "dist":
+                criteria_a = (dist_a, contrib_a)
+                criteria_b = (dist_b, contrib_b)
+            if criteria_a <= criteria_b:
                 chosen_start, chosen_end, chosen_mc = es_start, end_a, es_mc
             else:
                 chosen_start, chosen_end, chosen_mc = le_start, le_end, le_mc
