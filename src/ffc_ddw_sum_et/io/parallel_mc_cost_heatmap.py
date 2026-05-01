@@ -25,7 +25,9 @@ if TYPE_CHECKING:
     from ..parameters.ffc_ddw_params import FFcDDWParameters
 
 
-HeatmapSort = Literal["due2-window", "neh-cp", "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"]
+HeatmapSort = Literal[
+    "due2-window", "neh-cp", "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +84,13 @@ def _sort_jobs(
                 "the per-job MCF preemptive time window."
             )
         return _sort_by_neh_cp_abs_normalized_window_width(instance, x_jt_map)
+    if sort == "start_time":
+        if x_jt_map is None:
+            raise ValueError(
+                'Heatmap sort "start_time" requires x_jt_map to derive '
+                "the per-job MCF preemptive time window."
+            )
+        return _sort_by_start_time(instance, x_jt_map)
     return instance.get_due2_weight_pos_job_sequence()
 
 
@@ -157,6 +166,27 @@ def _sort_by_neh_cp_abs_normalized_window_width(
             -(ewt[j] + twt[j]),
             job_2_pos[j],
         )
+
+    return sorted(job_id_list, key=sort_key)
+
+
+def _sort_by_start_time(
+    instance: "FFcDDWParameters",
+    x_jt_map: Mapping[str, Mapping[int, int]],
+) -> list[str]:
+    """Sort jobs by their earliest MCF flow time."""
+    job_id_list = instance.job_id_list
+    job_2_pos = {j: i for i, j in enumerate(job_id_list)}
+
+    max_t = max(
+        (t for j_map in x_jt_map.values() for t, flow in j_map.items()),
+        default=0,
+    )
+
+    def sort_key(j: str) -> tuple[int, int]:
+        ts = [t for t, flow in x_jt_map.get(j, {}).items() if flow > 0]
+        earliest_t = min(ts) if ts else max_t
+        return (earliest_t, job_2_pos[j])
 
     return sorted(job_id_list, key=sort_key)
 

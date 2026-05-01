@@ -388,7 +388,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         draw_heatmap: bool = False,
         heatmap_sort: Literal[
-            "due2-window", "neh-cp", "1_rj_prmp_rel_dev"
+            "due2-window", "neh-cp", "1_rj_prmp_rel_dev", "start_time"
         ] = "due2-window",
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it

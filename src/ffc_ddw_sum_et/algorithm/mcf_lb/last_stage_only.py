@@ -86,6 +86,68 @@ class NehCpLastStageOnlyResult:
     """
 
 
+def dispatch_insert_idle_time(
+    instance: FFcDDWParameters,
+    mcf_preemptive_schedule: MCFPreemptiveSchedule,
+    *,
+    logger: logging.Logger | None = None,
+    job_priority: Literal[
+        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
+    ] = "1_rj_prmp_rel_dev",
+) -> NehCpLastStageOnlyResult:
+    log = logger or logging.getLogger(__name__)
+    start = time.monotonic()
+
+    last_stage_id = instance.stage_id_list[-1]
+    duration_map = instance.get_job_2_p_map_for_stage(last_stage_id)
+    job_2_release_map = instance.get_job_2_p_sum_except_last_stage()
+
+    window_map = window_map_from_preemptive_schedule(
+        mcf_preemptive_schedule, instance.job_id_list
+    )
+    job_sequence = jobs_sorted_by_normalized_window_width(
+        window_map,
+        duration_map,
+        instance,
+        logger=log,
+        job_priority=job_priority,
+    )
+
+    ref = _insert_jobs_at_desired_starts(
+        None,
+        instance,
+        last_stage_id=last_stage_id,
+        job_2_release=job_2_release_map,
+        duration_map=duration_map,
+        window_map=window_map,
+        appended=job_sequence,
+    )
+
+    ref.make_semi_active(
+        instance.stage_2_job_2_p_map,
+        start_from_stage=last_stage_id,
+        job_2_release_map=job_2_release_map,
+    )
+    ref.insert_idle_time(
+        instance.job_2_due_window_map, instance.job_2_ewt_map, instance.job_2_twt_map
+    )
+    sum_we, sum_wt = compute_weighted_earliness_tardiness(ref, instance)
+    obj_value = float(sum_we + sum_wt)
+
+    elapsed = time.monotonic() - start
+    return NehCpLastStageOnlyResult(
+        schedule=ref,
+        obj_value=obj_value,
+        # See dataclass docstring: this is the LAST NEH-CP iteration's
+        # sub-instance CP LB, not a global bound on the full problem.
+        obj_bound=0,
+        elapsed_time=elapsed,
+        cp_solve_sec=elapsed,
+        status="heuristic",
+        intermediate_schedules=[],
+    )
+
+
 def improve_last_stage_only_dispatched_schedule_from_mcf_lb(
     instance: FFcDDWParameters,
     mcf_preemptive_schedule: MCFPreemptiveSchedule,

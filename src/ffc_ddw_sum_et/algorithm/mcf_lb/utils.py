@@ -50,7 +50,7 @@ def jobs_sorted_by_normalized_window_width(
     *,
     logger: logging.Logger | None = None,
     job_priority: Literal[
-        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev"
+        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
     ] = "1_rj_prmp_rel_dev",
 ) -> list[str]:
     """Sort jobs by ascending ``(t_max - t_min) / p_{c,j}``.
@@ -79,12 +79,23 @@ def jobs_sorted_by_normalized_window_width(
                 -(ewt[j] + twt[j]),
                 job_2_pos[j],
             )
-        return (
-            0 if window is not None else 1,
-            ((window[1] - window[0]) - duration_map[j]) if window is not None else 0.0,
-            -(ewt[j] + twt[j]),
-            job_2_pos[j],
-        )
+        if job_priority == "1_rj_prmp_abs_dev":
+            return (
+                0 if window is not None else 1,
+                ((window[1] - window[0]) - duration_map[j])
+                if window is not None
+                else 0.0,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+        if job_priority == "start_time":
+            return (
+                0 if window is not None else 1,
+                (window[0]) if window is not None else 0.0,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+        raise ValueError(f"Unsupported job_priority: {job_priority}")
 
     sorted_jobs = sorted(job_id_list, key=sort_key)
 
