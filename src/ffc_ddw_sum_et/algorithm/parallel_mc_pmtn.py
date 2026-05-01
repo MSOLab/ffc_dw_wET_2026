@@ -211,6 +211,21 @@ class ParallelMachinePreemptionMcf:
             job_2_completion_time[j] = completion_time
         return job_2_completion_time
 
+    def get_job_2_time_window_map(self) -> dict[str, tuple[int, int] | None]:
+        """For each job, return ``(min_t, max_t)`` over arcs ``(j, t)`` with
+        ``x_jt > 0`` in the optimal MCF flow.
+
+        ``None`` for jobs with no flow (cannot occur once ``solve()`` is
+        optimal because every job carries supply ``p_j > 0``, but the
+        signature mirrors the start/completion accessors for consistency).
+        """
+        x_val = self.get_variable_value_dict()
+        job_2_window: dict[str, tuple[int, int] | None] = {}
+        for j in self.calJ:
+            times = x_val[j].keys()
+            job_2_window[j] = (min(times), max(times)) if times else None
+        return job_2_window
+
     def get_job_priority_by_avg_time(self) -> dict[str, float | None]:
         x_val = self.get_variable_value_dict()
         job_2_avg: dict[str, float | None] = {}

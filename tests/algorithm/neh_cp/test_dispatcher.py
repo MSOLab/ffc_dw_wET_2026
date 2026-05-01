@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from ffc_ddw_sum_et.algorithm.base.alg_record import WorkStatus
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
@@ -68,6 +69,51 @@ def test_dispatcher_schedules_every_op() -> None:
     for stage_id in instance.stage_id_list:
         for job_id in instance.job_id_list:
             schedule.get_job_end_time(stage_id, job_id)
+
+
+def test_dispatcher_custom_job_sequence_used() -> None:
+    """When custom_job_sequence is set, the dispatcher must respect that
+    permutation rather than ordering jobs by job_priority."""
+    instance = _make_instance()
+    custom = ("j2", "j0", "j1")
+    spec = AlgSpec(
+        instance=instance,
+        option=NehCpOption(cp_tl_seconds=1.0, custom_job_sequence=custom),
+    )
+
+    record = NehCpDispatcher().run(spec)
+
+    assert record.work_status == WorkStatus.FEASIBLE
+    assert record.result is not None
+    assert record.result.schedule is not None
+    sum_e, sum_t = compute_weighted_earliness_tardiness(
+        record.result.schedule, instance
+    )
+    assert record.result.obj_value == float(sum_e + sum_t)
+
+
+def test_dispatcher_custom_job_sequence_must_be_permutation() -> None:
+    instance = _make_instance()
+    bad = ("j0", "j1")  # missing j2
+    spec = AlgSpec(
+        instance=instance,
+        option=NehCpOption(cp_tl_seconds=1.0, custom_job_sequence=bad),
+    )
+
+    with pytest.raises(ValueError, match="must be a permutation"):
+        NehCpDispatcher().run(spec)
+
+
+def test_dispatcher_custom_job_sequence_rejects_extra_ids() -> None:
+    instance = _make_instance()
+    bad = ("j0", "j1", "j2", "ghost")  # contains an id not in instance
+    spec = AlgSpec(
+        instance=instance,
+        option=NehCpOption(cp_tl_seconds=1.0, custom_job_sequence=bad),
+    )
+
+    with pytest.raises(ValueError, match="must be a permutation"):
+        NehCpDispatcher().run(spec)
 
 
 def test_dispatcher_progress_log_and_step_log_align() -> None:

@@ -46,9 +46,7 @@ def test_run_captures_scenario_exception_as_none(tmp_path: Path) -> None:
     runner.scenario_names = ["failing", "ok"]
 
     with patch.object(FFcDDWMultiScenarioRunner, "post_run_process", return_value=None):
-        with patch(
-            "ffc_ddw_sum_et.orchestration.reporting.setup_logging"
-        ):
+        with patch("ffc_ddw_sum_et.orchestration.reporting.setup_logging"):
             runner.run()
 
     assert runner.results == [None, ok_result]
@@ -74,10 +72,9 @@ def test_post_run_process_handles_none_result(tmp_path: Path) -> None:
     runner.scenario_configs = [{}, {}]
     runner.scenario_names = ["failing", "ok"]
 
-    with patch(
-        "ffc_ddw_sum_et.orchestration.reporting.FFcDDWReporter"
-    ) as reporter_cls, patch(
-        "ffc_ddw_sum_et.orchestration.reporting.setup_logging"
+    with (
+        patch("ffc_ddw_sum_et.orchestration.reporting.FFcDDWReporter") as reporter_cls,
+        patch("ffc_ddw_sum_et.orchestration.reporting.setup_logging"),
     ):
         reporter_cls.return_value.generate.return_value = None
         final = runner.post_run_process()

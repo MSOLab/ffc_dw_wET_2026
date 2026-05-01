@@ -1223,6 +1223,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         pf_method: PFMethod = "PF1",
         skip_pf_below_obj: str | float | None = None,
         make_semi_active_after_cp: bool = False,
+        make_semi_active_after_cp_obj_threshold: int = -1,
         minimize_makespan_lex: bool = False,
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
@@ -1279,6 +1280,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             pf_method=pf_method,
             skip_pf_below_obj=skip_pf_below_obj_resolved,
             make_semi_active_after_cp=make_semi_active_after_cp,
+            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
             minimize_makespan_lex=minimize_makespan_lex,
             cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
@@ -1315,3 +1317,271 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     )
 
         return report
+
+    def run_mcf_lb_then_neh_cp(
+        self,
+        solver_thread_cnt: int = 1,
+        added_batch_size: int = 1,
+        extra_batch_size_expr: str | None = None,
+        cp_tl: float | str | None = None,
+        neh_cp_total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: NehCpBatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        pf_method: PFMethod = "PF1",
+        skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        make_semi_active_after_cp_obj_threshold: int = -1,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
+        error_if_infeasible: bool = False,
+        draw_heatmap: bool = False,
+        heatmap_sort: Literal["due2-window", "neh-cp"] = "due2-window",
+        keep_step_schedules: bool = False,
+    ) -> SubroutineReport:
+        """Step method: solve the MCF preemptive relaxation, derive a job
+        sequence by ascending MCF time-window width
+        ``(t_max_j - t_min_j)``, then run :class:`NehCpDispatcher` on that
+        sequence.
+
+        Job sequence tie-break order:
+          1. Window width ``(t_max_j - t_min_j)`` ASC
+          2. Total weight ``(w⁻_j + w⁺_j)`` DESC
+          3. Last-stage processing time ``p_{c,j}`` DESC
+          4. Native ``instance.job_id_list`` position ASC
+
+        ``neh_cp_total_timelimit`` bounds only the NEH-CP CP-SAT phase; the
+        MCF solve runs to optimality outside that budget so users do not
+        confuse "NEH-CP time limit" with "step time limit".
+
+        Reports ``obj_value`` = weighted E+T of the NEH-CP schedule and
+        ``obj_bound`` = MCF lower bound. Emits the MCF preemptive schedule
+        to ``self.mcf_lb_phase_schedules`` for post-run Gantt rendering.
+
+        ``draw_heatmap`` mirrors ``apply_lb_by_mcf``: when ``True``,
+        builds the signed C-cost matrix with the MCF preemptive flow
+        overlaid and writes ``<ins>_C_heatmap.yaml``; the post-run
+        reporter (gated by ``draw_gantt``) renders the matching HTML.
+
+        ``keep_step_schedules`` propagates to :class:`NehCpOption`. When
+        ``True``, every NEH-CP step's (dispatched, cp_raw, semi_active)
+        schedule triplet is appended to ``self.mcf_lb_phase_schedules``
+        so the runner emits one ``*_schedule.yaml`` per snapshot and the
+        reporter renders one Gantt PNG per snapshot. Heavy on disk; use
+        for diagnostics only.
+        """
+        start_elapsed = time.monotonic()
+        instance = self.instance
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+
+        diag = MCFLBDiagnostic()
+        self.mcf_lb_diagnostic = diag
+        mcf_result = solve_mcf_lb(instance, diag)
+        obj_bound_by_mcf = mcf_result.mcf_lb
+        self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
+        self.mcf_lb_phase_schedules.clear()
+        self.mcf_lb_phase_schedules.append(
+            ("1_mcf_preemptive_schedule", mcf_result.mcf_preemptive_schedule)
+        )
+        self.logger.info("run_mcf_lb_then_neh_cp: MCF LB = %d", int(obj_bound_by_mcf))
+
+        if draw_heatmap:
+            from ..io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
+
+            yaml_path = self.try_get_file_path_for_subroutine("_C_heatmap.yaml")
+            if yaml_path is not None:
+                heatmap_data = build_signed_cost_matrix(
+                    instance,
+                    sort=heatmap_sort,
+                    x_jt_map=mcf_result.mcf.get_variable_value_dict(),
+                    obj_value=obj_bound_by_mcf,
+                )
+                dump_signed_cost_heatmap_yaml(yaml_path, heatmap_data)
+                self.logger.info(
+                    "run_mcf_lb_then_neh_cp: wrote heatmap YAML to %s", yaml_path
+                )
+
+        custom_job_sequence = self._mcf_window_width_job_sequence(
+            mcf_result.mcf, instance
+        )
+
+        cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
+        total_timelimit_seconds = (
+            resolve_value_expr(neh_cp_total_timelimit, n, c, m)
+            if neh_cp_total_timelimit is not None
+            else None
+        )
+        cp_tl_2nd_obj_seconds = (
+            resolve_value_expr(
+                cp_tl_2nd_obj if cp_tl_2nd_obj is not None else cp_tl, n, c, m
+            )
+            if minimize_makespan_lex
+            else None
+        )
+        extra_batch_size_extra = 0
+        if num_batches is None and extra_batch_size_expr is not None:
+            extra = resolve_value_expr(extra_batch_size_expr, n, c, m)
+            if extra is not None:
+                extra_batch_size_extra = int(extra)
+
+        skip_pf_below_obj_resolved = NehCpOption.coerce_skip_pf_below_obj(
+            skip_pf_below_obj
+        )
+
+        option = NehCpOption(
+            custom_job_sequence=tuple(custom_job_sequence),
+            solver_thread_cnt=solver_thread_cnt,
+            added_batch_size=added_batch_size,
+            extra_batch_size_extra=extra_batch_size_extra,
+            cp_tl_seconds=cp_tl_seconds,
+            total_timelimit_seconds=total_timelimit_seconds,
+            num_batches=num_batches,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            pf_method=pf_method,
+            skip_pf_below_obj=skip_pf_below_obj_resolved,
+            make_semi_active_after_cp=make_semi_active_after_cp,
+            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
+            minimize_makespan_lex=minimize_makespan_lex,
+            cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
+            error_if_infeasible=error_if_infeasible,
+            keep_step_schedules=keep_step_schedules,
+        )
+        spec = AlgSpec(instance=instance, option=option, logger=self.logger)
+        record = NehCpDispatcher().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound_by_mcf,
+        )
+        if result is not None and result.schedule is not None:
+            self.solution_manager.register(
+                report,
+                FFcDDWSolution(
+                    schedule=result.schedule,
+                    obj_value=obj_value,
+                    obj_bound=obj_bound_by_mcf,
+                ),
+            )
+
+        if result is not None and result.metrics is not None:
+            step_log = result.metrics.get("step_log")
+            if step_log:
+                log_path = self.try_get_file_path_for_subroutine("_step_log.yaml")
+                if log_path is not None:
+                    dump_yaml(
+                        [entry.as_dict() for entry in step_log],
+                        log_path,
+                    )
+            step_schedules = result.metrics.get("step_schedules")
+            if step_schedules:
+                # Numbered prefix continues from "1_mcf_preemptive_schedule"
+                # so post-run Gantt PNGs sort in the natural execution order.
+                for (
+                    step_idx,
+                    dispatched_sch,
+                    cp_raw_sch,
+                    semi_active_sch,
+                ) in step_schedules:
+                    self.mcf_lb_phase_schedules.append(
+                        (
+                            f"2_neh_cp_step_{step_idx:03d}_a_dispatched",
+                            dispatched_sch,
+                        )
+                    )
+                    if cp_raw_sch is not None:
+                        self.mcf_lb_phase_schedules.append(
+                            (
+                                f"2_neh_cp_step_{step_idx:03d}_b_cp",
+                                cp_raw_sch,
+                            )
+                        )
+                    if semi_active_sch is not None:
+                        self.mcf_lb_phase_schedules.append(
+                            (
+                                f"2_neh_cp_step_{step_idx:03d}_c_semi_active",
+                                semi_active_sch,
+                            )
+                        )
+
+        return report
+
+    def _mcf_window_width_job_sequence(
+        self,
+        mcf: ParallelMachinePreemptionMcf,
+        instance: FFcDDWParameters,
+    ) -> list[str]:
+        """Order jobs by ascending MCF normalized window spread
+        ``(t_max_j - t_min_j) / p_{c,j}``.
+
+        The ratio is dimensionless: it measures how much the job's
+        preemptive flow is spread out relative to its own last-stage
+        processing time. A smaller ratio means the job is packed into
+        a window close to its own length, so its placement in the
+        final schedule is more constrained.
+
+        Tie-breakers, in order: total due-window weight ``(w⁻+w⁺)``
+        DESC, native ``instance.job_id_list`` position ASC. Jobs with
+        no MCF flow (``window is None``) are placed last under the
+        ``window is None`` bucket — this should not occur for an
+        optimal MCF, but keeps the sort total.
+
+        Logs the sorted sequence to ``self.logger`` with one job per
+        line plus the sort-key components, so a reader can verify
+        the ordering.
+        """
+        window_map = mcf.get_job_2_time_window_map()
+        last_stage_id = instance.stage_id_list[-1]
+        p_map = instance.get_job_2_p_map_for_stage(last_stage_id)
+        job_id_list = instance.job_id_list
+        job_2_pos = {j: i for i, j in enumerate(job_id_list)}
+        ewt = instance.job_2_ewt_map or dict.fromkeys(job_id_list, 1)
+        twt = instance.job_2_twt_map or dict.fromkeys(job_id_list, 1)
+
+        def sort_key(j: str) -> tuple[int, float, int, int]:
+            window = window_map[j]
+            return (
+                0 if window is not None else 1,
+                ((window[1] - window[0]) / p_map[j]) if window is not None else 0.0,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+
+        sorted_jobs = sorted(job_id_list, key=sort_key)
+
+        id_w = max(len(j) for j in job_id_list)
+        self.logger.info(
+            "MCF-induced job sequence "
+            "(rank | %-*s | width | p_cj | width/p_cj | (w-+w+) | native_pos):",
+            id_w,
+            "job_id",
+        )
+        for rank, j in enumerate(sorted_jobs):
+            window = window_map[j]
+            width = (window[1] - window[0]) if window is not None else None
+            ratio = (width / p_map[j]) if width is not None else None
+            self.logger.info(
+                "  %4d | %-*s | %s | %4d | %s | %4d | %4d",
+                rank,
+                id_w,
+                j,
+                f"{width:>5}" if width is not None else f"{'None':>5}",
+                p_map[j],
+                f"{ratio:>10.4f}" if ratio is not None else f"{'None':>10}",
+                ewt[j] + twt[j],
+                job_2_pos[j],
+            )
+
+        return sorted_jobs

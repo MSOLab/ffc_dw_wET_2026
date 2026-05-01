@@ -76,7 +76,13 @@ class NehCpDispatcher:
         params_for_horizon = BaseModelBuilder.make_params(instance)
         horizon = sum(params_for_horizon.p.values())
 
-        job_sequence = neh_cp_job_sequence(instance, job_priority=option.job_priority)
+        if option.custom_job_sequence is not None:
+            self._validate_custom_sequence(option.custom_job_sequence, instance)
+            job_sequence = list(option.custom_job_sequence)
+        else:
+            job_sequence = neh_cp_job_sequence(
+                instance, job_priority=option.job_priority
+            )
         max_m = max(instance.machine_count_per_stage)
         first_batch_size = max(added_batch_size, max_m * 2)
 
@@ -99,6 +105,9 @@ class NehCpDispatcher:
         current_jobs: list[str] = []
         step_entries: list[NehCpStepEntry] = []
         progress_entries: list[ProgressLogEntry] = []
+        step_schedules: list[
+            tuple[int, FFcSchedule, FFcSchedule | None, FFcSchedule | None]
+        ] = []
 
         mixed = MixedDispatcher(instance, logger=logger)
         first_stage_id = instance.stage_id_list[0]
@@ -170,6 +179,13 @@ class NehCpDispatcher:
                     dispatched.dispatch_job_by_stages(j, job_2_stage_2_p[j])
             dispatched.make_semi_active(stage_2_job_2_p)
             dispatched.insert_idle_time(due_window_map, ewt_map, twt_map)
+            se_dis, st_dis = compute_weighted_earliness_tardiness(
+                dispatched, sub_instance
+            )
+            dispatched_obj = float(se_dis + st_dis)
+            dispatched_snapshot = (
+                dispatched.deepcopy() if option.keep_step_schedules else None
+            )
             BaseModelBuilder.apply_hints_from_schedule(
                 mdl, params, op_vars, et_vars, dispatched
             )
@@ -218,6 +234,10 @@ class NehCpDispatcher:
             )
             sub_obj_lb = float(raw_lb) if raw_lb is not None else 0.0
 
+            cp_obj: float | None = None
+            semi_active_obj: float | None = None
+            cp_raw_snapshot: FFcSchedule | None = None
+            semi_active_snapshot: FFcSchedule | None = None
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 j_i_2_start = {
                     (j, i): int(solver.Value(op_vars.op_start[j, i]))
@@ -235,12 +255,23 @@ class NehCpDispatcher:
                 se_new, st_new = compute_weighted_earliness_tardiness(
                     cp_sch, sub_instance
                 )
-                if option.make_semi_active_after_cp:
+                cp_obj = float(se_new + st_new)
+                if option.keep_step_schedules:
+                    cp_raw_snapshot = cp_sch.deepcopy()
+                threshold = option.make_semi_active_after_cp_obj_threshold
+                if threshold >= 0:
+                    apply_semi_active = (se_new + st_new) >= threshold
+                else:
+                    apply_semi_active = option.make_semi_active_after_cp
+                if apply_semi_active:
                     cp_sch.make_semi_active(stage_2_job_2_p)
                     cp_sch.insert_idle_time(due_window_map, ewt_map, twt_map)
                     se_tidy, st_tidy = compute_weighted_earliness_tardiness(
                         cp_sch, sub_instance
                     )
+                    semi_active_obj = float(se_tidy + st_tidy)
+                    if option.keep_step_schedules:
+                        semi_active_snapshot = cp_sch.deepcopy()
                     if (se_tidy + st_tidy) < (se_new + st_new):
                         logger.info(
                             "neh_cp step %d: making CP solution semi-active reduced E/T "
@@ -250,9 +281,6 @@ class NehCpDispatcher:
                             se_tidy + st_tidy,
                         )
                         se_new, st_new = se_tidy, st_tidy
-                se_dis, st_dis = compute_weighted_earliness_tardiness(
-                    dispatched, sub_instance
-                )
                 partial_sol = (
                     cp_sch if (se_new + st_new) <= (se_dis + st_dis) else dispatched
                 )
@@ -263,6 +291,18 @@ class NehCpDispatcher:
                     solver.StatusName(status),
                 )
                 partial_sol = dispatched
+
+            if option.keep_step_schedules:
+                step_schedules.append(
+                    (
+                        step,
+                        dispatched_snapshot
+                        if dispatched_snapshot is not None
+                        else dispatched.deepcopy(),
+                        cp_raw_snapshot,
+                        semi_active_snapshot,
+                    )
+                )
 
             se_stage1, st_stage1 = compute_weighted_earliness_tardiness(
                 partial_sol, sub_instance
@@ -352,6 +392,9 @@ class NehCpDispatcher:
                     job_count=len(current_jobs),
                     makespan=int(partial_sol.makespan),
                     ran_2nd_obj=ran_2nd_obj,
+                    dispatched_obj=dispatched_obj,
+                    cp_obj=cp_obj,
+                    semi_active_obj=semi_active_obj,
                 )
             )
             progress_entries.append(
@@ -373,6 +416,9 @@ class NehCpDispatcher:
                     f"neh_cp produced no schedule for instance {instance.name}."
                 )
             logger.warning("neh_cp produced no schedule; returning empty record.")
+            metrics_infeasible: dict = {"step_log": tuple(step_entries)}
+            if option.keep_step_schedules:
+                metrics_infeasible["step_schedules"] = tuple(step_schedules)
             return AlgRecord(
                 work_status=WorkStatus.INFEASIBLE,
                 instance_id=instance.name,
@@ -382,7 +428,7 @@ class NehCpDispatcher:
                     schedule=None,
                     obj_value=None,
                     obj_bound=None,
-                    metrics={"step_log": tuple(step_entries)},
+                    metrics=metrics_infeasible,
                 ),
                 progress_log=tuple(progress_entries),
                 timing=timing,
@@ -392,6 +438,14 @@ class NehCpDispatcher:
         final = partial_sol
         sum_e, sum_t = compute_weighted_earliness_tardiness(final, instance)
         obj_value = float(sum_e + sum_t)
+        metrics_feasible: dict = {
+            "sum_earliness": sum_e,
+            "sum_tardiness": sum_t,
+            "makespan": final.makespan,
+            "step_log": tuple(step_entries),
+        }
+        if option.keep_step_schedules:
+            metrics_feasible["step_schedules"] = tuple(step_schedules)
         return AlgRecord(
             work_status=WorkStatus.FEASIBLE,
             instance_id=instance.name,
@@ -401,12 +455,7 @@ class NehCpDispatcher:
                 schedule=final,
                 obj_value=obj_value,
                 obj_bound=None,
-                metrics={
-                    "sum_earliness": sum_e,
-                    "sum_tardiness": sum_t,
-                    "makespan": final.makespan,
-                    "step_log": tuple(step_entries),
-                },
+                metrics=metrics_feasible,
             ),
             progress_log=tuple(progress_entries),
             timing=timing,
@@ -428,3 +477,19 @@ class NehCpDispatcher:
         if not isinstance(spec.option, NehCpOption):
             raise TypeError("NehCpDispatcher requires NehCpOption as spec.option.")
         return spec.option
+
+    @staticmethod
+    def _validate_custom_sequence(
+        sequence: tuple[str, ...], instance: FFcDDWParameters
+    ) -> None:
+        expected = set(instance.job_id_list)
+        provided = set(sequence)
+        if len(sequence) != len(expected) or provided != expected:
+            missing = sorted(expected - provided)
+            extra = sorted(provided - expected)
+            raise ValueError(
+                "NehCpOption.custom_job_sequence must be a permutation of "
+                f"instance.job_id_list ({len(expected)} jobs); "
+                f"got {len(sequence)} entries (missing={missing[:5]}, "
+                f"extra={extra[:5]})."
+            )

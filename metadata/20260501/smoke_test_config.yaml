@@ -1,0 +1,35 @@
+# Smoke test for run_mcf_lb_then_neh_cp on 2 small instances.
+# Not part of the production experiment — used to validate the new subroutine
+# end-to-end (incumbent registration, Gantt YAML emission, summary CSV).
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [0, 1]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260501_smoke
+
+instance_worker_cnt: 2
+
+draw_gantt: true
+painter_thread_cnt: 4
+
+scenarios:
+  - name: smoke_mcf_lb_then_neh_cp
+    timelimit: 30.0
+    output_subdir: smoke_mcf_lb_then_neh_cp
+    subroutine_flow:
+      - method: run_mcf_lb_then_neh_cp
+        solver_thread_cnt: 1
+        added_batch_size: 15
+        neh_cp_total_timelimit: 5.0
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: 0
+        make_semi_active_after_cp_obj_threshold: 1
+        minimize_makespan_lex: false
+        draw_heatmap: true
+        keep_step_schedules: true

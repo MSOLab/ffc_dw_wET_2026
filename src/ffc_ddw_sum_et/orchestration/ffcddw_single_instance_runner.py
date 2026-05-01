@@ -118,9 +118,7 @@ class FFcDDWSingleInstanceRunner(
             return
         if self.ins_name is None:
             raise ValueError("instance_name is required for FFcDDWSingleInstanceRunner")
-        self.working_dir = self.layout.instance_dir(
-            self._scenario_name, self.ins_name
-        )
+        self.working_dir = self.layout.instance_dir(self._scenario_name, self.ins_name)
 
     def run(self):
         self._run_error: str | None = None

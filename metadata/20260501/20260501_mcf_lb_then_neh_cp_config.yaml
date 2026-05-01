@@ -1,0 +1,38 @@
+# MCF-LB then NEH-CP experiment.
+# Step: solve MCF preemptive LB → derive job sequence by ascending
+# (t_max_j - t_min_j) (MCF time-window width) → run NEH-CP on that sequence.
+# Tie-break: (w^- + w^+) DESC, p_{c,j} DESC, native job_id_list ASC.
+# neh_cp_total_timelimit bounds only the NEH-CP CP-SAT phase (MCF is solved
+# to optimality outside that budget).
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260501
+
+instance_worker_cnt: 12
+
+draw_gantt: true
+painter_thread_cnt: 48
+
+scenarios:
+  - name: mcf_lb_then_neh_cp_bs15_linear_pf1_skip0_mas1_tl024nc
+    timelimit: 300.0
+    output_subdir: mcf_lb_then_neh_cp_bs15_linear_pf1_skip0_mas1_tl024nc
+    subroutine_flow:
+      - method: run_mcf_lb_then_neh_cp
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        neh_cp_total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: 0
+        make_semi_active_after_cp_obj_threshold: 1
+        minimize_makespan_lex: false
+        draw_heatmap: true
+        keep_step_schedules: true

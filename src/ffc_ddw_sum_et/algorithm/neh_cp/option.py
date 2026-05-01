@@ -20,9 +20,27 @@ class NehCpOption(AlgOption):
     All time-limit / batch-extra fields are pre-resolved scalars; the
     controller adapter is responsible for evaluating any ``"<n>nc"``-style
     expression strings before building this option.
+
+    ``custom_job_sequence`` overrides the priority-rule-derived sequence
+    when provided. ``NehCpDispatcher`` validates it is a permutation of
+    the instance's ``job_id_list``; ``job_priority`` is then ignored.
+
+    ``make_semi_active_after_cp_obj_threshold`` overrides the boolean
+    ``make_semi_active_after_cp`` flag when set to a non-negative value:
+    semi-active rebuild is applied iff the per-step CP-SAT weighted E+T
+    is at or above the threshold. ``-1`` (default) keeps the boolean
+    flag in effect.
+
+    ``keep_step_schedules`` toggles per-step schedule capture: when
+    ``True``, the dispatcher attaches a list of ``(step,
+    dispatched_schedule, cp_raw_schedule, semi_active_schedule)``
+    tuples to ``result.metrics["step_schedules"]`` for downstream
+    diagnostic emission. Cloning every step's schedule is O(n*c) per
+    step, so leave off for production runs.
     """
 
     job_priority: NehCpJobPriority = "weight-due-pos"
+    custom_job_sequence: tuple[str, ...] | None = None
     solver_thread_cnt: int = 1
     added_batch_size: int = 1
     extra_batch_size_extra: int = 0
@@ -35,9 +53,11 @@ class NehCpOption(AlgOption):
     pf_method: PFMethod = "PF1"
     skip_pf_below_obj: Literal["makespan"] | float | None = None
     make_semi_active_after_cp: bool = False
+    make_semi_active_after_cp_obj_threshold: int = -1
     minimize_makespan_lex: bool = False
     cp_tl_2nd_obj_seconds: float | None = None
     error_if_infeasible: bool = False
+    keep_step_schedules: bool = False
 
     @classmethod
     def coerce_skip_pf_below_obj(

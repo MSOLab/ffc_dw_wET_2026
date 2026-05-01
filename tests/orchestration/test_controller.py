@@ -135,3 +135,51 @@ def test_neh_cp_registers_full_schedule() -> None:
 
     sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
     assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.run_mcf_lb_then_neh_cp(cp_tl=1.0)
+
+    assert report.obj_value is not None
+    assert report.obj_bound is not None
+    assert report.obj_bound >= 0
+    assert report.obj_value >= report.obj_bound  # weighted ET dominates MCF LB
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+    assert incumbent.obj_bound == report.obj_bound
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+    # MCF preemptive schedule must be retained for the post-run Gantt pipeline.
+    assert controller.mcf_preemptive_schedule is not None
+    assert any(
+        name == "1_mcf_preemptive_schedule"
+        for name, _ in controller.mcf_lb_phase_schedules
+    )
+
+
+def test_run_mcf_lb_then_neh_cp_uses_window_width_sequence() -> None:
+    """Sanity check: the controller-derived sequence is a valid permutation
+    of the instance jobs (the dispatcher's own validation would otherwise
+    raise ValueError)."""
+    from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
+
+    instance = _make_instance()
+    controller = _make_controller(instance)
+    mcf = ParallelMachinePreemptionMcf.from_instance(instance)
+    mcf.solve()
+
+    sequence = controller._mcf_window_width_job_sequence(mcf, instance)
+
+    assert sorted(sequence) == sorted(instance.job_id_list)

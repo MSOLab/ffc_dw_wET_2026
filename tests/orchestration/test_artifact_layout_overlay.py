@@ -19,7 +19,9 @@ from ffc_ddw_sum_et.orchestration.artifact_layout import (
 )
 
 
-def _layout(tmp_path: Path, run_id: str = "20260429T000000_000000") -> FFcArtifactLayout:
+def _layout(
+    tmp_path: Path, run_id: str = "20260429T000000_000000"
+) -> FFcArtifactLayout:
     return FFcArtifactLayout(run_root=tmp_path / run_id, run_id=run_id)
 
 
@@ -57,9 +59,7 @@ def test_ffc_progress_kinds_routed_to_progress_zone(tmp_path: Path) -> None:
 
 def test_ffc_report_kinds_routed_to_report_zone(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
-    main_g = layout.artifact_path(
-        "gantt_png", scenario_name="sc", instance_name="ins"
-    )
+    main_g = layout.artifact_path("gantt_png", scenario_name="sc", instance_name="ins")
     phase_g = layout.artifact_path(
         "phase_gantt_png",
         scenario_name="sc",

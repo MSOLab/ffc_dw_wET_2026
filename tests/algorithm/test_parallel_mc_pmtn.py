@@ -222,6 +222,43 @@ def test_start_before_completion() -> None:
             assert completions[j] >= starts[j]
 
 
+def test_get_job_2_time_window_map_matches_start_completion() -> None:
+    """get_job_2_time_window_map() must match (start, completion) per job."""
+    instance = _make_instance()
+    solver = ParallelMachinePreemptionMcf.from_instance(instance)
+    solver.solve()
+
+    starts = solver.get_job_2_start_time_map()
+    completions = solver.get_job_2_completion_time_map()
+    windows = solver.get_job_2_time_window_map()
+
+    assert set(windows.keys()) == set(solver.calJ)
+    for j in solver.calJ:
+        if starts[j] is None:
+            assert windows[j] is None
+        else:
+            assert windows[j] == (starts[j], completions[j])
+
+
+def test_get_job_2_time_window_map_none_for_unscheduled() -> None:
+    solver = ParallelMachinePreemptionMcf.from_instance(
+        _make_instance(
+            jobs=["j0", "j1"],
+            stages=["i0", "i1"],
+            machines={"i0": ["i0_0", "i0_1"], "i1": ["i1_0"]},
+            processing=[[1, 1], [1, 1]],
+            due_window={"j0": (0, 100), "j1": (0, 100)},
+            ewt={"j0": 1, "j1": 1},
+            twt={"j0": 1, "j1": 1},
+        )
+    )
+    solver.solve()
+    assert solver.is_optimal()
+    solver.arc_index_job_time = {}
+
+    assert solver.get_job_2_time_window_map() == {"j0": None, "j1": None}
+
+
 # --- None for unscheduled jobs ---
 
 

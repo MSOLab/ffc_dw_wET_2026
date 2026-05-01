@@ -9,7 +9,12 @@ from ...parameters.ffc_ddw_params import FFcDDWParameters
 __all__ = ["NehCpJobPriority", "neh_cp_job_sequence"]
 
 NehCpJobPriority = Literal[
-    "weight-due-pos", "due-weight-pos", "due*-weight-pos", "due2-weight-pos", "wxd1", "wxd2"
+    "weight-due-pos",
+    "due-weight-pos",
+    "due*-weight-pos",
+    "due2-weight-pos",
+    "wxd1",
+    "wxd2",
 ]
 
 
