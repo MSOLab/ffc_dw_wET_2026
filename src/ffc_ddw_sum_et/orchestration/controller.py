@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
 from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
-    neh_cp_last_stage_only_from_mcf_lb,
+    neh_cp_last_stage_only_from_mcf_lb, improve_last_stage_only_dispatched_schedule_from_mcf_lb,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
@@ -524,11 +524,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         mcf_lb = self.mcf_lb_diagnostic.mcf_lb
-        result = neh_cp_last_stage_only_from_mcf_lb(
+        result = improve_last_stage_only_dispatched_schedule_from_mcf_lb(
             instance=instance,
             mcf_preemptive_schedule=self.mcf_preemptive_schedule,
             job_priority=job_priority,
-            batch_size=batch_size,
             cp_pf_method=cp_pf_method,
             cp_solver_thread_cnt=cp_solver_thread_cnt,
             total_tl_seconds=total_tl_seconds,
