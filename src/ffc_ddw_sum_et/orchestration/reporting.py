@@ -1248,15 +1248,21 @@ class FFcDDWReporter:
                     )
 
         gantt_count = len(jobs)
-        # Heatmap YAMLs aren't registered in ArtifactLayout yet; rglob fallback.
-        for hm_yaml in sorted(self.output_dir.rglob("*_C_heatmap.yaml")):
-            jobs.append(
-                (
-                    _render_heatmap_from_yaml,
-                    hm_yaml,
-                    hm_yaml.with_suffix(".html"),
+        # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the
+        # progress zone per (scenario, instance) and route the HTML output
+        # into the same instance's report zone.
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                progress_dir = self.layout.zone_dir(
+                    "progress", scenario_name=sc.name, instance_name=ins
                 )
-            )
+                report_dir = self.layout.zone_dir(
+                    "report", scenario_name=sc.name, instance_name=ins
+                )
+                for hm_yaml in sorted(progress_dir.glob("*_C_heatmap.yaml")):
+                    html_path = report_dir / hm_yaml.with_suffix(".html").name
+                    jobs.append((_render_heatmap_from_yaml, hm_yaml, html_path))
         heatmap_count = len(jobs) - gantt_count
 
         if not jobs:
