@@ -13,9 +13,24 @@ draw_gantt: false
 painter_thread_cnt: 48
 
 scenarios:
-  - name: end_time
+  - name: end_time_contrib
     timelimit: 300.0
-    output_subdir: end_time
+    output_subdir: end_time_contrib
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "contrib"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+        log_cp_search_progress: false
+
+  - name: end_time_dist
+    timelimit: 300.0
+    output_subdir: end_time_dist
     subroutine_flow:
       - method: apply_lb_by_mcf
         draw_heatmap: false
@@ -28,9 +43,24 @@ scenarios:
         total_tl: 0.01nc
         log_cp_search_progress: false
 
-  - name: start_time_maxw
+  - name: start_time_maxw_contrib
     timelimit: 300.0
-    output_subdir: start_time_maxw
+    output_subdir: start_time_maxw_contrib
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "start_time_maxw"
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "start_time_maxw"
+        placement_priority: "contrib"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+        log_cp_search_progress: false
+
+  - name: start_time_maxw_dist
+    timelimit: 300.0
+    output_subdir: start_time_maxw_dist
     subroutine_flow:
       - method: apply_lb_by_mcf
         draw_heatmap: false
@@ -43,9 +73,24 @@ scenarios:
         total_tl: 0.01nc
         log_cp_search_progress: false
 
-  - name: end_time_maxw
+  - name: end_time_maxw_contrib
     timelimit: 300.0
-    output_subdir: end_time_maxw
+    output_subdir: end_time_maxw_contrib
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time_maxw"
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time_maxw"
+        placement_priority: "contrib"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+        log_cp_search_progress: false
+
+  - name: end_time_maxw_dist
+    timelimit: 300.0
+    output_subdir: end_time_maxw_dist
     subroutine_flow:
       - method: apply_lb_by_mcf
         draw_heatmap: false
