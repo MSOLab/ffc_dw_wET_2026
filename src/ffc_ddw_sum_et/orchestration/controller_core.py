@@ -70,6 +70,14 @@ class FFcDDWSubroutineControllerCore(
         self.mcf_preemptive_schedule: MCFPreemptiveSchedule | None = None
         self.mcf_lb_diagnostic: MCFLBDiagnostic | None = None
         self.last_stage_only_sol: FFcDDWSolution | None = None
+        # `p_increment` value used by the producing step; ``None`` until the
+        # step has run. When non-zero, the recorded MCF preemptive schedule
+        # / last-stage-only solution belong to an *augmented* problem (last
+        # stage processing times inflated by ``p_increment``) and downstream
+        # consumers must treat them as such (e.g. MCF LB is not a global LB
+        # for the original problem).
+        self.mcf_preemptive_sch_p_increment: int | None = None
+        self.last_stage_only_sol_p_increment: int | None = None
         # Ordered (name, schedule) pairs per MCF-LB phase, used by the
         # runner to emit numbered progress artifacts (1_mcf_preemptive,
         # 2_last_stage_only_init, ..., 7_final). Only populated entries

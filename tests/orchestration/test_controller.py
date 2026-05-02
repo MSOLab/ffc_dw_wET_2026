@@ -205,8 +205,7 @@ def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
     # MCF preemptive schedule must be retained for the post-run Gantt pipeline.
     assert controller.mcf_preemptive_schedule is not None
     assert any(
-        name == "1_mcf_preemptive_sch"
-        for name, _ in controller.mcf_lb_phase_schedules
+        name == "1_mcf_preemptive_sch" for name, _ in controller.mcf_lb_phase_schedules
     )
 
 

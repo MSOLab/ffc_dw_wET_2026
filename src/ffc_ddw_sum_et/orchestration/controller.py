@@ -394,18 +394,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         draw_heatmap: bool = False,
         heatmap_sort: HeatmapSort = "due2-weight-pos",
+        p_increment: int = 0,
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
 
         Solves the MCF relaxation, records ``mcf_lb`` on the diagnostic, and
         returns a :class:`SubroutineReport` with ``obj_value=None`` and
-        ``obj_bound = mcf_lb``. No incumbent is registered with the solution
-        manager (this subroutine produces no full schedule), so no Gantt or
-        ``*_schedule.yaml`` is emitted for this step. The MCF preemptive
-        schedule is still stored on ``self.mcf_preemptive_schedule`` and
-        appended to ``self.mcf_lb_phase_schedules`` so downstream diagnostics
-        keyed off those attributes continue to work.
+        ``obj_bound = mcf_lb`` (when ``p_increment == 0``). No incumbent is
+        registered with the solution manager (this subroutine produces no
+        full schedule), so no Gantt or ``*_schedule.yaml`` is emitted for
+        this step. The MCF preemptive schedule is still stored on
+        ``self.mcf_preemptive_schedule`` and appended to
+        ``self.mcf_lb_phase_schedules`` so downstream diagnostics keyed off
+        those attributes continue to work.
 
         Args:
             draw_heatmap: When ``True``, build the parallel-machine signed
@@ -423,21 +425,49 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 ``(t_max - t_min) / p_{c,j}``, tie-break by total weight
                 DESC then native position ASC). Ignored when
                 ``draw_heatmap`` is ``False``.
+            p_increment: Integer ``≥ 0``. When non-zero, the MCF
+                relaxation is solved on an *augmented* instance whose
+                last-stage processing times are increased by
+                ``p_increment`` for every job. The resulting MCF LB is a
+                bound on the augmented problem only — it is **not** a
+                global LB on the original instance — so the returned
+                ``SubroutineReport.obj_bound`` is ``None`` in that case.
+                ``p_increment = 0`` (default) preserves the current
+                behaviour. The value used is recorded on
+                ``self.mcf_preemptive_sch_p_increment``.
         """
+        if p_increment < 0:
+            raise ValueError(
+                f"p_increment must be 0 or a positive integer; got {p_increment}."
+            )
+
         start_elapsed = time.monotonic()
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
 
-        mcf_result = solve_mcf_lb(self.instance, diag)
+        if p_increment == 0:
+            instance_for_mcf = self.instance
+        else:
+            last_stage_id = self.instance.stage_id_list[-1]
+            instance_for_mcf = FFcDDWParameters.with_stage_processing_time_increment(
+                self.instance, last_stage_id, p_increment
+            )
+
+        mcf_result = solve_mcf_lb(instance_for_mcf, diag)
         obj_bound_by_mcf = mcf_result.mcf_lb
 
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
+        self.mcf_preemptive_sch_p_increment = p_increment
         self.mcf_lb_phase_schedules.clear()
         self.mcf_lb_phase_schedules.append(
             ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
 
-        self.logger.info("apply_lb_by_mcf: MCF LB = %d", int(obj_bound_by_mcf))
+        self.logger.info(
+            "apply_lb_by_mcf: MCF LB = %d, p_increment=%d",
+            int(obj_bound_by_mcf),
+            p_increment,
+        )
 
         if draw_heatmap:
             from ..io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
@@ -445,7 +475,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             yaml_path = self.try_get_file_path_for_subroutine("_C_heatmap.yaml")
             if yaml_path is not None:
                 heatmap_data = build_signed_cost_matrix(
-                    self.instance,
+                    instance_for_mcf,
                     sort=heatmap_sort,
                     x_jt_map=mcf_result.mcf.get_variable_value_dict(),
                     obj_value=obj_bound_by_mcf,
@@ -465,7 +495,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return SubroutineReport(
             elapsed_time=elapsed,
             obj_value=None,
-            obj_bound=obj_bound_by_mcf,
+            obj_bound=obj_bound_by_mcf if p_increment == 0 else None,
         )
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
@@ -583,6 +613,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         solver_thread_cnt: int = 1,
         total_tl: float | str | None = None,
         log_cp_search_progress: bool = False,
+        p_increment: int = 0,
     ) -> SubroutineReport:
         """Step method: midpoint warm-start across all jobs from the MCF
         preemptive LB, then a single profile-fix CP-SAT solve.
@@ -614,6 +645,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             log_cp_search_progress: When ``True``, the CP solver writes
                 its search-progress log under the subroutine output
                 directory.
+            p_increment: Integer ``≥ 0``. When non-zero, the CP-SAT
+                solve runs on an augmented instance whose last-stage
+                processing times are increased by ``p_increment`` for
+                every job. The resulting last-stage-only schedule is
+                feasible for the augmented problem only;
+                ``build_full_sch_from_last_stage_only_sch`` rebuilds it
+                under original durations before reverse-dispatch (see
+                ``Phase3State.ls_only_sch_before_delay``). The value used
+                is recorded on ``self.last_stage_only_sol_p_increment``.
 
         Side effects:
           - Stores the resulting full last-stage schedule on
@@ -621,7 +661,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
           - Appends ``2_ls_only_sch_from_mcf_lb`` to
             ``self.mcf_lb_phase_schedules``. No per-batch snapshots are
             recorded (single CP solve).
+
+        The returned ``SubroutineReport.obj_bound`` is always ``None``:
+        this step does not produce a lower bound, it only consumes the
+        MCF LB stored by the prior ``apply_lb_by_mcf`` step. Callers
+        wanting the MCF LB should read it from
+        ``self.mcf_lb_diagnostic.mcf_lb`` (and check
+        ``self.mcf_preemptive_sch_p_increment`` for global validity).
         """
+        if p_increment < 0:
+            raise ValueError(
+                f"p_increment must be 0 or a positive integer; got {p_increment}."
+            )
         if self.mcf_preemptive_schedule is None:
             raise ValueError(
                 "single_pass_last_stage_only_sch_from_mcf_lb requires a prior "
@@ -641,9 +692,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance.last_stage_mc_count,
         )
 
+        if p_increment == 0:
+            instance_for_solve = instance
+        else:
+            last_stage_id = instance.stage_id_list[-1]
+            instance_for_solve = FFcDDWParameters.with_stage_processing_time_increment(
+                instance, last_stage_id, p_increment
+            )
+
         mcf_lb = self.mcf_lb_diagnostic.mcf_lb
         result = single_pass_last_stage_only_from_mcf_lb(
-            instance,
+            instance_for_solve,
             self.mcf_preemptive_schedule,
             logger=self.logger,
             job_priority=job_priority,
@@ -659,25 +718,27 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=result.schedule,
             obj_value=result.obj_value,
-            obj_bound=mcf_lb,
+            obj_bound=None,
         )
+        self.last_stage_only_sol_p_increment = p_increment
         self.mcf_lb_phase_schedules.append(
             ("2_ls_only_sch_from_mcf_lb", result.schedule)
         )
 
         self.logger.info(
             "single_pass_last_stage_only_sch_from_mcf_lb: status=%s, "
-            "obj=%.2f, mcf_lb=%d, cp_lb=%.2f, elapsed=%.2fs.",
+            "obj=%.2f, mcf_lb=%d, cp_lb=%.2f, elapsed=%.2fs, p_increment=%d.",
             result.status,
             result.obj_value,
             int(mcf_lb),
             result.obj_bound,
             result.elapsed_time,
+            p_increment,
         )
         return SubroutineReport(
             elapsed_time=result.elapsed_time,
             obj_value=result.obj_value,
-            obj_bound=mcf_lb,
+            obj_bound=None,
         )
 
     def build_full_sch_from_last_stage_only_sch(
@@ -708,6 +769,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             order is consistent across paths). The delayed / flipped /
             before-unflip entries are skipped when
             ``self.instance.stage_count == 1``.
+          - When the prior step recorded
+            ``self.last_stage_only_sol_p_increment != 0``, the
+            last-stage-only schedule was solved under inflated last-stage
+            durations. This step rebuilds it under the original
+            processing times (same end times, recomputed starts) before
+            reverse-dispatch, and appends the rebuilt schedule as
+            ``2_1_ls_only_sch_before_delayed`` to
+            ``self.mcf_lb_phase_schedules``.
 
         Returns:
             ``SubroutineReport`` with ``obj_value`` = dispatched weighted ET
@@ -724,11 +793,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "run_last_stage_cp_sat_lb, or run_mcf_lb_4)."
             )
 
+        ls_p_inc = self.last_stage_only_sol_p_increment
+        rebuild_with_original_p = ls_p_inc is not None and ls_p_inc != 0
+
         start_elapsed = time.monotonic()
         state = reverse_dispatch_full_schedule(
             self.instance,
             self.last_stage_only_sol.schedule,
             machine_then_job=machine_then_job,
+            rebuild_last_stage_with_original_p=rebuild_with_original_p,
             logger=self.logger,
         )
         elapsed = time.monotonic() - start_elapsed
@@ -739,6 +812,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
             return SubroutineReport(elapsed_time=elapsed, obj_value=None, obj_bound=0.0)
 
+        if state.ls_only_sch_before_delay is not None:
+            self.mcf_lb_phase_schedules.append(
+                ("2_1_ls_only_sch_before_delayed", state.ls_only_sch_before_delay)
+            )
         if state.ls_only_sch_delayed is not None:
             self.mcf_lb_phase_schedules.append(
                 ("3_ls_only_sch_delayed", state.ls_only_sch_delayed)

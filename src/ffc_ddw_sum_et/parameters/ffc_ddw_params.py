@@ -175,6 +175,57 @@ class FFcDDWParameters(FFcParameters):
         )
 
     @classmethod
+    def with_stage_processing_time_increment(
+        cls,
+        instance: FFcParameters,
+        stage_id: str,
+        increment: int,
+    ) -> Self:
+        """Return a new FFcDDWParameters identical to ``instance`` except the
+        processing time of every job at ``stage_id`` is increased by
+        ``increment``.
+
+        ``increment`` must be a non-negative ``int``; ``0`` produces a copy
+        with identical processing times. Other stages, due windows, weights,
+        and machine layout are preserved.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.with_stage_processing_time_increment requires "
+                f"FFcDDWParameters, got {type(instance).__name__}"
+            )
+        if not isinstance(increment, int) or increment < 0:
+            raise ValueError(
+                f"increment must be a non-negative integer; got {increment!r}."
+            )
+        if stage_id not in instance.stage_id_list:
+            raise ValueError(
+                f"stage_id {stage_id!r} not in instance.stage_id_list "
+                f"{instance.stage_id_list!r}."
+            )
+
+        # ``p_manager.df`` uses a positional column layout (RangeIndex),
+        # so look up the stage column by index rather than by name.
+        stage_index = instance.stage_id_list.index(stage_id)
+        new_df = instance.p_manager.df.copy()
+        new_df.iloc[:, stage_index] = new_df.iloc[:, stage_index] + increment
+        new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)
+        new_stage_2_machines_map = {
+            s: list(instance.stage_2_machines_map[s]) for s in instance.stage_id_list
+        }
+        return cls(
+            instance.name,
+            list(instance.job_id_list),
+            list(instance.stage_id_list),
+            new_stage_2_machines_map,
+            new_p_manager,
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+            instance.generation_params,
+        )
+
+    @classmethod
     def create_instance_of_stage_subset(
         cls,
         instance: FFcParameters,

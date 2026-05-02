@@ -257,3 +257,76 @@ def test_create_instance_of_stage_subset_rejects_non_ddw_instance() -> None:
     minimal = FFcParameters.__new__(FFcParameters)
     with pytest.raises(TypeError, match="requires FFcDDWParameters"):
         FFcDDWParameters.create_instance_of_stage_subset(minimal, {"i0"})
+
+
+# -----------------------------------------------------------------------------
+# with_stage_processing_time_increment
+# -----------------------------------------------------------------------------
+
+
+def test_with_stage_processing_time_increment_inflates_only_target_stage() -> None:
+    original = _load_pra_instance(
+        "benchmarks/PRA2017/large/Instance_50_5_3_0,2_0,2_10_Rep0.txt"
+    )
+    target_stage = original.stage_id_list[-1]
+
+    augmented = FFcDDWParameters.with_stage_processing_time_increment(
+        original, target_stage, 5
+    )
+
+    for stage_id in original.stage_id_list:
+        for job_id in original.job_id_list:
+            expected = original.stage_2_job_2_p_map[stage_id][job_id]
+            if stage_id == target_stage:
+                expected = expected + 5
+            assert augmented.stage_2_job_2_p_map[stage_id][job_id] == expected
+    # Non-processing fields are preserved.
+    assert augmented.job_2_due_window_map == original.job_2_due_window_map
+    assert augmented.job_2_ewt_map == original.job_2_ewt_map
+    assert augmented.job_2_twt_map == original.job_2_twt_map
+    assert augmented.stage_id_list == original.stage_id_list
+    # Original instance is untouched.
+    for job_id in original.job_id_list:
+        assert (
+            original.stage_2_job_2_p_map[target_stage][job_id]
+            == augmented.stage_2_job_2_p_map[target_stage][job_id] - 5
+        )
+
+
+def test_with_stage_processing_time_increment_zero_clones_unchanged() -> None:
+    original = _load_pra_instance(
+        "benchmarks/PRA2017/large/Instance_50_5_3_0,2_0,2_10_Rep0.txt"
+    )
+    target_stage = original.stage_id_list[-1]
+
+    clone = FFcDDWParameters.with_stage_processing_time_increment(
+        original, target_stage, 0
+    )
+
+    assert clone.stage_2_job_2_p_map == original.stage_2_job_2_p_map
+
+
+def test_with_stage_processing_time_increment_rejects_negative() -> None:
+    original = _load_pra_instance(
+        "benchmarks/PRA2017/large/Instance_50_5_3_0,2_0,2_10_Rep0.txt"
+    )
+    with pytest.raises(ValueError, match="non-negative integer"):
+        FFcDDWParameters.with_stage_processing_time_increment(
+            original, original.stage_id_list[-1], -1
+        )
+
+
+def test_with_stage_processing_time_increment_rejects_invalid_stage() -> None:
+    original = _load_pra_instance(
+        "benchmarks/PRA2017/large/Instance_50_5_3_0,2_0,2_10_Rep0.txt"
+    )
+    with pytest.raises(ValueError, match="not in instance.stage_id_list"):
+        FFcDDWParameters.with_stage_processing_time_increment(
+            original, "not_a_stage", 1
+        )
+
+
+def test_with_stage_processing_time_increment_rejects_non_ddw_instance() -> None:
+    minimal = FFcParameters.__new__(FFcParameters)
+    with pytest.raises(TypeError, match="requires FFcDDWParameters"):
+        FFcDDWParameters.with_stage_processing_time_increment(minimal, "i0", 1)
