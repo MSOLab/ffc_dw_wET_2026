@@ -30,7 +30,14 @@ __all__ = [
     "pm_pmtn_sort_job_sequence_from_window_map",
 ]
 
-PmPrmpSortKey = Literal["1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"]
+PmPrmpSortKey = Literal[
+    "1_rj_prmp_rel_dev",
+    "1_rj_prmp_abs_dev",
+    "start_time",
+    "end_time",
+    "start_time_maxw",
+    "end_time_maxw",
+]
 
 
 def pm_pmtn_sort_job_sequence_from_window_map(
@@ -76,6 +83,27 @@ def pm_pmtn_sort_job_sequence_from_window_map(
                 0 if window is not None else 1,
                 float(window[0]) if window is not None else 0.0,
                 -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+        if key == "end_time":
+            return (
+                0 if window is not None else 1,
+                float(window[1]) if window is not None else 0.0,
+                -(ewt[j] + twt[j]),
+                job_2_pos[j],
+            )
+        if key == "start_time_maxw":
+            return (
+                0 if window is not None else 1,
+                float(window[0]) if window is not None else 0.0,
+                -max(ewt[j], twt[j]),
+                job_2_pos[j],
+            )
+        if key == "end_time_maxw":
+            return (
+                0 if window is not None else 1,
+                float(window[1]) if window is not None else 0.0,
+                -max(ewt[j], twt[j]),
                 job_2_pos[j],
             )
         raise ValueError(f"Unknown PmPrmpSortKey: {key!r}")
