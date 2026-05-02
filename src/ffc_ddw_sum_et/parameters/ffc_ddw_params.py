@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import cached_property
 from io import StringIO
 from typing import Self, TextIO
 
@@ -61,6 +62,22 @@ class FFcDDWParameters(FFcParameters):
     def job_2_due_window_map(self) -> dict[str, tuple[int, int]]:
         """Get a copy of the per-job due date window bounds."""
         return self._job_2_due_window_map.copy()
+
+    @cached_property
+    def job_2_dw_lb_map(self) -> dict[str, int]:
+        """Get a mapping from job ID to due window lower bound (d^-_j)."""
+        return {
+            job_id: due_window[0]
+            for job_id, due_window in self._job_2_due_window_map.items()
+        }
+
+    @cached_property
+    def job_2_dw_ub_map(self) -> dict[str, int]:
+        """Get a mapping from job ID to due window upper bound (d^+_j)."""
+        return {
+            job_id: due_window[1]
+            for job_id, due_window in self._job_2_due_window_map.items()
+        }
 
     @property
     def job_2_ewt_map(self) -> dict[str, int]:
@@ -379,40 +396,24 @@ class FFcDDWParameters(FFcParameters):
     # Job → priority score maps
     # -------------------------
 
-    def get_job_2_due_date_lb_map(self) -> dict[str, int]:
-        """Get a mapping from job ID to due date lower bound (d^{-}_j)."""
-        return {
-            job_id: due_window[0]
-            for job_id, due_window in self._job_2_due_window_map.items()
-        }
-
     def get_job_2_due_date_lb_minus_p_map(self) -> dict[str, float]:
         """Get a mapping from job ID to due date lower bound minus processing time."""
-        job_2_due_date_lb_map = self.get_job_2_due_date_lb_map()
         job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
             self.job_id_list, self.stage_id_list
         )
         return {
-            job_id: job_2_due_date_lb_map[job_id]
+            job_id: self.job_2_dw_lb_map[job_id]
             - sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }
 
-    def get_job_2_due_date_ub_map(self) -> dict[str, int]:
-        """Get a mapping from job ID to due date upper bound (d^{+}_j)."""
-        return {
-            job_id: due_window[1]
-            for job_id, due_window in self._job_2_due_window_map.items()
-        }
-
     def get_job_2_due_date_ub_minus_p_map(self) -> dict[str, float]:
         """Get a mapping from job ID to due date upper bound minus processing time."""
-        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
         job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
             self.job_id_list, self.stage_id_list
         )
         return {
-            job_id: job_2_due_date_ub_map[job_id]
+            job_id: self.job_2_dw_ub_map[job_id]
             - sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }
@@ -499,10 +500,9 @@ class FFcDDWParameters(FFcParameters):
         Get the EDDUB (Earliest Due Date Upper Bound) job sequence.
         Sort by job sequence in job_id_list to break ties.
         """
-        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
         job_2_pos = {job_id: pos for pos, job_id in enumerate(self._job_id_list)}
         return sorted(
-            self.job_id_list, key=lambda j: (job_2_due_date_ub_map[j], job_2_pos[j])
+            self.job_id_list, key=lambda j: (self.job_2_dw_ub_map[j], job_2_pos[j])
         )
 
     def get_weight_due_pos_job_sequence(self) -> list[str]:
