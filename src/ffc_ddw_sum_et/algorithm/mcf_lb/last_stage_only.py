@@ -45,8 +45,9 @@ from ..cumulative_routine import (
     LastStageSolveResult,
     solve_last_stage_with_profile_fix,
 )
+from ..pm_pmtn_sorter import PmPrmpSortKey
 from .utils import (
-    jobs_sorted_by_normalized_window_width,
+    pm_pmtn_sort_job_sequence_with_log,
     window_map_from_preemptive_schedule,
 )
 
@@ -95,12 +96,10 @@ def single_pass_last_stage_only_from_mcf_lb(
     mcf_preemptive_schedule: MCFPreemptiveSchedule,
     *,
     logger: logging.Logger | None = None,
-    job_priority: Literal[
-        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
-    ] = "1_rj_prmp_rel_dev",
+    job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
     placement_priority: Literal["contrib", "dist"] = "contrib",
-    cp_pf_method: PFMethod | None = "PF1",
-    cp_solver_thread_cnt: int = 1,
+    pf_method: PFMethod | None = "PF1",
+    solver_thread_cnt: int = 1,
     total_tl_seconds: float | None = None,
     mcf_lb: float | None = None,
     log_cp_search_progress: bool = False,
@@ -121,7 +120,7 @@ def single_pass_last_stage_only_from_mcf_lb(
     window_map = window_map_from_preemptive_schedule(
         mcf_preemptive_schedule, instance.job_id_list
     )
-    job_sequence = jobs_sorted_by_normalized_window_width(
+    job_sequence = pm_pmtn_sort_job_sequence_with_log(
         window_map,
         duration_map,
         instance,
@@ -147,8 +146,8 @@ def single_pass_last_stage_only_from_mcf_lb(
         job_2_release_map,
         logger=log,
         obj_lb=mcf_lb,
-        pf_method=cp_pf_method,
-        solver_thread_cnt=cp_solver_thread_cnt,
+        pf_method=pf_method,
+        solver_thread_cnt=solver_thread_cnt,
         repeat_while_improving=False,
         max_time_in_seconds=total_tl_seconds,
         log_search_progress=log_cp_search_progress,
@@ -180,13 +179,11 @@ def neh_cp_last_stage_only_from_mcf_lb(
     mcf_preemptive_schedule: MCFPreemptiveSchedule,
     *,
     logger: logging.Logger | None = None,
-    job_priority: Literal[
-        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
-    ] = "1_rj_prmp_rel_dev",
+    job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
     hint_placement_priority: Literal["contrib", "dist"] = "contrib",
     batch_size: int = 5,
-    cp_pf_method: PFMethod | None = "PF1",
-    cp_solver_thread_cnt: int = 1,
+    pf_method: PFMethod | None = "PF1",
+    solver_thread_cnt: int = 1,
     total_tl_seconds: float | None = None,
     mcf_lb: float | None = None,
     log_cp_search_progress: bool = False,
@@ -210,7 +207,7 @@ def neh_cp_last_stage_only_from_mcf_lb(
     window_map = window_map_from_preemptive_schedule(
         mcf_preemptive_schedule, instance.job_id_list
     )
-    job_sequence = jobs_sorted_by_normalized_window_width(
+    job_sequence = pm_pmtn_sort_job_sequence_with_log(
         window_map,
         duration_map,
         instance,
@@ -261,8 +258,8 @@ def neh_cp_last_stage_only_from_mcf_lb(
             sub_job_2_release,
             logger=log,
             obj_lb=mcf_lb if is_last_step else None,
-            pf_method=cp_pf_method,
-            solver_thread_cnt=cp_solver_thread_cnt,
+            pf_method=pf_method,
+            solver_thread_cnt=solver_thread_cnt,
             repeat_while_improving=False,
             max_time_in_seconds=batch_tl_seconds,
             log_search_progress=log_cp_search_progress,

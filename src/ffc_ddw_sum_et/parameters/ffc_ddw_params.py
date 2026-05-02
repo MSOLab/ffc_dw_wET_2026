@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from io import StringIO
 from typing import Self, TextIO
 
-from ..io import TextDataParser
 from .base.job_stage_p import JobStageProcessingTimeManager
 from .ffc_params import FFcParameters
 
@@ -218,6 +217,8 @@ class FFcDDWParameters(FFcParameters):
 
     @classmethod
     def from_pra_2017_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:
+        from ffc_ddw_sum_et.io import TextDataParser
+
         marker = TextDataParser.strip_a_line(stream)
         if marker != "HFSDDW":
             raise ValueError(

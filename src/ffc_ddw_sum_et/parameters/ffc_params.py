@@ -3,8 +3,6 @@ from __future__ import annotations
 from functools import cached_property
 from typing import Self, TextIO
 
-from ffc_ddw_sum_et.io import TextDataParser
-
 from .base.job_stage_p import JobStageProcessingTimeManager
 
 
@@ -87,6 +85,8 @@ class FFcParameters:
         Returns:
             FFcParameters: Parsed parameters instance.
         """  # noqa: E501
+        from ffc_ddw_sum_et.io import TextDataParser
+
         job_count = TextDataParser.strip_a_typed_value(stream, int)
         stage_count = TextDataParser.strip_a_typed_value(stream, int)
         machine_count_per_stage = TextDataParser.strip_a_typed_list(stream, int)

@@ -34,7 +34,7 @@ This project wants the same pattern, wired through the YAML
     - select_best_of_mixed_dispatches
 - method: run_profile_fixed_ns
   solver_thread_cnt: 2
-  pf_method: "PF1"
+  cp_pf_method: "PF1"
 ```
 
 ### Design decisions (confirmed with user)

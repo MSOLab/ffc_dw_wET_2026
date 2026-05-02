@@ -32,7 +32,7 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import solve_mcf_lb
 from ffc_ddw_sum_et.algorithm.mcf_lb.utils import (
-    jobs_sorted_by_normalized_window_width,
+    pm_pmtn_sort_job_sequence_with_log,
 )
 from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpBatchTlMode,
@@ -41,6 +41,8 @@ from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpOption,
 )
 from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
+from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
+from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
@@ -388,9 +390,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def apply_lb_by_mcf(
         self,
         draw_heatmap: bool = False,
-        heatmap_sort: Literal[
-            "due2-window", "neh-cp", "1_rj_prmp_rel_dev", "start_time"
-        ] = "due2-window",
+        heatmap_sort: HeatmapSort = "due2-weight-pos",
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
@@ -410,9 +410,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 ``<ins>_C_heatmap.yaml`` next to the other per-instance
                 artifacts. The post-run reporter (gated by ``draw_gantt``)
                 renders the matching HTML.
-            heatmap_sort: Row ordering for the heatmap. ``"due2-window"``
+            heatmap_sort: Row ordering for the heatmap. ``"due2-weight-pos"``
                 sorts by ``max(r_j, d⁺-p)`` then ``d⁺`` then ``d⁻``;
-                ``"neh-cp"`` sorts by ``(max(w⁻, w⁺), w⁻+w⁺, window width)``;
+                ``"weight-due-pos"`` sorts by ``(max(w⁻, w⁺), w⁻+w⁺, window width)``;
                 ``"1_rj_prmp_rel_dev"`` reproduces the job order used by
                 the ``neh_cp_last_stage_only_sch_from_mcf_lb`` and
                 ``single_pass_last_stage_only_sch_from_mcf_lb`` steps
@@ -467,13 +467,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
         self,
-        job_priority: Literal[
-            "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
-        ] = "1_rj_prmp_rel_dev",
+        job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
         batch_size: int = 5,
         hint_placement_priority: Literal["contrib", "dist"] = "contrib",
-        cp_pf_method: PFMethod | None = "PF1",
-        cp_solver_thread_cnt: int = 1,
+        pf_method: PFMethod | None = "PF1",
+        solver_thread_cnt: int = 1,
         total_tl: float | str | None = None,
         log_cp_search_progress: bool = False,
     ) -> SubroutineReport:
@@ -489,10 +487,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Args:
             batch_size: Jobs added per NEH-CP step (in MCF window-width
                 priority order). Defaults to 5.
-            cp_pf_method: Profile-fix precedence policy for each batch's
+            pf_method: Profile-fix precedence policy for each batch's
                 last-stage CP-SAT solve. Defaults to ``"PF1"``; ``None``
                 skips the precedence-arc pass.
-            cp_solver_thread_cnt: ``num_search_workers`` per batch CP solve.
+            solver_thread_cnt: ``num_search_workers`` per batch CP solve.
             total_tl: Total time budget for the entire NEH-CP loop.
                 Accepts a float or a ``"<n>nc"`` / ``"<n>n"`` / ``"<n>c"``
                 / ``"<n>m"`` expression. When the budget is exhausted,
@@ -536,8 +534,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             job_priority=job_priority,
             hint_placement_priority=hint_placement_priority,
             batch_size=batch_size,
-            cp_pf_method=cp_pf_method,
-            cp_solver_thread_cnt=cp_solver_thread_cnt,
+            pf_method=pf_method,
+            solver_thread_cnt=solver_thread_cnt,
             total_tl_seconds=total_tl_seconds,
             mcf_lb=mcf_lb,
             log_cp_search_progress=log_cp_search_progress,
@@ -573,12 +571,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def single_pass_last_stage_only_sch_from_mcf_lb(
         self,
-        job_priority: Literal[
-            "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
-        ] = "1_rj_prmp_rel_dev",
+        job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
         placement_priority: Literal["contrib", "dist"] = "contrib",
-        cp_pf_method: PFMethod | None = "PF1",
-        cp_solver_thread_cnt: int = 1,
+        pf_method: PFMethod | None = "PF1",
+        solver_thread_cnt: int = 1,
         total_tl: float | str | None = None,
         log_cp_search_progress: bool = False,
     ) -> SubroutineReport:
@@ -602,10 +598,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 for semantics. Unlike the NEH-CP step, the placement IS
                 the profile-fix schedule, so this directly steers the
                 final CP solve.
-            cp_pf_method: Profile-fix precedence policy for the CP-SAT
+            pf_method: Profile-fix precedence policy for the CP-SAT
                 solve. Defaults to ``"PF1"``; ``None`` skips the
                 precedence-arc pass.
-            cp_solver_thread_cnt: ``num_search_workers`` for the CP solve.
+            solver_thread_cnt: ``num_search_workers`` for the CP solve.
             total_tl: Time budget for the single CP solve. Accepts a
                 float or a ``"<n>nc"`` / ``"<n>n"`` / ``"<n>c"`` /
                 ``"<n>m"`` expression.
@@ -646,8 +642,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             logger=self.logger,
             job_priority=job_priority,
             placement_priority=placement_priority,
-            cp_pf_method=cp_pf_method,
-            cp_solver_thread_cnt=cp_solver_thread_cnt,
+            pf_method=pf_method,
+            solver_thread_cnt=solver_thread_cnt,
             total_tl_seconds=total_tl_seconds,
             mcf_lb=mcf_lb,
             log_cp_search_progress=log_cp_search_progress,
@@ -1559,9 +1555,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
         draw_heatmap: bool = False,
-        heatmap_sort: Literal[
-            "due2-window", "neh-cp", "1_rj_prmp_rel_dev"
-        ] = "due2-window",
+        heatmap_sort: HeatmapSort = "due2-weight-pos",
         keep_step_schedules: bool = False,
     ) -> SubroutineReport:
         """Step method: solve the MCF preemptive relaxation, derive a job
@@ -1751,13 +1745,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``(t_max_j - t_min_j) / p_{c,j}``.
 
         Thin wrapper over
-        :func:`ffc_ddw_sum_et.algorithm.mcf_lb.utils.jobs_sorted_by_normalized_window_width`
+        :func:`ffc_ddw_sum_et.algorithm.mcf_lb.utils.pm_pmtn_sort_job_sequence_with_log`
         that supplies the live MCF time-window map. The shared helper owns
         the tie-break order and the rank-by-rank diagnostic log.
         """
         last_stage_id = instance.stage_id_list[-1]
         p_map = instance.get_job_2_p_map_for_stage(last_stage_id)
-        return jobs_sorted_by_normalized_window_width(
+        return pm_pmtn_sort_job_sequence_with_log(
             mcf.get_job_2_time_window_map(),
             p_map,
             instance,

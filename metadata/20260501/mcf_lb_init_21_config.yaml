@@ -23,8 +23,8 @@ scenarios:
       - method: single_pass_last_stage_only_sch_from_mcf_lb
         job_priority: "1_rj_prmp_rel_dev"
         placement_priority: "dist"
-        cp_pf_method: "PF1"
-        cp_solver_thread_cnt: 1
+        pf_method: "PF1"
+        solver_thread_cnt: 1
         total_tl: 0.01nc
         log_cp_search_progress: false
   - name: start_time
@@ -37,7 +37,7 @@ scenarios:
       - method: single_pass_last_stage_only_sch_from_mcf_lb
         job_priority: "start_time"
         placement_priority: "dist"
-        cp_pf_method: "PF1"
-        cp_solver_thread_cnt: 1
+        pf_method: "PF1"
+        solver_thread_cnt: 1
         total_tl: 0.01nc
         log_cp_search_progress: false

@@ -6,6 +6,8 @@ from ortools.graph.python.min_cost_flow import SimpleMinCostFlow
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
+__all__ = ["ParallelMachinePreemptionMcf"]
+
 
 def _resolve_weight_map(
     raw: dict[str, int], jobs: list[str], kind: str

@@ -31,7 +31,7 @@ scenarios:
       - method: neh_cp_last_stage_only_sch_from_mcf_lb
         job_priority: "1_rj_prmp_rel_dev"
         batch_size: 5
-        cp_pf_method: "PF1"
-        cp_solver_thread_cnt: 8
+        pf_method: "PF1"
+        solver_thread_cnt: 8
         total_tl: 10
         log_cp_search_progress: true

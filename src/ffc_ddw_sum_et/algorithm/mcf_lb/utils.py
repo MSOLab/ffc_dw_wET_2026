@@ -1,24 +1,26 @@
-"""Shared helpers for MCF-LB-driven job sequencing.
+"""Helpers for MCF-LB-driven job sequencing.
 
-Both ``orchestration.controller._mcf_window_width_job_sequence`` and the
-last-stage-only NEH-CP step want to sort jobs by ascending normalized
-window width derived from the MCF flow. The shape of the input differs
-(controller has the live ``ParallelMachinePreemptionMcf`` handle; the
-NEH-CP step only has a stored ``MCFPreemptiveSchedule``), so this module
-exposes both a window-map builder for the schedule path and a generic
-sort that takes any pre-computed window map.
+The actual sort logic lives in
+:mod:`ffc_ddw_sum_et.algorithm.sort_keys.pm_pmtn_sort_job_sequence_from_window_map`
+(SSOT). This module wraps it with two MCF-LB-specific concerns:
+
+* a window-map builder for ``MCFPreemptiveSchedule`` (the stored, post-
+  controller-discard form), and
+* a logging-enabled wrapper that emits the rank-by-rank table consumed by
+  the NEH-CP last-stage diagnostics.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Literal, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
+from ..pm_pmtn_sorter import PmPrmpSortKey, pm_pmtn_sort_job_sequence_from_window_map
 
 __all__ = [
-    "jobs_sorted_by_normalized_window_width",
+    "pm_pmtn_sort_job_sequence_with_log",
     "window_map_from_preemptive_schedule",
 ]
 
@@ -43,63 +45,30 @@ def window_map_from_preemptive_schedule(
     return window_map
 
 
-def jobs_sorted_by_normalized_window_width(
+def pm_pmtn_sort_job_sequence_with_log(
     window_map: Mapping[str, tuple[int, int] | None],
     duration_map: Mapping[str, int],
     instance: FFcDDWParameters,
     *,
     logger: logging.Logger | None = None,
-    job_priority: Literal[
-        "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
-    ] = "1_rj_prmp_rel_dev",
+    job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
 ) -> list[str]:
-    """Sort jobs by ascending ``(t_max - t_min) / p_{c,j}``.
+    """Sort jobs by a :data:`PmPrmpSortKey`, with optional rank-by-rank logging.
 
-    Tie-breakers, in order: total due-window weight ``-(w⁻+w⁺)`` (so
-    higher-weighted jobs come first on ties), native
-    ``instance.job_id_list`` position ASC. Jobs with ``window=None`` go
-    last so the sort is total.
-
-    When ``logger`` is provided, emits a rank-by-rank table at INFO level
-    so a reader can verify the ordering.
+    Delegates the sort to
+    :func:`pm_pmtn_sort_job_sequence_from_window_map`. When ``logger`` is
+    provided, emits a rank-by-rank table at INFO level so a reader can
+    verify the ordering.
     """
-    job_id_list = instance.job_id_list
-    job_2_pos = {j: i for i, j in enumerate(job_id_list)}
-    ewt = instance.job_2_ewt_map or dict.fromkeys(job_id_list, 1)
-    twt = instance.job_2_twt_map or dict.fromkeys(job_id_list, 1)
-
-    def sort_key(j: str) -> tuple[int, float, int, int]:
-        window = window_map[j]
-        if job_priority == "1_rj_prmp_rel_dev":
-            return (
-                0 if window is not None else 1,
-                ((window[1] - window[0]) / duration_map[j])
-                if window is not None
-                else 0.0,
-                -(ewt[j] + twt[j]),
-                job_2_pos[j],
-            )
-        if job_priority == "1_rj_prmp_abs_dev":
-            return (
-                0 if window is not None else 1,
-                ((window[1] - window[0]) - duration_map[j])
-                if window is not None
-                else 0.0,
-                -(ewt[j] + twt[j]),
-                job_2_pos[j],
-            )
-        if job_priority == "start_time":
-            return (
-                0 if window is not None else 1,
-                (window[0]) if window is not None else 0.0,
-                -(ewt[j] + twt[j]),
-                job_2_pos[j],
-            )
-        raise ValueError(f"Unsupported job_priority: {job_priority}")
-
-    sorted_jobs = sorted(job_id_list, key=sort_key)
+    sorted_jobs = pm_pmtn_sort_job_sequence_from_window_map(
+        window_map, duration_map, instance, job_priority
+    )
 
     if logger is not None:
+        job_id_list = instance.job_id_list
+        job_2_pos = {j: i for i, j in enumerate(job_id_list)}
+        ewt = instance.job_2_ewt_map or dict.fromkeys(job_id_list, 1)
+        twt = instance.job_2_twt_map or dict.fromkeys(job_id_list, 1)
         id_w = max(len(j) for j in job_id_list)
         logger.info(
             "MCF-induced job sequence "

@@ -27,7 +27,7 @@ scenarios:
         neh_cp_total_timelimit: 5.0
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
-        pf_method: "PF1"
+        cp_pf_method: "PF1"
         skip_pf_below_obj: 0
         make_semi_active_after_cp_obj_threshold: 1
         minimize_makespan_lex: false

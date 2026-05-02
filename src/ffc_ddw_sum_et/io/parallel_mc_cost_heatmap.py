@@ -16,18 +16,29 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, Union, get_args
 
 import numpy as np
 from routix.io import dump_yaml, load_yaml
 
+from ..algorithm.pm_pmtn_sorter import (
+    PmPrmpSortKey,
+    pm_pmtn_sort_job_sequence_from_window_map,
+)
+from ..parameters.sorter import ParamSortKey, param_sort_job_sequence
+
 if TYPE_CHECKING:
     from ..parameters.ffc_ddw_params import FFcDDWParameters
 
+HeatmapSort = Union[ParamSortKey, PmPrmpSortKey]
 
-HeatmapSort = Literal[
-    "due2-window", "neh-cp", "1_rj_prmp_rel_dev", "1_rj_prmp_abs_dev", "start_time"
-]
+_PARAM_SORT_VALUES: frozenset[str] = frozenset(get_args(ParamSortKey))
+_PMTN_SORT_VALUES: frozenset[str] = frozenset(get_args(PmPrmpSortKey))
+
+_HEATMAP_SORT_MIGRATION: dict[str, str] = {
+    "neh-cp": "weight-due-pos",
+    "due2-window": "due2-weight-pos",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +66,7 @@ class SignedCostHeatmapData:
     x_cells: list[tuple[int, int]] = field(default_factory=list)
     """``(row_index, t)`` for each MCF cell with ``x_jt = 1``. Empty when
     no MCF flow was supplied to :func:`build_signed_cost_matrix`."""
-    sort: HeatmapSort = "due2-window"
+    sort: HeatmapSort = "due2-weight-pos"
 
 
 def _weights_or_default(raw: dict[str, int], jobs: Sequence[str]) -> dict[str, int]:
@@ -63,137 +74,51 @@ def _weights_or_default(raw: dict[str, int], jobs: Sequence[str]) -> dict[str, i
     return dict.fromkeys(jobs, 1) if not raw else raw
 
 
+def _window_map_from_x_jt(
+    x_jt_map: Mapping[str, Mapping[int, int]],
+    job_id_list: Sequence[str],
+) -> dict[str, tuple[int, int] | None]:
+    """Build a per-job window map from an MCF flow dict.
+
+    Window is ``(min(t with flow>0) - 1, max(t with flow>0))`` so it matches
+    the half-open ``[t-1, t)`` segment semantics used by
+    ``MCFPreemptiveSchedule.from_flow_dict``. Jobs with no positive flow map
+    to ``None``.
+    """
+    window_map: dict[str, tuple[int, int] | None] = {j: None for j in job_id_list}
+    for j in job_id_list:
+        ts = [t for t, flow in x_jt_map.get(j, {}).items() if flow > 0]
+        if ts:
+            window_map[j] = (min(ts) - 1, max(ts))
+    return window_map
+
+
 def _sort_jobs(
-    instance: "FFcDDWParameters",
-    sort: HeatmapSort = "due2-window",
+    instance: FFcDDWParameters,
+    sort: HeatmapSort = "due2-weight-pos",
     x_jt_map: Mapping[str, Mapping[int, int]] | None = None,
 ) -> list[str]:
-    if sort == "neh-cp":
-        return instance.get_weight_due_pos_job_sequence()
-    if sort == "1_rj_prmp_rel_dev":
+    if sort in _PARAM_SORT_VALUES:
+        return param_sort_job_sequence(instance, sort)
+    if sort in _PMTN_SORT_VALUES:
         if x_jt_map is None:
             raise ValueError(
-                'Heatmap sort "1_rj_prmp_rel_dev" requires x_jt_map to derive '
-                "the per-job MCF preemptive time window."
+                f'Heatmap sort "{sort}" requires x_jt_map to derive the '
+                "per-job MCF preemptive time window."
             )
-        return _sort_by_neh_cp_rel_normalized_window_width(instance, x_jt_map)
-    if sort == "1_rj_prmp_abs_dev":
-        if x_jt_map is None:
-            raise ValueError(
-                'Heatmap sort "1_rj_prmp_abs_dev" requires x_jt_map to derive '
-                "the per-job MCF preemptive time window."
-            )
-        return _sort_by_neh_cp_abs_normalized_window_width(instance, x_jt_map)
-    if sort == "start_time":
-        if x_jt_map is None:
-            raise ValueError(
-                'Heatmap sort "start_time" requires x_jt_map to derive '
-                "the per-job MCF preemptive time window."
-            )
-        return _sort_by_start_time(instance, x_jt_map)
-    return instance.get_due2_weight_pos_job_sequence()
-
-
-def _sort_by_neh_cp_rel_normalized_window_width(
-    instance: "FFcDDWParameters",
-    x_jt_map: Mapping[str, Mapping[int, int]],
-) -> list[str]:
-    """Mirror the NEH-CP last-stage step's job-sort order.
-
-    Reproduces ``algorithm.mcf_lb.utils.jobs_sorted_by_normalized_window_width``
-    applied to ``window_map_from_preemptive_schedule(...)``: per-job window
-    is taken as ``(min(t with flow>0) - 1, max(t with flow>0))`` so it
-    matches the half-open ``[t-1, t)`` segment semantics used by
-    ``MCFPreemptiveSchedule.from_flow_dict``. Tie-breaks: weight DESC,
-    native job position ASC.
-    """
-    job_id_list = instance.job_id_list
-    last_stage = instance.stage_id_list[-1]
-    p_map = instance.get_job_2_p_map_for_stage(last_stage)
-    job_2_pos = {j: i for i, j in enumerate(job_id_list)}
-    ewt = _weights_or_default(instance.job_2_ewt_map, job_id_list)
-    twt = _weights_or_default(instance.job_2_twt_map, job_id_list)
-
-    window_map: dict[str, tuple[int, int] | None] = {j: None for j in job_id_list}
-    for j in job_id_list:
-        ts = [t for t, flow in x_jt_map.get(j, {}).items() if flow > 0]
-        if ts:
-            window_map[j] = (min(ts) - 1, max(ts))
-
-    def sort_key(j: str) -> tuple[int, float, int, int]:
-        window = window_map[j]
-        return (
-            0 if window is not None else 1,
-            ((window[1] - window[0]) / p_map[j]) if window is not None else 0.0,
-            -(ewt[j] + twt[j]),
-            job_2_pos[j],
+        last_stage = instance.stage_id_list[-1]
+        return pm_pmtn_sort_job_sequence_from_window_map(
+            _window_map_from_x_jt(x_jt_map, instance.job_id_list),
+            instance.get_job_2_p_map_for_stage(last_stage),
+            instance,
+            sort,
         )
-
-    return sorted(job_id_list, key=sort_key)
-
-
-def _sort_by_neh_cp_abs_normalized_window_width(
-    instance: "FFcDDWParameters",
-    x_jt_map: Mapping[str, Mapping[int, int]],
-) -> list[str]:
-    """Mirror the NEH-CP last-stage step's job-sort order.
-
-    Reproduces ``algorithm.mcf_lb.utils.jobs_sorted_by_normalized_window_width``
-    applied to ``window_map_from_preemptive_schedule(...)``: per-job window
-    is taken as ``(min(t with flow>0) - 1, max(t with flow>0))`` so it
-    matches the half-open ``[t-1, t)`` segment semantics used by
-    ``MCFPreemptiveSchedule.from_flow_dict``. Tie-breaks: weight DESC,
-    native job position ASC.
-    """
-    job_id_list = instance.job_id_list
-    last_stage = instance.stage_id_list[-1]
-    p_map = instance.get_job_2_p_map_for_stage(last_stage)
-    job_2_pos = {j: i for i, j in enumerate(job_id_list)}
-    ewt = _weights_or_default(instance.job_2_ewt_map, job_id_list)
-    twt = _weights_or_default(instance.job_2_twt_map, job_id_list)
-
-    window_map: dict[str, tuple[int, int] | None] = {j: None for j in job_id_list}
-    for j in job_id_list:
-        ts = [t for t, flow in x_jt_map.get(j, {}).items() if flow > 0]
-        if ts:
-            window_map[j] = (min(ts) - 1, max(ts))
-
-    def sort_key(j: str) -> tuple[int, float, int, int]:
-        window = window_map[j]
-        return (
-            0 if window is not None else 1,
-            (window[1] - window[0] - p_map[j]) if window is not None else 0.0,
-            -(ewt[j] + twt[j]),
-            job_2_pos[j],
-        )
-
-    return sorted(job_id_list, key=sort_key)
-
-
-def _sort_by_start_time(
-    instance: "FFcDDWParameters",
-    x_jt_map: Mapping[str, Mapping[int, int]],
-) -> list[str]:
-    """Sort jobs by their earliest MCF flow time."""
-    job_id_list = instance.job_id_list
-    job_2_pos = {j: i for i, j in enumerate(job_id_list)}
-
-    max_t = max(
-        (t for j_map in x_jt_map.values() for t, flow in j_map.items()),
-        default=0,
-    )
-
-    def sort_key(j: str) -> tuple[int, int]:
-        ts = [t for t, flow in x_jt_map.get(j, {}).items() if flow > 0]
-        earliest_t = min(ts) if ts else max_t
-        return (earliest_t, job_2_pos[j])
-
-    return sorted(job_id_list, key=sort_key)
+    raise ValueError(f"Unknown HeatmapSort: {sort!r}")
 
 
 def build_signed_cost_matrix(
     instance: "FFcDDWParameters",
-    sort: HeatmapSort = "due2-window",
+    sort: HeatmapSort = "due2-weight-pos",
     x_jt_map: Mapping[str, Mapping[int, int]] | None = None,
     obj_value: float | None = None,
     c_jt_clip_abs_value: float | None = None,
@@ -427,5 +352,7 @@ def load_signed_cost_heatmap_yaml(path: Path) -> SignedCostHeatmapData:
         clip_threshold=float(raw.get("clipThreshold", 0.0)),
         obj_value=None if obj_raw is None else float(obj_raw),
         x_cells=[(int(c["i"]), int(c["t"])) for c in (raw.get("xCells") or [])],
-        sort=raw.get("sort", "due2-window"),
+        sort=_HEATMAP_SORT_MIGRATION.get(
+            raw.get("sort", "due2-weight-pos"), raw.get("sort", "due2-weight-pos")
+        ),
     )
