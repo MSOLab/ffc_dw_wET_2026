@@ -96,9 +96,9 @@ def reverse_dispatch_full_schedule(
         # worsen per-job ET contribution. Operates on a copy so the caller's
         # input schedule stays untouched.
         ls_only_sch_delayed = last_stage_only_schedule.deepcopy()
-        ls_only_sch_delayed.delay_job_latest_leq_obj_contrib(
-            instance.job_2_dw_ub_map
-        )
+        # ls_only_sch_delayed.delay_job_latest_leq_obj_contrib(
+        #     instance.job_2_dw_ub_map
+        # )
         delayed_makespan = ls_only_sch_delayed.makespan
 
         last_stage_end_map: dict[str, int] = {}
