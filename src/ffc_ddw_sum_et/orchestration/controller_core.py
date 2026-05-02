@@ -69,7 +69,7 @@ class FFcDDWSubroutineControllerCore(
         """Define all state attributes used across subroutine phases."""
         self.mcf_preemptive_schedule: MCFPreemptiveSchedule | None = None
         self.mcf_lb_diagnostic: MCFLBDiagnostic | None = None
-        self.last_stage_cp_sat_solution: FFcDDWSolution | None = None
+        self.last_stage_only_sol: FFcDDWSolution | None = None
         # Ordered (name, schedule) pairs per MCF-LB phase, used by the
         # runner to emit numbered progress artifacts (1_mcf_preemptive,
         # 2_last_stage_only_init, ..., 7_final). Only populated entries

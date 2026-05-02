@@ -45,7 +45,7 @@ def test_ffc_progress_kinds_routed_to_progress_zone(tmp_path: Path) -> None:
         "mcf_lb_diagnostic", scenario_name="sc", instance_name="ins"
     )
     last_stage = layout.artifact_path(
-        "last_stage_cp_sat_schedule", scenario_name="sc", instance_name="ins"
+        "last_stage_only_schedule", scenario_name="sc", instance_name="ins"
     )
     phase = layout.artifact_path(
         "mcf_lb_phase_schedule",
@@ -66,10 +66,10 @@ def test_ffc_report_kinds_routed_to_report_zone(tmp_path: Path) -> None:
         instance_name="ins",
         phase_name="6_dispatched_schedule",
     )
-    ls_cpsat_g = layout.artifact_path(
-        "last_stage_cp_sat_gantt_png", scenario_name="sc", instance_name="ins"
+    ls_only_g = layout.artifact_path(
+        "last_stage_only_gantt_png", scenario_name="sc", instance_name="ins"
     )
-    for p in (main_g, phase_g, ls_cpsat_g):
+    for p in (main_g, phase_g, ls_only_g):
         assert p.parent.name == "report", p
         assert p.suffix == ".png"
 
@@ -121,7 +121,7 @@ def test_stamp_round_trips_overlay_kinds(tmp_path: Path) -> None:
         "mcf_lb_phase_schedule",
         "gantt_png",
         "phase_gantt_png",
-        "last_stage_cp_sat_gantt_png",
+        "last_stage_only_gantt_png",
         "report_xlsx",
         "mcf_lb_dashboard",
         "rpdf_comparison_csv",

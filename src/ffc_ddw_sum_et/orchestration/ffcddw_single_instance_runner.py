@@ -56,9 +56,9 @@ class InstanceResult:
     mcf_lb_diagnostic: dict[str, Any] | None = None
     makespan: float | None = None
 
-    last_stage_cp_sat_obj: float | None = None
+    last_stage_only_obj: float | None = None
     """
-    Weighted E+T of ``self.last_stage_cp_sat_solution`` when the
+    Weighted E+T of ``self.last_stage_only_sol`` when the
     controller produced a last-stage-only schedule
     (run_mcf_lb_4 / run_last_stage_cp_sat_lb /
     neh_cp_last_stage_only_sch_from_mcf_lb /
@@ -282,19 +282,19 @@ class FFcDDWSingleInstanceRunner(
             except Exception:
                 self.logger.exception("Error saving solution for %s", self.ins_name)
 
-        last_stage_cp_sat = getattr(controller, "last_stage_cp_sat_solution", None)
-        if last_stage_cp_sat is not None:
+        last_stage_only_sol = getattr(controller, "last_stage_only_sol", None)
+        if last_stage_only_sol is not None:
             try:
                 dump_schedule_yaml(
-                    last_stage_cp_sat.schedule,
-                    layout.artifact_path("last_stage_cp_sat_schedule", **scope),
-                    instance_name=f"{self.ins_name}_last_stage_cp_sat",
-                    obj_value=last_stage_cp_sat.obj_value,
-                    obj_bound=last_stage_cp_sat.obj_bound,
+                    last_stage_only_sol.schedule,
+                    layout.artifact_path("last_stage_only_schedule", **scope),
+                    instance_name=f"{self.ins_name}_last_stage_only",
+                    obj_value=last_stage_only_sol.obj_value,
+                    obj_bound=last_stage_only_sol.obj_bound,
                 )
             except Exception:
                 self.logger.exception(
-                    "Error saving last_stage_cp_sat schedule yaml for %s",
+                    "Error saving last_stage_only schedule yaml for %s",
                     self.ins_name,
                 )
 
@@ -329,10 +329,10 @@ class FFcDDWSingleInstanceRunner(
 
         diag = getattr(controller, "mcf_lb_diagnostic", None)
         diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None
-        ls_cp_sol = getattr(controller, "last_stage_cp_sat_solution", None)
-        last_stage_cp_sat_obj = (
-            float(ls_cp_sol.obj_value)
-            if ls_cp_sol is not None and ls_cp_sol.obj_value is not None
+        ls_only_sol = getattr(controller, "last_stage_only_sol", None)
+        last_stage_only_obj = (
+            float(ls_only_sol.obj_value)
+            if ls_only_sol is not None and ls_only_sol.obj_value is not None
             else None
         )
         if diag_dict is not None:
@@ -385,7 +385,7 @@ class FFcDDWSingleInstanceRunner(
             timelimit=timelimit,
             mcf_lb_diagnostic=diag_dict,
             makespan=makespan,
-            last_stage_cp_sat_obj=last_stage_cp_sat_obj,
+            last_stage_only_obj=last_stage_only_obj,
         )
 
         try:

@@ -506,7 +506,7 @@ class FFcDDWReporter:
 
         self._write_summary_csv()
         self._write_mcf_preemptive_obj_csv()
-        self._write_last_stage_cp_sat_obj_csv()
+        self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
         self._write_mcf_lb_pivot_artifacts()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
@@ -782,8 +782,8 @@ class FFcDDWReporter:
                 )
         logger.info("MCF preemptive obj CSV written to %s", path)
 
-    def _write_last_stage_cp_sat_obj_csv(self) -> None:
-        """Run-scoped long-format CSV of ``last_stage_cp_sat_solution`` objs.
+    def _write_last_stage_only_obj_csv(self) -> None:
+        """Run-scoped long-format CSV of ``last_stage_only_sol`` objs.
 
         Columns: ``scenarioName, insIndex, objValue``. One row per
         ``(scenario, instance)`` pair where the controller produced a
@@ -796,19 +796,19 @@ class FFcDDWReporter:
         rows: list[tuple[str, int | None, float]] = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
-                if ir.last_stage_cp_sat_obj is None:
+                if ir.last_stage_only_obj is None:
                     continue
                 rows.append(
                     (
                         sc.name,
                         self._resolve_ins_index(ir.instance_name),
-                        float(ir.last_stage_cp_sat_obj),
+                        float(ir.last_stage_only_obj),
                     )
                 )
         if not rows:
             return
         rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
-        path = self.layout.artifact_path("last_stage_cp_sat_obj_csv")
+        path = self.layout.artifact_path("last_stage_only_obj_csv")
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(("scenarioName", "insIndex", "objValue"))
@@ -820,7 +820,7 @@ class FFcDDWReporter:
                         obj_value,
                     )
                 )
-        logger.info("last_stage_cp_sat obj CSV written to %s", path)
+        logger.info("last_stage_only obj CSV written to %s", path)
 
     def _write_last_stage_only_obj_summary_csv(self) -> None:
         """Cross-scenario summary of ``lastStageOnlyObj`` per instance.
@@ -1190,7 +1190,7 @@ class FFcDDWReporter:
 
         For each instance: render the main solution Gantt from
         `<ins>_solution.json`, plus one Gantt per phase schedule yaml in
-        `progress/`, plus the last_stage_cp_sat schedule when present.
+        `progress/`, plus the last_stage_only schedule when present.
         Heatmap YAMLs (``*_C_heatmap.yaml``, written by ``apply_lb_by_mcf``
         when its ``draw_heatmap`` kwarg is True) are also rendered.
 
@@ -1235,16 +1235,14 @@ class FFcDDWReporter:
                             ),
                         )
                     )
-                ls_cpsat = self.layout.artifact_path(
-                    "last_stage_cp_sat_schedule", **scope
-                )
-                if ls_cpsat.exists():
+                ls_only = self.layout.artifact_path("last_stage_only_schedule", **scope)
+                if ls_only.exists():
                     jobs.append(
                         (
                             _render_phase_gantt_from_yaml,
-                            ls_cpsat,
+                            ls_only,
                             self.layout.artifact_path(
-                                "last_stage_cp_sat_gantt_png", **scope
+                                "last_stage_only_gantt_png", **scope
                             ),
                         )
                     )

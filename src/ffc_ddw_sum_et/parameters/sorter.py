@@ -25,9 +25,7 @@ ParamSortKey = Literal[
 ]
 
 
-def param_sort_job_sequence(
-    instance: FFcDDWParameters, key: ParamSortKey
-) -> list[str]:
+def param_sort_job_sequence(instance: FFcDDWParameters, key: ParamSortKey) -> list[str]:
     """Dispatcher: map a :data:`ParamSortKey` to the corresponding job sequence."""
     if key == "weight-due-pos":
         return instance.get_weight_due_pos_job_sequence()

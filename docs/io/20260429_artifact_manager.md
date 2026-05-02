@@ -72,7 +72,7 @@ output/
                 │   ├── <ins>_<step_idx>-<method>_step_log.yaml
                 │   ├── <ins>_mcf_lb_diagnostic.yaml
                 │   ├── <ins>_<phase_name>.yaml          # MCF-LB phase schedules
-                │   └── <ins>_last_stage_cp_sat_schedule.yaml
+                │   └── <ins>_last_stage_only_schedule.yaml
                 │
                 │ ── report zone ──
                 └── report/
@@ -100,7 +100,7 @@ output/
     위반. § 7 위험 항목에서 처리 옵션 제시.
   - `<ins>_<phase_name>.yaml` (MCF-LB phase schedule) → `progress/`.
   - `<ins>_mcf_lb_diagnostic.yaml` → `progress/`.
-  - `<ins>_last_stage_cp_sat_schedule.yaml` → `progress/`.
+  - `<ins>_last_stage_only_schedule.yaml` → `progress/`.
   - `<step_idx>-<method>_step_log.yaml` (현재 controller가 워킹 디렉터리에 직접
     쓰는 것) → `progress/`.
   - `<ins>_*_gantt.png` (Reporter 산출) → `report/`.
@@ -199,8 +199,8 @@ artifacts:
     file_template: "{instance_name}_{phase_name}.yaml"
   - scope: instance
     zone: progress
-    kind: last_stage_cp_sat_schedule
-    file_template: "{instance_name}_last_stage_cp_sat_schedule.yaml"
+    kind: last_stage_only_schedule
+    file_template: "{instance_name}_last_stage_only_schedule.yaml"
 
   # ---- instance / report ----
   - scope: instance
@@ -587,7 +587,7 @@ generic한 helper이다. 같은 패턴을 hybridflowshop 등 다른 프로젝트
   - **progress zone (instance_dir/progress/)**:
     - `layout.artifact_path("mcf_lb_diagnostic", ...)`
     - `layout.artifact_path("mcf_lb_phase_schedule", ..., phase_name=name)`
-    - `layout.artifact_path("last_stage_cp_sat_schedule", ...)`
+    - `layout.artifact_path("last_stage_only_schedule", ...)`
   - **삭제**:
     - `dump_schedule_yaml(incumbent.schedule, working_dir / f"{ins}_schedule.yaml", ...)`
       호출 자체를 제거. `_solution.json`이 `operations` 필드에 같은 정보를 갖고
@@ -640,7 +640,7 @@ generic한 helper이다. 같은 패턴을 hybridflowshop 등 다른 프로젝트
     102, 158). 이걸 layout 호출로 바꿔서 입력 yaml은 `progress/`에서, 출력 PNG는
     `report/`에 가도록 한다:
     - 입력: `layout.find_artifacts("mcf_lb_phase_schedule", ...)`,
-      `layout.find_artifacts("last_stage_cp_sat_schedule", ...)`,
+      `layout.find_artifacts("last_stage_only_schedule", ...)`,
       그리고 `final` zone의 solution_json (gantt 그릴 source가 schedule.yaml에서
       solution.json으로 옮겨짐).
     - 출력: `layout.artifact_path("gantt_png" | "phase_gantt_png" |
@@ -923,7 +923,7 @@ def _validate_scenario_uniqueness(scenarios: list[dict]) -> None:
 - [ ] `FFcDDWMultiInstanceRunner`: layout forward 및 자기 log path를 layout에 위임
 - [ ] `FFcDDWSingleInstanceRunner._persist_run_artifacts` 정리:
       - `dump_schedule_yaml(... f"{ins}_schedule.yaml")` 호출 삭제
-      - phase schedule / mcf_lb_diagnostic / last_stage_cp_sat → progress zone
+      - phase schedule / mcf_lb_diagnostic / last_stage_only → progress zone
       - **`_save_statistics` 호출 자체를 제거** (§ 7.1 option A 확정).
         `_statistics.{yaml,json}` 산출도 함께 제거. cross-instance derived
         metric은 reporter의 cross-instance 요약 단계에서 한 번만 계산.

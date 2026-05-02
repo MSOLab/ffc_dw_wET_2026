@@ -137,6 +137,46 @@ def test_neh_cp_registers_full_schedule() -> None:
     assert float(sum_e + sum_t) == report.obj_value
 
 
+def test_build_full_sch_from_last_stage_only_sch() -> None:
+    """``build_full_sch_from_last_stage_only_sch`` extends a partial
+    last-stage-only schedule into a feasible full incumbent via reverse
+    dispatch.
+    """
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    controller.apply_lb_by_mcf()
+    controller.single_pass_last_stage_only_sch_from_mcf_lb(total_tl=1.0)
+    assert controller.last_stage_only_sol is not None
+
+    report = controller.build_full_sch_from_last_stage_only_sch()
+
+    assert report.obj_value is not None
+    assert report.obj_bound == 0.0
+    assert report.elapsed_time >= 0
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+    assert incumbent.obj_bound == 0.0
+
+    # Every instance job must be scheduled at every stage.
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+    # Phase schedule entries appended for post-run Gantt rendering.
+    phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
+    assert "6_dispatched_schedule" in phase_names
+    if instance.stage_count > 1:
+        assert "4_last_stage_only_schedule_flipped" in phase_names
+        assert "5_dispatched_schedule_before_unflipping" in phase_names
+
+
 def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
     instance = _make_instance()
     controller = _make_controller(instance)

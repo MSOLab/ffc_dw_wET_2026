@@ -128,6 +128,4 @@ def pm_pmtn_sort_job_sequence(
     for j in instance.job_id_list:
         ts = list(x_val.get(j, {}).keys())
         window_map[j] = (min(ts) - 1, max(ts)) if ts else None
-    return pm_pmtn_sort_job_sequence_from_window_map(
-        window_map, mcf.p, instance, key
-    )
+    return pm_pmtn_sort_job_sequence_from_window_map(window_map, mcf.p, instance, key)

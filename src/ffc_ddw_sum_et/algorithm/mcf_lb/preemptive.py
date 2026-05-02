@@ -30,7 +30,7 @@ class McfLbResult:
 
     mcf_lb: float
     mcf_preemptive_schedule: MCFPreemptiveSchedule
-    mcf: ParallelMachinePreemptionMcf # TODO: remove; use mcf_preemptive_schedule instead
+    mcf: ParallelMachinePreemptionMcf  # TODO: remove; use mcf_preemptive_schedule instead
 
 
 def solve_mcf_lb(

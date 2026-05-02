@@ -28,7 +28,10 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase1_mcf import SeedTag, run_phase1
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase2_last_stage import run_phase2
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import run_phase3
+from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import (
+    reverse_dispatch_full_schedule,
+    run_phase3,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
 from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import solve_mcf_lb
 from ffc_ddw_sum_et.algorithm.mcf_lb.utils import (
@@ -503,7 +506,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         Side effects:
           - Stores the resulting full last-stage schedule on
-            ``self.last_stage_cp_sat_solution``.
+            ``self.last_stage_only_sol``.
           - Appends per-batch and final schedules to
             ``self.mcf_lb_phase_schedules`` for post-run diagnostics.
         """
@@ -545,7 +548,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # Publish the MCF LB as the global ``obj_bound``; ``result.obj_bound``
         # is only the last NEH-CP iteration's sub-instance CP LB and is not
         # a valid global lower bound (see NehCpLastStageOnlyResult docstring).
-        self.last_stage_cp_sat_solution = FFcDDWSolution(
+        self.last_stage_only_sol = FFcDDWSolution(
             schedule=result.schedule,
             obj_value=result.obj_value,
             obj_bound=mcf_lb,
@@ -611,7 +614,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         Side effects:
           - Stores the resulting full last-stage schedule on
-            ``self.last_stage_cp_sat_solution``.
+            ``self.last_stage_only_sol``.
           - Does NOT append intermediate schedules to
             ``self.mcf_lb_phase_schedules`` (single CP solve, no
             per-batch snapshots).
@@ -650,7 +653,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             solver_log_path_getter=self.get_file_path_for_subroutine,
         )
 
-        self.last_stage_cp_sat_solution = FFcDDWSolution(
+        self.last_stage_only_sol = FFcDDWSolution(
             schedule=result.schedule,
             obj_value=result.obj_value,
             obj_bound=mcf_lb,
@@ -670,6 +673,104 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=mcf_lb,
         )
+
+    def build_full_sch_from_last_stage_only_sch(
+        self,
+        machine_then_job: bool = False,
+    ) -> SubroutineReport:
+        """Step method: build a full dispatched ``FFcSchedule`` from
+        ``self.last_stage_only_sol.schedule`` via reverse-dispatch + unflip
+        (Phase 3 of the MCF-LB pipeline applied standalone).
+
+        Pre-condition (else ``ValueError``): ``self.last_stage_only_sol`` is
+        set by a prior step (``single_pass_last_stage_only_sch_from_mcf_lb``,
+        ``neh_cp_last_stage_only_sch_from_mcf_lb``,
+        ``run_last_stage_cp_sat_lb``, or ``run_mcf_lb_4``).
+
+        Args:
+            machine_then_job: Forwarded to the reversed
+                ``MixedDispatcher.get_best_mixed_schedule_by_sequence``;
+                controls candidate ordering inside the reverse dispatch.
+
+        Side effects:
+          - Registers the dispatched schedule as a full incumbent on
+            ``self.solution_manager``.
+          - Appends ``4_last_stage_only_schedule_flipped``,
+            ``5_dispatched_schedule_before_unflipping``, and
+            ``6_dispatched_schedule`` to ``self.mcf_lb_phase_schedules``
+            (numbered to match ``run_mcf_lb_4``'s phase-3 outputs so reporter
+            Gantt sort order is consistent across paths). The flipped /
+            before-unflip entries are skipped when
+            ``self.instance.stage_count == 1``.
+
+        Returns:
+            ``SubroutineReport`` with ``obj_value`` = dispatched weighted ET
+            and ``obj_bound = 0.0``. The step itself does not compute a
+            global LB; callers chain ``apply_lb_by_mcf`` (or
+            ``run_mcf_lb_4``) earlier in the flow when an LB is needed.
+        """
+        if self.last_stage_only_sol is None:
+            raise ValueError(
+                "build_full_sch_from_last_stage_only_sch requires "
+                "self.last_stage_only_sol; run a step that populates it "
+                "first (single_pass_last_stage_only_sch_from_mcf_lb, "
+                "neh_cp_last_stage_only_sch_from_mcf_lb, "
+                "run_last_stage_cp_sat_lb, or run_mcf_lb_4)."
+            )
+
+        start_elapsed = time.monotonic()
+        state = reverse_dispatch_full_schedule(
+            self.instance,
+            self.last_stage_only_sol.schedule,
+            machine_then_job=machine_then_job,
+            logger=self.logger,
+        )
+        elapsed = time.monotonic() - start_elapsed
+        if state is None:
+            self.logger.warning(
+                "build_full_sch_from_last_stage_only_sch: reverse-dispatch "
+                "produced no schedule"
+            )
+            return SubroutineReport(elapsed_time=elapsed, obj_value=None, obj_bound=0.0)
+
+        if state.last_stage_only_schedule_flipped is not None:
+            self.mcf_lb_phase_schedules.append(
+                (
+                    "4_last_stage_only_schedule_flipped",
+                    state.last_stage_only_schedule_flipped,
+                )
+            )
+        if state.dispatched_schedule_before_unflipping is not None:
+            self.mcf_lb_phase_schedules.append(
+                (
+                    "5_dispatched_schedule_before_unflipping",
+                    state.dispatched_schedule_before_unflipping,
+                )
+            )
+        self.mcf_lb_phase_schedules.append(
+            ("6_dispatched_schedule", state.dispatched_schedule)
+        )
+
+        self.logger.info(
+            "build_full_sch_from_last_stage_only_sch: dispatched obj=%.2f, "
+            "elapsed=%.2fs",
+            state.dispatched_obj,
+            elapsed,
+        )
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=state.dispatched_obj,
+            obj_bound=0.0,
+        )
+        self.solution_manager.register(
+            report,
+            FFcDDWSolution(
+                schedule=state.dispatched_schedule,
+                obj_value=state.dispatched_obj,
+                obj_bound=0.0,
+            ),
+        )
+        return report
 
     def run_mcf_lb_4(
         self,
@@ -828,7 +929,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             return SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
-        self.last_stage_cp_sat_solution = FFcDDWSolution(
+        self.last_stage_only_sol = FFcDDWSolution(
             schedule=phase2.last_stage_only_schedule,
             obj_value=phase2.last_stage_only_obj,
             obj_bound=obj_bound_by_mcf,
@@ -955,7 +1056,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         Solves under a time budget of ``0.01 * n * c`` seconds. The resulting
         partial schedule (only the last stage is filled) is stored on
-        ``self.last_stage_cp_sat_solution`` for downstream subroutines; it is
+        ``self.last_stage_only_sol`` for downstream subroutines; it is
         NOT registered with the incumbent manager (a partial schedule is not
         a full incumbent).
         """
@@ -1076,7 +1177,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         cp_obj = float(solver.objective_value)
-        self.last_stage_cp_sat_solution = FFcDDWSolution(
+        self.last_stage_only_sol = FFcDDWSolution(
             schedule=out_schedule, obj_value=cp_obj, obj_bound=mcf_lb
         )
 
