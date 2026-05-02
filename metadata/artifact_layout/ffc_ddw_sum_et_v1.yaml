@@ -19,16 +19,11 @@ artifacts:
     zone: progress
     kind: mcf_lb_phase_schedule
     file_template: "{instance_name}_{phase_name}.yaml"
-  - scope: instance
-    zone: progress
-    kind: last_stage_only_schedule
-    file_template: "{instance_name}_last_stage_only_schedule.yaml"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
   # the renderer is picked from the source yaml's content type, so a single
-  # kind suffices. `last_stage_only_gantt_png` is split out because its
-  # source yaml uses the dedicated `last_stage_only_schedule` kind.
+  # kind suffices.
   - scope: instance
     zone: report
     kind: gantt_png
@@ -37,10 +32,6 @@ artifacts:
     zone: report
     kind: phase_gantt_png
     file_template: "{instance_name}_{phase_name}_gantt.png"
-  - scope: instance
-    zone: report
-    kind: last_stage_only_gantt_png
-    file_template: "{instance_name}_last_stage_only_gantt.png"
 
   # ---- scenario ----
   - scope: scenario

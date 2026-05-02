@@ -1448,6 +1448,54 @@ class FFcSchedule:
                 ]
             self._rebuild_stage_time_caches(stage_id)
 
+    def delay_job_latest_leq_obj_contrib(
+        self,
+        job_2_dw_ub_map: Mapping[JobIdType, int],
+    ) -> None:
+        """Delay each last-stage operation to the latest end time that keeps
+        its objective contribution non-positive.
+
+        For every machine on the last stage, operations are processed from
+        the latest to the earliest. An operation is shifted only when its
+        current end is strictly before ``d_plus[j]``; the new end becomes
+        ``min(d_plus[j], next_op_new_start)`` (or ``d_plus[j]`` if no next
+        operation exists on the same machine). Tardy operations
+        (``old_end >= d_plus[j]``) are left in place.
+
+        Args:
+            job_2_dw_ub_map: ``job_id -> d_plus[j]`` mapping (typically
+                ``FFcDDWParameters.job_2_dw_ub_map``).
+        """
+        if not self.stages:
+            return
+
+        last_stage_id = self.stages[-1]
+        for mc_id in self.machines_per_stage[last_stage_id]:
+            seq = self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id]
+            if not seq:
+                continue
+
+            next_start: int | None = None
+            new_seq_rev: list[tuple[JobIdType, int, int]] = []
+            for job_id, old_start, old_end in reversed(seq):
+                d_plus = job_2_dw_ub_map[job_id]
+                if old_end < d_plus:
+                    target_end = (
+                        d_plus if next_start is None else min(d_plus, next_start)
+                    )
+                    new_end = target_end
+                    new_start = new_end - (old_end - old_start)
+                else:
+                    new_start, new_end = old_start, old_end
+                new_seq_rev.append((job_id, new_start, new_end))
+                next_start = new_start
+
+            self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id] = list(
+                reversed(new_seq_rev)
+            )
+
+        self._rebuild_stage_time_caches(last_stage_id)
+
     def insert_idle_time(
         self,
         due_window_map: Mapping[JobIdType, tuple[int, int]],

@@ -1235,17 +1235,6 @@ class FFcDDWReporter:
                             ),
                         )
                     )
-                ls_only = self.layout.artifact_path("last_stage_only_schedule", **scope)
-                if ls_only.exists():
-                    jobs.append(
-                        (
-                            _render_phase_gantt_from_yaml,
-                            ls_only,
-                            self.layout.artifact_path(
-                                "last_stage_only_gantt_png", **scope
-                            ),
-                        )
-                    )
 
         gantt_count = len(jobs)
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the

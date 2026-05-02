@@ -282,22 +282,6 @@ class FFcDDWSingleInstanceRunner(
             except Exception:
                 self.logger.exception("Error saving solution for %s", self.ins_name)
 
-        last_stage_only_sol = getattr(controller, "last_stage_only_sol", None)
-        if last_stage_only_sol is not None:
-            try:
-                dump_schedule_yaml(
-                    last_stage_only_sol.schedule,
-                    layout.artifact_path("last_stage_only_schedule", **scope),
-                    instance_name=f"{self.ins_name}_last_stage_only",
-                    obj_value=last_stage_only_sol.obj_value,
-                    obj_bound=last_stage_only_sol.obj_bound,
-                )
-            except Exception:
-                self.logger.exception(
-                    "Error saving last_stage_only schedule yaml for %s",
-                    self.ins_name,
-                )
-
         phase_schedules = getattr(controller, "mcf_lb_phase_schedules", None) or []
         for name, sched in phase_schedules:
             if sched is None:

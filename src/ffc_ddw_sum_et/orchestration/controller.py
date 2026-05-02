@@ -434,7 +434,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
         self.mcf_lb_phase_schedules.append(
-            ("1_mcf_preemptive_schedule", mcf_result.mcf_preemptive_schedule)
+            ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
 
         self.logger.info("apply_lb_by_mcf: MCF LB = %d", int(obj_bound_by_mcf))
@@ -554,6 +554,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=mcf_lb,
         )
         self.mcf_lb_phase_schedules.extend(result.intermediate_schedules)
+        self.mcf_lb_phase_schedules.append(
+            ("2_ls_only_sch_from_neh_cp", result.schedule)
+        )
 
         self.logger.info(
             "neh_cp_last_stage_only_sch_from_mcf_lb: status=%s, obj=%.2f, "
@@ -615,9 +618,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Side effects:
           - Stores the resulting full last-stage schedule on
             ``self.last_stage_only_sol``.
-          - Does NOT append intermediate schedules to
-            ``self.mcf_lb_phase_schedules`` (single CP solve, no
-            per-batch snapshots).
+          - Appends ``2_ls_only_sch_from_mcf_lb`` to
+            ``self.mcf_lb_phase_schedules``. No per-batch snapshots are
+            recorded (single CP solve).
         """
         if self.mcf_preemptive_schedule is None:
             raise ValueError(
@@ -658,6 +661,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=mcf_lb,
         )
+        self.mcf_lb_phase_schedules.append(
+            ("2_ls_only_sch_from_mcf_lb", result.schedule)
+        )
 
         self.logger.info(
             "single_pass_last_stage_only_sch_from_mcf_lb: status=%s, "
@@ -695,11 +701,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Side effects:
           - Registers the dispatched schedule as a full incumbent on
             ``self.solution_manager``.
-          - Appends ``4_last_stage_only_schedule_flipped``,
-            ``5_dispatched_schedule_before_unflipping``, and
-            ``6_dispatched_schedule`` to ``self.mcf_lb_phase_schedules``
-            (numbered to match ``run_mcf_lb_4``'s phase-3 outputs so reporter
-            Gantt sort order is consistent across paths). The flipped /
+          - Appends ``3_ls_only_sch_delayed``, ``4_ls_only_sch_flipped``,
+            ``5_full_sch_before_unflip``, and ``6_full_sch_from_ls_only_sch``
+            to ``self.mcf_lb_phase_schedules`` (numbered to match
+            ``run_mcf_lb_4``'s phase-3 outputs so reporter Gantt sort
+            order is consistent across paths). The delayed / flipped /
             before-unflip entries are skipped when
             ``self.instance.stage_count == 1``.
 
@@ -733,22 +739,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
             return SubroutineReport(elapsed_time=elapsed, obj_value=None, obj_bound=0.0)
 
-        if state.last_stage_only_schedule_flipped is not None:
+        if state.ls_only_sch_delayed is not None:
             self.mcf_lb_phase_schedules.append(
-                (
-                    "4_last_stage_only_schedule_flipped",
-                    state.last_stage_only_schedule_flipped,
-                )
+                ("3_ls_only_sch_delayed", state.ls_only_sch_delayed)
             )
-        if state.dispatched_schedule_before_unflipping is not None:
+        if state.ls_only_sch_flipped is not None:
             self.mcf_lb_phase_schedules.append(
-                (
-                    "5_dispatched_schedule_before_unflipping",
-                    state.dispatched_schedule_before_unflipping,
-                )
+                ("4_ls_only_sch_flipped", state.ls_only_sch_flipped)
+            )
+        if state.full_sch_before_unflip is not None:
+            self.mcf_lb_phase_schedules.append(
+                ("5_full_sch_before_unflip", state.full_sch_before_unflip)
             )
         self.mcf_lb_phase_schedules.append(
-            ("6_dispatched_schedule", state.dispatched_schedule)
+            ("6_full_sch_from_ls_only_sch", state.full_sch_from_ls_only_sch)
         )
 
         self.logger.info(
@@ -765,7 +769,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.solution_manager.register(
             report,
             FFcDDWSolution(
-                schedule=state.dispatched_schedule,
+                schedule=state.full_sch_from_ls_only_sch,
                 obj_value=state.dispatched_obj,
                 obj_bound=0.0,
             ),
@@ -891,7 +895,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
         self.mcf_lb_phase_schedules.append(
-            ("1_mcf_preemptive_schedule", phase1.mcf_preemptive_schedule)
+            ("1_mcf_preemptive_sch", phase1.mcf_preemptive_schedule)
         )
         for seed in phase1.last_stage_seeds:
             self.mcf_lb_phase_schedules.append(
@@ -959,22 +963,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             return SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
-        if phase3.last_stage_only_schedule_flipped is not None:
+        if phase3.ls_only_sch_delayed is not None:
             self.mcf_lb_phase_schedules.append(
-                (
-                    "4_last_stage_only_schedule_flipped",
-                    phase3.last_stage_only_schedule_flipped,
-                )
+                ("3_ls_only_sch_delayed", phase3.ls_only_sch_delayed)
             )
-        if phase3.dispatched_schedule_before_unflipping is not None:
+        if phase3.ls_only_sch_flipped is not None:
             self.mcf_lb_phase_schedules.append(
-                (
-                    "5_dispatched_schedule_before_unflipping",
-                    phase3.dispatched_schedule_before_unflipping,
-                )
+                ("4_ls_only_sch_flipped", phase3.ls_only_sch_flipped)
+            )
+        if phase3.full_sch_before_unflip is not None:
+            self.mcf_lb_phase_schedules.append(
+                ("5_full_sch_before_unflip", phase3.full_sch_before_unflip)
             )
         self.mcf_lb_phase_schedules.append(
-            ("6_dispatched_schedule", phase3.dispatched_schedule)
+            ("6_full_sch_from_ls_only_sch", phase3.full_sch_from_ls_only_sch)
         )
         self.solution_manager.register(
             SubroutineReport(
@@ -983,7 +985,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_bound=obj_bound_by_mcf,
             ),
             FFcDDWSolution(
-                schedule=phase3.dispatched_schedule,
+                schedule=phase3.full_sch_from_ls_only_sch,
                 obj_value=phase3.dispatched_obj,
                 obj_bound=obj_bound_by_mcf,
             ),
@@ -1179,6 +1181,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_obj = float(solver.objective_value)
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=out_schedule, obj_value=cp_obj, obj_bound=mcf_lb
+        )
+        self.mcf_lb_phase_schedules.append(
+            ("2_ls_only_sch_from_cp_sat_lb", out_schedule)
         )
 
         elapsed = time.monotonic() - start_elapsed
@@ -1703,7 +1708,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
         self.mcf_lb_phase_schedules.append(
-            ("1_mcf_preemptive_schedule", mcf_result.mcf_preemptive_schedule)
+            ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
         self.logger.info("run_mcf_lb_then_neh_cp: MCF LB = %d", int(obj_bound_by_mcf))
 
@@ -1806,7 +1811,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     )
             step_schedules = result.metrics.get("step_schedules")
             if step_schedules:
-                # Numbered prefix continues from "1_mcf_preemptive_schedule"
+                # Numbered prefix continues from "1_mcf_preemptive_sch"
                 # so post-run Gantt PNGs sort in the natural execution order.
                 for (
                     step_idx,

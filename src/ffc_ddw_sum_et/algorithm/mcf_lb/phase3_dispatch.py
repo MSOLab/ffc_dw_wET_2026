@@ -31,12 +31,13 @@ __all__ = ["Phase3State", "reverse_dispatch_full_schedule", "run_phase3"]
 class Phase3State:
     """Outputs of Phase 3 consumed by Phase 4 (and by controller sidecar)."""
 
-    dispatched_schedule: FFcSchedule
+    full_sch_from_ls_only_sch: FFcSchedule
     dispatched_obj: float
 
     # Reversed-instance intermediates (None when single-stage short-circuit fires).
-    last_stage_only_schedule_flipped: FFcSchedule | None = None
-    dispatched_schedule_before_unflipping: FFcSchedule | None = None
+    ls_only_sch_delayed: FFcSchedule | None = None
+    ls_only_sch_flipped: FFcSchedule | None = None
+    full_sch_before_unflip: FFcSchedule | None = None
 
 
 def reverse_dispatch_full_schedule(
@@ -44,7 +45,6 @@ def reverse_dispatch_full_schedule(
     last_stage_only_schedule: FFcSchedule,
     *,
     last_stage_id: str | None = None,
-    last_stage_only_makespan: int | None = None,
     job_2_pos: dict[str, int] | None = None,
     machine_then_job: bool = False,
     logger: logging.Logger | None = None,
@@ -55,18 +55,21 @@ def reverse_dispatch_full_schedule(
     :class:`MCFLBDiagnostic` if it needs to record timing/objective there.
 
     When ``instance.stage_count == 1`` the last-stage schedule is already
-    the full schedule; the reverse-dispatch is skipped and the flipped /
-    before-unflipping sidecar slots stay ``None``.
+    the full schedule; the reverse-dispatch is skipped and the delayed /
+    flipped / before-unflipping sidecar slots stay ``None``.
+
+    For ``instance.stage_count > 1``, the input last-stage schedule is
+    first delayed via :meth:`FFcSchedule.delay_job_latest_leq_obj_contrib`
+    so each operation ends as late as possible without increasing its
+    per-job objective contribution. The delayed schedule's makespan is
+    then used as the flip horizon.
 
     Args:
         instance: Original (non-reversed) FFcDDW instance.
         last_stage_only_schedule: Schedule whose last stage is fully
-            populated (other stages may be empty). The (job, last_stage)
-            end times are read directly from this schedule.
+            populated (other stages may be empty). Treated as immutable —
+            the delay step operates on a deep copy.
         last_stage_id: Defaults to ``instance.stage_id_list[-1]``.
-        last_stage_only_makespan: Max end on the last stage. Defaults to
-            ``last_stage_only_schedule.makespan`` (which itself returns
-            the max end on the schedule's last stage).
         job_2_pos: Tie-break order for the reverse job sequence.
             Defaults to instance-native order
             (``{j: i for i, j in enumerate(instance.job_id_list)}``).
@@ -81,17 +84,25 @@ def reverse_dispatch_full_schedule(
         last_stage_id = instance.stage_id_list[-1]
     if job_2_pos is None:
         job_2_pos = {j: i for i, j in enumerate(instance.job_id_list)}
-    if last_stage_only_makespan is None:
-        last_stage_only_makespan = last_stage_only_schedule.makespan
 
-    last_stage_only_schedule_flipped: FFcSchedule | None = None
-    dispatched_schedule_before_unflipping: FFcSchedule | None = None
+    ls_only_sch_delayed: FFcSchedule | None = None
+    ls_only_sch_flipped: FFcSchedule | None = None
+    full_sch_before_unflip: FFcSchedule | None = None
 
     if instance.stage_count == 1:
-        dispatched_schedule = last_stage_only_schedule
+        full_sch_from_ls_only_sch = last_stage_only_schedule
     else:
+        # Delay last-stage operations to the latest end time that does not
+        # worsen per-job ET contribution. Operates on a copy so the caller's
+        # input schedule stays untouched.
+        ls_only_sch_delayed = last_stage_only_schedule.deepcopy()
+        ls_only_sch_delayed.delay_job_latest_leq_obj_contrib(
+            instance.job_2_dw_ub_map
+        )
+        delayed_makespan = ls_only_sch_delayed.makespan
+
         last_stage_end_map: dict[str, int] = {}
-        for _, _, end_time, job_id in last_stage_only_schedule.iter_operations_on_stage(
+        for _, _, end_time, job_id in ls_only_sch_delayed.iter_operations_on_stage(
             last_stage_id
         ):
             last_stage_end_map[job_id] = end_time
@@ -108,17 +119,17 @@ def reverse_dispatch_full_schedule(
             stages=reversed_instance.stage_id_list,
             machines_per_stage=reversed_instance.stage_2_machines_map,
         )
-        for mc_id, s, e, j in last_stage_only_schedule.iter_operations_on_stage(
+        for mc_id, s, e, j in ls_only_sch_delayed.iter_operations_on_stage(
             last_stage_id
         ):
             reversed_seed.add_ops_times_2_mc(
                 stage_id=last_stage_id,
                 mc_id=mc_id,
                 job_id=j,
-                start_time=last_stage_only_makespan - e,
-                end_time=last_stage_only_makespan - s,
+                start_time=delayed_makespan - e,
+                end_time=delayed_makespan - s,
             )
-        last_stage_only_schedule_flipped = reversed_seed
+        ls_only_sch_flipped = reversed_seed
 
         rev_dispatcher = MixedDispatcher(reversed_instance)
         reversed_full = rev_dispatcher.get_best_mixed_schedule_by_sequence(
@@ -136,17 +147,27 @@ def reverse_dispatch_full_schedule(
                 )
             return None
 
-        dispatched_schedule_before_unflipping = reversed_full
-        dispatched_schedule = reversed_full.as_reversed()
+        full_sch_before_unflip = reversed_full
+        full_sch_from_ls_only_sch = reversed_full.as_reversed()
+        # Push left to a semi-active form, then insert idle time on the last
+        # stage so the unflipped operations land at ET-optimal positions
+        # before scoring (mirrors `_dispatch_by_reversed_sequence_with_iit`).
+        full_sch_from_ls_only_sch.make_semi_active(instance.stage_2_job_2_p_map)
+        full_sch_from_ls_only_sch.insert_idle_time(
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+        )
 
-    sum_e, sum_t = compute_weighted_earliness_tardiness(dispatched_schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(full_sch_from_ls_only_sch, instance)
     dispatched_obj = float(sum_e + sum_t)
 
     return Phase3State(
-        dispatched_schedule=dispatched_schedule,
+        full_sch_from_ls_only_sch=full_sch_from_ls_only_sch,
         dispatched_obj=dispatched_obj,
-        last_stage_only_schedule_flipped=last_stage_only_schedule_flipped,
-        dispatched_schedule_before_unflipping=dispatched_schedule_before_unflipping,
+        ls_only_sch_delayed=ls_only_sch_delayed,
+        ls_only_sch_flipped=ls_only_sch_flipped,
+        full_sch_before_unflip=full_sch_before_unflip,
     )
 
 
@@ -171,7 +192,6 @@ def run_phase3(
         instance,
         phase2.last_stage_only_schedule,
         last_stage_id=phase1.last_stage_id,
-        last_stage_only_makespan=phase2.last_stage_only_schedule_makespan,
         job_2_pos=phase1.job_2_pos,
         machine_then_job=machine_then_job,
         logger=logger,

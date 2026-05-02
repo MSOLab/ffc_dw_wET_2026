@@ -171,10 +171,11 @@ def test_build_full_sch_from_last_stage_only_sch() -> None:
 
     # Phase schedule entries appended for post-run Gantt rendering.
     phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
-    assert "6_dispatched_schedule" in phase_names
+    assert "6_full_sch_from_ls_only_sch" in phase_names
     if instance.stage_count > 1:
-        assert "4_last_stage_only_schedule_flipped" in phase_names
-        assert "5_dispatched_schedule_before_unflipping" in phase_names
+        assert "3_ls_only_sch_delayed" in phase_names
+        assert "4_ls_only_sch_flipped" in phase_names
+        assert "5_full_sch_before_unflip" in phase_names
 
 
 def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
@@ -204,7 +205,7 @@ def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
     # MCF preemptive schedule must be retained for the post-run Gantt pipeline.
     assert controller.mcf_preemptive_schedule is not None
     assert any(
-        name == "1_mcf_preemptive_schedule"
+        name == "1_mcf_preemptive_sch"
         for name, _ in controller.mcf_lb_phase_schedules
     )
 
