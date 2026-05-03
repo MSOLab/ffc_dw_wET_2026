@@ -165,7 +165,8 @@ def single_pass_last_stage_only_from_mcf_lb(
         schedule=result.schedule,
         obj_value=result.objective,
         # CP-SAT best_objective_bound from the single profile-fix solve;
-        # valid against result.objective on the full instance.
+        # valid against result.objective on the full instance if pf_method is None,
+        # otherwise not a global LB.
         obj_bound=float(result.bound),
         elapsed_time=elapsed,
         cp_solve_sec=solve_sec,
