@@ -53,6 +53,7 @@ from .utils import (
 
 __all__ = [
     "NehCpLastStageOnlyResult",
+    "heuristic_last_stage_only_from_mcf_lb",
     "neh_cp_last_stage_only_from_mcf_lb",
     "single_pass_last_stage_only_from_mcf_lb",
 ]
@@ -89,6 +90,81 @@ class NehCpLastStageOnlyResult:
     Ordered (label, schedule) snapshots for diagnostic Gantt rendering;
     callers append to e.g. ``self.mcf_lb_phase_schedules``.
     """
+
+
+def heuristic_last_stage_only_from_mcf_lb(
+    instance: FFcDDWParameters,
+    mcf_preemptive_schedule: MCFPreemptiveSchedule,
+    *,
+    logger: logging.Logger | None = None,
+    job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
+    placement_priority: Literal["contrib", "dist"] = "contrib",
+) -> NehCpLastStageOnlyResult:
+    """Build a midpoint warm-start across all jobs from the MCF preemptive
+    LB and refine it heuristically (no CP solve): left-shift via
+    :meth:`FFcSchedule.make_semi_active` on the last stage with upstream
+    release times, then apply :meth:`FFcSchedule.insert_idle_time` to
+    insert idle time at ET-optimal positions.
+
+    The schedule remains last-stage-only (other stages stay empty); the
+    caller is expected to extend it to a full schedule via the
+    reverse-dispatch pipeline (the same downstream path used by the
+    single-pass / NEH-CP variants).
+    """
+    log = logger or logging.getLogger(__name__)
+    start = time.monotonic()
+
+    last_stage_id = instance.stage_id_list[-1]
+    duration_map = instance.get_job_2_p_map_for_stage(last_stage_id)
+    job_2_release_map = instance.get_job_2_p_sum_except_last_stage()
+
+    window_map = window_map_from_preemptive_schedule(
+        mcf_preemptive_schedule, instance.job_id_list
+    )
+    job_sequence = pm_pmtn_sort_job_sequence_with_log(
+        window_map,
+        duration_map,
+        instance,
+        logger=log,
+        job_priority=job_priority,
+    )
+
+    schedule = _insert_jobs_at_desired_starts(
+        None,
+        instance,
+        last_stage_id=last_stage_id,
+        job_2_release=job_2_release_map,
+        duration_map=duration_map,
+        window_map=window_map,
+        appended=job_sequence,
+        placement_priority=placement_priority,
+    )
+
+    schedule.make_semi_active(
+        instance.stage_2_job_2_p_map,
+        start_from_stage=last_stage_id,
+        job_2_release_map=job_2_release_map,
+    )
+    schedule.insert_idle_time(
+        instance.job_2_due_window_map,
+        instance.job_2_ewt_map,
+        instance.job_2_twt_map,
+    )
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+    obj_value = float(sum_e + sum_t)
+
+    elapsed = time.monotonic() - start
+    return NehCpLastStageOnlyResult(
+        schedule=schedule,
+        obj_value=obj_value,
+        # Heuristic refinement does not produce a CP-style bound.
+        obj_bound=0.0,
+        elapsed_time=elapsed,
+        cp_solve_sec=0.0,
+        status="HEURISTIC",
+        intermediate_schedules=[],
+    )
 
 
 def single_pass_last_stage_only_from_mcf_lb(

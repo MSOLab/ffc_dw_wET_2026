@@ -23,6 +23,7 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
 from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
+    heuristic_last_stage_only_from_mcf_lb,
     neh_cp_last_stage_only_from_mcf_lb,
     single_pass_last_stage_only_from_mcf_lb,
 )
@@ -741,6 +742,113 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=None,
         )
 
+    def heuristic_last_stage_only_sch_from_mcf_lb(
+        self,
+        job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
+        placement_priority: Literal["contrib", "dist"] = "contrib",
+        p_increment: int = 0,
+    ) -> SubroutineReport:
+        """Step method: midpoint warm-start across all jobs from the MCF
+        preemptive LB, then a CP-free heuristic refinement
+        (``make_semi_active`` on the last stage with upstream release
+        times, followed by last-stage ``insert_idle_time``).
+
+        Same construction as
+        :meth:`single_pass_last_stage_only_sch_from_mcf_lb` up to the
+        midpoint placement; the CP solve is replaced by deterministic
+        left-shift + idle-time insertion. As a result this step exposes
+        no CP-only knobs (``pf_method``, ``solver_thread_cnt``,
+        ``total_tl``, ``log_cp_search_progress``).
+
+        Pre-conditions (else ``ValueError``):
+          - ``self.mcf_preemptive_schedule`` set by a prior
+            ``apply_lb_by_mcf`` (or compatible) step.
+          - ``self.mcf_lb_diagnostic`` set so the MCF LB context exists.
+
+        Args:
+            job_priority: Job-ordering priority used by the midpoint
+                warm-start placement.
+            placement_priority: Lex-tiebreak between weighted-ET
+                contribution and start-time distance when the midpoint
+                slot is occupied; see ``_insert_jobs_at_desired_starts``.
+            p_increment: Integer ``≥ 0``. When non-zero, the placement
+                + heuristic refinement run on an augmented instance
+                whose last-stage processing times are increased by
+                ``p_increment`` for every job. The resulting
+                last-stage-only schedule is feasible for the augmented
+                problem only; ``build_full_sch_from_last_stage_only_sch``
+                rebuilds it under original durations before
+                reverse-dispatch. The value used is recorded on
+                ``self.last_stage_only_sol_p_increment``.
+
+        Side effects:
+          - Stores the resulting last-stage-only schedule on
+            ``self.last_stage_only_sol``.
+          - Appends ``2_ls_only_sch_from_mcf_lb_heur`` to
+            ``self.mcf_lb_phase_schedules``.
+
+        The returned ``SubroutineReport.obj_bound`` is always ``None``:
+        this step does not produce a lower bound, it only consumes the
+        MCF preemptive schedule from the prior ``apply_lb_by_mcf`` step.
+        """
+        if p_increment < 0:
+            raise ValueError(
+                f"p_increment must be 0 or a positive integer; got {p_increment}."
+            )
+        if self.mcf_preemptive_schedule is None:
+            raise ValueError(
+                "heuristic_last_stage_only_sch_from_mcf_lb requires a prior "
+                "apply_lb_by_mcf step to populate self.mcf_preemptive_schedule."
+            )
+        if self.mcf_lb_diagnostic is None:
+            raise ValueError(
+                "heuristic_last_stage_only_sch_from_mcf_lb requires "
+                "self.mcf_lb_diagnostic (set by apply_lb_by_mcf)."
+            )
+
+        instance = self.instance
+        if p_increment == 0:
+            instance_for_solve = instance
+        else:
+            last_stage_id = instance.stage_id_list[-1]
+            instance_for_solve = FFcDDWParameters.with_stage_processing_time_increment(
+                instance, last_stage_id, p_increment
+            )
+
+        mcf_lb = self.mcf_lb_diagnostic.mcf_lb
+        result = heuristic_last_stage_only_from_mcf_lb(
+            instance_for_solve,
+            self.mcf_preemptive_schedule,
+            logger=self.logger,
+            job_priority=job_priority,
+            placement_priority=placement_priority,
+        )
+
+        self.last_stage_only_sol = FFcDDWSolution(
+            schedule=result.schedule,
+            obj_value=result.obj_value,
+            obj_bound=None,
+        )
+        self.last_stage_only_sol_p_increment = p_increment
+        self.mcf_lb_phase_schedules.append(
+            ("2_ls_only_sch_from_mcf_lb_heur", result.schedule)
+        )
+
+        self.logger.info(
+            "heuristic_last_stage_only_sch_from_mcf_lb: status=%s, "
+            "obj=%.2f, mcf_lb=%d, elapsed=%.2fs, p_increment=%d.",
+            result.status,
+            result.obj_value,
+            int(mcf_lb),
+            result.elapsed_time,
+            p_increment,
+        )
+        return SubroutineReport(
+            elapsed_time=result.elapsed_time,
+            obj_value=result.obj_value,
+            obj_bound=None,
+        )
+
     def build_full_sch_from_last_stage_only_sch(
         self,
         machine_then_job: bool = False,
@@ -751,6 +859,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         Pre-condition (else ``ValueError``): ``self.last_stage_only_sol`` is
         set by a prior step (``single_pass_last_stage_only_sch_from_mcf_lb``,
+        ``heuristic_last_stage_only_sch_from_mcf_lb``,
         ``neh_cp_last_stage_only_sch_from_mcf_lb``,
         ``run_last_stage_cp_sat_lb``, or ``run_mcf_lb_4``).
 
@@ -789,6 +898,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "build_full_sch_from_last_stage_only_sch requires "
                 "self.last_stage_only_sol; run a step that populates it "
                 "first (single_pass_last_stage_only_sch_from_mcf_lb, "
+                "heuristic_last_stage_only_sch_from_mcf_lb, "
                 "neh_cp_last_stage_only_sch_from_mcf_lb, "
                 "run_last_stage_cp_sat_lb, or run_mcf_lb_4)."
             )
