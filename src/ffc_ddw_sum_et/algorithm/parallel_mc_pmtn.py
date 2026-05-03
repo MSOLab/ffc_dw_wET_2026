@@ -93,12 +93,19 @@ class ParallelMachinePreemptionMcf:
         instance: FFcDDWParameters,
         *,
         r_multiplier: float = 1.0,
+        r_increment: int = 0,
     ) -> ParallelMachinePreemptionMcf:
         if r_multiplier < 0:
             raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
+        if r_increment < 0:
+            raise ValueError(
+                f"r_increment must be 0 or a positive integer; got {r_increment}."
+            )
         obj = cls()
         obj.name = f"{cls.__name__}_{instance.name}"
-        obj._define_parameters(instance, r_multiplier=r_multiplier)
+        obj._define_parameters(
+            instance, r_multiplier=r_multiplier, r_increment=r_increment
+        )
         obj._build_mcf()
         return obj
 
@@ -109,12 +116,15 @@ class ParallelMachinePreemptionMcf:
         instance: FFcDDWParameters,
         *,
         r_multiplier: float = 1.0,
+        r_increment: int = 0,
     ) -> None:
         self.calJ = instance.job_id_list
         self.p = instance.get_job_2_p_map_for_stage(instance.stage_id_list[-1])
         self.r = instance.get_job_2_p_sum_except_last_stage()
         if r_multiplier != 1.0:
             self.r = {j: math.ceil(v * r_multiplier) for j, v in self.r.items()}
+        if r_increment != 0:
+            self.r = {j: v + r_increment for j, v in self.r.items()}
         ddw = instance.job_2_due_window_map
         w_minus = _resolve_weight_map(instance.job_2_ewt_map, self.calJ, "ewt")
         w_plus = _resolve_weight_map(instance.job_2_twt_map, self.calJ, "twt")

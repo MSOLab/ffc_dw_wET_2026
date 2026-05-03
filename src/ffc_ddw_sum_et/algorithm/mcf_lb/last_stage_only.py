@@ -101,6 +101,7 @@ def heuristic_last_stage_only_from_mcf_lb(
     job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
     placement_priority: Literal["contrib", "dist"] = "contrib",
     r_multiplier: float = 1.0,
+    r_increment: int = 0,
 ) -> NehCpLastStageOnlyResult:
     """Build a midpoint warm-start across all jobs from the MCF preemptive
     LB and refine it heuristically (no CP solve): left-shift via
@@ -118,9 +119,17 @@ def heuristic_last_stage_only_from_mcf_lb(
             midpoint placement and the subsequent ``make_semi_active``
             left-shift; each value becomes ``ceil(r_j * r_multiplier)``.
             ``1.0`` (default) preserves the current behaviour.
+        r_increment: Integer ``>= 0`` added to every release time
+            *after* the ``r_multiplier`` scaling, so the effective
+            release becomes ``ceil(r_j * r_multiplier) + r_increment``.
+            ``0`` (default) preserves the current behaviour.
     """
     if r_multiplier < 0:
         raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
+    if r_increment < 0:
+        raise ValueError(
+            f"r_increment must be 0 or a positive integer; got {r_increment}."
+        )
     log = logger or logging.getLogger(__name__)
     start = time.monotonic()
 
@@ -131,6 +140,8 @@ def heuristic_last_stage_only_from_mcf_lb(
         job_2_release_map = {
             j: math.ceil(v * r_multiplier) for j, v in job_2_release_map.items()
         }
+    if r_increment != 0:
+        job_2_release_map = {j: v + r_increment for j, v in job_2_release_map.items()}
 
     window_map = window_map_from_preemptive_schedule(
         mcf_preemptive_schedule, instance.job_id_list

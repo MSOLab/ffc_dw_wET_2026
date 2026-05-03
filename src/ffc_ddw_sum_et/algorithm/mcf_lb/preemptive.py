@@ -38,6 +38,7 @@ def solve_mcf_lb(
     diagnostic: MCFLBDiagnostic,
     *,
     r_multiplier: float = 1.0,
+    r_increment: int = 0,
 ) -> McfLbResult:
     """Solve the MCF relaxation and record the bound on ``diagnostic``.
 
@@ -51,6 +52,12 @@ def solve_mcf_lb(
             current behaviour. Values ``<= 1`` keep the resulting bound a
             valid LB on the original instance (looser when ``< 1``);
             values ``> 1`` make it no longer a global LB.
+        r_increment: Integer ``>= 0`` added to every ``r_j`` *after* the
+            ``r_multiplier`` scaling, so the effective release date is
+            ``ceil(r_j * r_multiplier) + r_increment``. ``0`` (default)
+            preserves the current behaviour. Any positive value pushes
+            releases later than the original instance and therefore
+            makes the resulting MCF objective no longer a global LB.
 
     Raises:
         RuntimeError: if the MCF flow is not optimal for ``instance``.
@@ -59,7 +66,7 @@ def solve_mcf_lb(
 
     t_mcf = time.monotonic()
     mcf = ParallelMachinePreemptionMcf.from_instance(
-        instance, r_multiplier=r_multiplier
+        instance, r_multiplier=r_multiplier, r_increment=r_increment
     )
     mcf.solve()
     if not mcf.is_optimal():

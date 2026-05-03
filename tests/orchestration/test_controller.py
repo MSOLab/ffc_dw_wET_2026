@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 from routix.stopping_criteria import StoppingCriteria
 
 from ffc_ddw_sum_et.algorithm.base.alg_record import WorkStatus
@@ -275,3 +276,42 @@ def test_run_mcf_lb_then_neh_cp_uses_window_width_sequence() -> None:
     sequence = controller._mcf_window_width_job_sequence(mcf, instance)
 
     assert sorted(sequence) == sorted(instance.job_id_list)
+
+
+def test_r_increment_negative_raises() -> None:
+    """Both MCF-LB controller steps must reject ``r_increment < 0`` with
+    ``ValueError`` (mirroring the ``p_increment`` / ``r_multiplier``
+    guards) so a typo cannot silently shift release dates the wrong way.
+    """
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    with pytest.raises(ValueError):
+        controller.apply_lb_by_mcf(r_increment=-1)
+
+    # Establish a valid mcf_preemptive_schedule + diagnostic so the
+    # heuristic step's r_increment guard is what trips, not the
+    # missing-prerequisite guard.
+    controller.apply_lb_by_mcf()
+    with pytest.raises(ValueError):
+        controller.heuristic_last_stage_only_sch_from_mcf_lb(r_increment=-1)
+
+
+def test_apply_lb_by_mcf_r_increment_voids_lb_and_does_not_decrease() -> None:
+    """``r_increment > 0`` shifts every release date later, so the MCF
+    objective on the augmented instance cannot be smaller than the
+    baseline. It is also no longer a valid global LB on the original
+    instance, so ``SubroutineReport.obj_bound`` must be ``None``.
+    """
+    instance = _make_instance()
+
+    baseline_controller = _make_controller(instance)
+    baseline_report = baseline_controller.apply_lb_by_mcf()
+    assert baseline_report.obj_bound is not None
+    baseline_mcf_lb = baseline_controller.mcf_lb_diagnostic.mcf_lb
+
+    incremented_controller = _make_controller(instance)
+    incremented_report = incremented_controller.apply_lb_by_mcf(r_increment=4)
+
+    assert incremented_report.obj_bound is None
+    assert incremented_controller.mcf_lb_diagnostic.mcf_lb >= baseline_mcf_lb

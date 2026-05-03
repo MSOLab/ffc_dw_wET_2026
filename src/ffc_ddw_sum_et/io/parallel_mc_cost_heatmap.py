@@ -124,6 +124,7 @@ def build_signed_cost_matrix(
     c_jt_clip_abs_value: float | None = None,
     c_jt_clip_quantile: float = 0.5,
     r_multiplier: float = 1.0,
+    r_increment: int = 0,
 ) -> SignedCostHeatmapData:
     """Build the signed C-cost matrix and the row-aligned overlay payloads.
 
@@ -152,9 +153,18 @@ def build_signed_cost_matrix(
             Must match the multiplier passed to the MCF solve so the
             overlay aligns with the actual ``x_jt`` flow region. ``1.0``
             (default) preserves the unscaled view.
+        r_increment: Integer ``>= 0`` added to each ``r_j`` *after* the
+            ``r_multiplier`` scaling, so the effective release used for
+            the overlay becomes ``ceil(r_j * r_multiplier) + r_increment``.
+            Must match the increment passed to the MCF solve. ``0``
+            (default) preserves the unscaled view.
     """
     if r_multiplier < 0:
         raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
+    if r_increment < 0:
+        raise ValueError(
+            f"r_increment must be 0 or a positive integer; got {r_increment}."
+        )
     calJ = _sort_jobs(instance, sort=sort, x_jt_map=x_jt_map)
     last_stage = instance.stage_id_list[-1]
     p = instance.get_job_2_p_map_for_stage(last_stage)
@@ -164,6 +174,8 @@ def build_signed_cost_matrix(
     r = instance.get_job_2_p_sum_except_last_stage()
     if r_multiplier != 1.0:
         r = {j: math.ceil(v * r_multiplier) for j, v in r.items()}
+    if r_increment != 0:
+        r = {j: v + r_increment for j, v in r.items()}
 
     p_max = max(p[j] for j in calJ)
     t_min = max(0, min(ddw[j][0] - p[j] for j in calJ) - p_max)
