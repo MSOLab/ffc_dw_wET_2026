@@ -24,6 +24,7 @@ from ..io import dump_preemptive_schedule_yaml, dump_schedule_yaml, dump_solutio
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
+from ..solution.objectives import compute_weighted_earliness_tardiness
 from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
 
@@ -239,41 +240,45 @@ class FFcDDWSingleInstanceRunner(
 
         solution_manager = controller.solution_manager
 
-        first_report = (
-            solution_manager.history[0].report if solution_manager.history else None
-        )
+        history = solution_manager.history
         last_report = solution_manager.get_last_report()
         incumbent = solution_manager.get_incumbent()
 
-        elapsed_time = float(last_report.elapsed_time) if last_report else 0.0
-        obj_value = (
-            float(incumbent.obj_value)
-            if incumbent and incumbent.obj_value is not None
-            else (
-                float(last_report.obj_value)
-                if last_report and last_report.obj_value is not None
-                else None
+        # elapsedTime: outer controller wall-clock (set by core.run() override).
+        elapsed_time = float(controller.total_elapsed_time)
+
+        # bestObj: SSOT recompute from incumbent schedule.
+        obj_value: float | None = None
+        if incumbent is not None:
+            sum_e, sum_t = compute_weighted_earliness_tardiness(
+                incumbent.schedule, self.instance
             )
-        )
-        obj_bound = (
-            float(incumbent.obj_bound)
-            if incumbent and incumbent.obj_bound is not None
-            else (
-                float(last_report.obj_bound)
-                if last_report and last_report.obj_bound is not None
-                else None
-            )
-        )
-        first_obj_value = (
-            float(first_report.obj_value)
-            if first_report and first_report.obj_value is not None
-            else None
-        )
-        first_obj_bound = (
-            float(first_report.obj_bound)
-            if first_report and first_report.obj_bound is not None
-            else None
-        )
+            obj_value = float(sum_e + sum_t)
+
+        # bestBound: max over all registered reports' obj_bound; 0.0 when none.
+        bound_values = [
+            float(r.report.obj_bound)
+            for r in history
+            if r.report is not None and r.report.obj_bound is not None
+        ]
+        obj_bound: float = max(bound_values) if bound_values else 0.0
+
+        # initObj: recompute from the FIRST registered solution's schedule.
+        first_obj_value: float | None = None
+        for record in history:
+            if record.solution is not None:
+                sum_e, sum_t = compute_weighted_earliness_tardiness(
+                    record.solution.schedule, self.instance
+                )
+                first_obj_value = float(sum_e + sum_t)
+                break
+
+        # initBound: first non-None obj_bound across history; 0.0 when none.
+        first_obj_bound: float = 0.0
+        for record in history:
+            if record.report is not None and record.report.obj_bound is not None:
+                first_obj_bound = float(record.report.obj_bound)
+                break
 
         solution_path = None
         if incumbent is not None:

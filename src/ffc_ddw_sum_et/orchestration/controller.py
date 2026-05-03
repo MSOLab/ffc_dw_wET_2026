@@ -105,6 +105,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_bound=obj_bound,
             )
             self.solution_manager.register(report, fam_solution)
+        else:
+            self.solution_manager.register(report, None)
 
         return report
 
@@ -183,6 +185,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_bound=obj_bound,
             )
             self.solution_manager.register(report, bn2d_solution)
+        else:
+            self.solution_manager.register(report, None)
 
         return report
 
@@ -365,9 +369,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "initialize_by_best_of_selected_dispatches: no feasible "
                 "candidate; returning empty report."
             )
-            return SubroutineReport(
+            report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=None
             )
+            self.solution_manager.register(report, None)
+            return report
 
         sum_e, sum_t = compute_weighted_earliness_tardiness(best_sch, instance)
         obj_value = float(sum_e + sum_t)
@@ -507,13 +513,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 )
 
         elapsed = time.monotonic() - start_elapsed
-        return SubroutineReport(
+        report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=None,
             obj_bound=(
                 obj_bound_by_mcf if (p_increment == 0 and r_multiplier <= 1.0) else None
             ),
         )
+        self.solution_manager.register(report, None)
+        return report
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
         self,
@@ -616,11 +624,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             result.elapsed_time,
             result.cp_solve_sec,
         )
-        return SubroutineReport(
+        report = SubroutineReport(
             elapsed_time=result.elapsed_time,
             obj_value=result.obj_value,
             obj_bound=mcf_lb,
         )
+        self.solution_manager.register(report, None)
+        return report
 
     def single_pass_last_stage_only_sch_from_mcf_lb(
         self,
@@ -752,11 +762,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             result.elapsed_time,
             p_increment,
         )
-        return SubroutineReport(
+        report = SubroutineReport(
             elapsed_time=result.elapsed_time,
             obj_value=result.obj_value,
             obj_bound=None,
         )
+        self.solution_manager.register(report, None)
+        return report
 
     def heuristic_last_stage_only_sch_from_mcf_lb(
         self,
@@ -870,11 +882,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             p_increment,
             r_multiplier,
         )
-        return SubroutineReport(
+        report = SubroutineReport(
             elapsed_time=result.elapsed_time,
             obj_value=result.obj_value,
             obj_bound=None,
         )
+        self.solution_manager.register(report, None)
+        return report
 
     def build_full_sch_from_last_stage_only_sch(
         self,
@@ -947,7 +961,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "build_full_sch_from_last_stage_only_sch: reverse-dispatch "
                 "produced no schedule"
             )
-            return SubroutineReport(elapsed_time=elapsed, obj_value=None, obj_bound=0.0)
+            report = SubroutineReport(
+                elapsed_time=elapsed, obj_value=None, obj_bound=0.0
+            )
+            self.solution_manager.register(report, None)
+            return report
 
         if state.ls_only_sch_before_delay is not None:
             self.mcf_lb_phase_schedules.append(
@@ -1144,9 +1162,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         if phase2 is None:
             elapsed = time.monotonic() - start_elapsed
-            return SubroutineReport(
+            report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
+            self.solution_manager.register(report, None)
+            return report
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=phase2.last_stage_only_schedule,
             obj_value=phase2.last_stage_only_obj,
@@ -1174,9 +1194,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         if phase3 is None:
             elapsed = time.monotonic() - start_elapsed
-            return SubroutineReport(
+            report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
+            self.solution_manager.register(report, None)
+            return report
         if phase3.ls_only_sch_delayed is not None:
             self.mcf_lb_phase_schedules.append(
                 ("3_ls_only_sch_delayed", phase3.ls_only_sch_delayed)
@@ -1235,11 +1257,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             # Infeasible profile-fix: keep the phase-3 incumbent; the
             # profile-fix bound is not a valid global bound, so report
             # the MCF LB instead.
-            return SubroutineReport(
+            report = SubroutineReport(
                 elapsed_time=elapsed,
                 obj_value=phase3.dispatched_obj,
                 obj_bound=obj_bound_by_mcf,
             )
+            self.solution_manager.register(report, None)
+            return report
         self.mcf_lb_phase_schedules.append(("7_final_schedule", phase4.final_schedule))
 
         report = SubroutineReport(
@@ -1372,11 +1396,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "run_last_stage_cp_sat_lb: no feasible solution (status=%s)",
                 solver.StatusName(status),
             )
-            return SubroutineReport(
+            report = SubroutineReport(
                 elapsed_time=elapsed,
                 obj_value=None,
                 obj_bound=mcf_lb,
             )
+            self.solution_manager.register(report, None)
+            return report
 
         j_i_2_start = {
             (j, last_stage_id): int(
@@ -1406,6 +1432,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=cp_obj,
             obj_bound=obj_bound if obj_bound is not None else mcf_lb,
         )
+        self.solution_manager.register(report, None)
         return report
 
     def _dispatch_by_sequence(
@@ -1705,11 +1732,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "run_profile_fixed_ns: no feasible solution (status=%s)",
                 solver.StatusName(status),
             )
-            return SubroutineReport(
+            report = SubroutineReport(
                 elapsed_time=elapsed,
                 obj_value=None,
                 obj_bound=None,
             )
+            self.solution_manager.register(report, None)
+            return report
 
         j_i_2_start = {
             (j, i): int(solver.Value(op_vars.op_start[j, i]))
@@ -1843,6 +1872,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 report,
                 FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
             )
+        else:
+            self.solution_manager.register(report, None)
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")
@@ -2013,6 +2044,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     obj_bound=obj_bound_by_mcf,
                 ),
             )
+        else:
+            self.solution_manager.register(report, None)
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")

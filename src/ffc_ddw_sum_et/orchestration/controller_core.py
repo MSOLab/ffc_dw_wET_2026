@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -83,6 +84,9 @@ class FFcDDWSubroutineControllerCore(
         # 2_last_stage_only_init, ..., 7_final). Only populated entries
         # are appended so early returns retain partial progress.
         self.mcf_lb_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
+        # Outer wall-clock around `run()`. Set in the run() override below;
+        # the runner reads this for the per-instance summary `elapsedTime`.
+        self.total_elapsed_time: float = 0.0  # TODO: apply to routix
 
     def is_stopping_condition(self, **kwargs: Any) -> bool:
         """Stop when the timelimit is exceeded."""
@@ -121,6 +125,14 @@ class FFcDDWSubroutineControllerCore(
             return None
         return self.get_file_path_for_subroutine(suffix)
 
+    def run(self) -> None:
+        """Wrap routix's run loop with an outer wall-clock measurement."""
+        start = time.monotonic()
+        try:
+            super().run()
+        finally:  # TODO: apply to routix
+            self.total_elapsed_time = time.monotonic() - start
+
     def post_run_process(self) -> None:
         """Nothing to do at the controller level — the runner handles file I/O."""
 
@@ -137,6 +149,6 @@ class FFcDDWSubroutineControllerCore(
         if not self.solution_manager.history:
             return None
         last_record = self.solution_manager.history[-1]
-        if last_record.report is None:
+        if last_record.report is None or last_record.solution is None:
             return None
         return WorkStatus.FEASIBLE
