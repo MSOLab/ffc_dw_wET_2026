@@ -65,13 +65,13 @@ def build_rpdf_comparison_df(
 
     Returns a long-format DataFrame with columns from ``COMPARISON_COLUMNS``,
     sorted by (insIndex, scenarioName). ``insIndex`` stays a zero-padded
-    string. Rows where ``error`` is set or ``bestObj`` is NaN are dropped, as
-    are rows whose instanceName has no insIndex match.
+    string. Rows where ``error`` is set are dropped, as are rows whose
+    instanceName has no insIndex match. Rows with NaN ``bestObj`` (e.g. LB-only
+    runs) are kept so ``time%`` is reported; ``RPDf_BKS_data`` is NaN for them.
     """
     df = summary_df
     if "error" in df.columns:
         df = df[df["error"].isna() | (df["error"] == "")]
-    df = df.dropna(subset=["bestObj"])
 
     match = pd.read_csv(hybrid_match_csv, dtype={"insIndex": str})
     match["instanceName"] = match["ffc_ddw_sum_et_filename"].str.removesuffix(".txt")
