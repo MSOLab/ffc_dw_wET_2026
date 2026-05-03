@@ -5,14 +5,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from ffc_ddw_sum_et.algorithm import (
-    AlgOption,
-    AlgRecord,
-    AlgResult,
-    AlgSpec,
-    Algorithm,
+from ffc_ddw_sum_et.algorithm.base.alg_option import AlgOption
+from ffc_ddw_sum_et.algorithm.base.alg_record import AlgRecord, AlgResult, WorkStatus
+from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
+from ffc_ddw_sum_et.algorithm.base.algorithm import Algorithm
+from ffc_ddw_sum_et.algorithm.options.dispatch_stages_option import (
     DispatchStagesOption,
-    WorkStatus,
 )
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_params import FFcParameters

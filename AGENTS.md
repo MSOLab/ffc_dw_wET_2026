@@ -38,8 +38,13 @@ can pick up the same architectural intent.
   defined.
 - Prefer changing public imports through `ffc_ddw_sum_et.io` instead of
   importing deep internal modules from outside the IO subtree.
-- Prefer changing public imports through `ffc_ddw_sum_et.algorithm` instead of
-  importing deep internal modules from outside the algorithm subtree.
+- The `ffc_ddw_sum_et.algorithm` package surface is intentionally empty
+  (see `src/ffc_ddw_sum_et/algorithm/__init__.py` — re-exports caused a
+  circular import at package init). Until that is resolved, import contract
+  types from their owning submodules: `algorithm.base.alg_spec`,
+  `algorithm.base.alg_record`, `algorithm.base.alg_option`,
+  `algorithm.base.algorithm`, `algorithm.options.*`, `algorithm.fam`,
+  `algorithm.dispatcher.*`, `algorithm.mcf_lb.*`, `algorithm.neh_cp.*`.
 
 ## Deferred Design Notes
 
