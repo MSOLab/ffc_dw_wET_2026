@@ -396,6 +396,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_heatmap: bool = False,
         heatmap_sort: HeatmapSort = "due2-weight-pos",
         p_increment: int = 0,
+        r_multiplier: float = 1.0,
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
@@ -436,11 +437,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 ``p_increment = 0`` (default) preserves the current
                 behaviour. The value used is recorded on
                 ``self.mcf_preemptive_sch_p_increment``.
+            r_multiplier: Scales the per-job MCF release dates ``r_j``
+                (sum of upstream processing times) by this factor; each
+                value becomes ``ceil(r_j * r_multiplier)``. Must be
+                ``>= 0``. ``1.0`` (default) preserves the current
+                behaviour. Values ``<= 1`` keep the resulting MCF
+                objective a valid LB on the original instance (looser
+                when ``< 1``); values ``> 1`` make it no longer a
+                global LB, so ``SubroutineReport.obj_bound`` is set to
+                ``None`` in that case (mirroring ``p_increment != 0``).
         """
         if p_increment < 0:
             raise ValueError(
                 f"p_increment must be 0 or a positive integer; got {p_increment}."
             )
+        if r_multiplier < 0:
+            raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
 
         start_elapsed = time.monotonic()
         diag = MCFLBDiagnostic()
@@ -454,7 +466,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 self.instance, last_stage_id, p_increment
             )
 
-        mcf_result = solve_mcf_lb(instance_for_mcf, diag)
+        mcf_result = solve_mcf_lb(instance_for_mcf, diag, r_multiplier=r_multiplier)
         obj_bound_by_mcf = mcf_result.mcf_lb
 
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
@@ -465,9 +477,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         self.logger.info(
-            "apply_lb_by_mcf: MCF LB = %d, p_increment=%d",
+            "apply_lb_by_mcf: MCF LB = %d, p_increment=%d, r_multiplier=%.4g",
             int(obj_bound_by_mcf),
             p_increment,
+            r_multiplier,
         )
 
         if draw_heatmap:
@@ -480,6 +493,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     sort=heatmap_sort,
                     x_jt_map=mcf_result.mcf.get_variable_value_dict(),
                     obj_value=obj_bound_by_mcf,
+                    r_multiplier=r_multiplier,
                 )
                 dump_signed_cost_heatmap_yaml(yaml_path, heatmap_data)
                 self.logger.info(
@@ -496,7 +510,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return SubroutineReport(
             elapsed_time=elapsed,
             obj_value=None,
-            obj_bound=obj_bound_by_mcf if p_increment == 0 else None,
+            obj_bound=(
+                obj_bound_by_mcf if (p_increment == 0 and r_multiplier <= 1.0) else None
+            ),
         )
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
@@ -747,6 +763,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
         placement_priority: Literal["contrib", "dist"] = "contrib",
         p_increment: int = 0,
+        r_multiplier: float = 1.0,
     ) -> SubroutineReport:
         """Step method: midpoint warm-start across all jobs from the MCF
         preemptive LB, then a CP-free heuristic refinement
@@ -780,6 +797,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 rebuilds it under original durations before
                 reverse-dispatch. The value used is recorded on
                 ``self.last_stage_only_sol_p_increment``.
+            r_multiplier: Scales the per-job release times used for
+                midpoint placement and the subsequent
+                ``make_semi_active`` left-shift; each value becomes
+                ``ceil(r_j * r_multiplier)``. Must be ``>= 0``. ``1.0``
+                (default) preserves the current behaviour.
 
         Side effects:
           - Stores the resulting last-stage-only schedule on
@@ -795,6 +817,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             raise ValueError(
                 f"p_increment must be 0 or a positive integer; got {p_increment}."
             )
+        if r_multiplier < 0:
+            raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
         if self.mcf_preemptive_schedule is None:
             raise ValueError(
                 "heuristic_last_stage_only_sch_from_mcf_lb requires a prior "
@@ -822,6 +846,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             logger=self.logger,
             job_priority=job_priority,
             placement_priority=placement_priority,
+            r_multiplier=r_multiplier,
         )
 
         self.last_stage_only_sol = FFcDDWSolution(
@@ -836,12 +861,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         self.logger.info(
             "heuristic_last_stage_only_sch_from_mcf_lb: status=%s, "
-            "obj=%.2f, mcf_lb=%d, elapsed=%.2fs, p_increment=%d.",
+            "obj=%.2f, mcf_lb=%d, elapsed=%.2fs, p_increment=%d, "
+            "r_multiplier=%.4g.",
             result.status,
             result.obj_value,
             int(mcf_lb),
             result.elapsed_time,
             p_increment,
+            r_multiplier,
         )
         return SubroutineReport(
             elapsed_time=result.elapsed_time,

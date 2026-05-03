@@ -36,11 +36,21 @@ class McfLbResult:
 def solve_mcf_lb(
     instance: FFcDDWParameters,
     diagnostic: MCFLBDiagnostic,
+    *,
+    r_multiplier: float = 1.0,
 ) -> McfLbResult:
     """Solve the MCF relaxation and record the bound on ``diagnostic``.
 
     Mutates ``diagnostic`` in place: sets ``mcf_solve_sec``, ``mcf_lb``,
     and advances ``reached_phase`` to ``"mcf"``.
+
+    Args:
+        r_multiplier: Scales the MCF release dates ``r_j`` (sum of upstream
+            processing times) by this factor; the scaled value is
+            ``ceil(r_j * r_multiplier)``. ``1.0`` (default) preserves the
+            current behaviour. Values ``<= 1`` keep the resulting bound a
+            valid LB on the original instance (looser when ``< 1``);
+            values ``> 1`` make it no longer a global LB.
 
     Raises:
         RuntimeError: if the MCF flow is not optimal for ``instance``.
@@ -48,7 +58,9 @@ def solve_mcf_lb(
     last_stage_id = instance.stage_id_list[-1]
 
     t_mcf = time.monotonic()
-    mcf = ParallelMachinePreemptionMcf.from_instance(instance)
+    mcf = ParallelMachinePreemptionMcf.from_instance(
+        instance, r_multiplier=r_multiplier
+    )
     mcf.solve()
     if not mcf.is_optimal():
         raise RuntimeError(f"MCF not optimal for instance {instance.name}")

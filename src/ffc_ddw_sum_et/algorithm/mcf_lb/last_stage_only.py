@@ -31,6 +31,7 @@ and start-time distance.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,6 +100,7 @@ def heuristic_last_stage_only_from_mcf_lb(
     logger: logging.Logger | None = None,
     job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
     placement_priority: Literal["contrib", "dist"] = "contrib",
+    r_multiplier: float = 1.0,
 ) -> NehCpLastStageOnlyResult:
     """Build a midpoint warm-start across all jobs from the MCF preemptive
     LB and refine it heuristically (no CP solve): left-shift via
@@ -110,13 +112,25 @@ def heuristic_last_stage_only_from_mcf_lb(
     caller is expected to extend it to a full schedule via the
     reverse-dispatch pipeline (the same downstream path used by the
     single-pass / NEH-CP variants).
+
+    Args:
+        r_multiplier: Scales the per-job release times used for both
+            midpoint placement and the subsequent ``make_semi_active``
+            left-shift; each value becomes ``ceil(r_j * r_multiplier)``.
+            ``1.0`` (default) preserves the current behaviour.
     """
+    if r_multiplier < 0:
+        raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
     log = logger or logging.getLogger(__name__)
     start = time.monotonic()
 
     last_stage_id = instance.stage_id_list[-1]
     duration_map = instance.get_job_2_p_map_for_stage(last_stage_id)
     job_2_release_map = instance.get_job_2_p_sum_except_last_stage()
+    if r_multiplier != 1.0:
+        job_2_release_map = {
+            j: math.ceil(v * r_multiplier) for j, v in job_2_release_map.items()
+        }
 
     window_map = window_map_from_preemptive_schedule(
         mcf_preemptive_schedule, instance.job_id_list
