@@ -108,3 +108,72 @@ package" guidance.
   recurring source of confusion or breaks under a future change.
 
 Until then, document the band-aids in place and leave the structure as is.
+
+## Same-meaning values managed under different names
+
+Several diagnostics / report fields store the same logical value under
+distinct names or in distinct containers. The duplication isn't broken,
+but it forces consumers to know multiple aliases and risks one of them
+silently going stale.
+
+Items identified (2026-05-05, while adding the `adjust_p` knob and
+collapsing the `adjust_r_*`/`adjust_p_*` triples in `MCFLBDiagnostic`
+into a shared `adjust_params_*` triple):
+
+1. **`InstanceResult.last_stage_only_obj` (top-level field) vs
+   `InstanceResult.mcf_lb_diagnostic["last_stage_only_obj"]` (inside the
+   diag dict).** Both store the weighted E+T of the last-stage-only
+   schedule.
+   - Top-level is set unconditionally from
+     `controller.last_stage_only_sol.obj_value` in
+     `FFcDDWSingleInstanceRunner.post_run_process` (~L322).
+   - Diag-dict entry is set only by the legacy `run_mcf_lb` path through
+     `algorithm/mcf_lb/phase2_last_stage.py:162`. Newer subroutines
+     (`heuristic_*`, `single_pass_*`, `neh_cp_*`) do *not* update it.
+   - Consumers diverge: `_write_last_stage_only_obj_csv` reads the
+     top-level field; `_write_last_stage_only_obj_summary_csv` and
+     `_load_mcf_lb_analysis_rows` ("lastStageOnlyObj" column) read the
+     diag-dict entry. Result: depending on which subroutine produced the
+     ls-only schedule, two reports can show different (or
+     null-vs-non-null) values for what is conceptually the same quantity.
+
+2. **CSV column duplicate inside
+   `{run_id}_adjust_params_by_makespan_delta.csv`.** When `adjust_r`
+   fired (and `adjust_p` did not), `makespanDelta` and `rIncrementAdded`
+   are guaranteed equal — `effective_r_increment = r_increment +
+   makespan_delta`, so the "increment added" *is* the delta. The column
+   exists because the writer also handles `adjust_p`, where the
+   "increment added" is `ceil(delta * m_last / n)` and so genuinely
+   differs from the delta.
+
+3. **Setter blocks for shared `adjust_params_*` triple are duplicated
+   between `apply_lb_by_mcf` and `heuristic_last_stage_only_sch_from_mcf_lb`
+   in `orchestration/controller.py`.** Same three-line write of
+   `adjust_params_{last_stage_only_makespan, incumbent_makespan,
+   makespan_delta}` plus the per-knob `*_increment_added` field exists
+   at both call sites. Could be a small `_record_adjust_params_diag`
+   helper on the controller (or the diagnostic itself).
+
+**Why:** Each item works today but burdens future readers/refactors —
+they must learn the alias graph, and any new subroutine has to remember
+to populate every alias to keep downstream reports consistent. (#1 in
+particular has actual soundness implications: two reports can disagree
+because only the legacy path populates the diag-dict copy.)
+
+**When to act:**
+
+- Item #1: when a third report or analysis starts depending on the
+  ls-only weighted E+T, OR when a bug surfaces because one of the two
+  consumers reads stale/null data. Likely fix: drop the diag-dict copy
+  and route both consumers through `InstanceResult.last_stage_only_obj`,
+  *or* have the new subroutines also write into the diag (single source
+  of truth either way).
+- Item #2: when adding a third knob in the same family, OR when a
+  reader explicitly complains about the redundant column. Likely fix:
+  drop `rIncrementAdded`, document that for `adjust_r` rows the value
+  equals `makespanDelta`.
+- Item #3: when a third subroutine grows the same setter block, OR when
+  any of the field names rotate again. Likely fix: extract a single
+  helper.
+
+Until then, leave as-is.

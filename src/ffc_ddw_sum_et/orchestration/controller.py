@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Callable, Literal, Sequence
 
@@ -431,6 +432,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_increment: int = 0,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
+        adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
@@ -502,14 +504,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 f"r_increment must be 0 or a positive integer; got {r_increment}."
             )
 
-        effective_r_increment = r_increment
-        if adjust_r_by_full_sch_and_last_stage_only_sch:
+        incumbent_makespan: int | None = None
+        ls_only_makespan: int | None = None
+        makespan_delta: int | None = None
+
+        def _ensure_makespans() -> None:
+            nonlocal incumbent_makespan, ls_only_makespan, makespan_delta
+            if makespan_delta is not None:
+                return
             incumbent = self.solution_manager.get_incumbent()
             if incumbent is None or incumbent.schedule is None:
                 raise ValueError(
                     "apply_lb_by_mcf with "
-                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
-                    "an incumbent schedule on self.solution_manager."
+                    "adjust_(r|p)_by_full_sch_and_last_stage_only_sch=True "
+                    "requires an incumbent schedule on self.solution_manager."
                 )
             if (
                 self.last_stage_only_sol is None
@@ -517,12 +525,37 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ):
                 raise ValueError(
                     "apply_lb_by_mcf with "
-                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
-                    "self.last_stage_only_sol.schedule set by a prior step."
+                    "adjust_(p|r)_by_full_sch_and_last_stage_only_sch=True "
+                    "requires self.last_stage_only_sol.schedule set by a "
+                    "prior step."
                 )
             incumbent_makespan = int(incumbent.schedule.makespan)
             ls_only_makespan = int(self.last_stage_only_sol.schedule.makespan)
             makespan_delta = max(incumbent_makespan - ls_only_makespan, 0)
+
+        effective_p_increment = p_increment
+        p_adjust = 0
+        if adjust_p_by_full_sch_and_last_stage_only_sch:
+            _ensure_makespans()
+            n = self.instance.job_count
+            m_last = self.instance.last_stage_mc_count
+            p_adjust = math.ceil(makespan_delta * m_last / n)
+            self.logger.info(
+                "apply_lb_by_mcf: adjust_p_by_full_sch_and_last_stage_only_sch=True, "
+                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d, "
+                "n=%d, m_last=%d, p_adjust=%d",
+                incumbent_makespan,
+                ls_only_makespan,
+                makespan_delta,
+                n,
+                m_last,
+                p_adjust,
+            )
+            effective_p_increment = p_increment + p_adjust
+
+        effective_r_increment = r_increment
+        if adjust_r_by_full_sch_and_last_stage_only_sch:
+            _ensure_makespans()
             self.logger.info(
                 "apply_lb_by_mcf: adjust_r_by_full_sch_and_last_stage_only_sch=True, "
                 "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d",
@@ -536,10 +569,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
 
+        if (
+            adjust_p_by_full_sch_and_last_stage_only_sch
+            or adjust_r_by_full_sch_and_last_stage_only_sch
+        ):
+            diag.adjust_params_last_stage_only_makespan = ls_only_makespan
+            diag.adjust_params_incumbent_makespan = incumbent_makespan
+            diag.adjust_params_makespan_delta = makespan_delta
+        if adjust_p_by_full_sch_and_last_stage_only_sch:
+            diag.adjust_p_increment_added = p_adjust
         if adjust_r_by_full_sch_and_last_stage_only_sch:
-            diag.adjust_r_incumbent_makespan = incumbent_makespan
-            diag.adjust_r_last_stage_only_makespan = ls_only_makespan
-            diag.adjust_r_makespan_delta = makespan_delta
+            diag.adjust_r_increment_added = makespan_delta
 
         if r_multiplier != 1.0 or effective_r_increment != 0:
             self._log_effective_release_stats(
@@ -548,12 +588,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 r_increment=effective_r_increment,
             )
 
-        if p_increment == 0:
+        if effective_p_increment == 0:
             instance_for_mcf = self.instance
         else:
             last_stage_id = self.instance.stage_id_list[-1]
             instance_for_mcf = FFcDDWParameters.with_stage_processing_time_increment(
-                self.instance, last_stage_id, p_increment
+                self.instance, last_stage_id, effective_p_increment
             )
 
         mcf_result = solve_mcf_lb(
@@ -565,17 +605,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         obj_bound_by_mcf = mcf_result.mcf_lb
 
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
-        self.mcf_preemptive_sch_p_increment = p_increment
+        self.mcf_preemptive_sch_p_increment = effective_p_increment
         self.mcf_lb_phase_schedules.clear()
         self.mcf_lb_phase_schedules.append(
             ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
 
         self.logger.info(
-            "apply_lb_by_mcf: MCF LB = %d, p_increment=%d, r_multiplier=%.4g, "
-            "r_increment=%d (effective=%d)",
+            "apply_lb_by_mcf: MCF LB = %d, p_increment=%d (effective=%d), "
+            "r_multiplier=%.4g, r_increment=%d (effective=%d)",
             int(obj_bound_by_mcf),
             p_increment,
+            effective_p_increment,
             r_multiplier,
             r_increment,
             effective_r_increment,
@@ -606,7 +647,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 )
 
         obj_bound_is_valid = (
-            p_increment == 0 and r_multiplier <= 1.0 and effective_r_increment == 0
+            effective_p_increment == 0
+            and r_multiplier <= 1.0
+            and effective_r_increment == 0
         )
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
@@ -871,6 +914,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_increment: int = 0,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
+        adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
     ) -> SubroutineReport:
         """Step method: midpoint warm-start across all jobs from the MCF
@@ -946,14 +990,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "self.mcf_lb_diagnostic (set by apply_lb_by_mcf)."
             )
 
-        effective_r_increment = r_increment
-        if adjust_r_by_full_sch_and_last_stage_only_sch:
+        incumbent_makespan: int | None = None
+        ls_only_makespan: int | None = None
+        makespan_delta: int | None = None
+
+        def _ensure_makespans() -> None:
+            nonlocal incumbent_makespan, ls_only_makespan, makespan_delta
+            if makespan_delta is not None:
+                return
             incumbent = self.solution_manager.get_incumbent()
             if incumbent is None or incumbent.schedule is None:
                 raise ValueError(
                     "heuristic_last_stage_only_sch_from_mcf_lb with "
-                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
-                    "an incumbent schedule on self.solution_manager."
+                    "adjust_(p|r)_by_full_sch_and_last_stage_only_sch=True "
+                    "requires an incumbent schedule on self.solution_manager."
                 )
             if (
                 self.last_stage_only_sol is None
@@ -961,12 +1011,38 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ):
                 raise ValueError(
                     "heuristic_last_stage_only_sch_from_mcf_lb with "
-                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
-                    "self.last_stage_only_sol.schedule set by a prior step."
+                    "adjust_(p|r)_by_full_sch_and_last_stage_only_sch=True "
+                    "requires self.last_stage_only_sol.schedule set by a "
+                    "prior step."
                 )
             incumbent_makespan = int(incumbent.schedule.makespan)
             ls_only_makespan = int(self.last_stage_only_sol.schedule.makespan)
             makespan_delta = max(incumbent_makespan - ls_only_makespan, 0)
+
+        effective_p_increment = p_increment
+        p_adjust = 0
+        if adjust_p_by_full_sch_and_last_stage_only_sch:
+            _ensure_makespans()
+            n = self.instance.job_count
+            m_last = self.instance.last_stage_mc_count
+            p_adjust = math.ceil(makespan_delta * m_last / n)
+            self.logger.info(
+                "heuristic_last_stage_only_sch_from_mcf_lb: "
+                "adjust_p_by_full_sch_and_last_stage_only_sch=True, "
+                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d, "
+                "n=%d, m_last=%d, p_adjust=%d",
+                incumbent_makespan,
+                ls_only_makespan,
+                makespan_delta,
+                n,
+                m_last,
+                p_adjust,
+            )
+            effective_p_increment = p_increment + p_adjust
+
+        effective_r_increment = r_increment
+        if adjust_r_by_full_sch_and_last_stage_only_sch:
+            _ensure_makespans()
             self.logger.info(
                 "heuristic_last_stage_only_sch_from_mcf_lb: "
                 "adjust_r_by_full_sch_and_last_stage_only_sch=True, "
@@ -976,9 +1052,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 makespan_delta,
             )
             effective_r_increment = r_increment + makespan_delta
-            self.mcf_lb_diagnostic.adjust_r_incumbent_makespan = incumbent_makespan
-            self.mcf_lb_diagnostic.adjust_r_last_stage_only_makespan = ls_only_makespan
-            self.mcf_lb_diagnostic.adjust_r_makespan_delta = makespan_delta
+
+        if (
+            adjust_p_by_full_sch_and_last_stage_only_sch
+            or adjust_r_by_full_sch_and_last_stage_only_sch
+        ):
+            self.mcf_lb_diagnostic.adjust_params_last_stage_only_makespan = (
+                ls_only_makespan
+            )
+            self.mcf_lb_diagnostic.adjust_params_incumbent_makespan = incumbent_makespan
+            self.mcf_lb_diagnostic.adjust_params_makespan_delta = makespan_delta
+        if adjust_p_by_full_sch_and_last_stage_only_sch:
+            self.mcf_lb_diagnostic.adjust_p_increment_added = p_adjust
+        if adjust_r_by_full_sch_and_last_stage_only_sch:
+            self.mcf_lb_diagnostic.adjust_r_increment_added = makespan_delta
 
         if r_multiplier != 1.0 or effective_r_increment != 0:
             self._log_effective_release_stats(
@@ -988,12 +1075,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         instance = self.instance
-        if p_increment == 0:
+        if effective_p_increment == 0:
             instance_for_solve = instance
         else:
             last_stage_id = instance.stage_id_list[-1]
             instance_for_solve = FFcDDWParameters.with_stage_processing_time_increment(
-                instance, last_stage_id, p_increment
+                instance, last_stage_id, effective_p_increment
             )
 
         mcf_lb = self.mcf_lb_diagnostic.mcf_lb
@@ -1012,20 +1099,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=None,
         )
-        self.last_stage_only_sol_p_increment = p_increment
+        self.last_stage_only_sol_p_increment = effective_p_increment
         self.mcf_lb_phase_schedules.append(
             ("2_ls_only_sch_from_mcf_lb_heur", result.schedule)
         )
 
         self.logger.info(
             "heuristic_last_stage_only_sch_from_mcf_lb: status=%s, "
-            "obj=%.2f, mcf_lb=%d, elapsed=%.2fs, p_increment=%d, "
+            "obj=%.2f, mcf_lb=%d, elapsed=%.2fs, p_increment=%d (effective=%d), "
             "r_multiplier=%.4g, r_increment=%d (effective=%d).",
             result.status,
             result.obj_value,
             int(mcf_lb),
             result.elapsed_time,
             p_increment,
+            effective_p_increment,
             r_multiplier,
             r_increment,
             effective_r_increment,

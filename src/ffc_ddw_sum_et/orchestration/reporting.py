@@ -506,7 +506,7 @@ class FFcDDWReporter:
 
         self._write_summary_csv()
         self._write_mcf_preemptive_obj_csv()
-        self._write_adjust_r_makespan_delta_csv()
+        self._write_adjust_params_by_makespan_delta_csv()
         self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
         self._write_mcf_lb_pivot_artifacts()
@@ -783,40 +783,56 @@ class FFcDDWReporter:
                 )
         logger.info("MCF preemptive obj CSV written to %s", path)
 
-    def _write_adjust_r_makespan_delta_csv(self) -> None:
-        """Run-scoped long-format CSV of adjust-r makespan deltas.
+    def _write_adjust_params_by_makespan_delta_csv(self) -> None:
+        """Run-scoped long-format CSV of makespan-delta-driven param adjusts.
 
-        Columns: ``scenarioName, insIndex, instanceName, incumbentMakespan,
-        lastStageOnlyMakespan, makespanDelta``. One row per
-        ``(scenario, instance)`` pair where a subroutine ran with
-        ``adjust_r_by_full_sch_and_last_stage_only_sch=True`` (i.e.
-        ``mcf_lb_diagnostic.adjust_r_makespan_delta`` is non-null). Rows
-        are sorted by ``(scenarioName, insIndex)``. Skipped entirely if
-        no scenario produced an adjust-r delta.
+        Unifies the per-instance diagnostic produced by both
+        ``adjust_p_by_full_sch_and_last_stage_only_sch`` and
+        ``adjust_r_by_full_sch_and_last_stage_only_sch``. One row per
+        ``(scenario, instance)`` pair where either knob fired (i.e.
+        ``adjust_params_makespan_delta`` is non-null on the diagnostic).
+
+        Columns: ``scenarioName, insIndex, instanceName,
+        lastStageOnlyMakespan, incumbentMakespan, makespanDelta,
+        pIncrementAdded, rIncrementAdded``. ``pIncrementAdded`` is
+        ``ceil(delta * m_last / n)``; ``rIncrementAdded`` is the delta itself
+        (the adjust-r knob adds ``makespan_delta`` straight to
+        ``r_increment``). The empty string is written for whichever knob did
+        not fire.
         """
-        rows: list[tuple[str, int | None, str, int, int, int]] = []
+        rows: list[
+            tuple[str, int | None, str, int, int, int, int | None, int | None]
+        ] = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
                 diag = ir.mcf_lb_diagnostic
                 if diag is None:
                     continue
-                delta = diag.get("adjust_r_makespan_delta")
-                if delta is None:
+                makespan_delta = diag.get("adjust_params_makespan_delta")
+                if makespan_delta is None:
                     continue
+                ls_only_makespan = diag.get("adjust_params_last_stage_only_makespan")
+                incumbent_makespan = diag.get("adjust_params_incumbent_makespan")
+                p_inc_raw = diag.get("adjust_p_increment_added")
+                r_inc_raw = diag.get("adjust_r_increment_added")
+                p_inc_added = int(p_inc_raw) if p_inc_raw is not None else None
+                r_inc_added = int(r_inc_raw) if r_inc_raw is not None else None
                 rows.append(
                     (
                         sc.name,
                         self._resolve_ins_index(ir.instance_name),
                         ir.instance_name,
-                        int(diag.get("adjust_r_last_stage_only_makespan")),
-                        int(diag.get("adjust_r_incumbent_makespan")),
-                        int(delta),
+                        int(ls_only_makespan),
+                        int(incumbent_makespan),
+                        int(makespan_delta),
+                        p_inc_added,
+                        r_inc_added,
                     )
                 )
         if not rows:
             return
         rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
-        path = self.layout.artifact_path("adjust_r_makespan_delta_csv")
+        path = self.layout.artifact_path("adjust_params_by_makespan_delta_csv")
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(
@@ -827,27 +843,33 @@ class FFcDDWReporter:
                     "lastStageOnlyMakespan",
                     "incumbentMakespan",
                     "makespanDelta",
+                    "pIncrementAdded",
+                    "rIncrementAdded",
                 )
             )
             for (
                 scenario_name,
                 ins_index,
                 instance_name,
-                incumbent_makespan,
                 ls_only_makespan,
+                incumbent_makespan,
                 delta,
+                p_inc_added,
+                r_inc_added,
             ) in rows:
                 writer.writerow(
                     (
                         scenario_name,
                         "" if ins_index is None else ins_index,
                         instance_name,
-                        incumbent_makespan,
                         ls_only_makespan,
+                        incumbent_makespan,
                         delta,
+                        "" if p_inc_added is None else p_inc_added,
+                        "" if r_inc_added is None else r_inc_added,
                     )
                 )
-        logger.info("adjust_r makespan-delta CSV written to %s", path)
+        logger.info("adjust_params_by_makespan_delta CSV written to %s", path)
 
     def _write_last_stage_only_obj_csv(self) -> None:
         """Run-scoped long-format CSV of ``last_stage_only_sol`` objs.
