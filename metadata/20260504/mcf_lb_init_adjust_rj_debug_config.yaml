@@ -5,17 +5,17 @@ ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
 ins_index: [ 0, 1, 2, 3 ]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
-output_dir: output/20260504
+output_dir: output/20260504_debug
 
-instance_worker_cnt: 96
+instance_worker_cnt: 4
 
 draw_gantt: false
 painter_thread_cnt: 16
 
 scenarios:
-  - name: "build_full_sch_p+0_r_aujust"
+  - name: "build_full_sch_r_adjust"
     timelimit: 300.0
-    output_subdir: "build_full_sch_p+0_r+0"
+    output_subdir: "build_full_sch_r_adjust"
     subroutine_flow:
       - method: apply_lb_by_mcf
         draw_heatmap: false
