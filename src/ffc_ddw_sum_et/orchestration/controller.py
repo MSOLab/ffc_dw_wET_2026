@@ -558,9 +558,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             _ensure_makespans()
             self.logger.info(
                 "apply_lb_by_mcf: adjust_r_by_full_sch_and_last_stage_only_sch=True, "
-                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d",
+                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d, "
+                "r_adjust=%d",
                 incumbent_makespan,
                 ls_only_makespan,
+                makespan_delta,
                 makespan_delta,
             )
             effective_r_increment = r_increment + makespan_delta
@@ -1046,9 +1048,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self.logger.info(
                 "heuristic_last_stage_only_sch_from_mcf_lb: "
                 "adjust_r_by_full_sch_and_last_stage_only_sch=True, "
-                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d",
+                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d, "
+                "r_adjust=%d",
                 incumbent_makespan,
                 ls_only_makespan,
+                makespan_delta,
                 makespan_delta,
             )
             effective_r_increment = r_increment + makespan_delta
