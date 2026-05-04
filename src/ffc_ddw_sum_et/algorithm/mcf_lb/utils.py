@@ -51,6 +51,7 @@ def pm_pmtn_sort_job_sequence_with_log(
     instance: FFcDDWParameters,
     *,
     logger: logging.Logger | None = None,
+    log_level: int = logging.DEBUG,
     job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
 ) -> list[str]:
     """Sort jobs by a :data:`PmPrmpSortKey`, with optional rank-by-rank logging.
@@ -69,8 +70,9 @@ def pm_pmtn_sort_job_sequence_with_log(
         job_2_pos = {j: i for i, j in enumerate(job_id_list)}
         ewt = instance.job_2_ewt_map or dict.fromkeys(job_id_list, 1)
         twt = instance.job_2_twt_map or dict.fromkeys(job_id_list, 1)
-        id_w = max(len(j) for j in job_id_list)
-        logger.info(
+        id_w: int = max(len(j) for j in job_id_list)
+        logger.log(
+            log_level,
             "MCF-induced job sequence "
             "(rank | %-*s | width | p_cj | width/p_cj | (w-+w+) | native_pos):",
             id_w,
@@ -80,7 +82,8 @@ def pm_pmtn_sort_job_sequence_with_log(
             window = window_map[j]
             width = (window[1] - window[0]) if window is not None else None
             ratio = (width / duration_map[j]) if width is not None else None
-            logger.info(
+            logger.log(
+                log_level,
                 "  %4d | %-*s | %s | %4d | %s | %4d | %4d",
                 rank,
                 id_w,
