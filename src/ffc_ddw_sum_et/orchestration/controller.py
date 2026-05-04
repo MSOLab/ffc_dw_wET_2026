@@ -432,6 +432,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         r_increment: int = 0,
         adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
+        adjust_r_by_half: bool = False,
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
@@ -554,6 +555,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         effective_r_increment = r_increment
         if adjust_r_by_full_sch_and_last_stage_only_sch:
             _ensure_makespans()
+            r_adjust = makespan_delta
+            if adjust_r_by_half:
+                r_adjust = math.ceil(makespan_delta / 2)
             self.logger.info(
                 "apply_lb_by_mcf: adjust_r_by_full_sch_and_last_stage_only_sch=True, "
                 "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d, "
@@ -561,9 +565,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 incumbent_makespan,
                 ls_only_makespan,
                 makespan_delta,
-                makespan_delta,
+                r_adjust,
             )
-            effective_r_increment = r_increment + makespan_delta
+            effective_r_increment = r_increment + r_adjust
 
         start_elapsed = time.monotonic()
         diag = MCFLBDiagnostic()
@@ -579,7 +583,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if adjust_p_by_full_sch_and_last_stage_only_sch:
             diag.adjust_p_increment_added = p_adjust
         if adjust_r_by_full_sch_and_last_stage_only_sch:
-            diag.adjust_r_increment_added = makespan_delta
+            diag.adjust_r_increment_added = r_adjust
 
         if r_multiplier != 1.0 or effective_r_increment != 0:
             self._log_effective_release_stats(
@@ -917,6 +921,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         r_increment: int = 0,
         adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
+        adjust_r_by_half: bool = False,
     ) -> SubroutineReport:
         """Step method: midpoint warm-start across all jobs from the MCF
         preemptive LB, then a CP-free heuristic refinement
@@ -1044,6 +1049,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         effective_r_increment = r_increment
         if adjust_r_by_full_sch_and_last_stage_only_sch:
             _ensure_makespans()
+            r_adjust = makespan_delta
+            if adjust_r_by_half:
+                r_adjust = math.ceil(makespan_delta / 2)
             self.logger.info(
                 "heuristic_last_stage_only_sch_from_mcf_lb: "
                 "adjust_r_by_full_sch_and_last_stage_only_sch=True, "
@@ -1052,9 +1060,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 incumbent_makespan,
                 ls_only_makespan,
                 makespan_delta,
-                makespan_delta,
+                r_adjust,
             )
-            effective_r_increment = r_increment + makespan_delta
+            effective_r_increment = r_increment + r_adjust
 
         if (
             adjust_p_by_full_sch_and_last_stage_only_sch
@@ -1068,7 +1076,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if adjust_p_by_full_sch_and_last_stage_only_sch:
             self.mcf_lb_diagnostic.adjust_p_increment_added = p_adjust
         if adjust_r_by_full_sch_and_last_stage_only_sch:
-            self.mcf_lb_diagnostic.adjust_r_increment_added = makespan_delta
+            self.mcf_lb_diagnostic.adjust_r_increment_added = r_adjust
 
         if r_multiplier != 1.0 or effective_r_increment != 0:
             self._log_effective_release_stats(
