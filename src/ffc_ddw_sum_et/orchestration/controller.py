@@ -407,8 +407,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``ceil(p_sum_except_last_stage(j) * r_multiplier) + r_increment``
         so we can verify the effective r values before the solver runs.
         """
-        import math
-
         base = self.instance.get_job_2_p_sum_except_last_stage()
         if r_multiplier != 1.0:
             base = {j: math.ceil(v * r_multiplier) for j, v in base.items()}
@@ -747,6 +745,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=mcf_lb,
         )
+        self.last_stage_only_sol_p_increment = 0
         self.mcf_lb_phase_schedules.extend(result.intermediate_schedules)
         self.mcf_lb_phase_schedules.append(
             ("2_ls_only_sch_from_neh_cp", result.schedule)
@@ -1413,6 +1412,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=phase2.last_stage_only_obj,
             obj_bound=obj_bound_by_mcf,
         )
+        self.last_stage_only_sol_p_increment = 0
         for candidate in phase2.candidates:
             self.mcf_lb_phase_schedules.append(
                 (
@@ -1663,6 +1663,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=out_schedule, obj_value=cp_obj, obj_bound=mcf_lb
         )
+        self.last_stage_only_sol_p_increment = 0
         self.mcf_lb_phase_schedules.append(
             ("2_ls_only_sch_from_cp_sat_lb", out_schedule)
         )
