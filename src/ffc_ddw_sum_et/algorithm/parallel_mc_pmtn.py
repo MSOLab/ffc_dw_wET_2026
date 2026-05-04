@@ -130,7 +130,7 @@ class ParallelMachinePreemptionMcf:
         w_plus = _resolve_weight_map(instance.job_2_twt_map, self.calJ, "twt")
         self.mc_count = instance.machine_count_per_stage[-1]
 
-        # T = max_j(max(r_j, d^-_j) + (sum(p_j) / mc_count)
+        # T = max_j(max(r_j, d^-_j - p_j)) + ceil(sum(p_j) / mc_count)
         max_release = max(self.r[j] for j in self.calJ)
         max_dminus_minus_p = max(ddw[j][0] - self.p[j] for j in self.calJ)
         p_sum = sum(self.p[j] for j in self.calJ)

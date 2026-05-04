@@ -177,3 +177,31 @@ because only the legacy path populates the diag-dict copy.)
   helper.
 
 Until then, leave as-is.
+
+## `_insert_jobs_at_desired_starts` desired-start floor
+
+`src/ffc_ddw_sum_et/algorithm/mcf_lb/last_stage_only.py:519` clamps the
+midpoint warm-start `desired_start` at `0`:
+
+```python
+desired_start = max((t_min + t_max - p_j) // 2, 0)
+```
+
+A tighter floor would be `job_2_release[job_id]`, since the job cannot
+start before its upstream-stage release time anyway. Using the release
+floor would let the midpoint placement skip release-blocked positions
+directly instead of relying on the downstream `make_semi_active` /
+profile-fix solve to pull operations forward to the release time.
+
+**Why:** YAGNI today — the current `0` floor is conservative and the
+downstream passes recover the release-time constraint. Switching the
+floor changes both (a) which machine wins the `_interval_free` short
+path and (b) the `dist_a` / `dist_b` lex-tiebreak distances, so it has
+non-trivial behaviour effects worth measuring before adopting.
+
+**When to act:** When a profiling run shows midpoint placements being
+consistently overridden by `make_semi_active` because the chosen
+machine had earlier free space than the release time, OR when adding a
+new placement-priority mode that would benefit from a tighter window.
+Likely fix: replace the literal `0` with `job_2_release[job_id]` and
+re-run the `mcf_lb_init_*` benchmark sweep to confirm objective parity.

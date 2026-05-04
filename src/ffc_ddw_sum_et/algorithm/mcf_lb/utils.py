@@ -58,8 +58,8 @@ def pm_pmtn_sort_job_sequence_with_log(
 
     Delegates the sort to
     :func:`pm_pmtn_sort_job_sequence_from_window_map`. When ``logger`` is
-    provided, emits a rank-by-rank table at INFO level so a reader can
-    verify the ordering.
+    provided, emits a rank-by-rank table at ``log_level`` (default
+    :data:`logging.DEBUG`) so a reader can verify the ordering.
     """
     sorted_jobs = pm_pmtn_sort_job_sequence_from_window_map(
         window_map, duration_map, instance, job_priority

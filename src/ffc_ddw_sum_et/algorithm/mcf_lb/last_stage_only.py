@@ -515,7 +515,6 @@ def _insert_jobs_at_desired_starts(
             no_window_jobs.append(job_id)
             continue
         t_min, t_max = window
-        # TODO: 0 -> job_2_release[job_id]
         desired_start = max((t_min + t_max - p_j) // 2, 0)
         desired_end = desired_start + p_j
 
