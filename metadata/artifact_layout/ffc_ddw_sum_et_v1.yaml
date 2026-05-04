@@ -19,16 +19,11 @@ artifacts:
     zone: progress
     kind: mcf_lb_phase_schedule
     file_template: "{instance_name}_{phase_name}.yaml"
-  - scope: instance
-    zone: progress
-    kind: last_stage_cp_sat_schedule
-    file_template: "{instance_name}_last_stage_cp_sat_schedule.yaml"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
   # the renderer is picked from the source yaml's content type, so a single
-  # kind suffices. `last_stage_cp_sat_gantt_png` is split out because its
-  # source yaml uses the dedicated `last_stage_cp_sat_schedule` kind.
+  # kind suffices.
   - scope: instance
     zone: report
     kind: gantt_png
@@ -37,10 +32,6 @@ artifacts:
     zone: report
     kind: phase_gantt_png
     file_template: "{instance_name}_{phase_name}_gantt.png"
-  - scope: instance
-    zone: report
-    kind: last_stage_cp_sat_gantt_png
-    file_template: "{instance_name}_last_stage_cp_sat_gantt.png"
 
   # ---- scenario ----
   - scope: scenario
@@ -57,6 +48,15 @@ artifacts:
   - scope: run
     kind: mcf_lb_dashboard
     file_template: "{run_id}_mcf_lb_dashboard.html"
+  - scope: run
+    kind: mcf_preemptive_obj_csv
+    file_template: "{run_id}_mcf_preemptive_obj.csv"
+  - scope: run
+    kind: adjust_params_by_makespan_delta_csv
+    file_template: "{run_id}_adjust_params_by_makespan_delta.csv"
+  - scope: run
+    kind: last_stage_only_obj_csv
+    file_template: "{run_id}_last_stage_only_obj.csv"
   - scope: run
     kind: mcf_lb_lastStageOnlyObj_summary
     file_template: "{run_id}_mcf_lb_last_stage_only_obj.csv"

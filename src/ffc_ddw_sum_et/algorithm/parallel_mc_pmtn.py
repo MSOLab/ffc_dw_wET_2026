@@ -6,6 +6,8 @@ from ortools.graph.python.min_cost_flow import SimpleMinCostFlow
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
+__all__ = ["ParallelMachinePreemptionMcf"]
+
 
 def _resolve_weight_map(
     raw: dict[str, int], jobs: list[str], kind: str
@@ -86,26 +88,53 @@ class ParallelMachinePreemptionMcf:
         self.opt_cost = 0
 
     @classmethod
-    def from_instance(cls, instance: FFcDDWParameters) -> ParallelMachinePreemptionMcf:
+    def from_instance(
+        cls,
+        instance: FFcDDWParameters,
+        *,
+        r_multiplier: float = 1.0,
+        r_increment: int = 0,
+    ) -> ParallelMachinePreemptionMcf:
+        if r_multiplier < 0:
+            raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
+        if r_increment < 0:
+            raise ValueError(
+                f"r_increment must be 0 or a positive integer; got {r_increment}."
+            )
         obj = cls()
         obj.name = f"{cls.__name__}_{instance.name}"
-        obj._define_parameters(instance)
+        obj._define_parameters(
+            instance, r_multiplier=r_multiplier, r_increment=r_increment
+        )
         obj._build_mcf()
         return obj
 
     # Model construction
 
-    def _define_parameters(self, instance: FFcDDWParameters) -> None:
+    def _define_parameters(
+        self,
+        instance: FFcDDWParameters,
+        *,
+        r_multiplier: float = 1.0,
+        r_increment: int = 0,
+    ) -> None:
         self.calJ = instance.job_id_list
         self.p = instance.get_job_2_p_map_for_stage(instance.stage_id_list[-1])
         self.r = instance.get_job_2_p_sum_except_last_stage()
+        if r_multiplier != 1.0:
+            self.r = {j: math.ceil(v * r_multiplier) for j, v in self.r.items()}
+        if r_increment != 0:
+            self.r = {j: v + r_increment for j, v in self.r.items()}
         ddw = instance.job_2_due_window_map
         w_minus = _resolve_weight_map(instance.job_2_ewt_map, self.calJ, "ewt")
         w_plus = _resolve_weight_map(instance.job_2_twt_map, self.calJ, "twt")
         self.mc_count = instance.machine_count_per_stage[-1]
 
-        # T = max r_j + sum p_j
-        t_max = max(self.r.values()) + sum(self.p.values())
+        # T = max_j(max(r_j, d^-_j - p_j)) + ceil(sum(p_j) / mc_count)
+        max_release = max(self.r[j] for j in self.calJ)
+        max_dminus_minus_p = max(ddw[j][0] - self.p[j] for j in self.calJ)
+        p_sum = sum(self.p[j] for j in self.calJ)
+        t_max = max(max_release, max_dminus_minus_p) + math.ceil(p_sum / self.mc_count)
         self.calT = list(range(1, t_max + 1))
         if not self.calT:
             raise ValueError("calT cannot be empty; check instance parameters")
@@ -210,6 +239,21 @@ class ParallelMachinePreemptionMcf:
             completion_time = max(x_val[j].keys()) if x_val[j] else None
             job_2_completion_time[j] = completion_time
         return job_2_completion_time
+
+    def get_job_2_time_window_map(self) -> dict[str, tuple[int, int] | None]:
+        """For each job, return ``(min_t, max_t)`` over arcs ``(j, t)`` with
+        ``x_jt > 0`` in the optimal MCF flow.
+
+        ``None`` for jobs with no flow (cannot occur once ``solve()`` is
+        optimal because every job carries supply ``p_j > 0``, but the
+        signature mirrors the start/completion accessors for consistency).
+        """
+        x_val = self.get_variable_value_dict()
+        job_2_window: dict[str, tuple[int, int] | None] = {}
+        for j in self.calJ:
+            times = x_val[j].keys()
+            job_2_window[j] = (min(times), max(times)) if times else None
+        return job_2_window
 
     def get_job_priority_by_avg_time(self) -> dict[str, float | None]:
         x_val = self.get_variable_value_dict()

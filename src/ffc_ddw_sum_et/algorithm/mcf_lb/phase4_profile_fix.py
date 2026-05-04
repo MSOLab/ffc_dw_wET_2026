@@ -67,7 +67,7 @@ def run_phase4(
     incumbent, using ``obj_bound_final`` as the bound.
     """
     result, total_solve_sec, last_status_name = solve_full_cp_with_profile_fix(
-        phase3.dispatched_schedule,
+        phase3.full_sch_from_ls_only_sch,
         instance,
         pf_method=pf_method,
         solver_thread_cnt=solver_thread_cnt,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 from routix.stopping_criteria import StoppingCriteria
 
 from ffc_ddw_sum_et.algorithm.base.alg_record import WorkStatus
@@ -135,3 +136,182 @@ def test_neh_cp_registers_full_schedule() -> None:
 
     sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
     assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_build_full_sch_from_last_stage_only_sch() -> None:
+    """``build_full_sch_from_last_stage_only_sch`` extends a partial
+    last-stage-only schedule into a feasible full incumbent via reverse
+    dispatch.
+    """
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    controller.apply_lb_by_mcf()
+    controller.single_pass_last_stage_only_sch_from_mcf_lb(total_tl=1.0)
+    assert controller.last_stage_only_sol is not None
+
+    report = controller.build_full_sch_from_last_stage_only_sch()
+
+    assert report.obj_value is not None
+    assert report.obj_bound == 0.0
+    assert report.elapsed_time >= 0
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+    assert incumbent.obj_bound == 0.0
+
+    # Every instance job must be scheduled at every stage.
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+    # Phase schedule entries appended for post-run Gantt rendering.
+    phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
+    assert "6_full_sch_from_ls_only_sch" in phase_names
+    if instance.stage_count > 1:
+        assert "3_ls_only_sch_delayed" in phase_names
+        assert "4_ls_only_sch_flipped" in phase_names
+        assert "5_full_sch_before_unflip" in phase_names
+
+
+def test_heuristic_last_stage_only_sch_from_mcf_lb_sets_solution() -> None:
+    """The heuristic step populates ``last_stage_only_sol`` (no incumbent
+    yet — that is what ``build_full_sch_from_last_stage_only_sch`` does)
+    and appends a labelled snapshot to ``mcf_lb_phase_schedules``.
+    """
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    controller.apply_lb_by_mcf()
+    report = controller.heuristic_last_stage_only_sch_from_mcf_lb()
+
+    assert report.obj_value is not None
+    assert report.obj_bound is None
+    assert report.elapsed_time >= 0
+
+    assert controller.last_stage_only_sol is not None
+    assert controller.last_stage_only_sol.schedule is not None
+    assert controller.last_stage_only_sol.obj_value == report.obj_value
+    assert controller.last_stage_only_sol_p_increment == 0
+
+    phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
+    assert "2_ls_only_sch_from_mcf_lb_heur" in phase_names
+
+
+def test_heuristic_last_stage_only_sch_then_build_full() -> None:
+    """Chaining the heuristic last-stage-only step with
+    ``build_full_sch_from_last_stage_only_sch`` produces a full incumbent
+    covering every (stage, job).
+    """
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    controller.apply_lb_by_mcf()
+    controller.heuristic_last_stage_only_sch_from_mcf_lb()
+    report = controller.build_full_sch_from_last_stage_only_sch()
+
+    assert report.obj_value is not None
+    assert report.obj_bound == 0.0
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.run_mcf_lb_then_neh_cp(cp_tl=1.0)
+
+    assert report.obj_value is not None
+    assert report.obj_bound is not None
+    assert report.obj_bound >= 0
+    assert report.obj_value >= report.obj_bound  # weighted ET dominates MCF LB
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+    assert incumbent.obj_bound == report.obj_bound
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+    # MCF preemptive schedule must be retained for the post-run Gantt pipeline.
+    assert controller.mcf_preemptive_schedule is not None
+    assert any(
+        name == "1_mcf_preemptive_sch" for name, _ in controller.mcf_lb_phase_schedules
+    )
+
+
+def test_run_mcf_lb_then_neh_cp_uses_window_width_sequence() -> None:
+    """Sanity check: the controller-derived sequence is a valid permutation
+    of the instance jobs (the dispatcher's own validation would otherwise
+    raise ValueError)."""
+    from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
+
+    instance = _make_instance()
+    controller = _make_controller(instance)
+    mcf = ParallelMachinePreemptionMcf.from_instance(instance)
+    mcf.solve()
+
+    sequence = controller._mcf_window_width_job_sequence(mcf, instance)
+
+    assert sorted(sequence) == sorted(instance.job_id_list)
+
+
+def test_r_increment_negative_raises() -> None:
+    """Both MCF-LB controller steps must reject ``r_increment < 0`` with
+    ``ValueError`` (mirroring the ``p_increment`` / ``r_multiplier``
+    guards) so a typo cannot silently shift release dates the wrong way.
+    """
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    with pytest.raises(ValueError):
+        controller.apply_lb_by_mcf(r_increment=-1)
+
+    # Establish a valid mcf_preemptive_schedule + diagnostic so the
+    # heuristic step's r_increment guard is what trips, not the
+    # missing-prerequisite guard.
+    controller.apply_lb_by_mcf()
+    with pytest.raises(ValueError):
+        controller.heuristic_last_stage_only_sch_from_mcf_lb(r_increment=-1)
+
+
+def test_apply_lb_by_mcf_r_increment_voids_lb_and_does_not_decrease() -> None:
+    """``r_increment > 0`` shifts every release date later, so the MCF
+    objective on the augmented instance cannot be smaller than the
+    baseline. It is also no longer a valid global LB on the original
+    instance, so ``SubroutineReport.obj_bound`` must be ``None``.
+    """
+    instance = _make_instance()
+
+    baseline_controller = _make_controller(instance)
+    baseline_report = baseline_controller.apply_lb_by_mcf()
+    assert baseline_report.obj_bound is not None
+    baseline_mcf_lb = baseline_controller.mcf_lb_diagnostic.mcf_lb
+
+    incremented_controller = _make_controller(instance)
+    incremented_report = incremented_controller.apply_lb_by_mcf(r_increment=4)
+
+    assert incremented_report.obj_bound is None
+    assert incremented_controller.mcf_lb_diagnostic.mcf_lb >= baseline_mcf_lb

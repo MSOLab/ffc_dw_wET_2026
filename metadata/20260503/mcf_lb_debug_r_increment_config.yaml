@@ -1,0 +1,83 @@
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [0]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260503_debug
+
+instance_worker_cnt: 1
+
+draw_gantt: true
+painter_thread_cnt: 4
+
+scenarios:
+  - name: baseline
+    timelimit: 60.0
+    output_subdir: baseline
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "end_time"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 0
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 0
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: r_inc_8
+    timelimit: 60.0
+    output_subdir: r_inc_8
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "end_time"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 8
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 8
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: r_inc_32
+    timelimit: 60.0
+    output_subdir: r_inc_32
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "end_time"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 32
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 32
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: r_mult_2_0_r_inc_8
+    timelimit: 60.0
+    output_subdir: r_mult_2_0_r_inc_8
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "end_time"
+        p_increment: 0
+        r_multiplier: 2.0
+        r_increment: 8
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 0
+        r_multiplier: 2.0
+        r_increment: 8
+      - method: build_full_sch_from_last_stage_only_sch

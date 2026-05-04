@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import cached_property
 from io import StringIO
 from typing import Self, TextIO
 
-from ..io import TextDataParser
 from .base.job_stage_p import JobStageProcessingTimeManager
 from .ffc_params import FFcParameters
 
@@ -62,6 +62,22 @@ class FFcDDWParameters(FFcParameters):
     def job_2_due_window_map(self) -> dict[str, tuple[int, int]]:
         """Get a copy of the per-job due date window bounds."""
         return self._job_2_due_window_map.copy()
+
+    @cached_property
+    def job_2_dw_lb_map(self) -> dict[str, int]:
+        """Get a mapping from job ID to due window lower bound (d^-_j)."""
+        return {
+            job_id: due_window[0]
+            for job_id, due_window in self._job_2_due_window_map.items()
+        }
+
+    @cached_property
+    def job_2_dw_ub_map(self) -> dict[str, int]:
+        """Get a mapping from job ID to due window upper bound (d^+_j)."""
+        return {
+            job_id: due_window[1]
+            for job_id, due_window in self._job_2_due_window_map.items()
+        }
 
     @property
     def job_2_ewt_map(self) -> dict[str, int]:
@@ -159,6 +175,57 @@ class FFcDDWParameters(FFcParameters):
         )
 
     @classmethod
+    def with_stage_processing_time_increment(
+        cls,
+        instance: FFcParameters,
+        stage_id: str,
+        increment: int,
+    ) -> Self:
+        """Return a new FFcDDWParameters identical to ``instance`` except the
+        processing time of every job at ``stage_id`` is increased by
+        ``increment``.
+
+        ``increment`` must be a non-negative ``int``; ``0`` produces a copy
+        with identical processing times. Other stages, due windows, weights,
+        and machine layout are preserved.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.with_stage_processing_time_increment requires "
+                f"FFcDDWParameters, got {type(instance).__name__}"
+            )
+        if not isinstance(increment, int) or increment < 0:
+            raise ValueError(
+                f"increment must be a non-negative integer; got {increment!r}."
+            )
+        if stage_id not in instance.stage_id_list:
+            raise ValueError(
+                f"stage_id {stage_id!r} not in instance.stage_id_list "
+                f"{instance.stage_id_list!r}."
+            )
+
+        # ``p_manager.df`` uses a positional column layout (RangeIndex),
+        # so look up the stage column by index rather than by name.
+        stage_index = instance.stage_id_list.index(stage_id)
+        new_df = instance.p_manager.df.copy()
+        new_df.iloc[:, stage_index] = new_df.iloc[:, stage_index] + increment
+        new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)
+        new_stage_2_machines_map = {
+            s: list(instance.stage_2_machines_map[s]) for s in instance.stage_id_list
+        }
+        return cls(
+            instance.name,
+            list(instance.job_id_list),
+            list(instance.stage_id_list),
+            new_stage_2_machines_map,
+            new_p_manager,
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+            instance.generation_params,
+        )
+
+    @classmethod
     def create_instance_of_stage_subset(
         cls,
         instance: FFcParameters,
@@ -218,6 +285,8 @@ class FFcDDWParameters(FFcParameters):
 
     @classmethod
     def from_pra_2017_data(cls, name: str, stream: TextIO) -> FFcDDWParameters:
+        from ffc_ddw_sum_et.io import TextDataParser
+
         marker = TextDataParser.strip_a_line(stream)
         if marker != "HFSDDW":
             raise ValueError(
@@ -378,40 +447,24 @@ class FFcDDWParameters(FFcParameters):
     # Job → priority score maps
     # -------------------------
 
-    def get_job_2_due_date_lb_map(self) -> dict[str, int]:
-        """Get a mapping from job ID to due date lower bound (d^{-}_j)."""
-        return {
-            job_id: due_window[0]
-            for job_id, due_window in self._job_2_due_window_map.items()
-        }
-
     def get_job_2_due_date_lb_minus_p_map(self) -> dict[str, float]:
         """Get a mapping from job ID to due date lower bound minus processing time."""
-        job_2_due_date_lb_map = self.get_job_2_due_date_lb_map()
         job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
             self.job_id_list, self.stage_id_list
         )
         return {
-            job_id: job_2_due_date_lb_map[job_id]
+            job_id: self.job_2_dw_lb_map[job_id]
             - sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }
 
-    def get_job_2_due_date_ub_map(self) -> dict[str, int]:
-        """Get a mapping from job ID to due date upper bound (d^{+}_j)."""
-        return {
-            job_id: due_window[1]
-            for job_id, due_window in self._job_2_due_window_map.items()
-        }
-
     def get_job_2_due_date_ub_minus_p_map(self) -> dict[str, float]:
         """Get a mapping from job ID to due date upper bound minus processing time."""
-        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
         job_2_stage_2_value_map = self.p_manager.job_2_stage_2_value_map(
             self.job_id_list, self.stage_id_list
         )
         return {
-            job_id: job_2_due_date_ub_map[job_id]
+            job_id: self.job_2_dw_ub_map[job_id]
             - sum(job_2_stage_2_value_map[job_id].values())
             for job_id in self.job_id_list
         }
@@ -498,10 +551,9 @@ class FFcDDWParameters(FFcParameters):
         Get the EDDUB (Earliest Due Date Upper Bound) job sequence.
         Sort by job sequence in job_id_list to break ties.
         """
-        job_2_due_date_ub_map = self.get_job_2_due_date_ub_map()
         job_2_pos = {job_id: pos for pos, job_id in enumerate(self._job_id_list)}
         return sorted(
-            self.job_id_list, key=lambda j: (job_2_due_date_ub_map[j], job_2_pos[j])
+            self.job_id_list, key=lambda j: (self.job_2_dw_ub_map[j], job_2_pos[j])
         )
 
     def get_weight_due_pos_job_sequence(self) -> list[str]:

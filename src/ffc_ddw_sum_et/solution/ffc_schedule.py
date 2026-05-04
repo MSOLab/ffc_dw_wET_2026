@@ -1027,7 +1027,33 @@ class FFcSchedule:
         start_from_stage: StageIdType | None = None,
         *,
         operation_set: set[OperationType] | frozenset[OperationType] = frozenset(),
+        job_2_release_map: Mapping[JobIdType, int] | None = None,
     ) -> None:
+        """Shift operations left to produce a semi-active schedule in-place.
+
+        Each selected operation is moved as early as possible without changing
+        machine order, respecting both machine availability and precedence
+        (previous-stage end time). Non-selected operations keep their original
+        times but are validated for feasibility.
+
+        Args:
+            stage_2_job_2_duration: Processing durations indexed by stage then job.
+            start_from_stage: If given, only stages from this stage onward are
+                updated; stages before it are left unchanged. Defaults to None
+                (all stages).
+            operation_set: Set of ``(job_id, stage_id, mc_id)`` triples to
+                left-shift. When empty (default), every operation is shifted.
+                Operations absent from a non-empty set are treated as fixed.
+            job_2_release_map: External release times applied only at the first
+                processed stage. Each job's effective release time is
+                ``max(prev_stage_end, job_2_release_map[job])``; missing keys
+                default to 0. Ignored at subsequent stages.
+
+        Raises:
+            ValueError: If a fixed operation's original start time is earlier
+                than ``max(release_t, machine_available)``, i.e. the pinned
+                position is infeasible given current precedence constraints.
+        """
         first_idx = 0
         if start_from_stage is not None:
             self._validate_stage(start_from_stage)
@@ -1053,6 +1079,8 @@ class FFcSchedule:
                 for job_id, old_start, old_end in job_tuple_seq:
                     duration = job_2_duration[job_id]
                     release_t = prev_stage_end_times.get(job_id, 0)
+                    if job_2_release_map is not None and stage_idx == first_idx:
+                        release_t = max(release_t, job_2_release_map.get(job_id, 0))
                     if self._is_selected_operation(
                         operation_set, stage_id, mc_id, job_id
                     ):
@@ -1419,6 +1447,54 @@ class FFcSchedule:
                     )
                 ]
             self._rebuild_stage_time_caches(stage_id)
+
+    def delay_job_latest_leq_obj_contrib(
+        self,
+        job_2_dw_ub_map: Mapping[JobIdType, int],
+    ) -> None:
+        """Delay each last-stage operation to the latest end time that keeps
+        its objective contribution non-positive.
+
+        For every machine on the last stage, operations are processed from
+        the latest to the earliest. An operation is shifted only when its
+        current end is strictly before ``d_plus[j]``; the new end becomes
+        ``min(d_plus[j], next_op_new_start)`` (or ``d_plus[j]`` if no next
+        operation exists on the same machine). Tardy operations
+        (``old_end >= d_plus[j]``) are left in place.
+
+        Args:
+            job_2_dw_ub_map: ``job_id -> d_plus[j]`` mapping (typically
+                ``FFcDDWParameters.job_2_dw_ub_map``).
+        """
+        if not self.stages:
+            return
+
+        last_stage_id = self.stages[-1]
+        for mc_id in self.machines_per_stage[last_stage_id]:
+            seq = self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id]
+            if not seq:
+                continue
+
+            next_start: int | None = None
+            new_seq_rev: list[tuple[JobIdType, int, int]] = []
+            for job_id, old_start, old_end in reversed(seq):
+                d_plus = job_2_dw_ub_map[job_id]
+                if old_end < d_plus:
+                    target_end = (
+                        d_plus if next_start is None else min(d_plus, next_start)
+                    )
+                    new_end = target_end
+                    new_start = new_end - (old_end - old_start)
+                else:
+                    new_start, new_end = old_start, old_end
+                new_seq_rev.append((job_id, new_start, new_end))
+                next_start = new_start
+
+            self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id] = list(
+                reversed(new_seq_rev)
+            )
+
+        self._rebuild_stage_time_caches(last_stage_id)
 
     def insert_idle_time(
         self,

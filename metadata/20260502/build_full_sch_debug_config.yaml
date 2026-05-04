@@ -1,0 +1,30 @@
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1, 2, 3 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260502
+
+instance_worker_cnt: 4
+
+draw_gantt: true
+painter_thread_cnt: 8
+
+scenarios:
+  - name: build_full_sch_debug
+    timelimit: 300.0
+    output_subdir: build_full_sch_debug
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "end_time"
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+        log_cp_search_progress: true
+      - method: build_full_sch_from_last_stage_only_sch

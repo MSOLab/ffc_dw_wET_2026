@@ -42,14 +42,22 @@ def main() -> None:
     )
     parser.add_argument(
         "--sort",
-        choices=["due2-window", "neh-cp"],
-        default="due2-window",
-        help=(
-            "Job row ordering in the heatmap. "
-            "'due2-window' sorts by max(r_j, d⁺−p) asc, then d⁺ asc, then d⁻ asc. "
-            "'neh-cp' sorts by (max(w⁻,w⁺) desc, w⁻+w⁺ desc, window width asc, position). "
-            "Defaults to 'due2-window'."
-        ),
+        choices=[
+            "due2-weight-pos",
+            "weight-due-pos",
+            "due-weight-pos",
+            "due*-weight-pos",
+            "wxd1",
+            "wxd2",
+            "1_rj_prmp_rel_dev",
+            "1_rj_prmp_abs_dev",
+            "start_time",
+            "end_time",
+            "start_time_maxw",
+            "end_time_maxw",
+        ],
+        default="due2-weight-pos",
+        help="Job row ordering in the heatmap. Defaults to 'due2-weight-pos'.",
     )
     args = parser.parse_args()
 

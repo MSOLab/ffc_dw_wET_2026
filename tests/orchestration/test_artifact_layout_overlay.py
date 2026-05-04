@@ -19,7 +19,9 @@ from ffc_ddw_sum_et.orchestration.artifact_layout import (
 )
 
 
-def _layout(tmp_path: Path, run_id: str = "20260429T000000_000000") -> FFcArtifactLayout:
+def _layout(
+    tmp_path: Path, run_id: str = "20260429T000000_000000"
+) -> FFcArtifactLayout:
     return FFcArtifactLayout(run_root=tmp_path / run_id, run_id=run_id)
 
 
@@ -42,34 +44,26 @@ def test_ffc_progress_kinds_routed_to_progress_zone(tmp_path: Path) -> None:
     diag = layout.artifact_path(
         "mcf_lb_diagnostic", scenario_name="sc", instance_name="ins"
     )
-    last_stage = layout.artifact_path(
-        "last_stage_cp_sat_schedule", scenario_name="sc", instance_name="ins"
-    )
     phase = layout.artifact_path(
         "mcf_lb_phase_schedule",
         scenario_name="sc",
         instance_name="ins",
-        phase_name="1_mcf_preemptive_schedule",
+        phase_name="1_mcf_preemptive_sch",
     )
-    for p in (diag, last_stage, phase):
+    for p in (diag, phase):
         assert p.parent.name == "progress", p
 
 
 def test_ffc_report_kinds_routed_to_report_zone(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
-    main_g = layout.artifact_path(
-        "gantt_png", scenario_name="sc", instance_name="ins"
-    )
+    main_g = layout.artifact_path("gantt_png", scenario_name="sc", instance_name="ins")
     phase_g = layout.artifact_path(
         "phase_gantt_png",
         scenario_name="sc",
         instance_name="ins",
-        phase_name="6_dispatched_schedule",
+        phase_name="6_full_sch_from_ls_only_sch",
     )
-    ls_cpsat_g = layout.artifact_path(
-        "last_stage_cp_sat_gantt_png", scenario_name="sc", instance_name="ins"
-    )
-    for p in (main_g, phase_g, ls_cpsat_g):
+    for p in (main_g, phase_g):
         assert p.parent.name == "report", p
         assert p.suffix == ".png"
 
@@ -98,9 +92,9 @@ def test_phase_gantt_template_uses_phase_name(tmp_path: Path) -> None:
         "phase_gantt_png",
         scenario_name="sc",
         instance_name="ins",
-        phase_name="6_dispatched_schedule",
+        phase_name="6_full_sch_from_ls_only_sch",
     )
-    assert p.name == "ins_6_dispatched_schedule_gantt.png"
+    assert p.name == "ins_6_full_sch_from_ls_only_sch_gantt.png"
 
 
 def test_unknown_kind_raises(tmp_path: Path) -> None:
@@ -121,7 +115,6 @@ def test_stamp_round_trips_overlay_kinds(tmp_path: Path) -> None:
         "mcf_lb_phase_schedule",
         "gantt_png",
         "phase_gantt_png",
-        "last_stage_cp_sat_gantt_png",
         "report_xlsx",
         "mcf_lb_dashboard",
         "rpdf_comparison_csv",

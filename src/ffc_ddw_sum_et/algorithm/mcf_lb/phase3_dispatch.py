@@ -3,6 +3,11 @@
 Reverse-dispatch with the last stage pinned as seed, then unflip back
 to the original instance. Produces the full dispatched schedule that
 Phase 4 will warm-start its profile-fix CP-SAT model from.
+
+The reverse-dispatch core is exposed as :func:`reverse_dispatch_full_schedule`
+so other subroutines (e.g. ``build_full_sch_from_last_stage_only_sch``) can
+build a feasible full schedule from any last-stage-only ``FFcSchedule``
+without going through Phase 1 / Phase 2 first.
 """
 
 from __future__ import annotations
@@ -19,62 +24,140 @@ from .diagnostic import MCFLBDiagnostic
 from .phase1_mcf import Phase1State
 from .phase2_last_stage import Phase2State
 
-__all__ = ["Phase3State", "run_phase3"]
+__all__ = ["Phase3State", "reverse_dispatch_full_schedule", "run_phase3"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Phase3State:
     """Outputs of Phase 3 consumed by Phase 4 (and by controller sidecar)."""
 
-    dispatched_schedule: FFcSchedule
+    full_sch_from_ls_only_sch: FFcSchedule
     dispatched_obj: float
 
+    # Last-stage-only schedule rebuilt with the original instance's
+    # last-stage processing times (same end times, recomputed starts);
+    # only populated when ``rebuild_last_stage_with_original_p=True``.
+    ls_only_sch_before_delay: FFcSchedule | None = None
     # Reversed-instance intermediates (None when single-stage short-circuit fires).
-    last_stage_only_schedule_flipped: FFcSchedule | None = None
-    dispatched_schedule_before_unflipping: FFcSchedule | None = None
+    ls_only_sch_delayed: FFcSchedule | None = None
+    ls_only_sch_flipped: FFcSchedule | None = None
+    full_sch_before_unflip: FFcSchedule | None = None
 
 
-def run_phase3(
-    phase1: Phase1State,
-    phase2: Phase2State,
+def reverse_dispatch_full_schedule(
     instance: FFcDDWParameters,
-    diagnostic: MCFLBDiagnostic,
+    last_stage_only_schedule: FFcSchedule,
     *,
-    logger: logging.Logger | None = None,
+    last_stage_id: str | None = None,
+    job_2_pos: dict[str, int] | None = None,
     machine_then_job: bool = False,
+    rebuild_last_stage_with_original_p: bool = False,
+    logger: logging.Logger | None = None,
 ) -> Phase3State | None:
     """Build the full dispatched schedule via reverse-dispatch + unflip.
 
-    When ``instance.stage_count == 1`` the last-stage schedule is already
-    the full schedule; the reverse-dispatch is skipped and the flipped /
+    Pure helper — no diagnostic side effects. The caller mutates a
+    :class:`MCFLBDiagnostic` if it needs to record timing/objective there.
+
+    The input last-stage schedule is taken as the starting point (or, when
+    ``rebuild_last_stage_with_original_p=True``, the rebuilt schedule
+    described below is used as the starting point instead). When
+    ``instance.stage_count == 1`` that starting schedule IS the full
+    schedule; the reverse-dispatch is skipped and the delayed / flipped /
     before-unflipping sidecar slots stay ``None``.
 
-    Mutates ``diagnostic``: ``single_stage``, ``dispatch_sec``,
-    ``dispatched_obj``, advances ``reached_phase`` to ``"dispatched"``.
+    For ``instance.stage_count > 1``, the starting schedule is first
+    delayed via :meth:`FFcSchedule.delay_job_latest_leq_obj_contrib` so
+    each operation ends as late as possible without increasing its
+    per-job objective contribution. The delayed schedule's makespan is
+    then used as the flip horizon.
+
+    Args:
+        instance: Original (non-reversed) FFcDDW instance.
+        last_stage_only_schedule: Schedule whose last stage is fully
+            populated (other stages may be empty). Treated as immutable —
+            the delay step operates on a deep copy.
+        last_stage_id: Defaults to ``instance.stage_id_list[-1]``.
+        job_2_pos: Tie-break order for the reverse job sequence.
+            Defaults to instance-native order
+            (``{j: i for i, j in enumerate(instance.job_id_list)}``).
+        machine_then_job: Forwarded to
+            :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`.
+        rebuild_last_stage_with_original_p: When ``True``, rebuild the
+            input last-stage schedule using ``instance``'s last-stage
+            processing times before any further processing: each
+            operation's end time is preserved and its start is recomputed
+            as ``end - p_orig_j``. The rebuilt schedule then replaces the
+            input as the starting point for both the single-stage
+            short-circuit and the multi-stage delay/reverse-dispatch
+            path. Use this when the input schedule was produced under
+            inflated last-stage durations
+            (e.g. ``single_pass_last_stage_only_sch_from_mcf_lb`` with
+            ``p_increment != 0``) so downstream consumers operate on a
+            problem-feasible schedule. The rebuilt schedule is exposed
+            on ``Phase3State.ls_only_sch_before_delay``.
+        logger: Optional logger; warnings are emitted on dispatcher failure.
 
     Returns ``None`` if the reversed ``MixedDispatcher`` fails to produce
     a schedule (a warning is logged via ``logger`` when supplied).
     """
-    last_stage_id = phase1.last_stage_id
-    last_stage_only_schedule = phase2.last_stage_only_schedule
-    last_stage_only_schedule_makespan = phase2.last_stage_only_schedule_makespan
+    if last_stage_id is None:
+        last_stage_id = instance.stage_id_list[-1]
+    if job_2_pos is None:
+        job_2_pos = {j: i for i, j in enumerate(instance.job_id_list)}
 
-    t_disp = time.monotonic()
-    c = instance.stage_count
-    diagnostic.single_stage = c == 1
+    ls_only_sch_before_delay: FFcSchedule | None = None
+    ls_only_sch_delayed: FFcSchedule | None = None
+    ls_only_sch_flipped: FFcSchedule | None = None
+    full_sch_before_unflip: FFcSchedule | None = None
 
-    last_stage_only_schedule_flipped: FFcSchedule | None = None
-    dispatched_schedule_before_unflipping: FFcSchedule | None = None
-
-    if c == 1:
-        dispatched_schedule = last_stage_only_schedule
+    if rebuild_last_stage_with_original_p:
+        p_map = instance.get_job_2_p_map_for_stage(last_stage_id)
+        init_schedule = FFcSchedule(
+            jobs=list(instance.job_id_list),
+            stages=list(instance.stage_id_list),
+            machines_per_stage={
+                s: list(instance.stage_2_machines_map[s])
+                for s in instance.stage_id_list
+            },
+        )
+        for (
+            mc_id,
+            _aug_start,
+            aug_end,
+            job_id,
+        ) in last_stage_only_schedule.iter_operations_on_stage(last_stage_id):
+            init_schedule.add_ops_times_2_mc(
+                stage_id=last_stage_id,
+                mc_id=mc_id,
+                job_id=job_id,
+                start_time=aug_end - p_map[job_id],
+                end_time=aug_end,
+            )
+        ls_only_sch_before_delay = init_schedule
     else:
-        last_stage_end_map = {
-            j: phase2.ls_j_i_2_end[j, last_stage_id] for j in instance.job_id_list
-        }
+        init_schedule = last_stage_only_schedule
+
+    if instance.stage_count == 1:
+        full_sch_from_ls_only_sch = init_schedule
+    else:
+        # Delay last-stage operations to the latest end time that does not
+        # worsen per-job ET contribution. Operates on a copy so the caller's
+        # input schedule stays untouched.
+        ls_only_sch_delayed = init_schedule.deepcopy()
+        ls_only_sch_delayed.delay_job_latest_leq_obj_contrib(instance.job_2_dw_ub_map)
+        delayed_makespan = ls_only_sch_delayed.makespan
+
+        last_stage_end_map: dict[str, int] = {}
+        for _, _, end_time, job_id in ls_only_sch_delayed.iter_operations_on_stage(
+            last_stage_id
+        ):
+            last_stage_end_map[job_id] = end_time
+        # Every instance job must appear on the last stage; missing keys
+        # raise KeyError below (no silent defaulting).
         rev_job_sequence = sorted(
             instance.job_id_list,
-            key=lambda j: (-last_stage_end_map[j], phase1.job_2_pos[j]),
+            key=lambda j: (-last_stage_end_map[j], job_2_pos[j]),
         )
 
         reversed_instance = FFcDDWParameters.reverse_stages(instance)
@@ -83,17 +166,17 @@ def run_phase3(
             stages=reversed_instance.stage_id_list,
             machines_per_stage=reversed_instance.stage_2_machines_map,
         )
-        for mc_id, s, e, j in last_stage_only_schedule.iter_operations_on_stage(
+        for mc_id, s, e, j in ls_only_sch_delayed.iter_operations_on_stage(
             last_stage_id
         ):
             reversed_seed.add_ops_times_2_mc(
                 stage_id=last_stage_id,
                 mc_id=mc_id,
                 job_id=j,
-                start_time=last_stage_only_schedule_makespan - e,
-                end_time=last_stage_only_schedule_makespan - s,
+                start_time=delayed_makespan - e,
+                end_time=delayed_makespan - s,
             )
-        last_stage_only_schedule_flipped = reversed_seed
+        ls_only_sch_flipped = reversed_seed
 
         rev_dispatcher = MixedDispatcher(reversed_instance)
         reversed_full = rev_dispatcher.get_best_mixed_schedule_by_sequence(
@@ -106,23 +189,68 @@ def run_phase3(
         if reversed_full is None:
             if logger is not None:
                 logger.warning(
-                    "run_mcf_lb phase 3: reversed MixedDispatcher produced no schedule"
+                    "reverse_dispatch_full_schedule: reversed MixedDispatcher "
+                    "produced no schedule"
                 )
             return None
 
-        dispatched_schedule_before_unflipping = reversed_full
-        dispatched_schedule = reversed_full.as_reversed()
+        full_sch_before_unflip = reversed_full
+        full_sch_from_ls_only_sch = reversed_full.as_reversed()
+        # Push left to a semi-active form, then insert idle time on the last
+        # stage so the unflipped operations land at ET-optimal positions
+        # before scoring (mirrors `_dispatch_by_reversed_sequence_with_iit`).
+        full_sch_from_ls_only_sch.make_semi_active(instance.stage_2_job_2_p_map)
+        full_sch_from_ls_only_sch.insert_idle_time(
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+        )
 
-    sum_e, sum_t = compute_weighted_earliness_tardiness(dispatched_schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(
+        full_sch_from_ls_only_sch, instance
+    )
     dispatched_obj = float(sum_e + sum_t)
 
+    return Phase3State(
+        full_sch_from_ls_only_sch=full_sch_from_ls_only_sch,
+        dispatched_obj=dispatched_obj,
+        ls_only_sch_before_delay=ls_only_sch_before_delay,
+        ls_only_sch_delayed=ls_only_sch_delayed,
+        ls_only_sch_flipped=ls_only_sch_flipped,
+        full_sch_before_unflip=full_sch_before_unflip,
+    )
+
+
+def run_phase3(
+    phase1: Phase1State,
+    phase2: Phase2State,
+    instance: FFcDDWParameters,
+    diagnostic: MCFLBDiagnostic,
+    *,
+    logger: logging.Logger | None = None,
+    machine_then_job: bool = False,
+) -> Phase3State | None:
+    """Phase-3 wrapper around :func:`reverse_dispatch_full_schedule`.
+
+    Mutates ``diagnostic``: ``single_stage``, ``dispatch_sec``,
+    ``dispatched_obj``, advances ``reached_phase`` to ``"dispatched"``.
+    """
+    diagnostic.single_stage = instance.stage_count == 1
+    t_disp = time.monotonic()
+
+    state = reverse_dispatch_full_schedule(
+        instance,
+        phase2.last_stage_only_schedule,
+        last_stage_id=phase1.last_stage_id,
+        job_2_pos=phase1.job_2_pos,
+        machine_then_job=machine_then_job,
+        logger=logger,
+    )
+    if state is None:
+        return None
+
     diagnostic.dispatch_sec = time.monotonic() - t_disp
-    diagnostic.dispatched_obj = dispatched_obj
+    diagnostic.dispatched_obj = state.dispatched_obj
     diagnostic.reached_phase = "dispatched"
 
-    return Phase3State(
-        dispatched_schedule=dispatched_schedule,
-        dispatched_obj=dispatched_obj,
-        last_stage_only_schedule_flipped=last_stage_only_schedule_flipped,
-        dispatched_schedule_before_unflipping=dispatched_schedule_before_unflipping,
-    )
+    return state

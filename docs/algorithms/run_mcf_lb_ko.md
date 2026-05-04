@@ -72,7 +72,7 @@ def run_mcf_lb(
 feasible 시드가 하나도 없으면
 `SubroutineReport(obj_value=None, obj_bound=mcf_lb)`를 반환하고 인컴번트
 미등록. 있으면 `objective_value` 최소인 후보를 채택해
-`self.last_stage_cp_sat_solution: FFcDDWSolution`에 저장하고 Step 2로
+`self.last_stage_only_sol: FFcDDWSolution`에 저장하고 Step 2로
 넘김.
 
 ### Step 2-1 — 마지막 스테이지 고정 역방향 디스패치
@@ -130,11 +130,11 @@ Step 1-3 CP-SAT 시각보다 오른쪽으로 밀릴 수 있음. 앞쪽 스테이
 | --- | --- |
 | `self.solution_manager` (중간) | Step 2-2, `register(step2_obj)` |
 | `self.solution_manager` (최종) | Step 2-3, `OPTIMAL`/`FEASIBLE`일 때 |
-| `self.last_stage_cp_sat_solution` | Step 1-3, `OPTIMAL`/`FEASIBLE`일 때 |
+| `self.last_stage_only_sol` | Step 1-3, `OPTIMAL`/`FEASIBLE`일 때 |
 
 직접적인 파일 I/O는 없음. `FFcDDWSingleInstanceRunner`가 이후에
-`self.last_stage_cp_sat_solution.schedule`을
-`<working_dir>/<ins>_last_stage_cp_sat_schedule.yaml`로 덤프.
+`self.last_stage_only_sol.schedule`을
+`<working_dir>/<ins>_last_stage_only_schedule.yaml`로 덤프.
 
 ## 조기 반환 경로
 
@@ -170,5 +170,5 @@ Step 1-3 CP-SAT 시각보다 오른쪽으로 밀릴 수 있음. 앞쪽 스테이
   차이점: 디스패치 시드를 MCF **선점 시작 시각** 기준으로 정렬 (우선순위
   점수 아님); 디스패처에 넘기는 job별 release는 MCF 시작값이 `None`이면
   `r_j`로 폴백; CP-SAT 시간 예산은 `0.01 * n * c`로 고정.
-  `self.last_stage_cp_sat_solution`은 동일하게 채우며, 인컴번트는 등록하지
+  `self.last_stage_only_sol`은 동일하게 채우며, 인컴번트는 등록하지
   않음.

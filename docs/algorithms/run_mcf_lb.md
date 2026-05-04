@@ -74,7 +74,7 @@ For each seed:
 If no seed produces a feasible solution, return
 `SubroutineReport(obj_value=None, obj_bound=mcf_lb)` — no incumbent is
 registered. Otherwise pick the candidate with the minimum `objective_value`,
-store it on `self.last_stage_cp_sat_solution: FFcDDWSolution`, and carry it
+store it on `self.last_stage_only_sol: FFcDDWSolution`, and carry it
 into step 2.
 
 ### Step 2-1 — reverse-dispatch with last stage pinned
@@ -132,11 +132,11 @@ logged but the value from `compute_weighted_earliness_tardiness` is used.
 | --- | --- |
 | `self.solution_manager` (intermediate) | Step 2-2, via `register(step2_obj)` |
 | `self.solution_manager` (final) | Step 2-3, on `OPTIMAL`/`FEASIBLE` |
-| `self.last_stage_cp_sat_solution` | Step 1-3, on `OPTIMAL`/`FEASIBLE` |
+| `self.last_stage_only_sol` | Step 1-3, on `OPTIMAL`/`FEASIBLE` |
 
 No filesystem I/O is performed directly. `FFcDDWSingleInstanceRunner` later
-dumps `self.last_stage_cp_sat_solution.schedule` to
-`<working_dir>/<ins>_last_stage_cp_sat_schedule.yaml` if set.
+dumps `self.last_stage_only_sol.schedule` to
+`<working_dir>/<ins>_last_stage_only_schedule.yaml` if set.
 
 ## Early-return paths
 
@@ -172,5 +172,5 @@ In the first three cases no final incumbent is registered by `run_mcf_lb`
   1-3 (no step 2). Differences: dispatch seed is sorted by MCF **preemptive
   start times** (not the priority score); the per-job release used by the
   dispatcher falls back from MCF start to `r_j` when the MCF value is `None`;
-  the CP-SAT time budget is fixed at `0.01 * n * c`. `self.last_stage_cp_sat_solution`
+  the CP-SAT time budget is fixed at `0.01 * n * c`. `self.last_stage_only_sol`
   is still populated; no incumbent is registered.

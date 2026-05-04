@@ -16,16 +16,29 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, Union, get_args
 
 import numpy as np
 from routix.io import dump_yaml, load_yaml
 
+from ..algorithm.pm_pmtn_sorter import (
+    PmPrmpSortKey,
+    pm_pmtn_sort_job_sequence_from_window_map,
+)
+from ..parameters.sorter import ParamSortKey, param_sort_job_sequence
+
 if TYPE_CHECKING:
     from ..parameters.ffc_ddw_params import FFcDDWParameters
 
+HeatmapSort = Union[ParamSortKey, PmPrmpSortKey]
 
-HeatmapSort = Literal["due2-window", "neh-cp"]
+_PARAM_SORT_VALUES: frozenset[str] = frozenset(get_args(ParamSortKey))
+_PMTN_SORT_VALUES: frozenset[str] = frozenset(get_args(PmPrmpSortKey))
+
+_HEATMAP_SORT_MIGRATION: dict[str, str] = {
+    "neh-cp": "weight-due-pos",
+    "due2-window": "due2-weight-pos",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +66,7 @@ class SignedCostHeatmapData:
     x_cells: list[tuple[int, int]] = field(default_factory=list)
     """``(row_index, t)`` for each MCF cell with ``x_jt = 1``. Empty when
     no MCF flow was supplied to :func:`build_signed_cost_matrix`."""
-    sort: HeatmapSort = "due2-window"
+    sort: HeatmapSort = "due2-weight-pos"
 
 
 def _weights_or_default(raw: dict[str, int], jobs: Sequence[str]) -> dict[str, int]:
@@ -61,22 +74,57 @@ def _weights_or_default(raw: dict[str, int], jobs: Sequence[str]) -> dict[str, i
     return dict.fromkeys(jobs, 1) if not raw else raw
 
 
+def _window_map_from_x_jt(
+    x_jt_map: Mapping[str, Mapping[int, int]],
+    job_id_list: Sequence[str],
+) -> dict[str, tuple[int, int] | None]:
+    """Build a per-job window map from an MCF flow dict.
+
+    Window is ``(min(t with flow>0) - 1, max(t with flow>0))`` so it matches
+    the half-open ``[t-1, t)`` segment semantics used by
+    ``MCFPreemptiveSchedule.from_flow_dict``. Jobs with no positive flow map
+    to ``None``.
+    """
+    window_map: dict[str, tuple[int, int] | None] = {j: None for j in job_id_list}
+    for j in job_id_list:
+        ts = [t for t, flow in x_jt_map.get(j, {}).items() if flow > 0]
+        if ts:
+            window_map[j] = (min(ts) - 1, max(ts))
+    return window_map
+
+
 def _sort_jobs(
-    instance: "FFcDDWParameters",
-    sort: HeatmapSort = "due2-window",
+    instance: FFcDDWParameters,
+    sort: HeatmapSort = "due2-weight-pos",
+    x_jt_map: Mapping[str, Mapping[int, int]] | None = None,
 ) -> list[str]:
-    if sort == "neh-cp":
-        return instance.get_weight_due_pos_job_sequence()
-    return instance.get_due2_weight_pos_job_sequence()
+    if sort in _PARAM_SORT_VALUES:
+        return param_sort_job_sequence(instance, sort)
+    if sort in _PMTN_SORT_VALUES:
+        if x_jt_map is None:
+            raise ValueError(
+                f'Heatmap sort "{sort}" requires x_jt_map to derive the '
+                "per-job MCF preemptive time window."
+            )
+        last_stage = instance.stage_id_list[-1]
+        return pm_pmtn_sort_job_sequence_from_window_map(
+            _window_map_from_x_jt(x_jt_map, instance.job_id_list),
+            instance.get_job_2_p_map_for_stage(last_stage),
+            instance,
+            sort,
+        )
+    raise ValueError(f"Unknown HeatmapSort: {sort!r}")
 
 
 def build_signed_cost_matrix(
     instance: "FFcDDWParameters",
-    sort: HeatmapSort = "due2-window",
+    sort: HeatmapSort = "due2-weight-pos",
     x_jt_map: Mapping[str, Mapping[int, int]] | None = None,
     obj_value: float | None = None,
     c_jt_clip_abs_value: float | None = None,
     c_jt_clip_quantile: float = 0.5,
+    r_multiplier: float = 1.0,
+    r_increment: int = 0,
 ) -> SignedCostHeatmapData:
     """Build the signed C-cost matrix and the row-aligned overlay payloads.
 
@@ -99,14 +147,35 @@ def build_signed_cost_matrix(
             threshold when ``c_jt_clip_abs_value`` is ``None``. Default
             ``0.5`` keeps the diverging colorscale from being dominated by
             far-tail cells.
+        r_multiplier: Scales the per-job release dates ``r_j`` (sum of
+            upstream processing times) used for the grey release-blocked
+            overlay; each value becomes ``ceil(r_j * r_multiplier)``.
+            Must match the multiplier passed to the MCF solve so the
+            overlay aligns with the actual ``x_jt`` flow region. ``1.0``
+            (default) preserves the unscaled view.
+        r_increment: Integer ``>= 0`` added to each ``r_j`` *after* the
+            ``r_multiplier`` scaling, so the effective release used for
+            the overlay becomes ``ceil(r_j * r_multiplier) + r_increment``.
+            Must match the increment passed to the MCF solve. ``0``
+            (default) preserves the unscaled view.
     """
-    calJ = _sort_jobs(instance, sort=sort)
+    if r_multiplier < 0:
+        raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
+    if r_increment < 0:
+        raise ValueError(
+            f"r_increment must be 0 or a positive integer; got {r_increment}."
+        )
+    calJ = _sort_jobs(instance, sort=sort, x_jt_map=x_jt_map)
     last_stage = instance.stage_id_list[-1]
     p = instance.get_job_2_p_map_for_stage(last_stage)
     ddw = instance.job_2_due_window_map
     w_minus = _weights_or_default(instance.job_2_ewt_map, calJ)
     w_plus = _weights_or_default(instance.job_2_twt_map, calJ)
     r = instance.get_job_2_p_sum_except_last_stage()
+    if r_multiplier != 1.0:
+        r = {j: math.ceil(v * r_multiplier) for j, v in r.items()}
+    if r_increment != 0:
+        r = {j: v + r_increment for j, v in r.items()}
 
     p_max = max(p[j] for j in calJ)
     t_min = max(0, min(ddw[j][0] - p[j] for j in calJ) - p_max)
@@ -306,5 +375,7 @@ def load_signed_cost_heatmap_yaml(path: Path) -> SignedCostHeatmapData:
         clip_threshold=float(raw.get("clipThreshold", 0.0)),
         obj_value=None if obj_raw is None else float(obj_raw),
         x_cells=[(int(c["i"]), int(c["t"])) for c in (raw.get("xCells") or [])],
-        sort=raw.get("sort", "due2-window"),
+        sort=_HEATMAP_SORT_MIGRATION.get(
+            raw.get("sort", "due2-weight-pos"), raw.get("sort", "due2-weight-pos")
+        ),
     )

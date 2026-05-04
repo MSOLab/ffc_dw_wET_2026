@@ -1,0 +1,152 @@
+# Exercise the sort-key vocabulary refactor
+# (parameters/sorter.py::ParamSortKey,
+#  algorithm/pm_pmtn_sorter.py::PmPrmpSortKey,
+#  io/parallel_mc_cost_heatmap.py::HeatmapSort = ParamSortKey | PmPrmpSortKey).
+#
+# Three groups, each varies one sort-key axis with everything else fixed:
+#   A. Heatmap drawing — heatmap_sort sweeps both legs of the HeatmapSort
+#      union (2 ParamSortKey + 3 PmPrmpSortKey values).
+#   B. Full NEH-CP — job_priority sweeps the remaining ParamSortKey values
+#      not already covered in Group A.
+#   C. Last-stage NEH-CP from MCF-LB — job_priority sweeps PmPrmpSortKey
+#      via a different method than the heatmap path.
+#
+# Together this exercises every distinct ParamSortKey and PmPrmpSortKey
+# value at least once via at least one method.
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1, 2, 3 ]  # uncomment to subset for faster iteration
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260502
+
+instance_worker_cnt: 48
+
+draw_gantt: false
+painter_thread_cnt: 24
+
+scenarios:
+  # ===== Group A: HeatmapSort union (heatmap_sort axis) =====
+  - name: heatmap_param_due2-weight-pos
+    timelimit: 60.0
+    output_subdir: heatmap_param_due2-weight-pos
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "due2-weight-pos"
+
+  - name: heatmap_param_weight-due-pos
+    timelimit: 60.0
+    output_subdir: heatmap_param_weight-due-pos
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "weight-due-pos"
+
+  - name: heatmap_pmtn_1_rj_prmp_rel_dev
+    timelimit: 60.0
+    output_subdir: heatmap_pmtn_1_rj_prmp_rel_dev
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "1_rj_prmp_rel_dev"
+
+  - name: heatmap_pmtn_1_rj_prmp_abs_dev
+    timelimit: 60.0
+    output_subdir: heatmap_pmtn_1_rj_prmp_abs_dev
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "1_rj_prmp_abs_dev"
+
+  - name: heatmap_pmtn_start_time
+    timelimit: 60.0
+    output_subdir: heatmap_pmtn_start_time
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: true
+        heatmap_sort: "start_time"
+
+  # ===== Group B: ParamSortKey via full NEH-CP (job_priority axis) =====
+  - name: neh_cp_due-weight-pos
+    timelimit: 120.0
+    output_subdir: neh_cp_due-weight-pos
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due-weight-pos"
+        added_batch_size: 5
+        solver_thread_cnt: 4
+        cp_tl: 0.01nc
+
+  - name: neh_cp_due_star-weight-pos
+    timelimit: 120.0
+    output_subdir: neh_cp_due_star-weight-pos
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due*-weight-pos"
+        added_batch_size: 5
+        solver_thread_cnt: 4
+        cp_tl: 0.01nc
+
+  - name: neh_cp_wxd1
+    timelimit: 120.0
+    output_subdir: neh_cp_wxd1
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "wxd1"
+        added_batch_size: 5
+        solver_thread_cnt: 4
+        cp_tl: 0.01nc
+
+  - name: neh_cp_wxd2
+    timelimit: 120.0
+    output_subdir: neh_cp_wxd2
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "wxd2"
+        added_batch_size: 5
+        solver_thread_cnt: 4
+        cp_tl: 0.01nc
+
+  # ===== Group C: PmPrmpSortKey via last-stage NEH-CP from MCF-LB =====
+  - name: last_stage_1_rj_prmp_rel_dev
+    timelimit: 120.0
+    output_subdir: last_stage_1_rj_prmp_rel_dev
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "1_rj_prmp_rel_dev"
+        placement_priority: "dist"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+
+  - name: last_stage_1_rj_prmp_abs_dev
+    timelimit: 120.0
+    output_subdir: last_stage_1_rj_prmp_abs_dev
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "1_rj_prmp_abs_dev"
+        placement_priority: "dist"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+
+  - name: last_stage_start_time
+    timelimit: 120.0
+    output_subdir: last_stage_start_time
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "start_time"
+        placement_priority: "dist"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc

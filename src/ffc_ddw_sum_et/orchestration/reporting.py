@@ -505,6 +505,9 @@ class FFcDDWReporter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._write_summary_csv()
+        self._write_mcf_preemptive_obj_csv()
+        self._write_adjust_params_by_makespan_delta_csv()
+        self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
         self._write_mcf_lb_pivot_artifacts()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
@@ -734,6 +737,179 @@ class FFcDDWReporter:
             logger.info("MCF-LB analysis CSV written to %s", path)
 
         self._write_last_stage_only_obj_summary_csv()
+
+    def _write_mcf_preemptive_obj_csv(self) -> None:
+        """Run-scoped long-format CSV of MCF-preemptive objective values.
+
+        Columns: ``scenarioName, insIndex, objValue``. One row per
+        ``(scenario, instance)`` pair where ``mcf_lb_diagnostic.mcf_lb`` is
+        non-null. Rows are sorted by ``(scenarioName, insIndex)``. Skipped
+        entirely if no scenario produced an MCF LB.
+
+        Note: ``MCFPreemptiveSchedule`` does not carry a weighted-E+T
+        objective (it is preemptive and stage-disaggregated), so we use the
+        MCF lower-bound as the schedule's natural objective.
+        """
+        rows: list[tuple[str, int | None, float]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                diag = ir.mcf_lb_diagnostic
+                if diag is None:
+                    continue
+                mcf_lb = diag.get("mcf_lb")
+                if mcf_lb is None:
+                    continue
+                rows.append(
+                    (
+                        sc.name,
+                        self._resolve_ins_index(ir.instance_name),
+                        float(mcf_lb),
+                    )
+                )
+        if not rows:
+            return
+        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
+        path = self.layout.artifact_path("mcf_preemptive_obj_csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(("scenarioName", "insIndex", "objValue"))
+            for scenario_name, ins_index, obj_value in rows:
+                writer.writerow(
+                    (
+                        scenario_name,
+                        "" if ins_index is None else ins_index,
+                        obj_value,
+                    )
+                )
+        logger.info("MCF preemptive obj CSV written to %s", path)
+
+    def _write_adjust_params_by_makespan_delta_csv(self) -> None:
+        """Run-scoped long-format CSV of makespan-delta-driven param adjusts.
+
+        Unifies the per-instance diagnostic produced by both
+        ``adjust_p_by_full_sch_and_last_stage_only_sch`` and
+        ``adjust_r_by_full_sch_and_last_stage_only_sch``. One row per
+        ``(scenario, instance)`` pair where either knob fired (i.e.
+        ``adjust_params_makespan_delta`` is non-null on the diagnostic).
+
+        Columns: ``scenarioName, insIndex, instanceName,
+        lastStageOnlyMakespan, incumbentMakespan, makespanDelta,
+        pIncrementAdded, rIncrementAdded``. ``pIncrementAdded`` is
+        ``ceil(delta * m_last / n)``; ``rIncrementAdded`` is the delta itself
+        (the adjust-r knob adds ``makespan_delta`` straight to
+        ``r_increment``). The empty string is written for whichever knob did
+        not fire.
+        """
+        rows: list[
+            tuple[str, int | None, str, int, int, int, int | None, int | None]
+        ] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                diag = ir.mcf_lb_diagnostic
+                if diag is None:
+                    continue
+                makespan_delta = diag.get("adjust_params_makespan_delta")
+                if makespan_delta is None:
+                    continue
+                ls_only_makespan = diag.get("adjust_params_last_stage_only_makespan")
+                incumbent_makespan = diag.get("adjust_params_incumbent_makespan")
+                p_inc_raw = diag.get("adjust_p_increment_added")
+                r_inc_raw = diag.get("adjust_r_increment_added")
+                p_inc_added = int(p_inc_raw) if p_inc_raw is not None else None
+                r_inc_added = int(r_inc_raw) if r_inc_raw is not None else None
+                rows.append(
+                    (
+                        sc.name,
+                        self._resolve_ins_index(ir.instance_name),
+                        ir.instance_name,
+                        int(ls_only_makespan),
+                        int(incumbent_makespan),
+                        int(makespan_delta),
+                        p_inc_added,
+                        r_inc_added,
+                    )
+                )
+        if not rows:
+            return
+        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
+        path = self.layout.artifact_path("adjust_params_by_makespan_delta_csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                (
+                    "scenarioName",
+                    "insIndex",
+                    "instanceName",
+                    "lastStageOnlyMakespan",
+                    "incumbentMakespan",
+                    "makespanDelta",
+                    "pIncrementAdded",
+                    "rIncrementAdded",
+                )
+            )
+            for (
+                scenario_name,
+                ins_index,
+                instance_name,
+                ls_only_makespan,
+                incumbent_makespan,
+                delta,
+                p_inc_added,
+                r_inc_added,
+            ) in rows:
+                writer.writerow(
+                    (
+                        scenario_name,
+                        "" if ins_index is None else ins_index,
+                        instance_name,
+                        ls_only_makespan,
+                        incumbent_makespan,
+                        delta,
+                        "" if p_inc_added is None else p_inc_added,
+                        "" if r_inc_added is None else r_inc_added,
+                    )
+                )
+        logger.info("adjust_params_by_makespan_delta CSV written to %s", path)
+
+    def _write_last_stage_only_obj_csv(self) -> None:
+        """Run-scoped long-format CSV of ``last_stage_only_sol`` objs.
+
+        Columns: ``scenarioName, insIndex, objValue``. One row per
+        ``(scenario, instance)`` pair where the controller produced a
+        last-stage-only schedule (``run_mcf_lb_4`` /
+        ``run_last_stage_cp_sat_lb`` /
+        ``neh_cp_last_stage_only_sch_from_mcf_lb`` /
+        ``single_pass_last_stage_only_sch_from_mcf_lb``). Skipped
+        entirely if no scenario produced one.
+        """
+        rows: list[tuple[str, int | None, float]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                if ir.last_stage_only_obj is None:
+                    continue
+                rows.append(
+                    (
+                        sc.name,
+                        self._resolve_ins_index(ir.instance_name),
+                        float(ir.last_stage_only_obj),
+                    )
+                )
+        if not rows:
+            return
+        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
+        path = self.layout.artifact_path("last_stage_only_obj_csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(("scenarioName", "insIndex", "objValue"))
+            for scenario_name, ins_index, obj_value in rows:
+                writer.writerow(
+                    (
+                        scenario_name,
+                        "" if ins_index is None else ins_index,
+                        obj_value,
+                    )
+                )
+        logger.info("last_stage_only obj CSV written to %s", path)
 
     def _write_last_stage_only_obj_summary_csv(self) -> None:
         """Cross-scenario summary of ``lastStageOnlyObj`` per instance.
@@ -1103,7 +1279,7 @@ class FFcDDWReporter:
 
         For each instance: render the main solution Gantt from
         `<ins>_solution.json`, plus one Gantt per phase schedule yaml in
-        `progress/`, plus the last_stage_cp_sat schedule when present.
+        `progress/`, plus the last_stage_only schedule when present.
         Heatmap YAMLs (``*_C_heatmap.yaml``, written by ``apply_lb_by_mcf``
         when its ``draw_heatmap`` kwarg is True) are also rendered.
 
@@ -1148,30 +1324,23 @@ class FFcDDWReporter:
                             ),
                         )
                     )
-                ls_cpsat = self.layout.artifact_path(
-                    "last_stage_cp_sat_schedule", **scope
-                )
-                if ls_cpsat.exists():
-                    jobs.append(
-                        (
-                            _render_phase_gantt_from_yaml,
-                            ls_cpsat,
-                            self.layout.artifact_path(
-                                "last_stage_cp_sat_gantt_png", **scope
-                            ),
-                        )
-                    )
 
         gantt_count = len(jobs)
-        # Heatmap YAMLs aren't registered in ArtifactLayout yet; rglob fallback.
-        for hm_yaml in sorted(self.output_dir.rglob("*_C_heatmap.yaml")):
-            jobs.append(
-                (
-                    _render_heatmap_from_yaml,
-                    hm_yaml,
-                    hm_yaml.with_suffix(".html"),
+        # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the
+        # progress zone per (scenario, instance) and route the HTML output
+        # into the same instance's report zone.
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                progress_dir = self.layout.zone_dir(
+                    "progress", scenario_name=sc.name, instance_name=ins
                 )
-            )
+                report_dir = self.layout.zone_dir(
+                    "report", scenario_name=sc.name, instance_name=ins
+                )
+                for hm_yaml in sorted(progress_dir.glob("*_C_heatmap.yaml")):
+                    html_path = report_dir / hm_yaml.with_suffix(".html").name
+                    jobs.append((_render_heatmap_from_yaml, hm_yaml, html_path))
         heatmap_count = len(jobs) - gantt_count
 
         if not jobs:

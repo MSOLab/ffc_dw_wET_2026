@@ -357,6 +357,27 @@ instead of reaching into deep internal modules.
 This keeps future refactors possible without forcing repository-wide import
 rewrites.
 
+**Current status (deferred):** `ffc_ddw_sum_et.algorithm.__init__` is
+intentionally empty because a previous attempt to re-export contract types
+(`AlgSpec`, `AlgRecord`, `Algorithm`, ...) triggered a circular import chain
+(`algorithm.__init__ → base.alg_spec → parameters.ffc_params → io →
+parallel_mc_cost_heatmap → algorithm`). Until the cycle is broken, callers
+must import from the owning submodules:
+
+- `ffc_ddw_sum_et.algorithm.base.alg_option` — `AlgOption`
+- `ffc_ddw_sum_et.algorithm.base.alg_spec` — `AlgSpec`
+- `ffc_ddw_sum_et.algorithm.base.algorithm` — `Algorithm`
+- `ffc_ddw_sum_et.algorithm.base.alg_record` — `AlgRecord`, `AlgResult`,
+  `WorkStatus`, `TerminationReason`
+- `ffc_ddw_sum_et.algorithm.options.*` — concrete `AlgOption` subclasses
+  (e.g. `DispatchStagesOption`)
+- `ffc_ddw_sum_et.algorithm.fam`, `algorithm.dispatcher.*`,
+  `algorithm.mcf_lb.*`, `algorithm.neh_cp.*` — concrete algorithms
+
+When the underlying cycle is removed, restore the flat `from
+ffc_ddw_sum_et.algorithm import ...` form across callers and re-tighten this
+rule.
+
 ### Rule 18: do not let reporting concerns leak into algorithm internals
 
 Avoid adding fields, callbacks, or dependencies to algorithm code just because

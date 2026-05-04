@@ -1,0 +1,43 @@
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0, 1, 2, 3 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260501
+
+instance_worker_cnt: 96
+
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: 1_rj_prmp_rel_dev
+    timelimit: 300.0
+    output_subdir: 1_rj_prmp_rel_dev
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "1_rj_prmp_rel_dev"
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "1_rj_prmp_rel_dev"
+        placement_priority: "dist"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+        log_cp_search_progress: false
+  - name: start_time
+    timelimit: 300.0
+    output_subdir: start_time
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "start_time"
+      - method: single_pass_last_stage_only_sch_from_mcf_lb
+        job_priority: "start_time"
+        placement_priority: "dist"
+        pf_method: "PF1"
+        solver_thread_cnt: 1
+        total_tl: 0.01nc
+        log_cp_search_progress: false

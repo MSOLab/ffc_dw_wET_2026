@@ -53,9 +53,7 @@ def test_subdir_defaults_to_name() -> None:
     """When ``output_subdir`` is omitted, it falls back to ``name``; two
     scenarios with the same name therefore collide on both axes."""
     with pytest.raises(ValueError, match="duplicate scenario coordinates"):
-        _validate_scenario_uniqueness(
-            [{"name": "x"}, {"name": "x"}]
-        )
+        _validate_scenario_uniqueness([{"name": "x"}, {"name": "x"}])
 
 
 def test_layout_scenario_dir_blocks_duplicate(tmp_path: Path) -> None:

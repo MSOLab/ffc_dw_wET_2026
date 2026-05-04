@@ -1,0 +1,119 @@
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0, 1, 2, 3 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260503
+
+instance_worker_cnt: 96
+
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  - name: build_full_sch_p_inc_0
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_0
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 0
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 0
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: build_full_sch_p_inc_1
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_1
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 1
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 1
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: build_full_sch_p_inc_2
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_2
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 2
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 2
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: build_full_sch_p_inc_4
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_4
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 4
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 4
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: build_full_sch_p_inc_8
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_8
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 8
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 8
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: build_full_sch_p_inc_16
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_16
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 16
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 16
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: build_full_sch_p_inc_32
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_32
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 32
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 32
+      - method: build_full_sch_from_last_stage_only_sch
+  - name: build_full_sch_p_inc_64
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_inc_64
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 64
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 64
+      - method: build_full_sch_from_last_stage_only_sch

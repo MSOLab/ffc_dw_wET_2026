@@ -54,23 +54,30 @@ def solve_last_stage_with_profile_fix(
     instance: FFcDDWParameters,
     last_stage_id: str,
     job_2_release: dict[str, int],
-    obj_lb: float,
     *,
     logger: logging.Logger | None = None,
+    obj_lb: float | None = None,
     pf_method: PFMethod | None = None,
     solver_thread_cnt: int = 1,
     repeat_while_improving: bool = False,
     max_time_in_seconds: float | None = None,
     log_search_progress: bool = False,
     solver_log_path_getter: Callable[[str], Path] | None = None,
+    profile_fix_schedule: FFcSchedule | None = None,
 ) -> tuple[LastStageSolveResult | None, float, str]:
     """Build and solve a last-stage-only CP-SAT model, optionally looping.
 
     Args:
-        reference_schedule (FFcSchedule): Schedule whose operation ordering
-            defines the profile-fix precedence arcs and warm-start hints.
+        reference_schedule (FFcSchedule): Schedule used for warm-start hints.
             When ``repeat_while_improving=True`` this is only the initial
             reference; later iterations use the previously-solved schedule.
+        profile_fix_schedule (FFcSchedule | None, optional): Schedule whose
+            operation ordering defines the profile-fix precedence arcs on the
+            **first** loop iteration. When ``None`` (default), ``reference_schedule``
+            is used for both profile-fix arcs and hints, preserving prior
+            behaviour. Pass the previous CP result here (without newly-appended
+            jobs) to let CP freely insert new jobs while still preserving the
+            ordering of already-placed ones.
         instance (FFcDDWParameters): The FFc DDW instance to model.
         last_stage_id (str): Stage id whose operations are the CP-SAT
             decision variables. Earlier-stage operations are abstracted away
@@ -131,14 +138,15 @@ def solve_last_stage_with_profile_fix(
         )
         if pf_method is not None:
             by_machine, stride_set = decode_pf_method(pf_method)
-            BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
-                ls_mdl,
-                ls_params,
-                ls_ops_vars,
-                current_schedule,
-                profile_fix_by_machine=by_machine,
-                machine_precedence_stride_set=stride_set,
-            )
+            if profile_fix_schedule is not None:
+                BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
+                    ls_mdl,
+                    ls_params,
+                    ls_ops_vars,
+                    profile_fix_schedule,
+                    profile_fix_by_machine=by_machine,
+                    machine_precedence_stride_set=stride_set,
+                )
         BaseModelBuilder.apply_hints_from_schedule(
             ls_mdl, ls_params, ls_ops_vars, ls_et_vars, current_schedule
         )
