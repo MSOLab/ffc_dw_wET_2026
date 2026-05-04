@@ -46,3 +46,10 @@ class MCFLBDiagnostic:
     # Per-seed per-job-scan timing stats: {"mean_sec", "max_sec", "n_scans"}.
     heuristic_scan_stats_per_seed: dict[str, dict] = field(default_factory=dict)
     chosen_seed_tag: str | None = None
+    # Populated when a subroutine runs with
+    # ``adjust_r_by_full_sch_and_last_stage_only_sch=True``: incumbent and
+    # last-stage-only schedule makespans plus their (clamped >= 0) delta
+    # added to ``r_increment`` for that call.
+    adjust_r_last_stage_only_makespan: int | None = None
+    adjust_r_incumbent_makespan: int | None = None
+    adjust_r_makespan_delta: int | None = None

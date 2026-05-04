@@ -397,6 +397,33 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
+    def _log_effective_release_stats(
+        self, caller: str, *, r_multiplier: float, r_increment: int
+    ) -> None:
+        """Log min/max/mean of the per-job release map that ``solve_mcf_lb``
+        and ``heuristic_last_stage_only_from_mcf_lb`` will reconstruct
+        internally. Mirrors their formula
+        ``ceil(p_sum_except_last_stage(j) * r_multiplier) + r_increment``
+        so we can verify the effective r values before the solver runs.
+        """
+        import math
+
+        base = self.instance.get_job_2_p_sum_except_last_stage()
+        if r_multiplier != 1.0:
+            base = {j: math.ceil(v * r_multiplier) for j, v in base.items()}
+        if r_increment != 0:
+            base = {j: v + r_increment for j, v in base.items()}
+        values = list(base.values())
+        n = len(values)
+        self.logger.info(
+            "%s: effective r stats — min=%d, max=%d, mean=%.1f (n=%d)",
+            caller,
+            min(values),
+            max(values),
+            sum(values) / n,
+            n,
+        )
+
     def apply_lb_by_mcf(
         self,
         draw_heatmap: bool = False,
@@ -404,6 +431,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_increment: int = 0,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
+        adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
@@ -474,9 +502,51 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 f"r_increment must be 0 or a positive integer; got {r_increment}."
             )
 
+        effective_r_increment = r_increment
+        if adjust_r_by_full_sch_and_last_stage_only_sch:
+            incumbent = self.solution_manager.get_incumbent()
+            if incumbent is None or incumbent.schedule is None:
+                raise ValueError(
+                    "apply_lb_by_mcf with "
+                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
+                    "an incumbent schedule on self.solution_manager."
+                )
+            if (
+                self.last_stage_only_sol is None
+                or self.last_stage_only_sol.schedule is None
+            ):
+                raise ValueError(
+                    "apply_lb_by_mcf with "
+                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
+                    "self.last_stage_only_sol.schedule set by a prior step."
+                )
+            incumbent_makespan = int(incumbent.schedule.makespan)
+            ls_only_makespan = int(self.last_stage_only_sol.schedule.makespan)
+            makespan_delta = max(incumbent_makespan - ls_only_makespan, 0)
+            self.logger.info(
+                "apply_lb_by_mcf: adjust_r_by_full_sch_and_last_stage_only_sch=True, "
+                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d",
+                incumbent_makespan,
+                ls_only_makespan,
+                makespan_delta,
+            )
+            effective_r_increment = r_increment + makespan_delta
+
         start_elapsed = time.monotonic()
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
+
+        if adjust_r_by_full_sch_and_last_stage_only_sch:
+            diag.adjust_r_incumbent_makespan = incumbent_makespan
+            diag.adjust_r_last_stage_only_makespan = ls_only_makespan
+            diag.adjust_r_makespan_delta = makespan_delta
+
+        if r_multiplier != 1.0 or effective_r_increment != 0:
+            self._log_effective_release_stats(
+                "apply_lb_by_mcf",
+                r_multiplier=r_multiplier,
+                r_increment=effective_r_increment,
+            )
 
         if p_increment == 0:
             instance_for_mcf = self.instance
@@ -490,7 +560,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance_for_mcf,
             diag,
             r_multiplier=r_multiplier,
-            r_increment=r_increment,
+            r_increment=effective_r_increment,
         )
         obj_bound_by_mcf = mcf_result.mcf_lb
 
@@ -503,11 +573,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         self.logger.info(
             "apply_lb_by_mcf: MCF LB = %d, p_increment=%d, r_multiplier=%.4g, "
-            "r_increment=%d",
+            "r_increment=%d (effective=%d)",
             int(obj_bound_by_mcf),
             p_increment,
             r_multiplier,
             r_increment,
+            effective_r_increment,
         )
 
         if draw_heatmap:
@@ -521,7 +592,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     x_jt_map=mcf_result.mcf.get_variable_value_dict(),
                     obj_value=obj_bound_by_mcf,
                     r_multiplier=r_multiplier,
-                    r_increment=r_increment,
+                    r_increment=effective_r_increment,
                 )
                 dump_signed_cost_heatmap_yaml(yaml_path, heatmap_data)
                 self.logger.info(
@@ -535,7 +606,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 )
 
         obj_bound_is_valid = (
-            p_increment == 0 and r_multiplier <= 1.0 and r_increment == 0
+            p_increment == 0 and r_multiplier <= 1.0 and effective_r_increment == 0
         )
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
@@ -800,6 +871,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_increment: int = 0,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
+        adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
     ) -> SubroutineReport:
         """Step method: midpoint warm-start across all jobs from the MCF
         preemptive LB, then a CP-free heuristic refinement
@@ -874,6 +946,47 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "self.mcf_lb_diagnostic (set by apply_lb_by_mcf)."
             )
 
+        effective_r_increment = r_increment
+        if adjust_r_by_full_sch_and_last_stage_only_sch:
+            incumbent = self.solution_manager.get_incumbent()
+            if incumbent is None or incumbent.schedule is None:
+                raise ValueError(
+                    "heuristic_last_stage_only_sch_from_mcf_lb with "
+                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
+                    "an incumbent schedule on self.solution_manager."
+                )
+            if (
+                self.last_stage_only_sol is None
+                or self.last_stage_only_sol.schedule is None
+            ):
+                raise ValueError(
+                    "heuristic_last_stage_only_sch_from_mcf_lb with "
+                    "adjust_r_by_full_sch_and_last_stage_only_sch=True requires "
+                    "self.last_stage_only_sol.schedule set by a prior step."
+                )
+            incumbent_makespan = int(incumbent.schedule.makespan)
+            ls_only_makespan = int(self.last_stage_only_sol.schedule.makespan)
+            makespan_delta = max(incumbent_makespan - ls_only_makespan, 0)
+            self.logger.info(
+                "heuristic_last_stage_only_sch_from_mcf_lb: "
+                "adjust_r_by_full_sch_and_last_stage_only_sch=True, "
+                "incumbent makespan=%d, last_stage_only makespan=%d, delta=%d",
+                incumbent_makespan,
+                ls_only_makespan,
+                makespan_delta,
+            )
+            effective_r_increment = r_increment + makespan_delta
+            self.mcf_lb_diagnostic.adjust_r_incumbent_makespan = incumbent_makespan
+            self.mcf_lb_diagnostic.adjust_r_last_stage_only_makespan = ls_only_makespan
+            self.mcf_lb_diagnostic.adjust_r_makespan_delta = makespan_delta
+
+        if r_multiplier != 1.0 or effective_r_increment != 0:
+            self._log_effective_release_stats(
+                "heuristic_last_stage_only_sch_from_mcf_lb",
+                r_multiplier=r_multiplier,
+                r_increment=effective_r_increment,
+            )
+
         instance = self.instance
         if p_increment == 0:
             instance_for_solve = instance
@@ -891,7 +1004,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             job_priority=job_priority,
             placement_priority=placement_priority,
             r_multiplier=r_multiplier,
-            r_increment=r_increment,
+            r_increment=effective_r_increment,
         )
 
         self.last_stage_only_sol = FFcDDWSolution(
@@ -907,7 +1020,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.logger.info(
             "heuristic_last_stage_only_sch_from_mcf_lb: status=%s, "
             "obj=%.2f, mcf_lb=%d, elapsed=%.2fs, p_increment=%d, "
-            "r_multiplier=%.4g, r_increment=%d.",
+            "r_multiplier=%.4g, r_increment=%d (effective=%d).",
             result.status,
             result.obj_value,
             int(mcf_lb),
@@ -915,6 +1028,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             p_increment,
             r_multiplier,
             r_increment,
+            effective_r_increment,
         )
         report = SubroutineReport(
             elapsed_time=result.elapsed_time,
@@ -1023,8 +1137,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         self.logger.info(
             "build_full_sch_from_last_stage_only_sch: dispatched obj=%.2f, "
-            "elapsed=%.2fs",
+            "makespan=%d, elapsed=%.2fs",
             state.dispatched_obj,
+            int(state.full_sch_from_ls_only_sch.makespan),
             elapsed,
         )
         report = SubroutineReport(

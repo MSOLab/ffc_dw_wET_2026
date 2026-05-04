@@ -52,6 +52,9 @@ artifacts:
     kind: mcf_preemptive_obj_csv
     file_template: "{run_id}_mcf_preemptive_obj.csv"
   - scope: run
+    kind: adjust_r_makespan_delta_csv
+    file_template: "{run_id}_adjust_r_makespan_delta.csv"
+  - scope: run
     kind: last_stage_only_obj_csv
     file_template: "{run_id}_last_stage_only_obj.csv"
   - scope: run
