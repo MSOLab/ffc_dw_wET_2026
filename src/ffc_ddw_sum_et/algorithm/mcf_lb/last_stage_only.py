@@ -458,7 +458,7 @@ def _insert_jobs_at_desired_starts(
     For job ``j`` with preemptive window ``(t_min, t_max)`` and last-stage
     duration ``p_j``:
 
-      desired_start = max((t_min + t_max - p_j) // 2, 0)
+      desired_start = max((t_min + t_max - p_j) // 2, job_2_release[j])
 
     1. If ``[desired_start, desired_start + p_j)`` is free on at least one
        machine (in ``machines_per_stage`` order), place there.
@@ -515,7 +515,7 @@ def _insert_jobs_at_desired_starts(
             no_window_jobs.append(job_id)
             continue
         t_min, t_max = window
-        desired_start = max((t_min + t_max - p_j) // 2, 0)
+        desired_start = max((t_min + t_max - p_j) // 2, job_2_release[job_id])
         desired_end = desired_start + p_j
 
         chosen_mc: str | None = None
