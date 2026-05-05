@@ -228,7 +228,7 @@ uv run python scripts/aggregate_results_index.py analysis/results_index_<date>.c
 #   metric == "mcfLb (no incumbent)" → AlgRecord 미등록 (mean_value = mean mcfLb, mean_RPDf = None)
 ```
 
-집계는 `BKS_data > 0` 인스턴스만 사용 (BKS=0이면 RPDf 해석 불안정).
+집계는 **모든 인스턴스 포함** (1440개 전부). BKS_data=0 + bestObj=0 케이스는 builder가 이미 RPDf=0으로 처리; 나머지 BKS=0 케이스는 RPDf=2.0 (max symmetric distance)로 평균에 반영. 이전에는 `BKS>0` 필터를 권장했으나 사용자 의견에 따라 제거 — BKS=0 인스턴스의 lose도 알고리즘 평가의 일부로 본다.
 
 특이 케이스:
 - **`mcf_lb_only` RUN**: 설계상 schedule 없음 → `bestObj` NaN, `mcfLb`만 채워짐 → "결과 없음 (LB only)" 표기.

@@ -30,8 +30,15 @@ import pandas as pd
 
 
 def aggregate(df: pd.DataFrame) -> list[dict]:
-    """Return one record per (runNumber, scenarioName)."""
-    valid = df[df["BKS_data"] > 0]
+    """Return one record per (runNumber, scenarioName).
+
+    Includes ALL benchmark instances (no BKS_data > 0 filter). The build
+    script handles RPDf for the BKS_data=0 + bestObj=0 corner case
+    (defines it as 0.0); other BKS=0 cases produce RPDf=2.0 (max
+    symmetric distance) which is included in the average as a real
+    signal rather than dropped.
+    """
+    valid = df
     records = []
     for (r, scen), grp in valid.groupby(["runNumber", "scenarioName"], sort=True):
         bo_n = grp["bestObj"].notna().sum()
