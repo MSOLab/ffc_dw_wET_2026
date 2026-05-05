@@ -133,3 +133,8 @@ class MCFPreemptiveSchedule:
             (job_id, self.stage_id, mc, start, end)
             for (mc, job_id, start, end) in self.segments
         ]
+
+    @property
+    def makespan(self) -> int:
+        """Return the makespan of this schedule."""
+        return max(end for _, _, _, end in self.segments) if self.segments else 0
