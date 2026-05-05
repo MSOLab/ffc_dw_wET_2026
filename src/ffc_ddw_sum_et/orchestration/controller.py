@@ -1234,7 +1234,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def build_full_sch_from_last_stage_only_sch(
         self,
-        machine_then_job: bool = False,
     ) -> SubroutineReport:
         """Step method: build a full dispatched ``FFcSchedule`` from
         ``self.last_stage_only_sol.schedule`` via reverse-dispatch + unflip
@@ -1246,10 +1245,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``neh_cp_last_stage_only_sch_from_mcf_lb``,
         ``run_last_stage_cp_sat_lb``, or ``run_mcf_lb_4``).
 
-        Args:
-            machine_then_job: Forwarded to the reversed
-                ``MixedDispatcher.get_best_mixed_schedule_by_sequence``;
-                controls candidate ordering inside the reverse dispatch.
+        The reversed dispatcher is run twice (``machine_then_job=False``
+        and ``machine_then_job=True``) in `reverse_dispatch_full_schedule`;
+        the candidate with the shorter makespan is unflipped.
 
         Side effects:
           - Registers the dispatched schedule as a full incumbent on
@@ -1293,7 +1291,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         state = reverse_dispatch_full_schedule(
             self.instance,
             self.last_stage_only_sol.schedule,
-            machine_then_job=machine_then_job,
             rebuild_last_stage_with_original_p=rebuild_with_original_p,
             logger=self.logger,
         )
@@ -1362,7 +1359,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         repeat_last_stage_only_cp_while_improving: bool = False,
         log_last_stage_only_cp_search_progress: bool = False,
         last_stage_only_tl: float | str | None = None,
-        machine_then_job: bool = False,
         full_cp_pf_method: PFMethod | None = None,
         full_cp_solver_thread_cnt: int = 1,
         repeat_full_cp_while_improving: bool = False,
@@ -1415,7 +1411,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 or any expression supported by ``resolve_value_expr``
                 (``"<n>nc"``, ``"<n>n"``, ``"<n>c"``, ``"<n>m"``),
                 or ``None`` for no limit.
-            machine_then_job: Passed to Phase 3 reverse-dispatch ordering.
             full_cp_pf_method: Same policy for the Phase 4 full CP-SAT solve.
                 Same ``None`` / ``"PF0"`` distinction applies.
             full_cp_solver_thread_cnt: Number of CP-SAT solver threads for the
@@ -1534,7 +1529,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance,
             diag,
             logger=self.logger,
-            machine_then_job=machine_then_job,
         )
         if phase3 is None:
             elapsed = time.monotonic() - start_elapsed
@@ -2443,7 +2437,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``(t_max_j - t_min_j) / p_{c,j}``.
 
         Thin wrapper over
-        :func:`ffc_ddw_sum_et.algorithm.mcf_lb.utils.pm_pmtn_sort_job_sequence_with_log`
+        `ffc_ddw_sum_et.algorithm.mcf_lb.utils.pm_pmtn_sort_job_sequence_with_log`
         that supplies the live MCF time-window map. The shared helper owns
         the tie-break order and the rank-by-rank diagnostic log.
         """

@@ -50,13 +50,12 @@ def reverse_dispatch_full_schedule(
     *,
     last_stage_id: str | None = None,
     job_2_pos: dict[str, int] | None = None,
-    machine_then_job: bool = False,
     rebuild_last_stage_with_original_p: bool = False,
     logger: logging.Logger | None = None,
 ) -> Phase3State | None:
     """Build the full dispatched schedule via reverse-dispatch + unflip.
 
-    Pure helper — no diagnostic side effects. The caller mutates a
+    Pure helper -- no diagnostic side effects. The caller mutates a
     :class:`MCFLBDiagnostic` if it needs to record timing/objective there.
 
     The input last-stage schedule is taken as the starting point (or, when
@@ -72,17 +71,23 @@ def reverse_dispatch_full_schedule(
     per-job objective contribution. The delayed schedule's makespan is
     then used as the flip horizon.
 
+    The reversed dispatcher is run twice -- once with
+    ``machine_then_job=False`` and once with ``machine_then_job=True`` --
+    and the candidate with the shorter ``reversed_full`` makespan is kept;
+    only that winner is unflipped via `FFcSchedule.as_reversed`.
+    If exactly one branch returns ``None``, the other is used;
+    if both return ``None``, this function returns ``None``
+    (with a warning logged when ``logger`` is supplied).
+
     Args:
         instance: Original (non-reversed) FFcDDW instance.
         last_stage_only_schedule: Schedule whose last stage is fully
-            populated (other stages may be empty). Treated as immutable —
+            populated (other stages may be empty). Treated as immutable -
             the delay step operates on a deep copy.
         last_stage_id: Defaults to ``instance.stage_id_list[-1]``.
         job_2_pos: Tie-break order for the reverse job sequence.
             Defaults to instance-native order
             (``{j: i for i, j in enumerate(instance.job_id_list)}``).
-        machine_then_job: Forwarded to
-            :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`.
         rebuild_last_stage_with_original_p: When ``True``, rebuild the
             input last-stage schedule using ``instance``'s last-stage
             processing times before any further processing: each
@@ -98,8 +103,8 @@ def reverse_dispatch_full_schedule(
             on ``Phase3State.ls_only_sch_before_delay``.
         logger: Optional logger; warnings are emitted on dispatcher failure.
 
-    Returns ``None`` if the reversed ``MixedDispatcher`` fails to produce
-    a schedule (a warning is logged via ``logger`` when supplied).
+    Returns ``None`` if both reversed-dispatcher attempts fail (a warning
+    is logged via ``logger`` when supplied).
     """
     if last_stage_id is None:
         last_stage_id = instance.stage_id_list[-1]
@@ -179,20 +184,36 @@ def reverse_dispatch_full_schedule(
         ls_only_sch_flipped = reversed_seed
 
         rev_dispatcher = MixedDispatcher(reversed_instance)
-        reversed_full = rev_dispatcher.get_best_mixed_schedule_by_sequence(
+        reversed_full_jtm = rev_dispatcher.get_best_mixed_schedule_by_sequence(
             rev_job_sequence,
             schedule=reversed_seed,
             from_stage=reversed_instance.stage_id_list[1],
-            machine_then_job=machine_then_job,
+            machine_then_job=False,
             criteria="makespan",
         )
-        if reversed_full is None:
+        reversed_full_mtj = rev_dispatcher.get_best_mixed_schedule_by_sequence(
+            rev_job_sequence,
+            schedule=reversed_seed,
+            from_stage=reversed_instance.stage_id_list[1],
+            machine_then_job=True,
+            criteria="makespan",
+        )
+        if reversed_full_jtm is None and reversed_full_mtj is None:
             if logger is not None:
                 logger.warning(
                     "reverse_dispatch_full_schedule: reversed MixedDispatcher "
-                    "produced no schedule"
+                    "produced no schedule for either machine_then_job=False or "
+                    "machine_then_job=True"
                 )
             return None
+        if reversed_full_jtm is None:
+            reversed_full = reversed_full_mtj
+        elif reversed_full_mtj is None:
+            reversed_full = reversed_full_jtm
+        elif reversed_full_jtm.makespan <= reversed_full_mtj.makespan:
+            reversed_full = reversed_full_jtm
+        else:
+            reversed_full = reversed_full_mtj
 
         full_sch_before_unflip = reversed_full
         full_sch_from_ls_only_sch = reversed_full.as_reversed()
@@ -228,7 +249,6 @@ def run_phase3(
     diagnostic: MCFLBDiagnostic,
     *,
     logger: logging.Logger | None = None,
-    machine_then_job: bool = False,
 ) -> Phase3State | None:
     """Phase-3 wrapper around :func:`reverse_dispatch_full_schedule`.
 
@@ -243,7 +263,6 @@ def run_phase3(
         phase2.last_stage_only_schedule,
         last_stage_id=phase1.last_stage_id,
         job_2_pos=phase1.job_2_pos,
-        machine_then_job=machine_then_job,
         logger=logger,
     )
     if state is None:
