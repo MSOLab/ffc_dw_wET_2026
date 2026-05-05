@@ -46,16 +46,28 @@ class MCFLBDiagnostic:
     # Per-seed per-job-scan timing stats: {"mean_sec", "max_sec", "n_scans"}.
     heuristic_scan_stats_per_seed: dict[str, dict] = field(default_factory=dict)
     chosen_seed_tag: str | None = None
-    # Populated when a subroutine runs with
-    # ``adjust_(p|r)_by_full_sch_and_last_stage_only_sch=True``: incumbent
-    # and last-stage-only schedule makespans plus their (clamped >= 0)
-    # delta. ``adjust_p`` and ``adjust_r`` share the same makespan triple
-    # (computed from the same incumbent / ``last_stage_only_sol`` sources),
-    # so only a single set is stored. Per-knob increments are recorded
-    # separately: ``adjust_p_increment_added`` equals
-    # ``ceil(delta * m_last / n)`` (added to ``p_increment``);
-    # ``adjust_r_increment_added`` equals ``makespan_delta``
-    # (added straight to ``r_increment``);
+
+    # Populated when a subroutine runs with one of the
+    # ``adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch=True``
+    # knobs. The two reference-schedule sources are mutually exclusive
+    # within a single call (enforced by the controller), and exactly one
+    # of ``adjust_params_last_stage_only_pmtn_makespan`` /
+    # ``adjust_params_last_stage_only_makespan`` is populated:
+    # - ``adjust_params_last_stage_only_pmtn_makespan`` is set when an
+    #   ``_only_pmtn_sch`` knob fires, reading
+    #   ``mcf_preemptive_schedule.makespan`` (the preemptive MCF
+    #   relaxation schedule).
+    # - ``adjust_params_last_stage_only_makespan`` is set when an
+    #   ``_only_sch`` knob fires, reading
+    #   ``last_stage_only_sol.schedule.makespan`` (the non-preemptive
+    #   last-stage-only heuristic schedule).
+    # ``adjust_p`` and ``adjust_r`` (within the same source family)
+    # share the same makespan triple, so only a single set is stored.
+    # Per-knob increments are recorded separately:
+    # ``adjust_p_increment_added`` equals ``ceil(delta * m_last / n)``
+    # (added to ``p_increment``); ``adjust_r_increment_added`` equals
+    # ``makespan_delta`` (added straight to ``r_increment``).
+    adjust_params_last_stage_only_pmtn_makespan: int | None = None
     adjust_params_last_stage_only_makespan: int | None = None
     adjust_params_incumbent_makespan: int | None = None
     adjust_params_makespan_delta: int | None = None

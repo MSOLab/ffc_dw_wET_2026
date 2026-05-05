@@ -786,22 +786,35 @@ class FFcDDWReporter:
     def _write_adjust_params_by_makespan_delta_csv(self) -> None:
         """Run-scoped long-format CSV of makespan-delta-driven param adjusts.
 
-        Unifies the per-instance diagnostic produced by both
-        ``adjust_p_by_full_sch_and_last_stage_only_sch`` and
-        ``adjust_r_by_full_sch_and_last_stage_only_sch``. One row per
-        ``(scenario, instance)`` pair where either knob fired (i.e.
-        ``adjust_params_makespan_delta`` is non-null on the diagnostic).
+        Unifies the per-instance diagnostic produced by the
+        ``adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch``
+        knobs. One row per ``(scenario, instance)`` pair where any knob
+        fired (i.e. ``adjust_params_makespan_delta`` is non-null on the
+        diagnostic).
 
         Columns: ``scenarioName, insIndex, instanceName,
-        lastStageOnlyMakespan, incumbentMakespan, makespanDelta,
-        pIncrementAdded, rIncrementAdded``. ``pIncrementAdded`` is
-        ``ceil(delta * m_last / n)``; ``rIncrementAdded`` is the delta itself
-        (the adjust-r knob adds ``makespan_delta`` straight to
-        ``r_increment``). The empty string is written for whichever knob did
-        not fire.
+        lastStageOnlyPmtnMakespan, lastStageOnlyMakespan,
+        incumbentMakespan, makespanDelta, pIncrementAdded,
+        rIncrementAdded``. Exactly one of ``lastStageOnlyPmtnMakespan`` /
+        ``lastStageOnlyMakespan`` is populated per row (the two
+        reference-schedule sources are mutually exclusive within a
+        single call). ``pIncrementAdded`` is ``ceil(delta * m_last / n)``;
+        ``rIncrementAdded`` is the delta itself (the adjust-r knob adds
+        ``makespan_delta`` straight to ``r_increment``). The empty
+        string is written for whichever knob did not fire.
         """
         rows: list[
-            tuple[str, int | None, str, int, int, int, int | None, int | None]
+            tuple[
+                str,
+                int | None,
+                str,
+                int | None,
+                int | None,
+                int,
+                int,
+                int | None,
+                int | None,
+            ]
         ] = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
@@ -811,6 +824,9 @@ class FFcDDWReporter:
                 makespan_delta = diag.get("adjust_params_makespan_delta")
                 if makespan_delta is None:
                     continue
+                ls_only_pmtn_makespan = diag.get(
+                    "adjust_params_last_stage_only_pmtn_makespan"
+                )
                 ls_only_makespan = diag.get("adjust_params_last_stage_only_makespan")
                 incumbent_makespan = diag.get("adjust_params_incumbent_makespan")
                 p_inc_raw = diag.get("adjust_p_increment_added")
@@ -822,7 +838,10 @@ class FFcDDWReporter:
                         sc.name,
                         self._resolve_ins_index(ir.instance_name),
                         ir.instance_name,
-                        int(ls_only_makespan),
+                        int(ls_only_pmtn_makespan)
+                        if ls_only_pmtn_makespan is not None
+                        else None,
+                        int(ls_only_makespan) if ls_only_makespan is not None else None,
                         int(incumbent_makespan),
                         int(makespan_delta),
                         p_inc_added,
@@ -840,6 +859,7 @@ class FFcDDWReporter:
                     "scenarioName",
                     "insIndex",
                     "instanceName",
+                    "lastStageOnlyPmtnMakespan",
                     "lastStageOnlyMakespan",
                     "incumbentMakespan",
                     "makespanDelta",
@@ -851,6 +871,7 @@ class FFcDDWReporter:
                 scenario_name,
                 ins_index,
                 instance_name,
+                ls_only_pmtn_makespan,
                 ls_only_makespan,
                 incumbent_makespan,
                 delta,
@@ -862,7 +883,8 @@ class FFcDDWReporter:
                         scenario_name,
                         "" if ins_index is None else ins_index,
                         instance_name,
-                        ls_only_makespan,
+                        "" if ls_only_pmtn_makespan is None else ls_only_pmtn_makespan,
+                        "" if ls_only_makespan is None else ls_only_makespan,
                         incumbent_makespan,
                         delta,
                         "" if p_inc_added is None else p_inc_added,

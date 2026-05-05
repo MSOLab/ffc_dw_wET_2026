@@ -1,0 +1,10 @@
+{
+    "files.watcherExclude": {
+        "**/__pycache__/**": true,
+        "**/.venv/**": true,
+        "**/.ruff_cache/**": true,
+        "**/.pytest_cache/**": true,
+        "**/output": true,
+        "**/output/**": true
+    }
+}
