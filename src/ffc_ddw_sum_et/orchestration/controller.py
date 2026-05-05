@@ -1348,6 +1348,115 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
+    def calc_mcf_lb_and_derive_full_sch(
+        self,
+        draw_pmtn_sch_heatmap: bool = False,
+        heatmap_sort: HeatmapSort = "end_time",
+        job_placement_priority: PmPrmpSortKey = "end_time",
+        last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+        adjust_p: bool = False,
+        adjust_r: bool = False,
+    ) -> SubroutineReport:
+        """Composite step: MCF-LB → full schedule, then a conditional
+        second round with p/r adjustments.
+
+        Round 1 always runs:
+          1. ``apply_lb_by_mcf`` (base)
+          2. ``heuristic_last_stage_only_sch_from_mcf_lb`` (base)
+          3. ``build_full_sch_from_last_stage_only_sch`` → registers
+             solution #1 on ``self.solution_manager``.
+
+        Round 2 runs **only when both** of the following hold:
+          * ``adjust_p or adjust_r`` is ``True``;
+          * ``makespan_delta = incumbent_makespan -
+            self.mcf_preemptive_schedule.makespan > 0`` (computed with no
+            ``max(..., 0)`` clamp; this differs from the per-step
+            ``adjust_*`` flags on ``apply_lb_by_mcf`` /
+            ``heuristic_last_stage_only_sch_from_mcf_lb``, which clamp
+            their internal delta at zero).
+
+        When round 2 fires it forwards the three flags to both MCF
+        and heuristic steps and registers a second incumbent via a
+        second ``build_full_sch_from_last_stage_only_sch``. So the
+        solution is registered twice in the typical ``delta > 0`` case
+        and exactly once when round 2 is skipped.
+
+        Args:
+            draw_pmtn_sch_heatmap: Forwarded as ``draw_heatmap`` to
+                round-1 and round-2 ``apply_lb_by_mcf``. Renamed at
+                the composite layer to make clear it controls the
+                MCF preemptive schedule's C-cost heatmap (not a
+                heatmap of the full schedule).
+            heatmap_sort: Forwarded to round-1 and round-2
+                ``apply_lb_by_mcf``.
+            job_placement_priority: Forwarded to round-1 and round-2
+                ``heuristic_last_stage_only_sch_from_mcf_lb``.
+            last_stage_only_placement_criteria: Forwarded as
+                ``placement_priority`` to round-1 and round-2
+                ``heuristic_last_stage_only_sch_from_mcf_lb``. Renamed
+                at the composite layer to make clear it is the
+                last-stage heuristic's tiebreak knob, not an MCF-step
+                option.
+            adjust_p: When ``True``, round 2 enables
+                ``adjust_p_by_full_sch_and_last_stage_only_pmtn_sch``
+                on both the MCF and heuristic steps. Default
+                ``False``.
+            adjust_r: When ``True``, round 2 enables
+                ``adjust_r_by_full_sch_and_last_stage_only_pmtn_sch``
+                **and** ``adjust_r_by_half`` together; the half-adjust
+                is bundled with ``adjust_r`` in this composite.
+
+        Returns:
+            ``SubroutineReport`` from round-2's
+            ``build_full_sch_from_last_stage_only_sch`` when round 2
+            fires; otherwise from round-1's.
+        """
+        self.apply_lb_by_mcf(
+            draw_heatmap=draw_pmtn_sch_heatmap,
+            heatmap_sort=heatmap_sort,
+        )
+        self.heuristic_last_stage_only_sch_from_mcf_lb(
+            job_priority=job_placement_priority,
+            placement_priority=last_stage_only_placement_criteria,
+        )
+        report = self.build_full_sch_from_last_stage_only_sch()
+
+        if not (adjust_p or adjust_r):
+            return report
+
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            return report
+        incumbent_makespan = int(incumbent.schedule.makespan)
+        ls_only_pmtn_makespan = int(self.mcf_preemptive_schedule.makespan)
+        makespan_delta = incumbent_makespan - ls_only_pmtn_makespan
+
+        if makespan_delta <= 0:
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: incumbent makespan=%d, "
+                "ls_only_pmtn makespan=%d, delta=%d <= 0 — skipping adjust round",
+                incumbent_makespan,
+                ls_only_pmtn_makespan,
+                makespan_delta,
+            )
+            return report
+
+        self.apply_lb_by_mcf(
+            draw_heatmap=draw_pmtn_sch_heatmap,
+            heatmap_sort=heatmap_sort,
+            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
+            adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
+            adjust_r_by_half=adjust_r,
+        )
+        self.heuristic_last_stage_only_sch_from_mcf_lb(
+            job_priority=job_placement_priority,
+            placement_priority=last_stage_only_placement_criteria,
+            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
+            adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
+            adjust_r_by_half=adjust_r,
+        )
+        return self.build_full_sch_from_last_stage_only_sch()
+
     def run_mcf_lb_4(
         self,
         last_stage_only_priority_tags: Sequence[SeedTag] | None = None,
