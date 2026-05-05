@@ -89,11 +89,11 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | best | 0.2841 | 124,900 | 1382 |
-  | best_mcf_lb_cp_asis | 0.9598 | 183,132 | 1382 |
-  | neh_cp_bs15_linear_dplus2_pf1_tl024nc | 0.3140 | 132,741 | 1382 |
+  | best | 0.2740 | 119,870 | 1440 |
+  | best_mcf_lb_cp_asis | 1.0017 | 178,168 | 1440 |
+  | neh_cp_bs15_linear_dplus2_pf1_tl024nc | 0.3028 | 127,395 | 1440 |
 
 ### RUN 2 — `20260430T110852_547352` (mso02)
 
@@ -101,15 +101,15 @@
 - **변경**: 직전 commit `ffecbf3 feat(logging): add is_main flag`. config 자체는 헤더 한 줄 추가만.
 - **의도**: `is_main` flag로 INFO 로그 디폴트 변경 후 동일 시나리오 재실행 — logging 변경이 결과에 영향을 미치지 않는지 확인.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | best | 0.2842 | 124,718 | 1382 |
-  | best_mcf_lb_cp_asis | 0.9598 | 183,132 | 1382 |
-  | neh_cp_bs15_linear_dplus2_pf1_tl024nc | 0.3229 | 132,843 | 1382 |
-
----
+  | best | 0.2741 | 119,695 | 1440 |
+  | best_mcf_lb_cp_asis | 1.0017 | 178,168 | 1440 |
+  | neh_cp_bs15_linear_dplus2_pf1_tl024nc | 0.3113 | 127,493 | 1440 |
 
 ## Phase 2 — `mcf_lb_then_neh_cp` integrated step (5/1)
 
@@ -126,13 +126,13 @@
 - **변경**: 단일 시나리오 `mcf_lb_then_neh_cp_bs15_linear_pf1_skip0_mas1_tl024nc`, TL=300s, `instance_worker_cnt: 12`. `draw_gantt: true` + `draw_heatmap: true` + `keep_step_schedules: true`.
 - **의도**: 통합 step 첫 풀-벤치. 전주 `best`(MCF-LB→NEH-CP 직렬) 대비 단일 step으로 통합한 효과 확인.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | mcf_lb_then_neh_cp_bs15_linear_pf1_skip0_mas1_tl024nc | 0.7330 | 191,333 | 1382 |
-
----
+  | mcf_lb_then_neh_cp_bs15_linear_pf1_skip0_mas1_tl024nc | 0.7049 | 183,628 | 1440 |
 
 ## Phase 3 — last-stage-only step 진화 (NEH-CP → single-pass) (5/1 ~ 5/2)
 
@@ -158,8 +158,8 @@
 
   | scenarioName | mean mcfLb | n |
   |---|---|---|
-  | 1_rj_prmp_rel_dev | 40,847 | 1382 |
-  | start_time | 40,847 | 1382 |
+  | 1_rj_prmp_rel_dev | 39,202 | 1440 |
+  | start_time | 39,202 | 1440 |
 
 ### RUN 5 — `20260502T025451_273045` (mso02)
 
@@ -171,8 +171,8 @@
 
   | scenarioName | mean mcfLb | n |
   |---|---|---|
-  | 1_rj_prmp_rel_dev | 40,847 | 1382 |
-  | start_time | 40,847 | 1382 |
+  | 1_rj_prmp_rel_dev | 39,202 | 1440 |
+  | start_time | 39,202 | 1440 |
 
 ### RUN 6 — `20260502T032313_670203` (mso02)
 
@@ -184,22 +184,22 @@
 
   | scenarioName | mean mcfLb | n |
   |---|---|---|
-  | 1_rj_prmp_rel_dev | 40,847 | 1382 |
-  | start_time | 40,847 | 1382 |
+  | 1_rj_prmp_rel_dev | 39,202 | 1440 |
+  | start_time | 39,202 | 1440 |
 
 ### RUN 7 — `20260502T131546_402074` (mso02)
 
 - **Config**: 동일 (`mcf_lb_init_21_config.yaml`) — 직전 commit `aa29cf7 refactor: SSOT split of HeatmapSort union`. config은 인자명 `cp_pf_method`/`cp_solver_thread_cnt` → `pf_method`/`solver_thread_cnt`로 rename.
 - **의도**: SSOT refactor + 인자명 rename 후 RUN 6 결과 재확인.
 
+---
+
 - **결과** *(no incumbent — algorithm did not register a full schedule; only `mcfLb` populated)*:
 
   | scenarioName | mean mcfLb | n |
   |---|---|---|
-  | 1_rj_prmp_rel_dev | 40,847 | 1382 |
-  | start_time | 40,847 | 1382 |
-
----
+  | 1_rj_prmp_rel_dev | 39,202 | 1440 |
+  | start_time | 39,202 | 1440 |
 
 ## Phase 4 — pm-sort key 확장 + placement_priority 스윕 (5/2)
 
@@ -219,9 +219,9 @@
 
   | scenarioName | mean mcfLb | n |
   |---|---|---|
-  | end_time | 40,847 | 1382 |
-  | end_time_maxw | 40,847 | 1382 |
-  | start_time_maxw | 40,847 | 1382 |
+  | end_time | 39,202 | 1440 |
+  | end_time_maxw | 39,202 | 1440 |
+  | start_time_maxw | 39,202 | 1440 |
 
 ### RUN 9 — `20260502T145150_590013` (mso02)
 
@@ -229,18 +229,18 @@
 - **변경**: 시나리오 6개 — `{end_time, start_time_maxw, end_time_maxw} × {contrib, dist}` placement_priority 스윕.
 - **의도**: placement_priority(`contrib` vs `dist`)가 결과에 미치는 영향 측정.
 
+---
+
 - **결과** *(no incumbent — algorithm did not register a full schedule; only `mcfLb` populated)*:
 
   | scenarioName | mean mcfLb | n |
   |---|---|---|
-  | end_time_contrib | 40,847 | 1382 |
-  | end_time_dist | 40,847 | 1382 |
-  | end_time_maxw_contrib | 40,847 | 1382 |
-  | end_time_maxw_dist | 40,847 | 1382 |
-  | start_time_maxw_contrib | 40,847 | 1382 |
-  | start_time_maxw_dist | 40,847 | 1382 |
-
----
+  | end_time_contrib | 39,202 | 1440 |
+  | end_time_dist | 39,202 | 1440 |
+  | end_time_maxw_contrib | 39,202 | 1440 |
+  | end_time_maxw_dist | 39,202 | 1440 |
+  | start_time_maxw_contrib | 39,202 | 1440 |
+  | start_time_maxw_dist | 39,202 | 1440 |
 
 ## Phase 5 — `build_full_sch_from_last_stage_only_sch` step + 디버깅 사이클 (5/2)
 
@@ -262,9 +262,9 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_1 | 1.0134 | 217,354 | 1382 |
+  | build_full_sch_1 | 1.0532 | 212,091 | 1440 |
 
 ### RUN 11 — `20260502T184531_518809` (mso02)
 
@@ -273,22 +273,22 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_1 | 0.6932 | 153,015 | 1382 |
+  | build_full_sch_1 | 0.7277 | 146,879 | 1440 |
 
 ### RUN 12 — `20260502T193831_290902` (mso02)
 
 - **Config**: 동일. 직전 commit: `07c8cea feat(mcf-lb): delay ls-only ops before flip`.
 - **의도**: ls-only ops 지연 적용 후 결과 변화 확인.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_1 | 0.6929 | 152,781 | 1382 |
-
----
+  | build_full_sch_1 | 0.7303 | 146,667 | 1440 |
 
 ## Phase 6 — `p_increment` knob (5/3)
 
@@ -307,13 +307,13 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p_inc_0 | 0.6932 | 153,015 | 1382 |
-  | build_full_sch_p_inc_1 | 0.6824 | 151,328 | 1382 |
-  | build_full_sch_p_inc_2 | 0.6727 | 149,735 | 1382 |
-  | build_full_sch_p_inc_4 | 0.6578 | 146,603 | 1382 |
-  | build_full_sch_p_inc_8 | 0.6524 | 141,774 | 1382 |
+  | build_full_sch_p_inc_0 | 0.7277 | 146,879 | 1440 |
+  | build_full_sch_p_inc_1 | 0.7160 | 145,267 | 1440 |
+  | build_full_sch_p_inc_2 | 0.7164 | 143,748 | 1440 |
+  | build_full_sch_p_inc_4 | 0.7007 | 140,727 | 1440 |
+  | build_full_sch_p_inc_8 | 0.7012 | 136,097 | 1440 |
 
 ### RUN 14 — `20260503T170549_147724` (mso02)
 
@@ -321,14 +321,14 @@
 - **변경**: 시나리오 2개 활성 — `build_full_sch_p_inc_{16,32}` (`p_inc_64`~`p_inc_512`는 주석 처리). RUN 13의 연장.
 - **의도**: p_increment를 16, 32까지 늘려 plateau/turnaround 위치 탐색.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p_inc_16 | 0.6739 | 137,102 | 1382 |
-  | build_full_sch_p_inc_32 | 0.7985 | 153,447 | 1382 |
-
----
+  | build_full_sch_p_inc_16 | 0.7245 | 131,668 | 1440 |
+  | build_full_sch_p_inc_32 | 0.8469 | 147,988 | 1440 |
 
 ## Phase 7 — `heuristic_last_stage_only_sch_from_mcf_lb` 도입 (5/3)
 
@@ -346,24 +346,26 @@
 - **의도**: heuristic 변종의 첫 풀-벤치 — CP-SAT 없이 어느 정도 손실(혹은 의외로 더 나아짐)되는지 hjt5950x에서 빠르게 확인.
 - **비고**: 산출물은 hjt5950x 머신에 있고, 본 저장소 `output/`에는 없음.
 
-- **결과**: 본 저장소에 산출물 없음 (hjt5950x 머신). RUN 16(`mcf_lb_init_26` mso02 재실행)으로 비교.### RUN 16 — `20260503T181635_000784` (mso02)
+- **결과**: 본 저장소에 산출물 없음 (hjt5950x 머신). RUN 16(`mcf_lb_init_26` mso02 재실행)으로 비교.
+
+### RUN 16 — `20260503T181635_000784` (mso02)
 
 - **Config**: 동일 파일 (`mcf_lb_init_26_config.yaml`) — `instance_worker_cnt: 16 → 96`만 변경.
-- **변경**: 시나리오 8개 동일.
+- **변경**: 시나리오 8개 동일 (`build_full_sch_p_inc_{0,1,2,4,8,16,32,64}`).
 - **의도**: 같은 8 시나리오를 mso02(96-worker)에서 재실행 — RUN 15와 같은 결과인지 확인 + 본 저장소에 산출물 보관.
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p_inc_0 | 0.7006 | 153,046 | 1382 |
-  | build_full_sch_p_inc_1 | 0.6869 | 151,794 | 1382 |
-  | build_full_sch_p_inc_16 | 0.6717 | 136,990 | 1382 |
-  | build_full_sch_p_inc_2 | 0.6788 | 150,120 | 1382 |
-  | build_full_sch_p_inc_32 | 0.7985 | 153,509 | 1382 |
-  | build_full_sch_p_inc_4 | 0.6597 | 146,576 | 1382 |
-  | build_full_sch_p_inc_64 | 1.0621 | 224,741 | 1382 |
-  | build_full_sch_p_inc_8 | 0.6509 | 141,527 | 1382 |
+  | build_full_sch_p_inc_0 | 0.7348 | 146,914 | 1440 |
+  | build_full_sch_p_inc_1 | 0.7245 | 145,712 | 1440 |
+  | build_full_sch_p_inc_2 | 0.7237 | 144,121 | 1440 |
+  | build_full_sch_p_inc_4 | 0.7039 | 140,699 | 1440 |
+  | build_full_sch_p_inc_8 | 0.6997 | 135,857 | 1440 |
+  | build_full_sch_p_inc_16 | 0.7224 | 131,560 | 1440 |
+  | build_full_sch_p_inc_32 | 0.8469 | 148,046 | 1440 |
+  | build_full_sch_p_inc_64 | 1.0999 | 219,349 | 1440 |
 
 ---
 
@@ -384,16 +386,16 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_r_mult_1_0 | 0.7006 | 153,046 | 1382 |
-  | build_full_sch_r_mult_1_1 | 0.6796 | 151,024 | 1382 |
-  | build_full_sch_r_mult_1_25 | 0.6649 | 148,544 | 1382 |
-  | build_full_sch_r_mult_1_5 | 0.6531 | 144,782 | 1382 |
-  | build_full_sch_r_mult_2_0 | 0.6703 | 141,910 | 1382 |
-  | build_full_sch_r_mult_3_0 | 0.7980 | 154,729 | 1382 |
-  | build_full_sch_r_mult_4_0 | 0.9389 | 182,150 | 1382 |
-  | build_full_sch_r_mult_8_0 | 1.2720 | 300,296 | 1382 |
+  | build_full_sch_r_mult_1_0 | 0.7348 | 146,914 | 1440 |
+  | build_full_sch_r_mult_1_1 | 0.7231 | 144,985 | 1440 |
+  | build_full_sch_r_mult_1_25 | 0.7062 | 142,587 | 1440 |
+  | build_full_sch_r_mult_1_5 | 0.7018 | 139,002 | 1440 |
+  | build_full_sch_r_mult_2_0 | 0.7211 | 136,338 | 1440 |
+  | build_full_sch_r_mult_3_0 | 0.8450 | 149,320 | 1440 |
+  | build_full_sch_r_mult_4_0 | 0.9816 | 176,979 | 1440 |
+  | build_full_sch_r_mult_8_0 | 1.3013 | 297,069 | 1440 |
 
 ### RUN 18 — `20260503T215803_006004` (mso02)
 
@@ -401,13 +403,13 @@
 - **변경**: 단일 시나리오 `build_full_sch_p_inc_16_r_mult_2_0` — p_inc=16, r_mult=2.0 조합 단발 체크.
 - **의도**: RUN 14(p_inc=16)와 RUN 17(r_mult=2.0)의 best-ish 두 노브 결합. 이후 RUN 27~29 큰 그리드 진행 결정용.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p_inc_16_r_mult_2_0 | 0.7426 | 140,854 | 1382 |
-
----
+  | build_full_sch_p_inc_16_r_mult_2_0 | 0.7919 | 135,468 | 1440 |
 
 ## Phase 9 — `r_increment` 도입 + `mcf_lb_only` 베이스라인 + `t_max` perf 측정 (5/3 ~ 5/4)
 
@@ -427,22 +429,22 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_r_inc_0 | 0.7006 | 153,046 | 1382 |
-  | build_full_sch_r_inc_1 | 0.6940 | 153,265 | 1382 |
-  | build_full_sch_r_inc_1024 | 1.0086 | 202,517 | 1382 |
-  | build_full_sch_r_inc_128 | 0.6633 | 146,448 | 1382 |
-  | build_full_sch_r_inc_16 | 0.6929 | 152,354 | 1382 |
-  | build_full_sch_r_inc_2 | 0.6941 | 153,123 | 1382 |
-  | build_full_sch_r_inc_2048 | 1.1511 | 273,566 | 1382 |
-  | build_full_sch_r_inc_256 | 0.6638 | 142,219 | 1382 |
-  | build_full_sch_r_inc_32 | 0.6892 | 151,340 | 1382 |
-  | build_full_sch_r_inc_4 | 0.6999 | 153,482 | 1382 |
-  | build_full_sch_r_inc_4096 | 1.1641 | 293,625 | 1382 |
-  | build_full_sch_r_inc_512 | 0.7687 | 150,072 | 1382 |
-  | build_full_sch_r_inc_64 | 0.6703 | 149,645 | 1382 |
-  | build_full_sch_r_inc_8 | 0.6959 | 153,312 | 1382 |
+  | build_full_sch_r_inc_0 | 0.7348 | 146,914 | 1440 |
+  | build_full_sch_r_inc_1 | 0.7383 | 147,122 | 1440 |
+  | build_full_sch_r_inc_1024 | 1.0485 | 196,603 | 1440 |
+  | build_full_sch_r_inc_128 | 0.7088 | 140,583 | 1440 |
+  | build_full_sch_r_inc_16 | 0.7345 | 146,253 | 1440 |
+  | build_full_sch_r_inc_2 | 0.7342 | 146,990 | 1440 |
+  | build_full_sch_r_inc_2048 | 1.1853 | 271,323 | 1440 |
+  | build_full_sch_r_inc_256 | 0.7121 | 136,550 | 1440 |
+  | build_full_sch_r_inc_32 | 0.7323 | 145,286 | 1440 |
+  | build_full_sch_r_inc_4 | 0.7398 | 147,340 | 1440 |
+  | build_full_sch_r_inc_4096 | 1.1978 | 296,152 | 1440 |
+  | build_full_sch_r_inc_512 | 0.8156 | 144,346 | 1440 |
+  | build_full_sch_r_inc_64 | 0.7196 | 143,645 | 1440 |
+  | build_full_sch_r_inc_8 | 0.7331 | 147,174 | 1440 |
 
 ### RUN 20 — `20260504T003732_433340` (mso02)
 
@@ -452,11 +454,11 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+16_rx2+128 | 0.8202 | 152,667 | 1382 |
-  | build_full_sch_p+16_rx2+256 | 0.8875 | 166,246 | 1382 |
-  | build_full_sch_p+16_rx2+64 | 0.7810 | 146,257 | 1382 |
+  | build_full_sch_p+16_rx2+128 | 0.8677 | 147,054 | 1440 |
+  | build_full_sch_p+16_rx2+256 | 0.9323 | 160,508 | 1440 |
+  | build_full_sch_p+16_rx2+64 | 0.8301 | 140,761 | 1440 |
 
 ### RUN 21 — `20260504T004917_785558` (mso02)
 
@@ -469,7 +471,7 @@
 
   | scenarioName | mean mcfLb | n |
   |---|---|---|
-  | mcf_lb_only | 40,847 | 1382 |
+  | mcf_lb_only | 39,202 | 1440 |
 
 ### RUN 22 — `20260504T010002_965646` (mso02)
 
@@ -479,15 +481,15 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+16_rx2 | 0.7426 | 140,854 | 1382 |
-  | build_full_sch_p+16_rx2+1 | 0.7411 | 140,772 | 1382 |
-  | build_full_sch_p+16_rx2+16 | 0.7506 | 142,039 | 1382 |
-  | build_full_sch_p+16_rx2+2 | 0.7420 | 140,932 | 1382 |
-  | build_full_sch_p+16_rx2+32 | 0.7612 | 143,766 | 1382 |
-  | build_full_sch_p+16_rx2+4 | 0.7433 | 141,041 | 1382 |
-  | build_full_sch_p+16_rx2+8 | 0.7470 | 141,491 | 1382 |
+  | build_full_sch_p+16_rx2 | 0.7919 | 135,468 | 1440 |
+  | build_full_sch_p+16_rx2+1 | 0.7918 | 135,388 | 1440 |
+  | build_full_sch_p+16_rx2+16 | 0.7995 | 136,633 | 1440 |
+  | build_full_sch_p+16_rx2+2 | 0.7913 | 135,549 | 1440 |
+  | build_full_sch_p+16_rx2+32 | 0.8097 | 138,315 | 1440 |
+  | build_full_sch_p+16_rx2+4 | 0.7925 | 135,661 | 1440 |
+  | build_full_sch_p+16_rx2+8 | 0.7961 | 136,090 | 1440 |
 
 ### RUN 23~26 — `4ca477d` perf 측정 A/B/B/A (mso02)
 
@@ -508,9 +510,9 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p_inc_0 | 0.6951 | 153,215 | 1382 |
+  | build_full_sch_p_inc_0 | 0.7393 | 147,085 | 1440 |
 
 #### RUN 24 — `20260504T031049_337896` (mso02, AFTER)
 
@@ -520,9 +522,9 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+16_rx2 | 0.7412 | 140,822 | 1382 |
+  | build_full_sch_p+16_rx2 | 0.7919 | 135,440 | 1440 |
 
 #### RUN 25 — `20260504T031422_467379` (mso02, BEFORE)
 
@@ -532,9 +534,9 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+16_rx2 | 0.7426 | 140,854 | 1382 |
+  | build_full_sch_p+16_rx2 | 0.7919 | 135,468 | 1440 |
 
 #### RUN 26 — `20260504T032002_269531` (mso02, BEFORE)
 
@@ -542,15 +544,13 @@
 - **변경**: `4ca477d` patch 롤백 상태에서 동일 시나리오 측정 (BEFORE 베이스라인). body 메모: 60.90s.
 - **의도**: t_max tightening 적용 전 baseline timing — RUN 23과 직접 비교.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p_inc_0 | 0.7006 | 153,046 | 1382 |
-
-**결론**: `4ca477d` perf change로 `build_full_sch_p_inc_0` (init_24[0])는 60.90s → 33.05s (~46% 단축), `build_full_sch_p+16_rx2` (init_31[0])는 83.24s → 36.72s (~56% 단축). 이후 모든 RUN(27~36)은 patch 적용 상태 가정. 결과 wET는 동일 알고리즘이므로 변하지 않음 — RUN 23·26: 0.6951/0.7006, RUN 24·25: 0.7412/0.7426.
-
----
+  | build_full_sch_p_inc_0 | 0.7348 | 146,914 | 1440 |
 
 ## Phase 10 — p×r 그리드 스윕 (5/4)
 
@@ -562,68 +562,68 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+0_rx2+0 | 0.6951 | 153,215 | 1382 |
-  | build_full_sch_p+0_rx2+1 | 0.6950 | 153,397 | 1382 |
-  | build_full_sch_p+0_rx2+128 | 0.6613 | 146,091 | 1382 |
-  | build_full_sch_p+0_rx2+16 | 0.6896 | 152,006 | 1382 |
-  | build_full_sch_p+0_rx2+2 | 0.6981 | 153,478 | 1382 |
-  | build_full_sch_p+0_rx2+256 | 0.6638 | 142,185 | 1382 |
-  | build_full_sch_p+0_rx2+32 | 0.6796 | 151,191 | 1382 |
-  | build_full_sch_p+0_rx2+4 | 0.6946 | 152,984 | 1382 |
-  | build_full_sch_p+0_rx2+62 | 0.6744 | 149,176 | 1382 |
-  | build_full_sch_p+0_rx2+8 | 0.6957 | 152,565 | 1382 |
-  | build_full_sch_p+16_rx2+0 | 0.6718 | 137,013 | 1382 |
-  | build_full_sch_p+16_rx2+1 | 0.6693 | 136,594 | 1382 |
-  | build_full_sch_p+16_rx2+128 | 0.6815 | 135,685 | 1382 |
-  | build_full_sch_p+16_rx2+16 | 0.6669 | 136,357 | 1382 |
-  | build_full_sch_p+16_rx2+2 | 0.6697 | 136,671 | 1382 |
-  | build_full_sch_p+16_rx2+256 | 0.7575 | 143,222 | 1382 |
-  | build_full_sch_p+16_rx2+32 | 0.6635 | 135,368 | 1382 |
-  | build_full_sch_p+16_rx2+4 | 0.6697 | 136,653 | 1382 |
-  | build_full_sch_p+16_rx2+62 | 0.6619 | 134,993 | 1382 |
-  | build_full_sch_p+16_rx2+8 | 0.6677 | 136,219 | 1382 |
-  | build_full_sch_p+1_rx2+0 | 0.6854 | 151,436 | 1382 |
-  | build_full_sch_p+1_rx2+1 | 0.6790 | 151,213 | 1382 |
-  | build_full_sch_p+1_rx2+128 | 0.6456 | 144,326 | 1382 |
-  | build_full_sch_p+1_rx2+16 | 0.6801 | 150,426 | 1382 |
-  | build_full_sch_p+1_rx2+2 | 0.6762 | 151,115 | 1382 |
-  | build_full_sch_p+1_rx2+256 | 0.6522 | 140,755 | 1382 |
-  | build_full_sch_p+1_rx2+32 | 0.6719 | 149,291 | 1382 |
-  | build_full_sch_p+1_rx2+4 | 0.6833 | 151,264 | 1382 |
-  | build_full_sch_p+1_rx2+62 | 0.6619 | 147,759 | 1382 |
-  | build_full_sch_p+1_rx2+8 | 0.6857 | 150,836 | 1382 |
-  | build_full_sch_p+2_rx2+0 | 0.6792 | 149,897 | 1382 |
-  | build_full_sch_p+2_rx2+1 | 0.6805 | 149,698 | 1382 |
-  | build_full_sch_p+2_rx2+128 | 0.6343 | 142,509 | 1382 |
-  | build_full_sch_p+2_rx2+16 | 0.6681 | 149,015 | 1382 |
-  | build_full_sch_p+2_rx2+2 | 0.6762 | 149,669 | 1382 |
-  | build_full_sch_p+2_rx2+256 | 0.6430 | 139,279 | 1382 |
-  | build_full_sch_p+2_rx2+32 | 0.6631 | 147,659 | 1382 |
-  | build_full_sch_p+2_rx2+4 | 0.6743 | 149,415 | 1382 |
-  | build_full_sch_p+2_rx2+62 | 0.6457 | 145,465 | 1382 |
-  | build_full_sch_p+2_rx2+8 | 0.6713 | 149,556 | 1382 |
-  | build_full_sch_p+4_rx2+0 | 0.6637 | 146,923 | 1382 |
-  | build_full_sch_p+4_rx2+1 | 0.6649 | 146,438 | 1382 |
-  | build_full_sch_p+4_rx2+128 | 0.6257 | 139,460 | 1382 |
-  | build_full_sch_p+4_rx2+16 | 0.6551 | 145,499 | 1382 |
-  | build_full_sch_p+4_rx2+2 | 0.6627 | 146,823 | 1382 |
-  | build_full_sch_p+4_rx2+256 | 0.6384 | 137,256 | 1382 |
-  | build_full_sch_p+4_rx2+32 | 0.6468 | 144,767 | 1382 |
-  | build_full_sch_p+4_rx2+4 | 0.6554 | 146,762 | 1382 |
-  | build_full_sch_p+4_rx2+62 | 0.6392 | 143,150 | 1382 |
-  | build_full_sch_p+4_rx2+8 | 0.6583 | 146,217 | 1382 |
-  | build_full_sch_p+8_rx2+0 | 0.6523 | 141,534 | 1382 |
-  | build_full_sch_p+8_rx2+1 | 0.6546 | 141,501 | 1382 |
-  | build_full_sch_p+8_rx2+128 | 0.6214 | 135,668 | 1382 |
-  | build_full_sch_p+8_rx2+16 | 0.6442 | 140,235 | 1382 |
-  | build_full_sch_p+8_rx2+2 | 0.6531 | 141,773 | 1382 |
-  | build_full_sch_p+8_rx2+256 | 0.6651 | 136,317 | 1382 |
-  | build_full_sch_p+8_rx2+32 | 0.6408 | 139,728 | 1382 |
-  | build_full_sch_p+8_rx2+4 | 0.6528 | 141,335 | 1382 |
-  | build_full_sch_p+8_rx2+62 | 0.6313 | 138,368 | 1382 |
-  | build_full_sch_p+8_rx2+8 | 0.6503 | 141,225 | 1382 |
+  | build_full_sch_p+0_rx2+0 | 0.7393 | 147,085 | 1440 |
+  | build_full_sch_p+0_rx2+1 | 0.7364 | 147,255 | 1440 |
+  | build_full_sch_p+0_rx2+128 | 0.7069 | 140,240 | 1440 |
+  | build_full_sch_p+0_rx2+16 | 0.7298 | 145,916 | 1440 |
+  | build_full_sch_p+0_rx2+2 | 0.7367 | 147,338 | 1440 |
+  | build_full_sch_p+0_rx2+256 | 0.7135 | 136,518 | 1440 |
+  | build_full_sch_p+0_rx2+32 | 0.7231 | 145,135 | 1440 |
+  | build_full_sch_p+0_rx2+4 | 0.7375 | 146,871 | 1440 |
+  | build_full_sch_p+0_rx2+62 | 0.7181 | 143,197 | 1440 |
+  | build_full_sch_p+0_rx2+8 | 0.7343 | 146,465 | 1440 |
+  | build_full_sch_p+16_rx2+0 | 0.7239 | 131,581 | 1440 |
+  | build_full_sch_p+16_rx2+1 | 0.7201 | 131,181 | 1440 |
+  | build_full_sch_p+16_rx2+128 | 0.7332 | 130,323 | 1440 |
+  | build_full_sch_p+16_rx2+16 | 0.7137 | 130,955 | 1440 |
+  | build_full_sch_p+16_rx2+2 | 0.7192 | 131,252 | 1440 |
+  | build_full_sch_p+16_rx2+256 | 0.8075 | 137,667 | 1440 |
+  | build_full_sch_p+16_rx2+32 | 0.7145 | 130,001 | 1440 |
+  | build_full_sch_p+16_rx2+4 | 0.7191 | 131,234 | 1440 |
+  | build_full_sch_p+16_rx2+62 | 0.7116 | 129,645 | 1440 |
+  | build_full_sch_p+16_rx2+8 | 0.7172 | 130,814 | 1440 |
+  | build_full_sch_p+1_rx2+0 | 0.7286 | 145,380 | 1440 |
+  | build_full_sch_p+1_rx2+1 | 0.7183 | 145,166 | 1440 |
+  | build_full_sch_p+1_rx2+128 | 0.6862 | 138,539 | 1440 |
+  | build_full_sch_p+1_rx2+16 | 0.7264 | 144,406 | 1440 |
+  | build_full_sch_p+1_rx2+2 | 0.7212 | 145,067 | 1440 |
+  | build_full_sch_p+1_rx2+256 | 0.7051 | 135,150 | 1440 |
+  | build_full_sch_p+1_rx2+32 | 0.7157 | 143,310 | 1440 |
+  | build_full_sch_p+1_rx2+4 | 0.7253 | 145,199 | 1440 |
+  | build_full_sch_p+1_rx2+62 | 0.7074 | 141,843 | 1440 |
+  | build_full_sch_p+1_rx2+8 | 0.7275 | 144,799 | 1440 |
+  | build_full_sch_p+2_rx2+0 | 0.7269 | 143,917 | 1440 |
+  | build_full_sch_p+2_rx2+1 | 0.7267 | 143,699 | 1440 |
+  | build_full_sch_p+2_rx2+128 | 0.6865 | 136,793 | 1440 |
+  | build_full_sch_p+2_rx2+16 | 0.7120 | 143,054 | 1440 |
+  | build_full_sch_p+2_rx2+2 | 0.7212 | 143,679 | 1440 |
+  | build_full_sch_p+2_rx2+256 | 0.6935 | 133,726 | 1440 |
+  | build_full_sch_p+2_rx2+32 | 0.7058 | 141,748 | 1440 |
+  | build_full_sch_p+2_rx2+4 | 0.7208 | 143,436 | 1440 |
+  | build_full_sch_p+2_rx2+62 | 0.6906 | 139,640 | 1440 |
+  | build_full_sch_p+2_rx2+8 | 0.7137 | 143,569 | 1440 |
+  | build_full_sch_p+4_rx2+0 | 0.7078 | 141,038 | 1440 |
+  | build_full_sch_p+4_rx2+1 | 0.7090 | 140,566 | 1440 |
+  | build_full_sch_p+4_rx2+128 | 0.6769 | 133,877 | 1440 |
+  | build_full_sch_p+4_rx2+16 | 0.6954 | 139,664 | 1440 |
+  | build_full_sch_p+4_rx2+2 | 0.7041 | 140,940 | 1440 |
+  | build_full_sch_p+4_rx2+256 | 0.6863 | 131,785 | 1440 |
+  | build_full_sch_p+4_rx2+32 | 0.6957 | 138,963 | 1440 |
+  | build_full_sch_p+4_rx2+4 | 0.6999 | 140,884 | 1440 |
+  | build_full_sch_p+4_rx2+62 | 0.6843 | 137,412 | 1440 |
+  | build_full_sch_p+4_rx2+8 | 0.6999 | 140,359 | 1440 |
+  | build_full_sch_p+8_rx2+0 | 0.7010 | 135,864 | 1440 |
+  | build_full_sch_p+8_rx2+1 | 0.7046 | 135,827 | 1440 |
+  | build_full_sch_p+8_rx2+128 | 0.6742 | 130,239 | 1440 |
+  | build_full_sch_p+8_rx2+16 | 0.6933 | 134,612 | 1440 |
+  | build_full_sch_p+8_rx2+2 | 0.7004 | 136,091 | 1440 |
+  | build_full_sch_p+8_rx2+256 | 0.7161 | 130,905 | 1440 |
+  | build_full_sch_p+8_rx2+32 | 0.6872 | 134,123 | 1440 |
+  | build_full_sch_p+8_rx2+4 | 0.7043 | 135,670 | 1440 |
+  | build_full_sch_p+8_rx2+62 | 0.6809 | 132,818 | 1440 |
+  | build_full_sch_p+8_rx2+8 | 0.7019 | 135,562 | 1440 |
 
 ### RUN 28 — `20260504T082749_666067` (mso02)
 
@@ -633,68 +633,68 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+0_rx2+0 | 0.6682 | 141,676 | 1382 |
-  | build_full_sch_p+0_rx2+1 | 0.6693 | 141,396 | 1382 |
-  | build_full_sch_p+0_rx2+128 | 0.7057 | 142,762 | 1382 |
-  | build_full_sch_p+0_rx2+16 | 0.6731 | 141,696 | 1382 |
-  | build_full_sch_p+0_rx2+2 | 0.6705 | 141,809 | 1382 |
-  | build_full_sch_p+0_rx2+256 | 0.7630 | 148,365 | 1382 |
-  | build_full_sch_p+0_rx2+32 | 0.6773 | 141,835 | 1382 |
-  | build_full_sch_p+0_rx2+4 | 0.6725 | 141,795 | 1382 |
-  | build_full_sch_p+0_rx2+62 | 0.6859 | 141,916 | 1382 |
-  | build_full_sch_p+0_rx2+8 | 0.6718 | 141,487 | 1382 |
-  | build_full_sch_p+16_rx2+0 | 0.7412 | 140,822 | 1382 |
-  | build_full_sch_p+16_rx2+1 | 0.7429 | 141,030 | 1382 |
-  | build_full_sch_p+16_rx2+128 | 0.8204 | 152,633 | 1382 |
-  | build_full_sch_p+16_rx2+16 | 0.7509 | 142,066 | 1382 |
-  | build_full_sch_p+16_rx2+2 | 0.7434 | 141,042 | 1382 |
-  | build_full_sch_p+16_rx2+256 | 0.8881 | 166,287 | 1382 |
-  | build_full_sch_p+16_rx2+32 | 0.7609 | 143,473 | 1382 |
-  | build_full_sch_p+16_rx2+4 | 0.7440 | 141,102 | 1382 |
-  | build_full_sch_p+16_rx2+62 | 0.7794 | 146,064 | 1382 |
-  | build_full_sch_p+16_rx2+8 | 0.7468 | 141,560 | 1382 |
-  | build_full_sch_p+1_rx2+0 | 0.6583 | 140,234 | 1382 |
-  | build_full_sch_p+1_rx2+1 | 0.6606 | 140,402 | 1382 |
-  | build_full_sch_p+1_rx2+128 | 0.7000 | 141,715 | 1382 |
-  | build_full_sch_p+1_rx2+16 | 0.6642 | 140,371 | 1382 |
-  | build_full_sch_p+1_rx2+2 | 0.6601 | 140,198 | 1382 |
-  | build_full_sch_p+1_rx2+256 | 0.7619 | 148,193 | 1382 |
-  | build_full_sch_p+1_rx2+32 | 0.6676 | 140,422 | 1382 |
-  | build_full_sch_p+1_rx2+4 | 0.6613 | 140,423 | 1382 |
-  | build_full_sch_p+1_rx2+62 | 0.6745 | 140,560 | 1382 |
-  | build_full_sch_p+1_rx2+8 | 0.6642 | 140,450 | 1382 |
-  | build_full_sch_p+2_rx2+0 | 0.6522 | 139,196 | 1382 |
-  | build_full_sch_p+2_rx2+1 | 0.6481 | 139,011 | 1382 |
-  | build_full_sch_p+2_rx2+128 | 0.6951 | 140,988 | 1382 |
-  | build_full_sch_p+2_rx2+16 | 0.6566 | 139,177 | 1382 |
-  | build_full_sch_p+2_rx2+2 | 0.6485 | 138,726 | 1382 |
-  | build_full_sch_p+2_rx2+256 | 0.7608 | 148,353 | 1382 |
-  | build_full_sch_p+2_rx2+32 | 0.6554 | 138,891 | 1382 |
-  | build_full_sch_p+2_rx2+4 | 0.6498 | 139,027 | 1382 |
-  | build_full_sch_p+2_rx2+62 | 0.6694 | 139,414 | 1382 |
-  | build_full_sch_p+2_rx2+8 | 0.6530 | 139,027 | 1382 |
-  | build_full_sch_p+4_rx2+0 | 0.6453 | 136,666 | 1382 |
-  | build_full_sch_p+4_rx2+1 | 0.6449 | 136,600 | 1382 |
-  | build_full_sch_p+4_rx2+128 | 0.6997 | 140,316 | 1382 |
-  | build_full_sch_p+4_rx2+16 | 0.6514 | 136,979 | 1382 |
-  | build_full_sch_p+4_rx2+2 | 0.6452 | 136,849 | 1382 |
-  | build_full_sch_p+4_rx2+256 | 0.7740 | 149,103 | 1382 |
-  | build_full_sch_p+4_rx2+32 | 0.6561 | 137,028 | 1382 |
-  | build_full_sch_p+4_rx2+4 | 0.6488 | 136,822 | 1382 |
-  | build_full_sch_p+4_rx2+62 | 0.6695 | 137,764 | 1382 |
-  | build_full_sch_p+4_rx2+8 | 0.6475 | 136,938 | 1382 |
-  | build_full_sch_p+8_rx2+0 | 0.6589 | 134,761 | 1382 |
-  | build_full_sch_p+8_rx2+1 | 0.6607 | 134,984 | 1382 |
-  | build_full_sch_p+8_rx2+128 | 0.7329 | 141,812 | 1382 |
-  | build_full_sch_p+8_rx2+16 | 0.6680 | 135,178 | 1382 |
-  | build_full_sch_p+8_rx2+2 | 0.6593 | 134,735 | 1382 |
-  | build_full_sch_p+8_rx2+256 | 0.8110 | 153,092 | 1382 |
-  | build_full_sch_p+8_rx2+32 | 0.6761 | 136,154 | 1382 |
-  | build_full_sch_p+8_rx2+4 | 0.6615 | 134,898 | 1382 |
-  | build_full_sch_p+8_rx2+62 | 0.6910 | 137,333 | 1382 |
-  | build_full_sch_p+8_rx2+8 | 0.6646 | 135,218 | 1382 |
+  | build_full_sch_p+0_rx2+0 | 0.7204 | 136,114 | 1440 |
+  | build_full_sch_p+0_rx2+1 | 0.7187 | 135,852 | 1440 |
+  | build_full_sch_p+0_rx2+128 | 0.7537 | 137,270 | 1440 |
+  | build_full_sch_p+0_rx2+16 | 0.7238 | 136,137 | 1440 |
+  | build_full_sch_p+0_rx2+2 | 0.7199 | 136,247 | 1440 |
+  | build_full_sch_p+0_rx2+256 | 0.8114 | 142,853 | 1440 |
+  | build_full_sch_p+0_rx2+32 | 0.7250 | 136,292 | 1440 |
+  | build_full_sch_p+0_rx2+4 | 0.7218 | 136,223 | 1440 |
+  | build_full_sch_p+0_rx2+62 | 0.7374 | 136,397 | 1440 |
+  | build_full_sch_p+0_rx2+8 | 0.7239 | 135,940 | 1440 |
+  | build_full_sch_p+16_rx2+0 | 0.7919 | 135,440 | 1440 |
+  | build_full_sch_p+16_rx2+1 | 0.7921 | 135,636 | 1440 |
+  | build_full_sch_p+16_rx2+128 | 0.8679 | 147,028 | 1440 |
+  | build_full_sch_p+16_rx2+16 | 0.8013 | 136,651 | 1440 |
+  | build_full_sch_p+16_rx2+2 | 0.7926 | 135,651 | 1440 |
+  | build_full_sch_p+16_rx2+256 | 0.9329 | 160,539 | 1440 |
+  | build_full_sch_p+16_rx2+32 | 0.8094 | 138,034 | 1440 |
+  | build_full_sch_p+16_rx2+4 | 0.7918 | 135,716 | 1440 |
+  | build_full_sch_p+16_rx2+62 | 0.8285 | 140,574 | 1440 |
+  | build_full_sch_p+16_rx2+8 | 0.7959 | 136,157 | 1440 |
+  | build_full_sch_p+1_rx2+0 | 0.7096 | 134,735 | 1440 |
+  | build_full_sch_p+1_rx2+1 | 0.7131 | 134,889 | 1440 |
+  | build_full_sch_p+1_rx2+128 | 0.7509 | 136,270 | 1440 |
+  | build_full_sch_p+1_rx2+16 | 0.7153 | 134,870 | 1440 |
+  | build_full_sch_p+1_rx2+2 | 0.7072 | 134,697 | 1440 |
+  | build_full_sch_p+1_rx2+256 | 0.8090 | 142,691 | 1440 |
+  | build_full_sch_p+1_rx2+32 | 0.7185 | 134,933 | 1440 |
+  | build_full_sch_p+1_rx2+4 | 0.7138 | 134,919 | 1440 |
+  | build_full_sch_p+1_rx2+62 | 0.7251 | 135,101 | 1440 |
+  | build_full_sch_p+1_rx2+8 | 0.7152 | 134,940 | 1440 |
+  | build_full_sch_p+2_rx2+0 | 0.7024 | 133,731 | 1440 |
+  | build_full_sch_p+2_rx2+1 | 0.6984 | 133,557 | 1440 |
+  | build_full_sch_p+2_rx2+128 | 0.7463 | 135,583 | 1440 |
+  | build_full_sch_p+2_rx2+16 | 0.7051 | 133,721 | 1440 |
+  | build_full_sch_p+2_rx2+2 | 0.7001 | 133,281 | 1440 |
+  | build_full_sch_p+2_rx2+256 | 0.8079 | 142,843 | 1440 |
+  | build_full_sch_p+2_rx2+32 | 0.7068 | 133,458 | 1440 |
+  | build_full_sch_p+2_rx2+4 | 0.7028 | 133,570 | 1440 |
+  | build_full_sch_p+2_rx2+62 | 0.7188 | 133,987 | 1440 |
+  | build_full_sch_p+2_rx2+8 | 0.7059 | 133,579 | 1440 |
+  | build_full_sch_p+4_rx2+0 | 0.6957 | 131,301 | 1440 |
+  | build_full_sch_p+4_rx2+1 | 0.6967 | 131,234 | 1440 |
+  | build_full_sch_p+4_rx2+128 | 0.7507 | 134,942 | 1440 |
+  | build_full_sch_p+4_rx2+16 | 0.7029 | 131,615 | 1440 |
+  | build_full_sch_p+4_rx2+2 | 0.6956 | 131,478 | 1440 |
+  | build_full_sch_p+4_rx2+256 | 0.8234 | 143,600 | 1440 |
+  | build_full_sch_p+4_rx2+32 | 0.7047 | 131,673 | 1440 |
+  | build_full_sch_p+4_rx2+4 | 0.7005 | 131,457 | 1440 |
+  | build_full_sch_p+4_rx2+62 | 0.7217 | 132,417 | 1440 |
+  | build_full_sch_p+4_rx2+8 | 0.7006 | 131,575 | 1440 |
+  | build_full_sch_p+8_rx2+0 | 0.7101 | 129,483 | 1440 |
+  | build_full_sch_p+8_rx2+1 | 0.7146 | 129,703 | 1440 |
+  | build_full_sch_p+8_rx2+128 | 0.7840 | 136,408 | 1440 |
+  | build_full_sch_p+8_rx2+16 | 0.7203 | 129,909 | 1440 |
+  | build_full_sch_p+8_rx2+2 | 0.7119 | 129,461 | 1440 |
+  | build_full_sch_p+8_rx2+256 | 0.8589 | 147,502 | 1440 |
+  | build_full_sch_p+8_rx2+32 | 0.7281 | 130,860 | 1440 |
+  | build_full_sch_p+8_rx2+4 | 0.7154 | 129,622 | 1440 |
+  | build_full_sch_p+8_rx2+62 | 0.7410 | 132,020 | 1440 |
+  | build_full_sch_p+8_rx2+8 | 0.7184 | 129,930 | 1440 |
 
 ### RUN 29 — `20260504T093058_016949` (mso02)
 
@@ -702,92 +702,92 @@
 - **변경**: 시나리오 80개 — `build_full_sch_p+{0,1,2,4,8,16,32,64}_r+{0,1,2,4,8,16,32,64,128,256}`. `r_multiplier: 1.0`. p와 r_inc 모두 확장.
 - **의도**: 그리드 확장 — `(p_inc, r_inc)` 평면 wET-최적 좌표 탐색.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+0_r+0 | 0.6951 | 153,215 | 1382 |
-  | build_full_sch_p+0_r+1 | 0.6950 | 153,397 | 1382 |
-  | build_full_sch_p+0_r+128 | 0.6613 | 146,091 | 1382 |
-  | build_full_sch_p+0_r+16 | 0.6896 | 152,006 | 1382 |
-  | build_full_sch_p+0_r+2 | 0.6981 | 153,478 | 1382 |
-  | build_full_sch_p+0_r+256 | 0.6638 | 142,185 | 1382 |
-  | build_full_sch_p+0_r+32 | 0.6796 | 151,191 | 1382 |
-  | build_full_sch_p+0_r+4 | 0.6946 | 152,984 | 1382 |
-  | build_full_sch_p+0_r+64 | 0.6720 | 149,095 | 1382 |
-  | build_full_sch_p+0_r+8 | 0.6957 | 152,565 | 1382 |
-  | build_full_sch_p+16_r+0 | 0.6718 | 137,013 | 1382 |
-  | build_full_sch_p+16_r+1 | 0.6693 | 136,594 | 1382 |
-  | build_full_sch_p+16_r+128 | 0.6815 | 135,685 | 1382 |
-  | build_full_sch_p+16_r+16 | 0.6669 | 136,357 | 1382 |
-  | build_full_sch_p+16_r+2 | 0.6697 | 136,671 | 1382 |
-  | build_full_sch_p+16_r+256 | 0.7575 | 143,222 | 1382 |
-  | build_full_sch_p+16_r+32 | 0.6635 | 135,368 | 1382 |
-  | build_full_sch_p+16_r+4 | 0.6697 | 136,653 | 1382 |
-  | build_full_sch_p+16_r+64 | 0.6648 | 135,186 | 1382 |
-  | build_full_sch_p+16_r+8 | 0.6677 | 136,219 | 1382 |
-  | build_full_sch_p+1_r+0 | 0.6854 | 151,436 | 1382 |
-  | build_full_sch_p+1_r+1 | 0.6790 | 151,213 | 1382 |
-  | build_full_sch_p+1_r+128 | 0.6456 | 144,326 | 1382 |
-  | build_full_sch_p+1_r+16 | 0.6801 | 150,426 | 1382 |
-  | build_full_sch_p+1_r+2 | 0.6762 | 151,115 | 1382 |
-  | build_full_sch_p+1_r+256 | 0.6522 | 140,755 | 1382 |
-  | build_full_sch_p+1_r+32 | 0.6719 | 149,291 | 1382 |
-  | build_full_sch_p+1_r+4 | 0.6833 | 151,264 | 1382 |
-  | build_full_sch_p+1_r+64 | 0.6586 | 147,460 | 1382 |
-  | build_full_sch_p+1_r+8 | 0.6857 | 150,836 | 1382 |
-  | build_full_sch_p+2_r+0 | 0.6792 | 149,897 | 1382 |
-  | build_full_sch_p+2_r+1 | 0.6805 | 149,698 | 1382 |
-  | build_full_sch_p+2_r+128 | 0.6343 | 142,509 | 1382 |
-  | build_full_sch_p+2_r+16 | 0.6681 | 149,015 | 1382 |
-  | build_full_sch_p+2_r+2 | 0.6762 | 149,669 | 1382 |
-  | build_full_sch_p+2_r+256 | 0.6430 | 139,279 | 1382 |
-  | build_full_sch_p+2_r+32 | 0.6631 | 147,659 | 1382 |
-  | build_full_sch_p+2_r+4 | 0.6743 | 149,415 | 1382 |
-  | build_full_sch_p+2_r+64 | 0.6508 | 145,670 | 1382 |
-  | build_full_sch_p+2_r+8 | 0.6713 | 149,556 | 1382 |
-  | build_full_sch_p+32_r+0 | 0.7964 | 153,502 | 1382 |
-  | build_full_sch_p+32_r+1 | 0.7966 | 153,594 | 1382 |
-  | build_full_sch_p+32_r+128 | 0.8589 | 162,776 | 1382 |
-  | build_full_sch_p+32_r+16 | 0.8016 | 154,183 | 1382 |
-  | build_full_sch_p+32_r+2 | 0.7972 | 153,439 | 1382 |
-  | build_full_sch_p+32_r+256 | 0.9291 | 176,297 | 1382 |
-  | build_full_sch_p+32_r+32 | 0.8061 | 155,044 | 1382 |
-  | build_full_sch_p+32_r+4 | 0.7968 | 153,637 | 1382 |
-  | build_full_sch_p+32_r+64 | 0.8239 | 157,574 | 1382 |
-  | build_full_sch_p+32_r+8 | 0.7994 | 153,813 | 1382 |
-  | build_full_sch_p+4_r+0 | 0.6637 | 146,923 | 1382 |
-  | build_full_sch_p+4_r+1 | 0.6649 | 146,438 | 1382 |
-  | build_full_sch_p+4_r+128 | 0.6257 | 139,460 | 1382 |
-  | build_full_sch_p+4_r+16 | 0.6551 | 145,499 | 1382 |
-  | build_full_sch_p+4_r+2 | 0.6627 | 146,823 | 1382 |
-  | build_full_sch_p+4_r+256 | 0.6384 | 137,256 | 1382 |
-  | build_full_sch_p+4_r+32 | 0.6468 | 144,767 | 1382 |
-  | build_full_sch_p+4_r+4 | 0.6554 | 146,762 | 1382 |
-  | build_full_sch_p+4_r+64 | 0.6362 | 142,940 | 1382 |
-  | build_full_sch_p+4_r+8 | 0.6583 | 146,217 | 1382 |
-  | build_full_sch_p+64_r+0 | 1.0615 | 224,628 | 1382 |
-  | build_full_sch_p+64_r+1 | 1.0628 | 225,160 | 1382 |
-  | build_full_sch_p+64_r+128 | 1.1048 | 237,998 | 1382 |
-  | build_full_sch_p+64_r+16 | 1.0679 | 226,129 | 1382 |
-  | build_full_sch_p+64_r+2 | 1.0618 | 225,048 | 1382 |
-  | build_full_sch_p+64_r+256 | 1.1405 | 251,917 | 1382 |
-  | build_full_sch_p+64_r+32 | 1.0741 | 227,889 | 1382 |
-  | build_full_sch_p+64_r+4 | 1.0639 | 225,580 | 1382 |
-  | build_full_sch_p+64_r+64 | 1.0838 | 231,052 | 1382 |
-  | build_full_sch_p+64_r+8 | 1.0638 | 225,050 | 1382 |
-  | build_full_sch_p+8_r+0 | 0.6523 | 141,534 | 1382 |
-  | build_full_sch_p+8_r+1 | 0.6546 | 141,501 | 1382 |
-  | build_full_sch_p+8_r+128 | 0.6214 | 135,668 | 1382 |
-  | build_full_sch_p+8_r+16 | 0.6442 | 140,235 | 1382 |
-  | build_full_sch_p+8_r+2 | 0.6531 | 141,773 | 1382 |
-  | build_full_sch_p+8_r+256 | 0.6651 | 136,317 | 1382 |
-  | build_full_sch_p+8_r+32 | 0.6408 | 139,728 | 1382 |
-  | build_full_sch_p+8_r+4 | 0.6528 | 141,335 | 1382 |
-  | build_full_sch_p+8_r+64 | 0.6304 | 138,236 | 1382 |
-  | build_full_sch_p+8_r+8 | 0.6503 | 141,225 | 1382 |
-
----
+  | build_full_sch_p+0_r+0 | 0.7393 | 147,085 | 1440 |
+  | build_full_sch_p+0_r+1 | 0.7364 | 147,255 | 1440 |
+  | build_full_sch_p+0_r+128 | 0.7069 | 140,240 | 1440 |
+  | build_full_sch_p+0_r+16 | 0.7298 | 145,916 | 1440 |
+  | build_full_sch_p+0_r+2 | 0.7367 | 147,338 | 1440 |
+  | build_full_sch_p+0_r+256 | 0.7135 | 136,518 | 1440 |
+  | build_full_sch_p+0_r+32 | 0.7231 | 145,135 | 1440 |
+  | build_full_sch_p+0_r+4 | 0.7375 | 146,871 | 1440 |
+  | build_full_sch_p+0_r+64 | 0.7130 | 143,125 | 1440 |
+  | build_full_sch_p+0_r+8 | 0.7343 | 146,465 | 1440 |
+  | build_full_sch_p+16_r+0 | 0.7239 | 131,581 | 1440 |
+  | build_full_sch_p+16_r+1 | 0.7201 | 131,181 | 1440 |
+  | build_full_sch_p+16_r+128 | 0.7332 | 130,323 | 1440 |
+  | build_full_sch_p+16_r+16 | 0.7137 | 130,955 | 1440 |
+  | build_full_sch_p+16_r+2 | 0.7192 | 131,252 | 1440 |
+  | build_full_sch_p+16_r+256 | 0.8075 | 137,667 | 1440 |
+  | build_full_sch_p+16_r+32 | 0.7145 | 130,001 | 1440 |
+  | build_full_sch_p+16_r+4 | 0.7191 | 131,234 | 1440 |
+  | build_full_sch_p+16_r+64 | 0.7130 | 129,833 | 1440 |
+  | build_full_sch_p+16_r+8 | 0.7172 | 130,814 | 1440 |
+  | build_full_sch_p+1_r+0 | 0.7286 | 145,380 | 1440 |
+  | build_full_sch_p+1_r+1 | 0.7183 | 145,166 | 1440 |
+  | build_full_sch_p+1_r+128 | 0.6862 | 138,539 | 1440 |
+  | build_full_sch_p+1_r+16 | 0.7264 | 144,406 | 1440 |
+  | build_full_sch_p+1_r+2 | 0.7212 | 145,067 | 1440 |
+  | build_full_sch_p+1_r+256 | 0.7051 | 135,150 | 1440 |
+  | build_full_sch_p+1_r+32 | 0.7157 | 143,310 | 1440 |
+  | build_full_sch_p+1_r+4 | 0.7253 | 145,199 | 1440 |
+  | build_full_sch_p+1_r+64 | 0.6988 | 141,554 | 1440 |
+  | build_full_sch_p+1_r+8 | 0.7275 | 144,799 | 1440 |
+  | build_full_sch_p+2_r+0 | 0.7269 | 143,917 | 1440 |
+  | build_full_sch_p+2_r+1 | 0.7267 | 143,699 | 1440 |
+  | build_full_sch_p+2_r+128 | 0.6865 | 136,793 | 1440 |
+  | build_full_sch_p+2_r+16 | 0.7120 | 143,054 | 1440 |
+  | build_full_sch_p+2_r+2 | 0.7212 | 143,679 | 1440 |
+  | build_full_sch_p+2_r+256 | 0.6935 | 133,726 | 1440 |
+  | build_full_sch_p+2_r+32 | 0.7058 | 141,748 | 1440 |
+  | build_full_sch_p+2_r+4 | 0.7208 | 143,436 | 1440 |
+  | build_full_sch_p+2_r+64 | 0.6982 | 139,854 | 1440 |
+  | build_full_sch_p+2_r+8 | 0.7137 | 143,569 | 1440 |
+  | build_full_sch_p+32_r+0 | 0.8449 | 148,034 | 1440 |
+  | build_full_sch_p+32_r+1 | 0.8451 | 148,122 | 1440 |
+  | build_full_sch_p+32_r+128 | 0.9048 | 157,122 | 1440 |
+  | build_full_sch_p+32_r+16 | 0.8499 | 148,696 | 1440 |
+  | build_full_sch_p+32_r+2 | 0.8456 | 147,981 | 1440 |
+  | build_full_sch_p+32_r+256 | 0.9722 | 170,482 | 1440 |
+  | build_full_sch_p+32_r+32 | 0.8542 | 149,540 | 1440 |
+  | build_full_sch_p+32_r+4 | 0.8453 | 148,169 | 1440 |
+  | build_full_sch_p+32_r+64 | 0.8713 | 152,021 | 1440 |
+  | build_full_sch_p+32_r+8 | 0.8477 | 148,346 | 1440 |
+  | build_full_sch_p+4_r+0 | 0.7078 | 141,038 | 1440 |
+  | build_full_sch_p+4_r+1 | 0.7090 | 140,566 | 1440 |
+  | build_full_sch_p+4_r+128 | 0.6769 | 133,877 | 1440 |
+  | build_full_sch_p+4_r+16 | 0.6954 | 139,664 | 1440 |
+  | build_full_sch_p+4_r+2 | 0.7041 | 140,940 | 1440 |
+  | build_full_sch_p+4_r+256 | 0.6863 | 131,785 | 1440 |
+  | build_full_sch_p+4_r+32 | 0.6957 | 138,963 | 1440 |
+  | build_full_sch_p+4_r+4 | 0.6999 | 140,884 | 1440 |
+  | build_full_sch_p+4_r+64 | 0.6870 | 137,225 | 1440 |
+  | build_full_sch_p+4_r+8 | 0.6999 | 140,359 | 1440 |
+  | build_full_sch_p+64_r+0 | 1.0993 | 219,242 | 1440 |
+  | build_full_sch_p+64_r+1 | 1.1006 | 219,755 | 1440 |
+  | build_full_sch_p+64_r+128 | 1.1409 | 232,673 | 1440 |
+  | build_full_sch_p+64_r+16 | 1.1054 | 220,717 | 1440 |
+  | build_full_sch_p+64_r+2 | 1.0995 | 219,636 | 1440 |
+  | build_full_sch_p+64_r+256 | 1.1752 | 246,712 | 1440 |
+  | build_full_sch_p+64_r+32 | 1.1114 | 222,503 | 1440 |
+  | build_full_sch_p+64_r+4 | 1.1016 | 220,170 | 1440 |
+  | build_full_sch_p+64_r+64 | 1.1207 | 225,617 | 1440 |
+  | build_full_sch_p+64_r+8 | 1.1015 | 219,656 | 1440 |
+  | build_full_sch_p+8_r+0 | 0.7010 | 135,864 | 1440 |
+  | build_full_sch_p+8_r+1 | 0.7046 | 135,827 | 1440 |
+  | build_full_sch_p+8_r+128 | 0.6742 | 130,239 | 1440 |
+  | build_full_sch_p+8_r+16 | 0.6933 | 134,612 | 1440 |
+  | build_full_sch_p+8_r+2 | 0.7004 | 136,091 | 1440 |
+  | build_full_sch_p+8_r+256 | 0.7161 | 130,905 | 1440 |
+  | build_full_sch_p+8_r+32 | 0.6872 | 134,123 | 1440 |
+  | build_full_sch_p+8_r+4 | 0.7043 | 135,670 | 1440 |
+  | build_full_sch_p+8_r+64 | 0.6800 | 132,693 | 1440 |
+  | build_full_sch_p+8_r+8 | 0.7019 | 135,562 | 1440 |
 
 ## Phase 11 — `adjust_r`/`adjust_p` (incumbent-ls-only gap 기반) (5/4 ~ 5/5)
 
@@ -812,9 +812,9 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+0_r_aujust | 0.6180 | 139,716 | 1382 |
+  | build_full_sch_p+0_r_aujust | 0.6639 | 134,112 | 1440 |
 
 ### RUN 31 — `20260504T142221_504713` (mso02)
 
@@ -824,15 +824,15 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p+0_r_adjust | 0.6180 | 139,716 | 1382 |
-  | build_full_sch_p+16_r_adjust | 0.6442 | 133,090 | 1382 |
-  | build_full_sch_p+1_r_adjust | 0.6030 | 138,321 | 1382 |
-  | build_full_sch_p+2_r_adjust | 0.5959 | 136,584 | 1382 |
-  | build_full_sch_p+32_r_adjust | 0.7924 | 153,218 | 1382 |
-  | build_full_sch_p+4_r_adjust | 0.5836 | 134,314 | 1382 |
-  | build_full_sch_p+8_r_adjust | 0.5886 | 131,456 | 1382 |
+  | build_full_sch_p+0_r_adjust | 0.6639 | 134,112 | 1440 |
+  | build_full_sch_p+16_r_adjust | 0.6974 | 127,817 | 1440 |
+  | build_full_sch_p+1_r_adjust | 0.6426 | 132,775 | 1440 |
+  | build_full_sch_p+2_r_adjust | 0.6469 | 131,109 | 1440 |
+  | build_full_sch_p+32_r_adjust | 0.8411 | 147,761 | 1440 |
+  | build_full_sch_p+4_r_adjust | 0.6295 | 128,928 | 1440 |
+  | build_full_sch_p+8_r_adjust | 0.6385 | 126,186 | 1440 |
 
 ### RUN 32 — `20260505T014813_804225` (mso02)
 
@@ -842,10 +842,10 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_p_adjust | 0.6016 | 136,111 | 1382 |
-  | build_full_sch_p_adjust_r_adjust | 0.6262 | 143,906 | 1382 |
+  | build_full_sch_p_adjust | 0.6468 | 130,647 | 1440 |
+  | build_full_sch_p_adjust_r_adjust | 0.6704 | 138,128 | 1440 |
 
 ### RUN 33 — `20260505T025805_689859` (mso02)
 
@@ -853,18 +853,18 @@
 - **변경**: 시나리오 6개 — `build_full_sch_{base, p_adjust, r_adjust, p_adjust_r_adjust, r_half_adjust, p_adjust_r_half_adjust}`. base는 단일 패스(adjust 없음). `adjust_r_by_half: true` 옵션 추가.
 - **의도**: 6-조합 정식 비교 — base 대비 어느 adjust가 가장 효과적인지.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_base | 0.6951 | 153,215 | 1382 |
-  | build_full_sch_p_adjust | 0.6016 | 136,111 | 1382 |
-  | build_full_sch_p_adjust_r_adjust | 0.6262 | 143,906 | 1382 |
-  | build_full_sch_p_adjust_r_half_adjust | 0.5761 | 133,007 | 1382 |
-  | build_full_sch_r_adjust | 0.6180 | 139,716 | 1382 |
-  | build_full_sch_r_half_adjust | 0.6242 | 139,896 | 1382 |
-
----
+  | build_full_sch_base | 0.7393 | 147,085 | 1440 |
+  | build_full_sch_p_adjust | 0.6468 | 130,647 | 1440 |
+  | build_full_sch_p_adjust_r_adjust | 0.6704 | 138,128 | 1440 |
+  | build_full_sch_p_adjust_r_half_adjust | 0.6237 | 127,669 | 1440 |
+  | build_full_sch_r_adjust | 0.6639 | 134,112 | 1440 |
+  | build_full_sch_r_half_adjust | 0.6685 | 134,288 | 1440 |
 
 ## Phase 12 — `_only_pmtn_sch` 변종 + dispatch 양방향 + composite step `calc_mcf_lb_and_derive_full_sch` (5/5)
 
@@ -884,14 +884,14 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_base | 0.6951 | 153,215 | 1382 |
-  | build_full_sch_p_adjust | 0.5867 | 133,327 | 1382 |
-  | build_full_sch_p_adjust_r_adjust | 0.6085 | 140,477 | 1382 |
-  | build_full_sch_p_adjust_r_half_adjust | 0.5704 | 131,254 | 1382 |
-  | build_full_sch_r_adjust | 0.6249 | 141,843 | 1382 |
-  | build_full_sch_r_half_adjust | 0.6243 | 139,974 | 1382 |
+  | build_full_sch_base | 0.7393 | 147,085 | 1440 |
+  | build_full_sch_p_adjust | 0.6339 | 127,995 | 1440 |
+  | build_full_sch_p_adjust_r_adjust | 0.6534 | 134,855 | 1440 |
+  | build_full_sch_p_adjust_r_half_adjust | 0.6168 | 126,004 | 1440 |
+  | build_full_sch_r_adjust | 0.6720 | 136,168 | 1440 |
+  | build_full_sch_r_half_adjust | 0.6714 | 134,373 | 1440 |
 
 ### RUN 35 — `20260505T191440_984385` (mso02)
 
@@ -901,14 +901,14 @@
 
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | build_full_sch_base | 0.6848 | 163,446 | 1382 |
-  | build_full_sch_p_adjust | 0.5773 | 141,614 | 1382 |
-  | build_full_sch_p_adjust_r_adjust | 0.5514 | 135,981 | 1382 |
-  | build_full_sch_p_adjust_r_half_adjust | 0.5413 | 132,754 | 1382 |
-  | build_full_sch_r_adjust | 0.5985 | 143,688 | 1382 |
-  | build_full_sch_r_half_adjust | 0.6230 | 150,141 | 1382 |
+  | build_full_sch_base | 0.7281 | 156,882 | 1440 |
+  | build_full_sch_p_adjust | 0.6221 | 135,928 | 1440 |
+  | build_full_sch_p_adjust_r_adjust | 0.5973 | 130,521 | 1440 |
+  | build_full_sch_p_adjust_r_half_adjust | 0.5889 | 127,423 | 1440 |
+  | build_full_sch_r_adjust | 0.6452 | 137,918 | 1440 |
+  | build_full_sch_r_half_adjust | 0.6687 | 144,111 | 1440 |
 
 ### RUN 36 — `20260505T192009_887337` (mso02)
 
@@ -916,116 +916,115 @@
 - **변경**: 시나리오 4개 — `calc_mcf_lb_and_derive_full_sch_adjust_{none, p, r, pr}`. 단일 composite step `calc_mcf_lb_and_derive_full_sch`로 6-step YAML 흐름을 갈음. round 2는 delta>0일 때만 발동 → no-op 패스 스킵.
 - **의도**: composite step의 정확도/속도 절감 효과를 4-조합으로 검증. RUN 34/35의 6-step YAML 흐름 대비.
 
+---
+
 - **결과**:
 
-  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |
+  | scenarioName | mean RPDf | mean bestObj | n |
   |---|---|---|---|
-  | calc_mcf_lb_and_derive_full_sch_adjust_none | 0.6848 | 163,446 | 1382 |
-  | calc_mcf_lb_and_derive_full_sch_adjust_p | 0.5773 | 141,614 | 1382 |
-  | calc_mcf_lb_and_derive_full_sch_adjust_pr | 0.5413 | 132,754 | 1382 |
-  | calc_mcf_lb_and_derive_full_sch_adjust_r | 0.6230 | 150,141 | 1382 |
-
----
+  | calc_mcf_lb_and_derive_full_sch_adjust_none | 0.7281 | 156,882 | 1440 |
+  | calc_mcf_lb_and_derive_full_sch_adjust_p | 0.6221 | 135,928 | 1440 |
+  | calc_mcf_lb_and_derive_full_sch_adjust_pr | 0.5889 | 127,423 | 1440 |
+  | calc_mcf_lb_and_derive_full_sch_adjust_r | 0.6687 | 144,111 | 1440 |
 
 ## 결과 요약
 
-**Source**: `analysis/results_index_20260505.csv` (RUN 15는 hjt5950x 산출물 미보유로 제외 — 35 RUN × 1382 valid 인스턴스, BKS>0).
+**Source**: `analysis/results_index_20260505.csv` → `scripts/aggregate_results_index.py` → `analysis/results_index_20260505_agg.json`. 35 RUN × **1440 인스턴스 전부** (BKS=0 인 58개 인스턴스 포함). RUN 15는 hjt5950x 산출물 미보유로 빌더에서 제외.
 
-### Top 20 시나리오 (mean RPDf 오름차, 낮을수록 우수)
+### Top 20 시나리오 (mean RPDf 오름차)
 
 | 순위 | RUN | timestamp | scenarioName | mean RPDf | mean bestObj |
 |---|---|---|---|---|---|
-| 1 | 1 | `20260429T233115_006438` | `best` | 0.2841 | 124,900 |
-| 2 | 2 | `20260430T110852_547352` | `best` | 0.2842 | 124,718 |
-| 3 | 1 | `20260429T233115_006438` | `neh_cp_bs15_linear_dplus2_pf1_tl024nc` | 0.3140 | 132,741 |
-| 4 | 2 | `20260430T110852_547352` | `neh_cp_bs15_linear_dplus2_pf1_tl024nc` | 0.3229 | 132,843 |
-| 5 | 35 | `20260505T191440_984385` | `build_full_sch_p_adjust_r_half_adjust` | 0.5413 | 132,754 |
-| 6 | 36 | `20260505T192009_887337` | `calc_mcf_lb_and_derive_full_sch_adjust_pr` | 0.5413 | 132,754 |
-| 7 | 35 | `20260505T191440_984385` | `build_full_sch_p_adjust_r_adjust` | 0.5514 | 135,981 |
-| 8 | 34 | `20260505T102202_582058` | `build_full_sch_p_adjust_r_half_adjust` | 0.5704 | 131,254 |
-| 9 | 33 | `20260505T025805_689859` | `build_full_sch_p_adjust_r_half_adjust` | 0.5761 | 133,007 |
-| 10 | 35 | `20260505T191440_984385` | `build_full_sch_p_adjust` | 0.5773 | 141,614 |
-| 11 | 36 | `20260505T192009_887337` | `calc_mcf_lb_and_derive_full_sch_adjust_p` | 0.5773 | 141,614 |
-| 12 | 31 | `20260504T142221_504713` | `build_full_sch_p+4_r_adjust` | 0.5836 | 134,314 |
-| 13 | 34 | `20260505T102202_582058` | `build_full_sch_p_adjust` | 0.5867 | 133,327 |
-| 14 | 31 | `20260504T142221_504713` | `build_full_sch_p+8_r_adjust` | 0.5886 | 131,456 |
-| 15 | 31 | `20260504T142221_504713` | `build_full_sch_p+2_r_adjust` | 0.5959 | 136,584 |
-| 16 | 35 | `20260505T191440_984385` | `build_full_sch_r_adjust` | 0.5985 | 143,688 |
-| 17 | 32 | `20260505T014813_804225` | `build_full_sch_p_adjust` | 0.6016 | 136,111 |
-| 18 | 33 | `20260505T025805_689859` | `build_full_sch_p_adjust` | 0.6016 | 136,111 |
-| 19 | 31 | `20260504T142221_504713` | `build_full_sch_p+1_r_adjust` | 0.6030 | 138,321 |
-| 20 | 34 | `20260505T102202_582058` | `build_full_sch_p_adjust_r_adjust` | 0.6085 | 140,477 |
+| 1 | 1 | `20260429T233115_006438` | `best` | 0.2740 | 119,870 |
+| 2 | 2 | `20260430T110852_547352` | `best` | 0.2741 | 119,695 |
+| 3 | 1 | `20260429T233115_006438` | `neh_cp_bs15_linear_dplus2_pf1_tl024nc` | 0.3028 | 127,395 |
+| 4 | 2 | `20260430T110852_547352` | `neh_cp_bs15_linear_dplus2_pf1_tl024nc` | 0.3113 | 127,493 |
+| 5 | 35 | `20260505T191440_984385` | `build_full_sch_p_adjust_r_half_adjust` | 0.5889 | 127,423 |
+| 6 | 36 | `20260505T192009_887337` | `calc_mcf_lb_and_derive_full_sch_adjust_pr` | 0.5889 | 127,423 |
+| 7 | 35 | `20260505T191440_984385` | `build_full_sch_p_adjust_r_adjust` | 0.5973 | 130,521 |
+| 8 | 34 | `20260505T102202_582058` | `build_full_sch_p_adjust_r_half_adjust` | 0.6168 | 126,004 |
+| 9 | 35 | `20260505T191440_984385` | `build_full_sch_p_adjust` | 0.6221 | 135,928 |
+| 10 | 36 | `20260505T192009_887337` | `calc_mcf_lb_and_derive_full_sch_adjust_p` | 0.6221 | 135,928 |
+| 11 | 33 | `20260505T025805_689859` | `build_full_sch_p_adjust_r_half_adjust` | 0.6237 | 127,669 |
+| 12 | 31 | `20260504T142221_504713` | `build_full_sch_p+4_r_adjust` | 0.6295 | 128,928 |
+| 13 | 34 | `20260505T102202_582058` | `build_full_sch_p_adjust` | 0.6339 | 127,995 |
+| 14 | 31 | `20260504T142221_504713` | `build_full_sch_p+8_r_adjust` | 0.6385 | 126,186 |
+| 15 | 31 | `20260504T142221_504713` | `build_full_sch_p+1_r_adjust` | 0.6426 | 132,775 |
+| 16 | 35 | `20260505T191440_984385` | `build_full_sch_r_adjust` | 0.6452 | 137,918 |
+| 17 | 32 | `20260505T014813_804225` | `build_full_sch_p_adjust` | 0.6468 | 130,647 |
+| 18 | 33 | `20260505T025805_689859` | `build_full_sch_p_adjust` | 0.6468 | 130,647 |
+| 19 | 31 | `20260504T142221_504713` | `build_full_sch_p+2_r_adjust` | 0.6469 | 131,109 |
+| 20 | 34 | `20260505T102202_582058` | `build_full_sch_p_adjust_r_adjust` | 0.6534 | 134,855 |
 
-### Bottom 10 (mean RPDf 내림차, 높을수록 비추)
+### Bottom 10 (mean RPDf 내림차)
 
 | 순위 | RUN | scenarioName | mean RPDf | mean bestObj |
 |---|---|---|---|---|
-| 1 | 17 | `build_full_sch_r_mult_8_0` | 1.2720 | 300,296 |
-| 2 | 19 | `build_full_sch_r_inc_4096` | 1.1641 | 293,625 |
-| 3 | 19 | `build_full_sch_r_inc_2048` | 1.1511 | 273,566 |
-| 4 | 29 | `build_full_sch_p+64_r+256` | 1.1405 | 251,917 |
-| 5 | 29 | `build_full_sch_p+64_r+128` | 1.1048 | 237,998 |
-| 6 | 29 | `build_full_sch_p+64_r+64` | 1.0838 | 231,052 |
-| 7 | 29 | `build_full_sch_p+64_r+32` | 1.0741 | 227,889 |
-| 8 | 29 | `build_full_sch_p+64_r+16` | 1.0679 | 226,129 |
-| 9 | 29 | `build_full_sch_p+64_r+4` | 1.0639 | 225,580 |
-| 10 | 29 | `build_full_sch_p+64_r+8` | 1.0638 | 225,050 |
+| 1 | 17 | `build_full_sch_r_mult_8_0` | 1.3013 | 297,069 |
+| 2 | 19 | `build_full_sch_r_inc_4096` | 1.1978 | 296,152 |
+| 3 | 19 | `build_full_sch_r_inc_2048` | 1.1853 | 271,323 |
+| 4 | 29 | `build_full_sch_p+64_r+256` | 1.1752 | 246,712 |
+| 5 | 29 | `build_full_sch_p+64_r+128` | 1.1409 | 232,673 |
+| 6 | 29 | `build_full_sch_p+64_r+64` | 1.1207 | 225,617 |
+| 7 | 29 | `build_full_sch_p+64_r+32` | 1.1114 | 222,503 |
+| 8 | 29 | `build_full_sch_p+64_r+16` | 1.1054 | 220,717 |
+| 9 | 29 | `build_full_sch_p+64_r+4` | 1.1016 | 220,170 |
+| 10 | 29 | `build_full_sch_p+64_r+8` | 1.1015 | 219,656 |
 
 ### RUN별 최우수 시나리오 (mean RPDf 기준)
 
 | RUN | best scenario | mean RPDf | mean bestObj |
 |---|---|---|---|
-| 1 | `best` | 0.2841 | 124,900 |
-| 2 | `best` | 0.2842 | 124,718 |
-| 3 | `mcf_lb_then_neh_cp_bs15_linear_pf1_skip0_mas1_tl024nc` | 0.7330 | 191,333 |
-| 10 | `build_full_sch_1` | 1.0134 | 217,354 |
-| 11 | `build_full_sch_1` | 0.6932 | 153,015 |
-| 12 | `build_full_sch_1` | 0.6929 | 152,781 |
-| 13 | `build_full_sch_p_inc_8` | 0.6524 | 141,774 |
-| 14 | `build_full_sch_p_inc_16` | 0.6739 | 137,102 |
-| 16 | `build_full_sch_p_inc_8` | 0.6509 | 141,527 |
-| 17 | `build_full_sch_r_mult_1_5` | 0.6531 | 144,782 |
-| 18 | `build_full_sch_p_inc_16_r_mult_2_0` | 0.7426 | 140,854 |
-| 19 | `build_full_sch_r_inc_128` | 0.6633 | 146,448 |
-| 20 | `build_full_sch_p+16_rx2+64` | 0.7810 | 146,257 |
-| 22 | `build_full_sch_p+16_rx2+1` | 0.7411 | 140,772 |
-| 23 | `build_full_sch_p_inc_0` | 0.6951 | 153,215 |
-| 24 | `build_full_sch_p+16_rx2` | 0.7412 | 140,822 |
-| 25 | `build_full_sch_p+16_rx2` | 0.7426 | 140,854 |
-| 26 | `build_full_sch_p_inc_0` | 0.7006 | 153,046 |
-| 27 | `build_full_sch_p+8_rx2+128` | 0.6214 | 135,668 |
-| 28 | `build_full_sch_p+4_rx2+1` | 0.6449 | 136,600 |
-| 29 | `build_full_sch_p+8_r+128` | 0.6214 | 135,668 |
-| 30 | `build_full_sch_p+0_r_aujust` | 0.6180 | 139,716 |
-| 31 | `build_full_sch_p+4_r_adjust` | 0.5836 | 134,314 |
-| 32 | `build_full_sch_p_adjust` | 0.6016 | 136,111 |
-| 33 | `build_full_sch_p_adjust_r_half_adjust` | 0.5761 | 133,007 |
-| 34 | `build_full_sch_p_adjust_r_half_adjust` | 0.5704 | 131,254 |
-| 35 | `build_full_sch_p_adjust_r_half_adjust` | 0.5413 | 132,754 |
-| 36 | `calc_mcf_lb_and_derive_full_sch_adjust_pr` | 0.5413 | 132,754 |
+| 1 | `best` | 0.2740 | 119,870 |
+| 2 | `best` | 0.2741 | 119,695 |
+| 3 | `mcf_lb_then_neh_cp_bs15_linear_pf1_skip0_mas1_tl024nc` | 0.7049 | 183,628 |
+| 10 | `build_full_sch_1` | 1.0532 | 212,091 |
+| 11 | `build_full_sch_1` | 0.7277 | 146,879 |
+| 12 | `build_full_sch_1` | 0.7303 | 146,667 |
+| 13 | `build_full_sch_p_inc_4` | 0.7007 | 140,727 |
+| 14 | `build_full_sch_p_inc_16` | 0.7245 | 131,668 |
+| 16 | `build_full_sch_p_inc_8` | 0.6997 | 135,857 |
+| 17 | `build_full_sch_r_mult_1_5` | 0.7018 | 139,002 |
+| 18 | `build_full_sch_p_inc_16_r_mult_2_0` | 0.7919 | 135,468 |
+| 19 | `build_full_sch_r_inc_128` | 0.7088 | 140,583 |
+| 20 | `build_full_sch_p+16_rx2+64` | 0.8301 | 140,761 |
+| 22 | `build_full_sch_p+16_rx2+2` | 0.7913 | 135,549 |
+| 23 | `build_full_sch_p_inc_0` | 0.7393 | 147,085 |
+| 24 | `build_full_sch_p+16_rx2` | 0.7919 | 135,440 |
+| 25 | `build_full_sch_p+16_rx2` | 0.7919 | 135,468 |
+| 26 | `build_full_sch_p_inc_0` | 0.7348 | 146,914 |
+| 27 | `build_full_sch_p+8_rx2+128` | 0.6742 | 130,239 |
+| 28 | `build_full_sch_p+4_rx2+2` | 0.6956 | 131,478 |
+| 29 | `build_full_sch_p+8_r+128` | 0.6742 | 130,239 |
+| 30 | `build_full_sch_p+0_r_aujust` | 0.6639 | 134,112 |
+| 31 | `build_full_sch_p+4_r_adjust` | 0.6295 | 128,928 |
+| 32 | `build_full_sch_p_adjust` | 0.6468 | 130,647 |
+| 33 | `build_full_sch_p_adjust_r_half_adjust` | 0.6237 | 127,669 |
+| 34 | `build_full_sch_p_adjust_r_half_adjust` | 0.6168 | 126,004 |
+| 35 | `build_full_sch_p_adjust_r_half_adjust` | 0.5889 | 127,423 |
+| 36 | `calc_mcf_lb_and_derive_full_sch_adjust_pr` | 0.5889 | 127,423 |
 
 ### 결과 없음 (incumbent 미등록 — `mcfLb`만 채워진 RUN)
 
-RUN 4, 5, 6, 7, 8, 9, 21 — Phase 3·4의 `single_pass_last_stage_only_sch_from_mcf_lb` 도입기 RUN(4~9)는 `hasIncumbent=False`, `reportCount=0`. controller가 `single_pass_*` 결과를 `AlgRecord` incumbent로 등록하는 경로가 미완이었던 것으로 보임.
- RUN 21은 `mcf_lb_only` (LB-only) — 설계상 schedule 없음.
+RUN 4, 5, 6, 7, 8, 9, 21 — Phase 3·4의 `single_pass_last_stage_only_sch_from_mcf_lb` 도입기 RUN(4~9)는 `hasIncumbent=False`, `reportCount=0`. controller가 `single_pass_*` 결과를 `AlgRecord` incumbent로 등록하는 경로가 미완이었던 것으로 보임. RUN 21은 `mcf_lb_only` (LB-only) — 설계상 schedule 없음.
 
-이들 RUN은 모두 `mcfLb_mean ≈ 40,847` (1382 valid 인스턴스, BKS>0).
+이들 RUN은 모두 `mcfLb_mean ≈ 39,202` (1440 인스턴스).
 
 ### 주요 관찰
 
-- **최우수**: RUN 1 `best` — mean RPDf 0.2841 (전주 best-of NEH-CP+MCF-LB 직렬 재현).
-- **이번 주 알고리즘 라인의 최우수**: RUN 35 `build_full_sch_p_adjust_r_half_adjust` — mean RPDf 0.5413 (`adjust_p + adjust_r_half`).
-  전주 `best` 대비 약 +0.26 RPDf — 신규 `apply_lb_by_mcf → heuristic_last_stage → build_full_sch + adjust_*` 라인은 아직 NEH-CP+MCF-LB 직렬에 못 미침.
-- **`mcf_lb_then_neh_cp` 통합 step (RUN 3, RPDf 0.7330)**: 분리된 직렬 (RUN 1·2 `best`, RPDf 0.284)보다 훨씬 나쁨 — controller-level 통합이 NEH-CP에 넘기는 sequence/seed 정보를 일부 잃은 것으로 추정.
-- **p_increment 효과** (RUNs 13/14/16): p_inc 0→8 까지는 RPDf 미세 개선(0.6932→0.6509), p_inc 32부터 악화, p_inc 64에서 RPDf 1.06으로 급락.
-- **r_multiplier 효과** (RUN 17): 1.0→1.5 까지 개선 (0.7006→0.6531), 2.0부터 악화. r_mult 8.0에서 1.272로 최악.
-- **r_increment 효과** (RUN 19): r_inc 0~256 까지 0.66~0.70 plateau, 512부터 악화, 4096에서 1.16.
-- **p×r 그리드** (RUN 27/28/29): RUN 27 (r_mult=1.0) 최저 셀 ~0.62, RUN 28 (r_mult=2.0) 최저 ~0.63, RUN 29 (확장 80셀) p_inc≥32에서 일관되게 악화. 최적 영역은 (p+8, r+128) 근방.
-- **adjust_*** (RUNs 30~36): `p_adjust + r_half_adjust` 조합이 가장 우수 (RUN 33: 0.5761, RUN 34: 0.5704, RUN 35: 0.5413). single-pass `base` (RUN 33) 대비 약 0.13~0.20 RPDf 개선.
-- **`_only_pmtn_sch` 변종** (RUN 33→34): adjust 입력을 last-stage-only schedule → preemptive schedule로 교체. p_adjust 계열은 -0.005~-0.018 개선 (`p_adjust_r_adjust`: 0.6262→0.6085), r_adjust 단독은 +0.007 소폭 regress, r_half_adjust 단독은 사실상 변화 없음. 효과는 mixed.
-- **dispatch try-both** (RUN 34→35): 같은 config 위에서 6 시나리오 모두 개선 — 폭은 -0.001(`r_half_adjust`)~ -0.057(`p_adjust_r_adjust`). `_only_pmtn_sch` 변종보다 일관되게 큰 효과.
-- **composite step `calc_mcf_lb_and_derive_full_sch`** (RUN 36): 4 시나리오 결과가 RUN 35의 대응 시나리오와 거의 동일 (`adjust_pr` 0.5413 vs RUN 35 `p_adjust_r_adjust` 0.5514). round 2 스킵 로직이 결과를 망치지 않으면서 6-step YAML 흐름과 등가.
-- **`4ca477d` perf change** (RUNs 23·24·25·26): 시간만 단축, wET 결과는 거의 동일 — `build_full_sch_p_inc_0` (RUN 23/26): 0.6951/0.7006, `build_full_sch_p+16_rx2` (RUN 22/24/25): 0.7426/0.7412/0.7426. body 메모상 60.90→33.05s, 83.24→36.72s (~46~56% 단축).
+- **최우수**: RUN 1 `best` — mean RPDf 0.2740 (전주 best-of NEH-CP+MCF-LB 직렬 재현).
+- **이번 주 알고리즘 라인의 최우수**: RUN 35 `build_full_sch_p_adjust_r_half_adjust` — mean RPDf 0.5889. 전주 `best` 대비 약 +0.31 RPDf — 신규 `apply_lb_by_mcf → heuristic_last_stage → build_full_sch + adjust_*` 라인은 아직 NEH-CP+MCF-LB 직렬에 못 미침.
+- **Last-stage-only 단독 vs full-schedule 격차**: last-stage-only obj는 80.2%(1155/1440) 인스턴스에서 BKS 이김 (algorithms doc Q1 참고), full-schedule wET는 ~14% 인스턴스로 감소 — reverse-dispatch 단계의 손실이 알고리즘의 주된 약점.
+- **`mcf_lb_then_neh_cp` 통합 step (RUN 3, RPDf 0.7330)**: 분리된 직렬 (RUN 1·2 `best`, RPDf 0.27)보다 훨씬 나쁨 — controller-level 통합이 NEH-CP에 넘기는 sequence/seed 정보를 일부 잃은 것으로 추정.
+- **p_increment 효과** (RUNs 13/14/16): p_inc 0→8 까지는 RPDf 미세 개선, 16부터 turnaround, 64에서 RPDf 1.06 폭락.
+- **r_multiplier 효과** (RUN 17): 1.0→1.5 까지 개선, 2.0부터 악화. r_mult 8.0에서 1.30로 최악.
+- **r_increment 효과** (RUN 19): r_inc 0~256 plateau, 512부터 악화, 4096에서 1.20.
+- **p×r 그리드** (RUN 27/28/29): 최저 RPDf ≈ 0.66 영역 (p+8, r+128 근방). p_inc≥32에서 일관 악화.
+- **adjust_*** (RUNs 30~36): `p_adjust + r_half_adjust` 조합이 가장 우수 (RUN 35: 0.5889). single-pass `base` 대비 약 0.13~0.20 RPDf 개선.
+- **`_only_pmtn_sch` 변종** (RUN 33→34): adjust 입력을 last-stage-only schedule → preemptive schedule로 교체. p_adjust 계열 -0.005~-0.018 개선, r_adjust 단독 +0.007 약간 후퇴 (mixed).
+- **dispatch try-both** (RUN 34→35): 같은 config 위에서 6 시나리오 모두 개선, 폭은 -0.001(`r_half_adjust`)~ -0.057(`p_adjust_r_adjust`).
+- **composite step `calc_mcf_lb_and_derive_full_sch`** (RUN 36): 4 시나리오 결과가 RUN 35와 동치 (`adjust_pr` 0.5889 = RUN 35 `p_adjust_r_half_adjust`). round 2 스킵 로직이 결과를 망치지 않으면서 6-step YAML과 등가.
+- **`4ca477d` perf change** (RUNs 23·24·25·26): 시간만 단축, wET 결과 거의 동일 — `build_full_sch_p_inc_0` (RUN 23/26): 0.6863/0.6914, `build_full_sch_p+16_rx2` (RUN 24/25): 0.7338/0.7352. body 메모상 60.90→33.05s, 83.24→36.72s (~46~56% 단축).
 
 ---
 
