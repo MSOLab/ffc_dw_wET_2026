@@ -177,3 +177,25 @@ because only the legacy path populates the diag-dict copy.)
   helper.
 
 Until then, leave as-is.
+
+## SubroutineController file log level controllable via CLI flag
+
+`attach_fh_to_logger` in routix ([routix/logging.py:51](../../routix/src/routix/logging.py#L51))
+hardcodes the file handler level to `logging.DEBUG`, so `*_SubroutineController.log` always
+captures DEBUG regardless of the `-v`/`-vv` flag.
+
+The `quiet`/`verbose` values are already unpacked at line 140 of
+`ffcddw_single_instance_runner.py`, just above the `attach_fh_to_logger` call at line 157,
+so once routix exposes a `level` parameter the caller can pass it immediately.
+
+**Changes needed:**
+
+1. **routix** — add `level=logging.DEBUG` parameter to `attach_fh_to_logger`.
+2. **`ffcddw_single_instance_runner.py`** — pass the appropriate level derived from
+   `verbose`: DEBUG only for `-vv` (verbose ≥ 2), INFO otherwise.
+
+**Why:** SubroutineController log files accumulate DEBUG-level noise on every run even
+when it is not needed, inflating file size and making logs harder to scan.
+
+**When to act:** When log file size or noise becomes a real problem, or when routix API
+is being tidied up and the change can be bundled in.
