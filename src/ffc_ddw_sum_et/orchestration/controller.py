@@ -35,7 +35,10 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import (
     run_phase3,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
-from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import solve_mcf_lb
+from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import (
+    MCFLBStopRequested,
+    solve_mcf_lb,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb.utils import (
     pm_pmtn_sort_job_sequence_with_log,
 )
@@ -619,6 +622,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             effective_r_increment = r_increment + r_adjust
 
         start_elapsed = time.monotonic()
+        prev_diag = self.mcf_lb_diagnostic
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
 
@@ -649,12 +653,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 self.instance, last_stage_id, effective_p_increment
             )
 
-        mcf_result = solve_mcf_lb(
-            instance_for_mcf,
-            diag,
-            r_multiplier=r_multiplier,
-            r_increment=effective_r_increment,
-        )
+        try:
+            mcf_result = solve_mcf_lb(
+                instance_for_mcf,
+                diag,
+                r_multiplier=r_multiplier,
+                r_increment=effective_r_increment,
+                stop_predicate=self.is_stopping_condition,
+            )
+        except MCFLBStopRequested:
+            self.mcf_lb_diagnostic = prev_diag
+            self.logger.info(
+                "apply_lb_by_mcf: stop predicate fired before MCF solve; skipping."
+            )
+            return self._make_stop_report(start_elapsed)
         obj_bound_by_mcf = mcf_result.mcf_lb
 
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
@@ -1409,19 +1421,32 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Returns:
             ``SubroutineReport`` from round-2's
             ``build_full_sch_from_last_stage_only_sch`` when round 2
-            fires; otherwise from round-1's.
+            fires; otherwise from round-1's. When the controller's
+            ``is_stopping_condition`` fires (timelimit or proven
+            optimality) at any step boundary, returns a stop-report from
+            ``_make_stop_report`` (or the most recent ``report`` if one
+            has been produced).
         """
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
         self.apply_lb_by_mcf(
             draw_heatmap=draw_pmtn_sch_heatmap,
             heatmap_sort=heatmap_sort,
         )
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
         self.heuristic_last_stage_only_sch_from_mcf_lb(
             job_priority=job_placement_priority,
             placement_priority=last_stage_only_placement_criteria,
         )
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
         report = self.build_full_sch_from_last_stage_only_sch()
 
         if not (adjust_p or adjust_r):
+            return report
+        if self.is_stopping_condition():
             return report
 
         incumbent = self.solution_manager.get_incumbent()
@@ -1441,6 +1466,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
             return report
 
+        if self.is_stopping_condition():
+            return report
         self.apply_lb_by_mcf(
             draw_heatmap=draw_pmtn_sch_heatmap,
             heatmap_sort=heatmap_sort,
@@ -1448,6 +1475,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
             adjust_r_by_half=adjust_r,
         )
+        if self.is_stopping_condition():
+            return report
         self.heuristic_last_stage_only_sch_from_mcf_lb(
             job_priority=job_placement_priority,
             placement_priority=last_stage_only_placement_criteria,
@@ -1455,6 +1484,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
             adjust_r_by_half=adjust_r,
         )
+        if self.is_stopping_condition():
+            return report
         return self.build_full_sch_from_last_stage_only_sch()
 
     def run_mcf_lb_4(

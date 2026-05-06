@@ -73,3 +73,57 @@ class MCFLBDiagnostic:
     adjust_params_makespan_delta: int | None = None
     adjust_p_increment_added: int | None = None
     adjust_r_increment_added: int | None = None
+
+    @property
+    def mcf_lb_is_valid_for_main_problem(self) -> bool:
+        """Whether ``mcf_lb`` is a valid global lower bound on the
+        *original* (un-augmented) instance, judged only from the
+        ``adjust_*_increment_added`` fields recorded on this diagnostic.
+
+        Returns ``True`` when:
+          - ``mcf_lb`` is set, **and**
+          - neither adjust knob fired (both ``adjust_p_increment_added``
+            and ``adjust_r_increment_added`` are ``None``), **or** every
+            knob that fired added a non-positive increment (``<= 0``).
+
+        Returns ``False`` when:
+          - ``mcf_lb`` is ``None``, **or**
+          - any positive ``adjust_*_increment_added`` is recorded — the
+            adjustment inflated processing time / pushed releases, so the
+            MCF objective bounds the *augmented* problem only.
+
+        Important caveat — direct kwargs are NOT inspected:
+          The property only reads the post-fact ``adjust_*_increment_added``
+          fields populated by the ``adjust_*_by_full_sch_and_last_stage_*``
+          knobs on ``apply_lb_by_mcf`` /
+          ``heuristic_last_stage_only_sch_from_mcf_lb``. It does **not**
+          look at the direct ``p_increment``, ``r_increment``, or
+          ``r_multiplier`` arguments those callers may pass. If a caller
+          invokes ``apply_lb_by_mcf(p_increment=k>0)`` (or
+          ``r_increment > 0``, or ``r_multiplier > 1.0``) without firing
+          an adjust knob, this property still returns ``True`` even though
+          the MCF objective is no longer a global LB on the original
+          instance. Today both call sites of ``apply_lb_by_mcf``
+          (``calc_mcf_lb_and_derive_full_sch`` round-1 and round-2) leave
+          the direct kwargs at their defaults, so the gap is theoretical;
+          but a future caller that uses those kwargs must either persist
+          its own validity flag or extend this property.
+        """
+        if self.mcf_lb is None:
+            return False
+        if (
+            self.adjust_p_increment_added is None
+            and self.adjust_r_increment_added is None
+        ):
+            return True
+        if (
+            self.adjust_p_increment_added is not None
+            and self.adjust_p_increment_added > 0
+        ):
+            return False
+        if (
+            self.adjust_r_increment_added is not None
+            and self.adjust_r_increment_added > 0
+        ):
+            return False
+        return True

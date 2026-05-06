@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -89,8 +90,63 @@ class FFcDDWSubroutineControllerCore(
         self.total_elapsed_time: float = 0.0  # TODO: apply to routix
 
     def is_stopping_condition(self, **kwargs: Any) -> bool:
-        """Stop when the timelimit is exceeded."""
-        return self.timer.time_over(self.stopping_criteria.timelimit)
+        """Stop when the timelimit is exceeded or optimality is proven."""
+        return (
+            self.timer.time_over(self.stopping_criteria.timelimit)
+            or self._optimality_proven()
+        )
+
+    def _current_valid_lb(self) -> float:
+        """Return the latest MCF LB if it is a valid global LB for the
+        original (un-augmented) problem; otherwise ``0.0`` (the trivial
+        valid LB for weighted earliness/tardiness).
+        """
+        diag = self.mcf_lb_diagnostic
+        if diag is None:
+            return 0.0
+        if diag.mcf_lb is None:
+            return 0.0
+        if not diag.mcf_lb_is_valid_for_main_problem:
+            return 0.0
+        return float(diag.mcf_lb)
+
+    def _optimality_proven(self) -> bool:
+        """Return True iff ``ceil(valid_lb) == int(best_obj_value)``.
+
+        Raises ``ValueError`` when ``ceil(valid_lb) > int(best_obj_value)``
+        — that is an LB-violates-UB inconsistency that should not be
+        silently accepted.
+        """
+        ub = self.solution_manager.best_obj_value
+        if ub is None:
+            return False
+        lb_int = math.ceil(self._current_valid_lb())
+        ub_int = int(ub)
+        if lb_int > ub_int:
+            raise ValueError(
+                f"{self._instance_name}: MCF global LB ({lb_int}) exceeds "
+                f"incumbent UB ({ub_int}); LB or UB is inconsistent."
+            )
+        return lb_int == ub_int
+
+    def _make_stop_report(self, start_elapsed: float | None = None) -> SubroutineReport:
+        """Stop-report with elapsed_time measured from start_elapsed (0.0
+        when not provided) and obj_bound from a valid LB when available.
+        """
+        diag = self.mcf_lb_diagnostic
+        bound = (
+            float(diag.mcf_lb)
+            if diag is not None
+            and diag.mcf_lb is not None
+            and diag.mcf_lb_is_valid_for_main_problem
+            else None
+        )
+        elapsed = time.monotonic() - start_elapsed if start_elapsed is not None else 0.0
+        return SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=None,
+            obj_bound=bound,
+        )
 
     def get_file_path_for_subroutine(self, filename_suffix: str) -> Path:
         """Override: when an `ArtifactLayout` is bound, route per-call-context
