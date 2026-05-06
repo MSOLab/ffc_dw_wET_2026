@@ -7,6 +7,7 @@ not pull in the seed-generation machinery.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -48,6 +49,7 @@ def solve_mcf_lb(
     r_multiplier: float = 1.0,
     r_increment: int = 0,
     stop_predicate: Callable[[], bool] | None = None,
+    logger: logging.Logger | None = None,
 ) -> McfLbResult:
     """Solve the MCF relaxation and record the bound on ``diagnostic``.
 
@@ -78,6 +80,11 @@ def solve_mcf_lb(
             solve.
     """
     if stop_predicate is not None and stop_predicate():
+        if logger is not None:
+            logger.info(
+                "solve_mcf_lb: stop_predicate True before LP solve; "
+                "raising MCFLBStopRequested."
+            )
         raise MCFLBStopRequested
 
     last_stage_id = instance.stage_id_list[-1]
@@ -93,6 +100,15 @@ def solve_mcf_lb(
     diagnostic.mcf_solve_sec = time.monotonic() - t_mcf
     diagnostic.mcf_lb = mcf_lb
     diagnostic.reached_phase = "mcf"
+    if logger is not None:
+        logger.info(
+            "solve_mcf_lb: solved in %.3fs, mcf_lb=%.2f "
+            "(r_multiplier=%.4g, r_increment=%d)",
+            diagnostic.mcf_solve_sec,
+            mcf_lb,
+            r_multiplier,
+            r_increment,
+        )
 
     mcf_preemptive_schedule = MCFPreemptiveSchedule.from_flow_dict(
         mcf.get_variable_value_dict(),

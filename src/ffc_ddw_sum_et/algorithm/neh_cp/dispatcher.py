@@ -101,6 +101,20 @@ class NehCpDispatcher:
             logger=logger,
         )
 
+        logger.info(
+            "neh_cp: %d jobs split into %d batches (sizes=%s); "
+            "objective_lower_bound=%s, wall_clock_deadline_sec=%s",
+            n,
+            len(batches),
+            [len(b) for b in batches],
+            f"{option.objective_lower_bound:.2f}"
+            if option.objective_lower_bound is not None
+            else "None",
+            f"{option.wall_clock_deadline_sec:.3f}"
+            if option.wall_clock_deadline_sec is not None
+            else "None",
+        )
+
         partial_sol: FFcSchedule | None = None
         current_jobs: list[str] = []
         step_entries: list[NehCpStepEntry] = []
@@ -137,6 +151,12 @@ class NehCpDispatcher:
                 if is_last_batch and option.objective_lower_bound is not None
                 else None
             )
+            if obj_lb_for_build is not None:
+                logger.info(
+                    "neh_cp step %d: last batch — passing obj_lb=%.2f to CP-SAT",
+                    step,
+                    obj_lb_for_build,
+                )
             mdl, params, op_vars, et_vars = builder.build(
                 sub_instance, horizon=horizon, obj_lb=obj_lb_for_build
             )
@@ -260,6 +280,21 @@ class NehCpDispatcher:
                 else None
             )
             sub_obj_lb = float(raw_lb) if raw_lb is not None else 0.0
+
+            logger.info(
+                "neh_cp step %d: primary CP-SAT status=%s, obj=%s, "
+                "bound=%.2f, wall=%.3fs, applied_tl=%s",
+                step,
+                solver.StatusName(status),
+                f"{int(solver.ObjectiveValue())}"
+                if status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+                else "None",
+                sub_obj_lb,
+                solver.wall_time,
+                f"{applied_tl_seconds:.3f}"
+                if applied_tl_seconds is not None
+                else "None",
+            )
 
             cp_obj: float | None = None
             semi_active_obj: float | None = None
@@ -478,6 +513,13 @@ class NehCpDispatcher:
 
         if stopped_early:
             remaining_jobs = [j for j in job_sequence if j not in scheduled_job_set]
+            logger.info(
+                "neh_cp: recovery dispatch — %d/%d remaining jobs "
+                "(scheduled=%d).",
+                len(remaining_jobs),
+                n,
+                len(scheduled_job_set),
+            )
             if remaining_jobs:
                 if partial_sol is None:
                     partial_sol = FFcSchedule(
@@ -528,6 +570,13 @@ class NehCpDispatcher:
         final = partial_sol
         sum_e, sum_t = compute_weighted_earliness_tardiness(final, instance)
         obj_value = float(sum_e + sum_t)
+        logger.info(
+            "neh_cp: completed all %d batches naturally; obj=%.0f, "
+            "makespan=%d.",
+            len(batches),
+            obj_value,
+            int(final.makespan),
+        )
         metrics_feasible: dict = {
             "sum_earliness": sum_e,
             "sum_tardiness": sum_t,

@@ -661,6 +661,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 r_multiplier=r_multiplier,
                 r_increment=effective_r_increment,
                 stop_predicate=self.is_stopping_condition,
+                logger=self.logger,
             )
         except MCFLBStopRequested:
             self.mcf_lb_diagnostic = prev_diag
@@ -1430,24 +1431,40 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """
         start_elapsed = time.monotonic()
         if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired at entry "
+                "(before round1_apply_lb_by_mcf)"
+            )
             return self._make_stop_report(start_elapsed)
         self.apply_lb_by_mcf(
             draw_heatmap=draw_pmtn_sch_heatmap,
             heatmap_sort=heatmap_sort,
         )
         if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round1_heuristic_last_stage_only"
+            )
             return self._make_stop_report(start_elapsed)
         self.heuristic_last_stage_only_sch_from_mcf_lb(
             job_priority=job_placement_priority,
             placement_priority=last_stage_only_placement_criteria,
         )
         if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round1_build_full_sch"
+            )
             return self._make_stop_report(start_elapsed)
         report = self.build_full_sch_from_last_stage_only_sch()
 
         if not (adjust_p or adjust_r):
             return report
         if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_check (returning round1 report)"
+            )
             return report
 
         incumbent = self.solution_manager.get_incumbent()
@@ -1468,6 +1485,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             return report
 
         if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_apply_lb_by_mcf (returning round1 report)"
+            )
             return report
         self.apply_lb_by_mcf(
             draw_heatmap=draw_pmtn_sch_heatmap,
@@ -1477,6 +1498,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             adjust_r_by_half=adjust_r,
         )
         if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_heuristic_last_stage_only (returning round1 report)"
+            )
             return report
         self.heuristic_last_stage_only_sch_from_mcf_lb(
             job_priority=job_placement_priority,
@@ -1486,6 +1511,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             adjust_r_by_half=adjust_r,
         )
         if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_build_full_sch (returning round1 report)"
+            )
             return report
         return self.build_full_sch_from_last_stage_only_sch()
 
@@ -2321,6 +2350,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         valid_lb = self.get_current_valid_lb()
         objective_lower_bound = valid_lb if valid_lb > 0 else None
 
+        self.logger.info(
+            "neh_cp: threading wall_clock_deadline=%.3fs (remaining=%.3fs), "
+            "objective_lower_bound=%s",
+            wall_clock_deadline_sec,
+            remaining_sec,
+            f"{objective_lower_bound:.2f}"
+            if objective_lower_bound is not None
+            else "None",
+        )
+
         option = NehCpOption(
             job_priority=job_priority,
             solver_thread_cnt=solver_thread_cnt,
@@ -2460,7 +2499,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.mcf_lb_diagnostic = diag
         try:
             mcf_result = solve_mcf_lb(
-                instance, diag, stop_predicate=self.is_stopping_condition
+                instance,
+                diag,
+                stop_predicate=self.is_stopping_condition,
+                logger=self.logger,
             )
         except MCFLBStopRequested:
             self.mcf_lb_diagnostic = prev_diag
@@ -2528,6 +2570,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         valid_lb = self.get_current_valid_lb()
         objective_lower_bound = valid_lb if valid_lb > 0 else None
+
+        self.logger.info(
+            "run_mcf_lb_then_neh_cp: threading wall_clock_deadline=%.3fs "
+            "(remaining=%.3fs), objective_lower_bound=%s",
+            wall_clock_deadline_sec,
+            remaining_sec,
+            f"{objective_lower_bound:.2f}"
+            if objective_lower_bound is not None
+            else "None",
+        )
 
         option = NehCpOption(
             custom_job_sequence=tuple(custom_job_sequence),

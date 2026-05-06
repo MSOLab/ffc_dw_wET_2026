@@ -110,12 +110,10 @@ class FFcDDWSubroutineControllerCore(
             return 0.0
         return float(diag.mcf_lb)
 
-    def _optimality_proven(self) -> bool:
-        """Return True iff ``ceil(valid_lb) == int(best_obj_value)``.
-
-        Raises ``ValueError`` when ``ceil(valid_lb) > int(best_obj_value)``
-        — that is an LB-violates-UB inconsistency that should not be
-        silently accepted.
+    def _optimality_proven_no_log(self) -> bool:
+        """``_optimality_proven`` without the transition log; used by
+        ``_make_stop_report`` to derive the stop reason without
+        double-logging.
         """
         ub = self.solution_manager.best_obj_value
         if ub is None:
@@ -128,6 +126,27 @@ class FFcDDWSubroutineControllerCore(
                 f"incumbent UB ({ub_int}); LB or UB is inconsistent."
             )
         return lb_int == ub_int
+
+    def _optimality_proven(self) -> bool:
+        """Return True iff ``ceil(valid_lb) == int(best_obj_value)``.
+
+        Raises ``ValueError`` when ``ceil(valid_lb) > int(best_obj_value)``
+        — that is an LB-violates-UB inconsistency that should not be
+        silently accepted.
+        """
+        proven = self._optimality_proven_no_log()
+        if proven and not getattr(self, "_optimality_logged", False):
+            lb = self.get_current_valid_lb()
+            ub = self.solution_manager.best_obj_value
+            self.logger.info(
+                "_optimality_proven: ceil(LB)=%d == int(UB)=%d (LB=%.2f, UB=%.2f)",
+                math.ceil(lb),
+                int(ub),
+                lb,
+                ub,
+            )
+            self._optimality_logged = True
+        return proven
 
     def _make_stop_report(self, start_elapsed: float | None = None) -> SubroutineReport:
         """Stop-report with elapsed_time measured from start_elapsed (0.0
@@ -142,6 +161,27 @@ class FFcDDWSubroutineControllerCore(
             else None
         )
         elapsed = time.monotonic() - start_elapsed if start_elapsed is not None else 0.0
+        timelimit = self.stopping_criteria.timelimit
+        timer_elapsed = self.timer.elapsed_sec
+        ub = self.solution_manager.best_obj_value
+        lb = self.get_current_valid_lb()
+        if self.timer.time_over(timelimit):
+            reason = "timelimit"
+        elif self._optimality_proven_no_log():
+            reason = "optimality_proven"
+        else:
+            reason = "unknown"
+        self.logger.info(
+            "_make_stop_report: reason=%s, subroutine_elapsed=%.3fs, "
+            "timer_elapsed=%.3fs/%.3fs, valid_lb=%.2f, best_ub=%s, bound=%s",
+            reason,
+            elapsed,
+            timer_elapsed,
+            timelimit,
+            lb,
+            f"{ub:.2f}" if ub is not None else "None",
+            f"{bound:.2f}" if bound is not None else "None",
+        )
         return SubroutineReport(
             elapsed_time=elapsed,
             obj_value=None,
