@@ -2318,6 +2318,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
         wall_clock_deadline_sec = time.monotonic() + remaining_sec
 
+        valid_lb = self.get_current_valid_lb()
+        objective_lower_bound = valid_lb if valid_lb > 0 else None
+
         option = NehCpOption(
             job_priority=job_priority,
             solver_thread_cnt=solver_thread_cnt,
@@ -2337,6 +2340,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
             wall_clock_deadline_sec=wall_clock_deadline_sec,
+            objective_lower_bound=objective_lower_bound,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2522,6 +2526,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
         wall_clock_deadline_sec = time.monotonic() + remaining_sec
 
+        valid_lb = self.get_current_valid_lb()
+        objective_lower_bound = valid_lb if valid_lb > 0 else None
+
         option = NehCpOption(
             custom_job_sequence=tuple(custom_job_sequence),
             solver_thread_cnt=solver_thread_cnt,
@@ -2542,6 +2549,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible=error_if_infeasible,
             keep_step_schedules=keep_step_schedules,
             wall_clock_deadline_sec=wall_clock_deadline_sec,
+            objective_lower_bound=objective_lower_bound,
         )
         spec = AlgSpec(
             instance=instance,

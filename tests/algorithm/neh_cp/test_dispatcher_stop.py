@@ -123,6 +123,53 @@ def test_stop_predicate_false_runs_to_completion() -> None:
     assert record.result.schedule is not None
 
 
+def test_objective_lower_bound_at_optimal_still_solves() -> None:
+    """Passing the actual optimal objective as objective_lower_bound on
+    the option lets CP-SAT prove optimality early at the last batch.
+    The dispatcher still returns a valid full schedule with that
+    objective value."""
+    instance = _make_instance()
+    # Optimal E+T for this instance is 7 (verified empirically).
+    spec = AlgSpec(
+        instance=instance,
+        option=NehCpOption(
+            cp_tl_seconds=2.0,
+            added_batch_size=1,
+            objective_lower_bound=7.0,
+        ),
+    )
+
+    record = NehCpDispatcher().run(spec)
+
+    assert record.work_status == WorkStatus.FEASIBLE
+    assert record.termination_reason == TerminationReason.COMPLETED
+    assert record.result is not None
+    assert record.result.schedule is not None
+    assert record.result.obj_value == 7.0
+
+
+def test_objective_lower_bound_none_unchanged_behavior() -> None:
+    """``objective_lower_bound=None`` (default) — no obj_lb constraint
+    is added; result matches the no-bound regression case."""
+    instance = _make_instance()
+    spec = AlgSpec(
+        instance=instance,
+        option=NehCpOption(
+            cp_tl_seconds=2.0,
+            added_batch_size=1,
+            objective_lower_bound=None,
+        ),
+    )
+
+    record = NehCpDispatcher().run(spec)
+
+    assert record.work_status == WorkStatus.FEASIBLE
+    assert record.termination_reason == TerminationReason.COMPLETED
+    assert record.result is not None
+    assert record.result.schedule is not None
+    assert record.result.obj_value == 7.0
+
+
 def test_stop_after_last_batch_keeps_partial_sol_unmodified() -> None:
     """When stop_predicate fires after the last batch completes, all jobs
     are already in partial_sol — recovery skips dispatch and reports

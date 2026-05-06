@@ -58,11 +58,21 @@ class NehCpOption(AlgOption):
     cp_tl_2nd_obj_seconds: float | None = None
     error_if_infeasible: bool = False
     keep_step_schedules: bool = False
+
     wall_clock_deadline_sec: float | None = None
     """Optional ``time.monotonic()`` deadline used to clamp each batch's
     CP-SAT ``max_time_in_seconds`` by the remaining wall-clock budget.
     ``None`` means "no deadline" — preserves today's behavior for
     isolated dispatcher tests / scripts.
+    """
+
+    objective_lower_bound: float | None = None
+    """Optional valid global lower bound on the full-instance weighted
+    E+T objective. Passed to ``BaseModelBuilder.build`` as ``obj_lb``
+    only at the **last** NEH-CP batch (which by construction covers
+    every job, so the global LB is a valid LB on that batch's CP-SAT
+    objective). Lets CP-SAT prove optimality early when the bound is
+    tight. ``None`` (default) preserves today's behavior.
     """
 
     @classmethod

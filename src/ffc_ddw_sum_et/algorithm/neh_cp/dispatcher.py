@@ -131,7 +131,15 @@ class NehCpDispatcher:
             )
 
             builder = BaseModelBuilder()
-            mdl, params, op_vars, et_vars = builder.build(sub_instance, horizon=horizon)
+            is_last_batch = step == len(batches) - 1
+            obj_lb_for_build = (
+                option.objective_lower_bound
+                if is_last_batch and option.objective_lower_bound is not None
+                else None
+            )
+            mdl, params, op_vars, et_vars = builder.build(
+                sub_instance, horizon=horizon, obj_lb=obj_lb_for_build
+            )
             skip_pf = False
             if option.skip_pf_below_obj is not None:
                 if option.skip_pf_below_obj == "makespan":

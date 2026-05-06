@@ -3,8 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pandas as pd
+import pytest
 from routix.stopping_criteria import StoppingCriteria
 
+from ffc_ddw_sum_et.algorithm.mcf_lb.diagnostic import MCFLBDiagnostic
+from ffc_ddw_sum_et.algorithm.neh_cp.dispatcher import NehCpDispatcher
+from ffc_ddw_sum_et.algorithm.neh_cp.option import NehCpOption
 from ffc_ddw_sum_et.orchestration.controller import FFcDDWSubroutineController
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
@@ -73,6 +77,66 @@ def test_neh_cp_registers_recovered_schedule_when_stop_fires_mid_dispatch() -> N
     controller.run()
 
     assert controller.solution_manager.best_obj_value is not None
+
+
+def test_controller_threads_valid_mcf_lb_to_neh_cp_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``self.mcf_lb_diagnostic`` carries a valid LB, the controller
+    populates ``NehCpOption.objective_lower_bound`` so the dispatcher can
+    constrain the last-batch CP-SAT objective from below."""
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[{"method": "neh_cp", "cp_tl": 0.5, "added_batch_size": 1}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    diag = MCFLBDiagnostic()
+    diag.mcf_lb = 5.0  # no adjust knobs fired -> valid for main problem
+    controller.mcf_lb_diagnostic = diag
+
+    captured: dict[str, NehCpOption | None] = {"option": None}
+    original_run = NehCpDispatcher.run
+
+    def capture_run(self_disp, spec):  # type: ignore[no-untyped-def]
+        captured["option"] = spec.option
+        return original_run(self_disp, spec)
+
+    monkeypatch.setattr(NehCpDispatcher, "run", capture_run)
+
+    controller.run()
+
+    assert captured["option"] is not None
+    assert captured["option"].objective_lower_bound == 5.0
+
+
+def test_controller_omits_objective_lower_bound_when_lb_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the LB is invalid (adjust knob fired), ``_current_valid_lb``
+    returns 0.0 — controller leaves ``objective_lower_bound`` as None."""
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[{"method": "neh_cp", "cp_tl": 0.5, "added_batch_size": 1}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    diag = MCFLBDiagnostic()
+    diag.mcf_lb = 5.0
+    diag.adjust_p_increment_added = 1  # invalidates LB
+    controller.mcf_lb_diagnostic = diag
+
+    captured: dict[str, NehCpOption | None] = {"option": None}
+    original_run = NehCpDispatcher.run
+
+    def capture_run(self_disp, spec):  # type: ignore[no-untyped-def]
+        captured["option"] = spec.option
+        return original_run(self_disp, spec)
+
+    monkeypatch.setattr(NehCpDispatcher, "run", capture_run)
+
+    controller.run()
+
+    assert captured["option"] is not None
+    assert captured["option"].objective_lower_bound is None
 
 
 def test_neh_cp_completes_with_generous_timelimit() -> None:

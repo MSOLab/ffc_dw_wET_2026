@@ -212,7 +212,7 @@ Inspect each `*_instance_result.yaml`: with `timelimit: 2.0`,
 With a tiny `timelimit: 0.05`, NEH-CP should be skipped or stopped
 mid-batch.
 
-## Phase 2 — superseded (no separate phase needed)
+## Phase 2 — superseded by last-batch LB constraint (shipped)
 
 The original Phase 2 ideas (mid-batch CP-SAT interruption via
 `CpSolverSolutionCallback.StopSearch()`; per-batch incumbent emission
@@ -226,24 +226,20 @@ Two reasons:
    Finer mid-batch interruption isn't worth the added solver-callback
    complexity at this point.
 
-2. **Optimality short-circuit, cheap variant**: Leverage the fact that
-   **the last NEH-CP batch covers all jobs by construction** — so the
+2. **Optimality short-circuit, cheap variant — implemented**: At the
+   last NEH-CP batch every job is included by construction, so the
    CP-SAT model's objective at that batch IS the full-instance E+T
-   objective, and any valid global LB (the controller's
-   `_current_valid_lb()` from MCF) is a valid lower bound on it. Pass
-   that LB to the solver as an objective lower bound — concretely,
-   either as a hard constraint `et_objective_expr >=
-   ceil(global_lb_int)` added when `step == len(batches) - 1`, or as
-   a new `NehCpOption.objective_lower_bound: float | None` threaded
-   through `BaseModelBuilder.build` (the builder already accepts an
-   `et_ub` for the secondary lex-makespan path; symmetric `et_lb` is
-   the natural fit). CP-SAT then proves optimality whenever its
-   solution matches the bound and terminates the last batch early
+   objective and any valid global LB (the controller's
+   `_current_valid_lb()` from MCF) is a valid lower bound on it.
+   `BaseModelBuilder.build` already accepts an `obj_lb` kwarg that
+   adds `sum(et_terms) >= math.ceil(obj_lb)` when set
+   (`cumulative.py:382-383`), so no builder change was needed.
+   `NehCpOption.objective_lower_bound: float | None` is threaded
+   through and the dispatcher passes it to `builder.build` only when
+   `step == len(batches) - 1`. CP-SAT then proves optimality whenever
+   its solution matches the bound and terminates the last batch early
    without any dispatcher-side incumbent emission or partial-schedule
    extension.
-
-   This is a small, scoped follow-up; track in `docs/TODO.md` if it
-   doesn't ship in a near-term PR.
 
 ## Files to touch in Phase 1
 
