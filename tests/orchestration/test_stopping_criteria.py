@@ -73,7 +73,7 @@ def test_optimality_proven_when_ceil_lb_equals_ub() -> None:
     controller.mcf_lb_diagnostic = diag
     _register_incumbent(controller, obj=5.0)
 
-    assert controller._current_valid_lb() == 4.3
+    assert controller.get_current_valid_lb() == 4.3
     assert controller._optimality_proven() is True
     assert controller.is_stopping_condition() is True
 
@@ -86,7 +86,7 @@ def test_invalid_lb_substitutes_zero() -> None:
     controller.mcf_lb_diagnostic = diag
     _register_incumbent(controller, obj=7.0)
 
-    assert controller._current_valid_lb() == 0.0
+    assert controller.get_current_valid_lb() == 0.0
     assert controller._optimality_proven() is False
 
 
@@ -98,7 +98,7 @@ def test_invalid_lb_substitutes_zero_optimal_at_zero() -> None:
     controller.mcf_lb_diagnostic = diag
     _register_incumbent(controller, obj=0.0)
 
-    assert controller._current_valid_lb() == 0.0
+    assert controller.get_current_valid_lb() == 0.0
     assert controller._optimality_proven() is True
 
 

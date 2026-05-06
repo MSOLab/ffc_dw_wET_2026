@@ -96,7 +96,7 @@ class FFcDDWSubroutineControllerCore(
             or self._optimality_proven()
         )
 
-    def _current_valid_lb(self) -> float:
+    def get_current_valid_lb(self) -> float:
         """Return the latest MCF LB if it is a valid global LB for the
         original (un-augmented) problem; otherwise ``0.0`` (the trivial
         valid LB for weighted earliness/tardiness).
@@ -120,7 +120,7 @@ class FFcDDWSubroutineControllerCore(
         ub = self.solution_manager.best_obj_value
         if ub is None:
             return False
-        lb_int = math.ceil(self._current_valid_lb())
+        lb_int = math.ceil(self.get_current_valid_lb())
         ub_int = int(ub)
         if lb_int > ub_int:
             raise ValueError(
