@@ -27,6 +27,7 @@ from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ..solution.objectives import compute_weighted_earliness_tardiness
 from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
+from .value_resolver import resolve_value_expr
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,35 @@ class FFcDDWSingleInstanceRunner(
                 "It is forwarded by FFcDDWMultiInstanceRunner."
             )
         self._layout = self.layout
+        self._resolve_stopping_timelimit_expr()
+
+    def _resolve_stopping_timelimit_expr(self) -> None:
+        # The scenario-level stopping_criteria dict is a single object shared
+        # by reference across every SIR in the scenario (see
+        # ffcddw_multi_instance_runner._init_single_instance_runners). Replace
+        # with a fresh dict so per-instance resolution never mutates the
+        # shared one.
+        sc = self.stopping_criteria
+        if not isinstance(sc, dict):
+            return
+        raw_tl = sc.get("timelimit")
+        if not isinstance(raw_tl, str):
+            return
+        n = self.instance.job_count
+        c = self.instance.stage_count
+        m = self.instance.last_stage_mc_count
+        resolved = float(resolve_value_expr(raw_tl, n, c, m))
+        self.stopping_criteria = {**sc, "timelimit": resolved}
+        self.logger.info(
+            "Resolved scenario timelimit '%s' for %s "
+            "(n=%d, c=%d, m=%d) -> %.3fs",
+            raw_tl,
+            self._ins_name,
+            n,
+            c,
+            m,
+            resolved,
+        )
 
     def _init_working_dir(self) -> None:
         """Resolve working_dir through the layout when one is bound, else fall
