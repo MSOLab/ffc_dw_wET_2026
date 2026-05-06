@@ -42,7 +42,7 @@ if isinstance(sc, dict):
         m = self.instance.last_stage_mc_count
         resolved = float(resolve_value_expr(raw_tl, n, c, m))
         self.stopping_criteria = {**sc, "timelimit": resolved}
-        self.logger.info(
+        self.logger.debug(
             "Resolved scenario timelimit '%s' for %s "
             "(n=%d, c=%d, m=%d) -> %.3fs",
             raw_tl, self._ins_name, n, c, m, resolved,
@@ -50,11 +50,13 @@ if isinstance(sc, dict):
 ```
 
 Plus the import:
+
 ```python
 from .value_resolver import resolve_value_expr
 ```
 
 Notes:
+
 - `isinstance(sc, dict)` guard is necessary because routix permits passing
   an already-built `StoppingCriteria` object too; we only resolve when the
   dict path is in use (which is what `main.py` produces today).

@@ -134,9 +134,8 @@ class FFcDDWSingleInstanceRunner(
         m = self.instance.last_stage_mc_count
         resolved = float(resolve_value_expr(raw_tl, n, c, m))
         self.stopping_criteria = {**sc, "timelimit": resolved}
-        self.logger.info(
-            "Resolved scenario timelimit '%s' for %s "
-            "(n=%d, c=%d, m=%d) -> %.3fs",
+        self.logger.debug(
+            "Resolved scenario timelimit '%s' for %s (n=%d, c=%d, m=%d) -> %.3fs",
             raw_tl,
             self._ins_name,
             n,
