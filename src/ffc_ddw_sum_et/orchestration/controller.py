@@ -10,6 +10,7 @@ from ortools.sat.python import cp_model
 from routix.io import dump_yaml
 from routix.report import SubroutineReport
 
+from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.cumulative import (
     BaseModelBuilder,
@@ -2284,6 +2285,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         working directory.
         """
         start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
         instance = self.instance
         n = instance.job_count
         c = instance.stage_count
@@ -2312,6 +2315,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             skip_pf_below_obj
         )
 
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+
         option = NehCpOption(
             job_priority=job_priority,
             solver_thread_cnt=solver_thread_cnt,
@@ -2330,9 +2336,27 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             minimize_makespan_lex=minimize_makespan_lex,
             cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
         )
-        spec = AlgSpec(instance=instance, option=option, logger=self.logger)
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
         record = NehCpDispatcher().run(spec)
+
+        if record.termination_reason == TerminationReason.STOP_REQUESTED:
+            stopped_after = (
+                record.result.metrics.get("stopped_after_batch")
+                if record.result is not None and record.result.metrics is not None
+                else None
+            )
+            self.logger.info(
+                "neh_cp: dispatcher stopped early after batch %s; "
+                "registering recovered schedule.",
+                stopped_after,
+            )
 
         elapsed = time.monotonic() - start_elapsed
         result = record.result
@@ -2420,14 +2444,27 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         for diagnostics only.
         """
         start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
         instance = self.instance
         n = instance.job_count
         c = instance.stage_count
         m = instance.last_stage_mc_count
 
+        prev_diag = self.mcf_lb_diagnostic
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
-        mcf_result = solve_mcf_lb(instance, diag)
+        try:
+            mcf_result = solve_mcf_lb(
+                instance, diag, stop_predicate=self.is_stopping_condition
+            )
+        except MCFLBStopRequested:
+            self.mcf_lb_diagnostic = prev_diag
+            self.logger.info(
+                "run_mcf_lb_then_neh_cp: stop predicate fired before MCF solve; "
+                "skipping."
+            )
+            return self._make_stop_report(start_elapsed)
         obj_bound_by_mcf = mcf_result.mcf_lb
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
@@ -2435,6 +2472,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
         self.logger.info("run_mcf_lb_then_neh_cp: MCF LB = %d", int(obj_bound_by_mcf))
+
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
 
         if draw_heatmap:
             from ..io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
@@ -2479,6 +2519,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             skip_pf_below_obj
         )
 
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+
         option = NehCpOption(
             custom_job_sequence=tuple(custom_job_sequence),
             solver_thread_cnt=solver_thread_cnt,
@@ -2498,9 +2541,27 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
             keep_step_schedules=keep_step_schedules,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
         )
-        spec = AlgSpec(instance=instance, option=option, logger=self.logger)
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
         record = NehCpDispatcher().run(spec)
+
+        if record.termination_reason == TerminationReason.STOP_REQUESTED:
+            stopped_after = (
+                record.result.metrics.get("stopped_after_batch")
+                if record.result is not None and record.result.metrics is not None
+                else None
+            )
+            self.logger.info(
+                "run_mcf_lb_then_neh_cp: dispatcher stopped early after batch %s; "
+                "registering recovered schedule.",
+                stopped_after,
+            )
 
         elapsed = time.monotonic() - start_elapsed
         result = record.result

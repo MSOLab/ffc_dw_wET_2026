@@ -119,6 +119,8 @@ class NehCpDispatcher:
 
         last_obj_value: float | int = 0
         prev_elapsed_seconds = 0.0
+        stopped_early = False
+        scheduled_job_set: set[str] = set()
 
         start_elapsed = time.monotonic()
 
@@ -224,6 +226,23 @@ class NehCpDispatcher:
                 else:
                     solver.parameters.max_time_in_seconds = step_tl
                     applied_tl_seconds = step_tl
+            if option.wall_clock_deadline_sec is not None:
+                remaining_deadline = option.wall_clock_deadline_sec - time.monotonic()
+                if remaining_deadline <= 0:
+                    logger.info(
+                        "neh_cp: wall_clock_deadline_sec exceeded before batch "
+                        "%d/%d primary CP-SAT solve; stopping.",
+                        step + 1,
+                        len(batches),
+                    )
+                    stopped_early = True
+                    break
+                if (
+                    applied_tl_seconds is None
+                    or remaining_deadline < applied_tl_seconds
+                ):
+                    solver.parameters.max_time_in_seconds = remaining_deadline
+                    applied_tl_seconds = remaining_deadline
             solver.parameters.num_workers = option.solver_thread_cnt
             status = solver.solve(mdl)
 
@@ -291,6 +310,7 @@ class NehCpDispatcher:
                     solver.StatusName(status),
                 )
                 partial_sol = dispatched
+            scheduled_job_set = set(current_jobs)
 
             if option.keep_step_schedules:
                 step_schedules.append(
@@ -335,6 +355,24 @@ class NehCpDispatcher:
                 if cp_tl_2nd_obj_seconds is not None:
                     solver_2.parameters.max_time_in_seconds = cp_tl_2nd_obj_seconds
                 solver_2.parameters.num_workers = option.solver_thread_cnt
+                if option.wall_clock_deadline_sec is not None:
+                    remaining_deadline_2 = (
+                        option.wall_clock_deadline_sec - time.monotonic()
+                    )
+                    if remaining_deadline_2 <= 0:
+                        logger.info(
+                            "neh_cp: wall_clock_deadline_sec exceeded before "
+                            "stage-2 makespan solve at batch %d/%d; stopping.",
+                            step + 1,
+                            len(batches),
+                        )
+                        stopped_early = True
+                        break
+                    if (
+                        cp_tl_2nd_obj_seconds is None
+                        or remaining_deadline_2 < cp_tl_2nd_obj_seconds
+                    ):
+                        solver_2.parameters.max_time_in_seconds = remaining_deadline_2
                 status_2 = solver_2.solve(mdl_2)
                 if status_2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                     j_i_2_start_2 = {
@@ -407,33 +445,77 @@ class NehCpDispatcher:
             prev_elapsed_seconds = step_elapsed_seconds
             last_obj_value = se + st
 
+            if spec.stop_predicate is not None and spec.stop_predicate():
+                logger.info(
+                    "neh_cp: stop_predicate fired after batch %d/%d; stopping.",
+                    step + 1,
+                    len(batches),
+                )
+                stopped_early = True
+                break
+            if option.wall_clock_deadline_sec is not None:
+                remaining_post = option.wall_clock_deadline_sec - time.monotonic()
+                if remaining_post <= 0:
+                    logger.info(
+                        "neh_cp: wall_clock_deadline_sec exceeded after batch "
+                        "%d/%d; stopping.",
+                        step + 1,
+                        len(batches),
+                    )
+                    stopped_early = True
+                    break
+
         elapsed_seconds = time.monotonic() - start_elapsed
         timing = TimingInfo(wall_ms=elapsed_seconds * 1000.0)
 
-        if partial_sol is None:
-            if option.error_if_infeasible:
-                raise RuntimeError(
-                    f"neh_cp produced no schedule for instance {instance.name}."
-                )
-            logger.warning("neh_cp produced no schedule; returning empty record.")
-            metrics_infeasible: dict = {"step_log": tuple(step_entries)}
+        if stopped_early:
+            remaining_jobs = [j for j in job_sequence if j not in scheduled_job_set]
+            if remaining_jobs:
+                if partial_sol is None:
+                    partial_sol = FFcSchedule(
+                        jobs=instance.job_id_list,
+                        stages=instance.stage_id_list,
+                        machines_per_stage=instance.stage_2_machines_map,
+                    )
+                for j in remaining_jobs:
+                    partial_sol.dispatch_job_by_stages(j, job_2_stage_2_p[j])
+                partial_sol.make_semi_active(stage_2_job_2_p)
+                partial_sol.insert_idle_time(due_window_map, ewt_map, twt_map)
+
+            assert partial_sol is not None
+            sum_e_stop, sum_t_stop = compute_weighted_earliness_tardiness(
+                partial_sol, instance
+            )
+            obj_value_stop = float(sum_e_stop + sum_t_stop)
+            metrics_stopped: dict = {
+                "sum_earliness": sum_e_stop,
+                "sum_tardiness": sum_t_stop,
+                "makespan": partial_sol.makespan,
+                "step_log": tuple(step_entries),
+                "stopped_after_batch": step,
+                "recovered_jobs": tuple(remaining_jobs),
+            }
             if option.keep_step_schedules:
-                metrics_infeasible["step_schedules"] = tuple(step_schedules)
+                metrics_stopped["step_schedules"] = tuple(step_schedules)
             return AlgRecord(
-                work_status=WorkStatus.INFEASIBLE,
+                work_status=WorkStatus.FEASIBLE,
                 instance_id=instance.name,
                 algorithm_id=self.algorithm_id,
                 option=option,
                 result=AlgResult(
-                    schedule=None,
-                    obj_value=None,
+                    schedule=partial_sol,
+                    obj_value=obj_value_stop,
                     obj_bound=None,
-                    metrics=metrics_infeasible,
+                    metrics=metrics_stopped,
                 ),
                 progress_log=tuple(progress_entries),
                 timing=timing,
-                termination_reason=TerminationReason.COMPLETED,
+                termination_reason=TerminationReason.STOP_REQUESTED,
             )
+
+        assert partial_sol is not None, (
+            "partial_sol should not be None if we didn't stop early."
+        )
 
         final = partial_sol
         sum_e, sum_t = compute_weighted_earliness_tardiness(final, instance)

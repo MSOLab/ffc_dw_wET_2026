@@ -34,6 +34,7 @@ class TerminationReason(StrEnum):
     COMPLETED = "completed"
     TIME_LIMIT = "time_limit"
     INTERRUPTED = "interrupted"
+    STOP_REQUESTED = "stop_requested"
     ERROR = "error"
 
 

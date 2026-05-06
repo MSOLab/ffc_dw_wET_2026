@@ -58,6 +58,12 @@ class NehCpOption(AlgOption):
     cp_tl_2nd_obj_seconds: float | None = None
     error_if_infeasible: bool = False
     keep_step_schedules: bool = False
+    wall_clock_deadline_sec: float | None = None
+    """Optional ``time.monotonic()`` deadline used to clamp each batch's
+    CP-SAT ``max_time_in_seconds`` by the remaining wall-clock budget.
+    ``None`` means "no deadline" — preserves today's behavior for
+    isolated dispatcher tests / scripts.
+    """
 
     @classmethod
     def coerce_skip_pf_below_obj(
