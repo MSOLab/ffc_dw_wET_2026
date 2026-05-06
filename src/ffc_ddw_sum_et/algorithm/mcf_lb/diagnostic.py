@@ -95,19 +95,31 @@ class MCFLBDiagnostic:
         Important caveat — direct kwargs are NOT inspected:
           The property only reads the post-fact ``adjust_*_increment_added``
           fields populated by the ``adjust_*_by_full_sch_and_last_stage_*``
-          knobs on ``apply_lb_by_mcf`` /
-          ``heuristic_last_stage_only_sch_from_mcf_lb``. It does **not**
-          look at the direct ``p_increment``, ``r_increment``, or
-          ``r_multiplier`` arguments those callers may pass. If a caller
-          invokes ``apply_lb_by_mcf(p_increment=k>0)`` (or
-          ``r_increment > 0``, or ``r_multiplier > 1.0``) without firing
-          an adjust knob, this property still returns ``True`` even though
-          the MCF objective is no longer a global LB on the original
-          instance. Today both call sites of ``apply_lb_by_mcf``
-          (``calc_mcf_lb_and_derive_full_sch`` round-1 and round-2) leave
-          the direct kwargs at their defaults, so the gap is theoretical;
-          but a future caller that uses those kwargs must either persist
-          its own validity flag or extend this property.
+          knobs on ``apply_lb_by_mcf`` and
+          ``heuristic_last_stage_only_sch_from_mcf_lb``. Both steps may
+          write these fields, but ``apply_lb_by_mcf`` takes precedence:
+          each write is gated by an ``is None`` check so the value
+          recorded by the LB-producing step (``apply_lb_by_mcf``, which
+          runs first in the typical ``calc_mcf_lb_and_derive_full_sch``
+          flow) survives a later heuristic-side recomputation. This
+          matters when round-2 ``apply_lb_by_mcf`` solves an augmented
+          MCF and records a positive increment, and the following
+          heuristic step would otherwise read a delta of ``0`` against
+          the already-augmented preemptive schedule and clobber that
+          record back to ``0``.
+
+          The property does **not** look at the direct ``p_increment``,
+          ``r_increment``, or ``r_multiplier`` arguments those callers
+          may pass. If a caller invokes
+          ``apply_lb_by_mcf(p_increment=k>0)`` (or ``r_increment > 0``,
+          or ``r_multiplier > 1.0``) without firing an adjust knob, this
+          property still returns ``True`` even though the MCF objective
+          is no longer a global LB on the original instance. Today both
+          call sites of ``apply_lb_by_mcf``
+          (``calc_mcf_lb_and_derive_full_sch`` round-1 and round-2)
+          leave the direct kwargs at their defaults, so the gap is
+          theoretical; but a future caller that uses those kwargs must
+          either persist its own validity flag or extend this property.
         """
         if self.mcf_lb is None:
             return False

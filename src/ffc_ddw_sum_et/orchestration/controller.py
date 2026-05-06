@@ -1173,18 +1173,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         if uses_ls_only_pmtn or uses_ls_only_full:
             if uses_ls_only_pmtn:
-                self.mcf_lb_diagnostic.adjust_params_last_stage_only_pmtn_makespan = (
-                    ls_only_pmtn_makespan
-                )
+                if (
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_pmtn_makespan
+                    is None
+                ):
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_pmtn_makespan = ls_only_pmtn_makespan
             else:
-                self.mcf_lb_diagnostic.adjust_params_last_stage_only_makespan = (
-                    ls_only_makespan
+                if (
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_makespan
+                    is None
+                ):
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_makespan = (
+                        ls_only_makespan
+                    )
+            if self.mcf_lb_diagnostic.adjust_params_incumbent_makespan is None:
+                self.mcf_lb_diagnostic.adjust_params_incumbent_makespan = (
+                    incumbent_makespan
                 )
-            self.mcf_lb_diagnostic.adjust_params_incumbent_makespan = incumbent_makespan
-            self.mcf_lb_diagnostic.adjust_params_makespan_delta = makespan_delta
-        if fire_p:
+            if self.mcf_lb_diagnostic.adjust_params_makespan_delta is None:
+                self.mcf_lb_diagnostic.adjust_params_makespan_delta = makespan_delta
+        if fire_p and self.mcf_lb_diagnostic.adjust_p_increment_added is None:
             self.mcf_lb_diagnostic.adjust_p_increment_added = p_adjust
-        if fire_r:
+        if fire_r and self.mcf_lb_diagnostic.adjust_r_increment_added is None:
             self.mcf_lb_diagnostic.adjust_r_increment_added = r_adjust
 
         if r_multiplier != 1.0 or effective_r_increment != 0:
