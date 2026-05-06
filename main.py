@@ -139,9 +139,22 @@ def main() -> None:
         len(scenario_configs),
     )
     try:
-        runner.run()
+        final = runner.run()
         setup_logging(*main_logging_args, is_main=True)
-        logger.info("Experiment run completed successfully.")
+        total_err = sum(
+            1
+            for sr in getattr(final, "scenario_results", []) or []
+            for ir in getattr(sr, "instance_results", []) or []
+            if getattr(ir, "error", None)
+        )
+        if total_err:
+            logger.error(
+                "Experiment run finished with %d instance error(s); "
+                "see per-scenario MultiInstanceRunner logs for tracebacks.",
+                total_err,
+            )
+        else:
+            logger.info("Experiment run completed successfully.")
     finally:
         setup_logging(*main_logging_args, is_main=True)
         time_main_end = time.monotonic()

@@ -370,6 +370,18 @@ class FFcDDWMultiScenarioRunner(
                     "Error in scenario %d: %s", i + 1, scenario_name, exc_info=True
                 )
                 self.results.append(None)
+            else:
+                if isinstance(result, list):
+                    n_err = sum(
+                        1 for ir in result if getattr(ir, "error", None)
+                    )
+                    if n_err:
+                        logger.error(
+                            "Scenario %s: %d/%d instances finished with errors",
+                            scenario_name,
+                            n_err,
+                            len(result),
+                        )
             logger.info(
                 "--- Finished Scenario %d/%d: %s ---", i + 1, runner_cnt, scenario_name
             )
