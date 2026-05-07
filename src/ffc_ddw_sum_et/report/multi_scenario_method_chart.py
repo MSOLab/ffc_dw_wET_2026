@@ -17,28 +17,43 @@ from typing import Any
 
 import pandas as pd
 
+from ._chart_constants import series_colors_json, symbol_map_json
 from .rpdf_scatter_chart import (
     _build_best_so_far_progression_points,
     _build_step_path,
-    _lookup_rpdf_at_or_before,
+    _extract_progression_times,
+    _lookup_rpdf_at_or_before_indexed,
 )
 
 logger = logging.getLogger(__name__)
 
+# Fallback axis-upper used when no positive RPDf values are present
+# (mean series collapsed to 0). Kept small so the chart still renders a
+# readable y-axis instead of degenerating to a single tick.
+_EMPTY_POSITIVE_AXIS_UPPER = 0.01
+
+# Headroom multiplier above the largest RPDf so markers are not clipped
+# by the y-axis cap.
+_POSITIVE_AXIS_PADDING = 1.05
+
+# Minimum normalized-time x-axis upper. Prevents the chart from
+# squeezing horizontally when every scenario finishes well before t=1.
+_MIN_NORMALIZED_TIME_X_UPPER = 1.0
+
 
 def _positive_axis_upper(values: list[float]) -> float:
     if not values:
-        return 0.01
+        return _EMPTY_POSITIVE_AXIS_UPPER
     max_value = max(values)
     if max_value <= 0:
-        return 0.01
-    return max_value * 1.05
+        return _EMPTY_POSITIVE_AXIS_UPPER
+    return max_value * _POSITIVE_AXIS_PADDING
 
 
 def _x_axis_upper(values: list[float]) -> float:
     if not values:
-        return 1.0
-    return max(1.0, max(values))
+        return _MIN_NORMALIZED_TIME_X_UPPER
+    return max(_MIN_NORMALIZED_TIME_X_UPPER, max(values))
 
 
 def _y_axis_lower(values: list[float]) -> float:
@@ -162,11 +177,18 @@ def _build_scenario_mean_series(
 
     mean_x: list[float] = []
     mean_y: list[float] = []
+    # Precompute (times, points) per model so the inner union_times loop
+    # bisects against an already-built haystack instead of re-walking
+    # progression_points for every query_time.
+    model_haystacks = [
+        (_extract_progression_times(m["progression_points"]), m["progression_points"])
+        for m in models
+    ]
     for t in union_times:
         values = [
             v
-            for m in models
-            if (v := _lookup_rpdf_at_or_before(m["progression_points"], t)) is not None
+            for times, pts in model_haystacks
+            if (v := _lookup_rpdf_at_or_before_indexed(times, pts, t)) is not None
         ]
         if len(values) != len(models):
             continue
@@ -263,20 +285,8 @@ _HTML_TEMPLATE = Template("""<!doctype html>
   <div id="multi-scenario-method-chart" style="width: 100%; height: 760px;"></div>
   <script>
     const payload = $payload_json;
-    const SERIES_COLORS = [
-      "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-      "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
-    ];
-    const SYMBOL_MAP = {
-      "calc_mcf_lb_and_derive_full_sch": "diamond",
-      "solve_base_model_cpsat": "circle",
-      "neh_cp_full_sch_from_mcf_lb": "square",
-      "single_pass_full_sch_from_mcf_lb": "triangle-up",
-      "neh_cp_last_stage_only_sch_from_mcf_lb": "square-open",
-      "single_pass_last_stage_only_sch_from_mcf_lb": "triangle-down",
-      "run_last_stage_cp_sat_lb": "x",
-      "run_mcf_lb_4": "star"
-    };
+    const SERIES_COLORS = $series_colors_json;
+    const SYMBOL_MAP = $symbol_map_json;
 
     function buildVisibleGuideShapes(plotData) {
       return payload.traces.flatMap((trace, idx) => {
@@ -351,6 +361,8 @@ def _render_html(payload: dict, x_decimals: int, y_decimals: int) -> str:
         payload_json=json.dumps(payload, separators=(",", ":")),
         x_percent_decimals=x_decimals,
         y_percent_decimals=y_decimals,
+        series_colors_json=series_colors_json(),
+        symbol_map_json=symbol_map_json(),
     )
 
 

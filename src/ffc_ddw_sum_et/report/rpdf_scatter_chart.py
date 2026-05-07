@@ -21,6 +21,7 @@ Two changes vs the upstream:
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ from pathlib import Path
 from typing import TypeVar
 
 import pandas as pd
+
+from ._chart_constants import series_colors_json, symbol_map_json
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +117,47 @@ def _build_best_so_far_progression_points(grp: pd.DataFrame) -> list[_Progressio
 def _lookup_rpdf_at_or_before(
     progression_points: list[_ProgressionPoint], query_time: float
 ) -> float | None:
-    matched: float | None = None
-    for p in progression_points:
-        if p.time > query_time:
-            break
-        matched = p.rpd_f
-    return matched
+    """Largest ``rpd_f`` whose ``time <= query_time``, or ``None`` when all
+    points lie after ``query_time``.
+
+    ``progression_points`` is produced by ``_dedupe_progression_points`` and
+    is therefore sorted ascending by ``time`` with unique keys. Convenience
+    wrapper around :func:`_extract_progression_times` +
+    :func:`_lookup_rpdf_at_or_before_indexed` for one-off lookups; hot
+    paths (e.g. mean-series rendering across union times) should
+    precompute the times array once per model and call the indexed
+    helper directly.
+    """
+    if not progression_points:
+        return None
+    times = _extract_progression_times(progression_points)
+    return _lookup_rpdf_at_or_before_indexed(times, progression_points, query_time)
+
+
+def _extract_progression_times(
+    progression_points: list[_ProgressionPoint],
+) -> list[float]:
+    """Sorted-ascending times, suitable as the haystack for ``bisect``."""
+    return [p.time for p in progression_points]
+
+
+def _lookup_rpdf_at_or_before_indexed(
+    times: list[float],
+    progression_points: list[_ProgressionPoint],
+    query_time: float,
+) -> float | None:
+    """Bisect-based lookup that reuses a precomputed ``times`` array.
+
+    ``times[i]`` must equal ``progression_points[i].time``. Use this in
+    inner loops over multiple query times — one allocation of ``times``
+    per model, one O(log n) bisect per query.
+    """
+    if not progression_points:
+        return None
+    idx = bisect.bisect_right(times, query_time) - 1
+    if idx < 0:
+        return None
+    return progression_points[idx].rpd_f
 
 
 def _build_step_path(
@@ -353,11 +391,18 @@ def _build_mean_series_payload(
 
         mean_x: list[float] = []
         mean_y: list[float] = []
+        # Precompute the (times, points) pair per model once; the inner
+        # loop below would otherwise rebuild the times array for every
+        # union_time × model pair.
+        model_haystacks = [
+            (_extract_progression_times(m.progression_points), m.progression_points)
+            for m in models
+        ]
         for t in union_times:
             values = [
                 v
-                for m in models
-                if (v := _lookup_rpdf_at_or_before(m.progression_points, t)) is not None
+                for times, pts in model_haystacks
+                if (v := _lookup_rpdf_at_or_before_indexed(times, pts, t)) is not None
             ]
             if len(values) != len(models):
                 continue
@@ -477,20 +522,8 @@ _HTML_TEMPLATE = """<!doctype html>
     const DATA = {data_json};
     const xTickFormat = ".{x_decimals}%";
     const yTickFormat = ".{y_decimals}%";
-    const SERIES_COLORS = [
-      "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-      "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
-    ];
-    const SYMBOL_MAP = {{
-      "calc_mcf_lb_and_derive_full_sch": "diamond",
-      "solve_base_model_cpsat": "circle",
-      "neh_cp_full_sch_from_mcf_lb": "square",
-      "single_pass_full_sch_from_mcf_lb": "triangle-up",
-      "neh_cp_last_stage_only_sch_from_mcf_lb": "square-open",
-      "single_pass_last_stage_only_sch_from_mcf_lb": "triangle-down",
-      "run_last_stage_cp_sat_lb": "x",
-      "run_mcf_lb_4": "star"
-    }};
+    const SERIES_COLORS = {series_colors_json};
+    const SYMBOL_MAP = {symbol_map_json};
     const modeFilter = document.getElementById("mode-filter");
     const tFilter = document.getElementById("t-filter");
     const rFilter = document.getElementById("r-filter");
@@ -619,6 +652,8 @@ def _render_html(payload: dict, x_decimals: int, y_decimals: int) -> str:
         data_json=json.dumps(payload, separators=(",", ":")),
         x_decimals=x_decimals,
         y_decimals=y_decimals,
+        series_colors_json=series_colors_json(),
+        symbol_map_json=symbol_map_json(),
     )
 
 
