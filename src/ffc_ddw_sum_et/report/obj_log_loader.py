@@ -87,7 +87,9 @@ def _build_calls_for_series(
     if not notes:
         return ()
 
-    sorted_data = sorted(((float(k), float(v)) for k, v in data.items()), key=lambda x: x[0])
+    sorted_data = sorted(
+        ((float(k), float(v)) for k, v in data.items()), key=lambda x: x[0]
+    )
     sorted_endpoints = sorted(
         ((float(k), str(v)) for k, v in notes.items()), key=lambda x: x[0]
     )
@@ -127,6 +129,40 @@ def _load_obj_log_json(obj_log_path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def _extract_series_block(
+    payload: dict[str, Any], series_key: str, source: Path
+) -> tuple[dict[str, float], dict[str, str]]:
+    """Return ``(data, notes)`` for ``series_key`` from a raw obj_log payload.
+
+    Tolerates the series being absent (returns empty mappings) but raises
+    ``ValueError`` on shape drift — non-mapping series block, non-mapping
+    ``data`` / ``notes``. Per the module-level "raise loudly on drift"
+    policy: a partial / mistyped payload should not silently produce
+    misleading rows downstream.
+    """
+    block = payload.get(series_key)
+    if block is None:
+        return {}, {}
+    if not isinstance(block, dict):
+        raise ValueError(
+            f"obj_log[{series_key!r}] in {source} is {type(block).__name__}, "
+            "expected mapping"
+        )
+    data = block.get("data", {})
+    notes = block.get("notes", {})
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"obj_log[{series_key!r}]['data'] in {source} is "
+            f"{type(data).__name__}, expected mapping"
+        )
+    if not isinstance(notes, dict):
+        raise ValueError(
+            f"obj_log[{series_key!r}]['notes'] in {source} is "
+            f"{type(notes).__name__}, expected mapping"
+        )
+    return data, notes
+
+
 def _read_manifest(manifest_path: Path) -> dict[str, Any]:
     raw = load_yaml(manifest_path)
     if not isinstance(raw, dict):
@@ -154,16 +190,11 @@ def load_instance_progression(
     stage_cnt = int(manifest["stage_count"])
     timelimit_sec = float(manifest["timelimit"])
 
-    obj_value_block = payload.get("obj_value") or {}
-    obj_bound_block = payload.get("obj_bound") or {}
-
     obj_value_calls = _build_calls_for_series(
-        data=obj_value_block.get("data", {}),
-        notes=obj_value_block.get("notes", {}),
+        *_extract_series_block(payload, "obj_value", obj_log_path)
     )
     obj_bound_calls = _build_calls_for_series(
-        data=obj_bound_block.get("data", {}),
-        notes=obj_bound_block.get("notes", {}),
+        *_extract_series_block(payload, "obj_bound", obj_log_path)
     )
 
     return InstanceProgression(
