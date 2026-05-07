@@ -12,6 +12,7 @@ from routix.report import SubroutineReport
 
 from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
+from ffc_ddw_sum_et.algorithm.cpsat_adapter import CpsatAdapter, CpsatOption
 from ffc_ddw_sum_et.algorithm.cumulative import (
     BaseModelBuilder,
     PFMethod,
@@ -2292,6 +2293,98 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value),
         )
+        return report
+
+    def solve_base_model_cpsat(
+        self,
+        timelimit: float | str | None = None,
+        solver_thread_cnt: int = 1,
+        log_search_progress: bool = False,
+        error_if_infeasible: bool = False,
+        draw_gantt: bool = False,
+    ) -> SubroutineReport:
+        """Step method: solve the FFc-DDW base CP model on the full instance
+        via :class:`CpsatAdapter`, optionally warm-started from the
+        incumbent schedule.
+
+        ``timelimit`` is the user-specified per-call cap (absolute seconds, or
+        any expression supported by :func:`resolve_value_expr`). The actual
+        time budget passed to the algorithm is the strict-min of ``timelimit``
+        and the controller's remaining global time. ``timelimit=None`` means
+        "no per-call cap" — only the global time limit is enforced.
+        """
+        start_elapsed = time.monotonic()
+        instance = self.instance
+
+        timelimit_resolved = resolve_value_expr(
+            timelimit,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        eff_timelimit_sec = (
+            min(timelimit_resolved, remaining_sec)
+            if timelimit_resolved is not None
+            else remaining_sec
+        )
+
+        incumbent = self.solution_manager.get_incumbent()
+        ref_solution = incumbent.schedule if incumbent is not None else None
+
+        self.logger.info(
+            "solve_base_model_cpsat: effective=%.3fs (timelimit=%s, "
+            "remaining=%.3fs), ref_solution=%s",
+            eff_timelimit_sec,
+            f"{timelimit_resolved:.3f}s" if timelimit_resolved is not None else "None",
+            remaining_sec,
+            "given" if ref_solution is not None else "None",
+        )
+
+        option = CpsatOption(
+            timelimit_sec=eff_timelimit_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            log_search_progress=log_search_progress,
+            error_if_infeasible=error_if_infeasible,
+            draw_gantt=draw_gantt,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            ref_solution=ref_solution,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = CpsatAdapter().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        obj_bound = (
+            float(result.obj_bound)
+            if result is not None and result.obj_bound is not None
+            else None
+        )
+        schedule = result.schedule if result is not None else None
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound,
+        )
+        if schedule is not None:
+            self.solution_manager.register(
+                report,
+                FFcDDWSolution(
+                    schedule=schedule, obj_value=obj_value, obj_bound=obj_bound
+                ),
+            )
+        else:
+            self.solution_manager.register(report, None)
         return report
 
     def neh_cp(
