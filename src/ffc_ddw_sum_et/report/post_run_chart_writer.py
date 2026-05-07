@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +49,15 @@ logger = logging.getLogger(__name__)
 
 
 def _rpdf(obj: float, ref: float) -> float:
-    """RPDf = 2 * (obj - ref) / (obj + ref). 0.0 when undefined."""
+    """RPDf = 2 * (obj - ref) / (obj + ref). NaN when undefined.
+
+    Returning ``NaN`` (rather than ``0.0``) for the degenerate
+    ``obj + ref == 0`` case ensures the row is excluded by downstream
+    pandas operations (``dropna`` etc.) instead of being plotted as a
+    real "matched baseline" zero — which would silently bias the chart.
+    """
     denom = obj + ref
-    return 0.0 if denom == 0 else 2 * (obj - ref) / denom
+    return math.nan if denom == 0 else 2 * (obj - ref) / denom
 
 
 def load_baseline_df(
@@ -81,9 +88,8 @@ def load_baseline_df(
         columns={"T": "t_factor", "R": "r_factor"}
     )
 
-    merged = (
-        match.merge(bks, on="insIndex", how="inner")
-        .merge(instance, on="insIndex", how="inner")
+    merged = match.merge(bks, on="insIndex", how="inner").merge(
+        instance, on="insIndex", how="inner"
     )
     merged["ref_obj"] = pd.to_numeric(merged["ref_obj"], errors="coerce")
     merged["t_factor"] = pd.to_numeric(merged["t_factor"], errors="coerce")
@@ -187,7 +193,9 @@ def write_post_run_subroutine_chart_artifacts(
     summary_csv = layout.artifact_path("summary_csv")
     scenarios = _read_scenarios_from_summary(summary_csv)
     if not scenarios:
-        logger.info("Skipping subroutine chart artifacts: no scenarios in %s", summary_csv)
+        logger.info(
+            "Skipping subroutine chart artifacts: no scenarios in %s", summary_csv
+        )
         return
 
     scenario_metrics: list[dict[str, Any]] = []
