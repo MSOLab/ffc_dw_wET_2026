@@ -13,7 +13,7 @@ from routix.report import SubroutineReport
 from routix.stopping_criteria import StoppingCriteria
 from routix.subroutine_controller import SubroutineController
 
-from ..algorithm.base.alg_record import WorkStatus
+from ..algorithm.base.alg_record import ProgressLogEntry, WorkStatus
 from ..algorithm.mcf_lb.diagnostic import MCFLBDiagnostic
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import (
@@ -24,6 +24,7 @@ from ..solution.ffc_schedule import (
 )
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
+from .subroutine_report import FFcDDWSubroutineReport
 
 MCFLBPhaseSchedule = FFcSchedule | MCFPreemptiveSchedule
 
@@ -201,6 +202,57 @@ class FFcDDWSubroutineControllerCore(
             obj_value=None,
             obj_bound=bound,
         )
+
+    def _wrap_report(
+        self,
+        report: SubroutineReport,
+        *,
+        progress_log: tuple[ProgressLogEntry, ...] = (),
+    ) -> FFcDDWSubroutineReport:
+        """Promote a plain ``SubroutineReport`` to ``FFcDDWSubroutineReport``
+        with controller-frame ``start_time`` and ``step_label`` filled.
+
+        ``start_time`` is derived as
+        ``self.timer.elapsed_sec - report.elapsed_time``.
+
+        Invariant relied on by this derivation: ``report.elapsed_time`` is
+        the duration from step entry to *this* call. All current step
+        methods build the report immediately before calling ``_register``,
+        with ``elapsed_time = time.monotonic() - start_elapsed`` measured
+        at the same point — so step_entry_global ≈ now_global - elapsed_time.
+        New step methods that wedge work between ``elapsed_time`` capture
+        and ``_register`` will skew ``start_time`` and the resulting obj_log
+        timestamps; capture and register together.
+
+        ``progress_log`` is forwarded if the step has a captured trajectory;
+        otherwise empty tuple (the aggregator will synthesize a single
+        endpoint from ``start_time + elapsed_time``).
+        """
+        return FFcDDWSubroutineReport(
+            elapsed_time=report.elapsed_time,
+            obj_value=report.obj_value,
+            obj_bound=report.obj_bound,
+            start_time=self.timer.elapsed_sec - report.elapsed_time,
+            progress_log=progress_log,
+            step_label=self._get_call_context_of_current_method(),
+        )
+
+    def _register(
+        self,
+        report: SubroutineReport,
+        solution: FFcDDWSolution | None,
+        *,
+        progress_log: tuple[ProgressLogEntry, ...] = (),
+    ) -> bool:
+        """Wrap ``report`` into a ``FFcDDWSubroutineReport`` and register it.
+
+        Replaces direct ``self.solution_manager.register(report, sol)`` calls
+        in step methods. Single point that always promotes the plain report
+        into the project-local subclass — ensures every history entry carries
+        ``start_time`` / ``step_label`` for the end-of-run obj_log aggregation.
+        """
+        wrapped = self._wrap_report(report, progress_log=progress_log)
+        return self.solution_manager.register(wrapped, solution)
 
     def get_file_path_for_subroutine(self, filename_suffix: str) -> Path:
         """Override: when an `ArtifactLayout` is bound, route per-call-context

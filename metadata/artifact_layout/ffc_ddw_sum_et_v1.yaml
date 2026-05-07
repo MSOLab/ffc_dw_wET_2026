@@ -10,6 +10,16 @@ overlay_for: routix.io._default_artifact_layout
 #   - scope=run / scenario: zone FORBIDDEN.
 
 artifacts:
+  # ---- instance / final ----
+  # Compact JSON variant of routix's default `obj_log` (yaml). Same logical
+  # contents (per-step trajectory of obj_value / obj_bound), single-line
+  # serialization to keep file size small. The default `obj_log` (yaml) kind
+  # is left registered by routix but unused by this project.
+  - scope: instance
+    zone: final
+    kind: obj_log_json
+    file_template: "{instance_name}_obj_log.json"
+
   # ---- instance / progress (per-instance solve trajectory) ----
   - scope: instance
     zone: progress

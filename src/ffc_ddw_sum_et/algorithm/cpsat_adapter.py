@@ -26,10 +26,13 @@ from .base.alg_option import AlgOption
 from .base.alg_record import (
     AlgRecord,
     AlgResult,
+    ProgressLogEntry,
     TerminationReason,
     WorkStatus,
 )
 from .base.alg_spec import AlgSpec
+from .cpsat_callbacks.obj_bound_recorder import ObjectiveBoundRecorder
+from .cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from .cpsat_solver_options import CpsatSolverOptions, get_solver
 from .cumulative import BaseModelBuilder
 
@@ -90,6 +93,10 @@ class CpsatAdapter:
         )
         solver = get_solver(solver_cfg)
 
+        value_recorder = ObjectiveValueRecorder()
+        bound_recorder = ObjectiveBoundRecorder()
+        solver.best_bound_callback = bound_recorder
+
         logger.info(
             "CpsatAdapter: instance=%s, ref_solution=%s, eff_tl=%s, num_workers=%d",
             instance.name,
@@ -98,10 +105,15 @@ class CpsatAdapter:
             option.solver_thread_cnt,
         )
 
-        status = solver.solve(mdl)
+        status = solver.solve(mdl, solution_callback=value_recorder)
         status_name = solver.status_name(status)
 
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+        progress_log = self._build_progress_log(
+            value_recorder=value_recorder,
+            bound_recorder=bound_recorder,
+        )
 
         if not has_solution:
             if status == cp_model.INFEASIBLE and option.error_if_infeasible:
@@ -126,6 +138,7 @@ class CpsatAdapter:
                     obj_bound=None,
                     metrics={"cpsat_status": status_name},
                 ),
+                progress_log=progress_log,
                 termination_reason=(
                     TerminationReason.COMPLETED
                     if status == cp_model.INFEASIBLE
@@ -166,6 +179,18 @@ class CpsatAdapter:
                 "is not yet implemented at the algorithm layer; skipping."
             )
 
+        # Append the post-semi-active final point so the trajectory ends on
+        # the value the controller reports, even when it diverges from the
+        # CP-SAT internal objective due to semi-active normalization.
+        final_elapsed_sec = time.monotonic() - start
+        progress_log = progress_log + (
+            ProgressLogEntry(
+                elapsed_sec=final_elapsed_sec,
+                obj_value=obj_value,
+                obj_bound=obj_bound,
+            ),
+        )
+
         return AlgRecord(
             work_status=(
                 WorkStatus.OPTIMAL
@@ -187,12 +212,51 @@ class CpsatAdapter:
                     "makespan": schedule.makespan,
                 },
             ),
+            progress_log=progress_log,
             termination_reason=(
                 TerminationReason.COMPLETED
                 if status == cp_model.OPTIMAL
                 else TerminationReason.TIME_LIMIT
             ),
         )
+
+    @staticmethod
+    def _build_progress_log(
+        *,
+        value_recorder: ObjectiveValueRecorder,
+        bound_recorder: ObjectiveBoundRecorder,
+    ) -> tuple[ProgressLogEntry, ...]:
+        """Merge solution-callback and best-bound-callback entries into a
+        single ``progress_log`` time series.
+
+        - Solution callback fires at solve-time t with both ``v`` and ``b``.
+        - Best-bound callback fires at solve-time t with ``b`` only.
+        - When the two callbacks fire at the same timestamp, the solution
+          callback wins (carries v in addition to b).
+        Entries are sorted by ``elapsed_sec`` ascending.
+        """
+        entries: list[ProgressLogEntry] = []
+        for t, vb in value_recorder.entries:
+            entries.append(
+                ProgressLogEntry(
+                    elapsed_sec=t,
+                    obj_value=float(vb.value),
+                    obj_bound=float(vb.bound),
+                )
+            )
+        value_t_set = {t for t, _ in value_recorder.entries}
+        for t, b in bound_recorder.entries:
+            if t in value_t_set:
+                continue
+            entries.append(
+                ProgressLogEntry(
+                    elapsed_sec=t,
+                    obj_value=None,
+                    obj_bound=float(b),
+                )
+            )
+        entries.sort(key=lambda e: e.elapsed_sec)
+        return tuple(entries)
 
     @staticmethod
     def _validate_instance(spec: AlgSpec) -> FFcDDWParameters:

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from routix.report import SubroutineReport
 from routix.solution_manager import SolutionManager
 
 from ..solution.ffc_schedule import FFcSchedule
+from .subroutine_report import FFcDDWSubroutineReport
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -19,7 +19,7 @@ class FFcDDWSolution:
     obj_bound: float | None = None
 
 
-class FFcDDWSolutionManager(SolutionManager[SubroutineReport, FFcDDWSolution]):
+class FFcDDWSolutionManager(SolutionManager[FFcDDWSubroutineReport, FFcDDWSolution]):
     """Tracks the incumbent best solution across multiple FAM runs."""
 
     def _get_obj_value(self, solution: FFcDDWSolution) -> float:

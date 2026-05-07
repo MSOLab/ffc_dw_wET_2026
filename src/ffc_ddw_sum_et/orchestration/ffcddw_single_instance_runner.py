@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import os
 import traceback
@@ -27,6 +28,7 @@ from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ..solution.objectives import compute_weighted_earliness_tardiness
 from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
+from .subroutine_report import FFcDDWSubroutineReport
 from .value_resolver import resolve_value_expr
 
 logger = logging.getLogger(__name__)
@@ -466,28 +468,66 @@ class FFcDDWSingleInstanceRunner(
         return str(path)
 
     def _save_obj_log(self, history) -> None:
-        """Save objective value trajectory as YAML."""
-        entries = []
-        for i, record in enumerate(history):
-            if record.report is not None:
-                entries.append(
-                    {
-                        "step": i,
-                        "elapsed_time": float(record.report.elapsed_time),
-                        "obj_value": float(record.report.obj_value)
-                        if record.report.obj_value is not None
-                        else None,
-                        "obj_bound": float(record.report.obj_bound)
-                        if record.report.obj_bound is not None
-                        else None,
-                    }
-                )
-        if entries:
-            dump_yaml(
-                entries,
-                self._layout.artifact_path(
-                    "obj_log",
-                    scenario_name=self._scenario_name,
-                    instance_name=self.ins_name,
-                ),
-            )
+        """Aggregate per-step ``progress_log`` into a single-line, compact
+        JSON file matching hybridflowshop's yaml mapping shape.
+
+        Layout (one line, no whitespace):
+            {"obj_value":{"name":"obj_value","data":{<t_str>:v,...},"notes":{<t_str>:label,...}},
+             "obj_bound":{...}}
+
+        Timestamps are controller-frame elapsed seconds, formatted via
+        ``repr(float)`` to preserve full precision (matches hybridflowshop).
+        First-writer-wins on duplicate timestamps.
+        """
+        value_data: dict[str, float] = {}
+        value_notes: dict[str, str] = {}
+        bound_data: dict[str, float] = {}
+        bound_notes: dict[str, str] = {}
+
+        for record in history:
+            report = record.report
+            if not isinstance(report, FFcDDWSubroutineReport):
+                continue
+
+            for entry in report.progress_log:
+                t_global = report.start_time + entry.elapsed_sec
+                key = repr(t_global)
+                if entry.obj_value is not None:
+                    value_data.setdefault(key, float(entry.obj_value))
+                if entry.obj_bound is not None:
+                    bound_data.setdefault(key, float(entry.obj_bound))
+
+            end_global = report.start_time + report.elapsed_time
+            end_key = repr(end_global)
+            label = report.step_label or ""
+            if report.obj_value is not None:
+                value_data.setdefault(end_key, float(report.obj_value))
+                if label:
+                    value_notes[end_key] = label
+            if report.obj_bound is not None:
+                bound_data.setdefault(end_key, float(report.obj_bound))
+                if label:
+                    bound_notes[end_key] = label
+
+        if not (value_data or bound_data):
+            return
+
+        payload = {
+            "obj_value": {
+                "name": "obj_value",
+                "data": value_data,
+                "notes": value_notes,
+            },
+            "obj_bound": {
+                "name": "obj_bound",
+                "data": bound_data,
+                "notes": bound_notes,
+            },
+        }
+        out_path = self._layout.artifact_path(
+            "obj_log_json",
+            scenario_name=self._scenario_name,
+            instance_name=self.ins_name,
+        )
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)

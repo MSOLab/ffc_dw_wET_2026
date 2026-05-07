@@ -110,9 +110,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=obj_value,
                 obj_bound=obj_bound,
             )
-            self.solution_manager.register(report, fam_solution)
+            self._register(report, fam_solution)
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None)
 
         return report
 
@@ -190,9 +190,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=obj_value,
                 obj_bound=obj_bound,
             )
-            self.solution_manager.register(report, bn2d_solution)
+            self._register(report, bn2d_solution)
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None)
 
         return report
 
@@ -378,7 +378,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=None
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
 
         sum_e, sum_t = compute_weighted_earliness_tardiness(best_sch, instance)
@@ -397,7 +397,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=best_sch, obj_value=obj_value, obj_bound=None),
         )
@@ -729,7 +729,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=(obj_bound_by_mcf if obj_bound_is_valid else None),
         )
         if _register_report:
-            self.solution_manager.register(report, None)
+            self._register(report, None)
         return report
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
@@ -839,7 +839,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=mcf_lb,
         )
-        self.solution_manager.register(report, None)
+        self._register(report, None)
         return report
 
     def single_pass_last_stage_only_sch_from_mcf_lb(
@@ -977,7 +977,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(report, None)
+        self._register(report, None)
         return report
 
     def heuristic_last_stage_only_sch_from_mcf_lb(
@@ -1262,7 +1262,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=None,
         )
         if _register_report:
-            self.solution_manager.register(report, None)
+            self._register(report, None)
         return report
 
     def build_full_sch_from_last_stage_only_sch(
@@ -1308,7 +1308,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ``run_mcf_lb_4``) earlier in the flow when an LB is needed.
         """
         report, solution = self._build_full_sch_core()
-        self.solution_manager.register(report, solution)
+        self._register(report, solution)
         return report
 
     def _build_full_sch_core(
@@ -1484,7 +1484,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=best_r.obj_value,
                 obj_bound=r_lb_r1.obj_bound,
             )
-            self.solution_manager.register(final_report, best_s)
+            self._register(final_report, best_s)
             self.adjust_ref_full_sol = None
             return final_report
 
@@ -1723,7 +1723,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=phase2.last_stage_only_schedule,
@@ -1755,7 +1755,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
         if phase3.ls_only_sch_delayed is not None:
             self.mcf_lb_phase_schedules.append(
@@ -1808,7 +1808,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=phase3.dispatched_obj,
                 obj_bound=obj_bound_by_mcf,
             )
-            self.solution_manager.register(
+            self._register(
                 report,
                 FFcDDWSolution(
                     schedule=phase3.full_sch_from_ls_only_sch,
@@ -1824,7 +1824,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=phase4.final_obj,
             obj_bound=obj_bound_by_mcf,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(
                 schedule=phase4.final_schedule,
@@ -1954,7 +1954,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=None,
                 obj_bound=mcf_lb,
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
 
         j_i_2_start = {
@@ -1986,7 +1986,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=cp_obj,
             obj_bound=obj_bound if obj_bound is not None else mcf_lb,
         )
-        self.solution_manager.register(report, None)
+        self._register(report, None)
         return report
 
     def _dispatch_by_sequence(
@@ -2148,7 +2148,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
@@ -2170,7 +2170,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
@@ -2291,7 +2291,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=None,
                 obj_bound=None,
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
 
         j_i_2_start = {
@@ -2323,7 +2323,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,  # objBound by profile-fixed model is not a valid global bound
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value),
         )
@@ -2410,15 +2410,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=obj_bound,
         )
+        cpsat_progress_log = record.progress_log or ()
         if schedule is not None:
-            self.solution_manager.register(
+            self._register(
                 report,
                 FFcDDWSolution(
                     schedule=schedule, obj_value=obj_value, obj_bound=obj_bound
                 ),
+                progress_log=cpsat_progress_log,
             )
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None, progress_log=cpsat_progress_log)
         return report
 
     def neh_cp(
@@ -2550,13 +2552,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
+        neh_cp_progress_log = record.progress_log or ()
         if result is not None and result.schedule is not None:
-            self.solution_manager.register(
+            self._register(
                 report,
                 FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
+                progress_log=neh_cp_progress_log,
             )
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None, progress_log=neh_cp_progress_log)
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")
@@ -2772,17 +2776,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=obj_bound_by_mcf,
         )
+        neh_cp_progress_log = record.progress_log or ()
         if result is not None and result.schedule is not None:
-            self.solution_manager.register(
+            self._register(
                 report,
                 FFcDDWSolution(
                     schedule=result.schedule,
                     obj_value=obj_value,
                     obj_bound=obj_bound_by_mcf,
                 ),
+                progress_log=neh_cp_progress_log,
             )
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None, progress_log=neh_cp_progress_log)
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")
