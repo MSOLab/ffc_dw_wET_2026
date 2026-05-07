@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
@@ -22,7 +23,12 @@ from ffc_ddw_sum_et.report import write_post_run_subroutine_chart_artifacts
 
 
 def _write_instance(
-    layout, scenario: str, instance: str, *, timelimit: float, endpoints: list[tuple[float, float, str]]
+    layout,
+    scenario: str,
+    instance: str,
+    *,
+    timelimit: float,
+    endpoints: list[tuple[float, float, str]],
 ) -> None:
     """Write a synthetic ``<instance>_obj_log.json`` + manifest pair.
 
@@ -171,3 +177,84 @@ def test_writes_both_html_artifacts(tmp_path: Path) -> None:
     payload = json.loads(payload_match.group(1))
     assert len(payload["traces"]) == 1
     assert payload["traces"][0]["scenario"] == scenario
+
+
+def _setup_layout(tmp_path: Path) -> tuple[Any, str]:  # type: ignore[name-defined]
+    run_id = "20260507T000000_000000"
+    rr = RunRoot(path=tmp_path / run_id, run_id=run_id)
+    return init_ffc_artifact_layout(rr), run_id
+
+
+def test_silently_skips_when_baseline_csv_missing(tmp_path: Path) -> None:
+    """Each baseline file is independently optional; a missing one returns
+    early without writing artifacts and without raising."""
+    layout, _ = _setup_layout(tmp_path)
+    bogus = tmp_path / "does_not_exist.csv"
+    real = tmp_path / "real.csv"
+    real.write_text("insIndex,ffc_ddw_sum_et_filename\n", encoding="utf-8")
+
+    # No HTML should be written for any of the three skip branches.
+    flow_path = layout.artifact_path("multi_scenario_subroutine_flow_comparison_html")
+
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=bogus,
+        bks_table_csv=real,
+        instance_table_csv=real,
+    )
+    assert not flow_path.exists()
+
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=real,
+        bks_table_csv=bogus,
+        instance_table_csv=real,
+    )
+    assert not flow_path.exists()
+
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=real,
+        bks_table_csv=real,
+        instance_table_csv=bogus,
+    )
+    assert not flow_path.exists()
+
+
+def test_silently_skips_when_summary_csv_missing(tmp_path: Path) -> None:
+    """No summary_csv → no scenarios → early return, no artifacts."""
+    layout, _ = _setup_layout(tmp_path)
+    match_csv, bks_csv, inst_csv = _write_baseline_files(tmp_path, ["Inst"])
+
+    flow_path = layout.artifact_path("multi_scenario_subroutine_flow_comparison_html")
+
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=match_csv,
+        bks_table_csv=bks_csv,
+        instance_table_csv=inst_csv,
+    )
+    assert not flow_path.exists()
+
+
+def test_silently_skips_scenarios_without_obj_log(tmp_path: Path) -> None:
+    """A scenario listed in summary but with no obj_log instances is skipped
+    without raising; with no usable scenarios, the multi-scenario HTML is
+    not written."""
+    layout, _ = _setup_layout(tmp_path)
+    instances = ["InstA"]
+    match_csv, bks_csv, inst_csv = _write_baseline_files(tmp_path, instances)
+    _write_summary_csv(
+        layout,
+        [{"scenarioName": "empty_scenario", "instanceName": "InstA", "bestObj": 0.0}],
+    )
+
+    flow_path = layout.artifact_path("multi_scenario_subroutine_flow_comparison_html")
+
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=match_csv,
+        bks_table_csv=bks_csv,
+        instance_table_csv=inst_csv,
+    )
+    assert not flow_path.exists()

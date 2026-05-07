@@ -150,3 +150,37 @@ def test_missing_manifest_field_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(KeyError):
         load_instance_progression(obj_log_path, manifest_path)
+
+
+def test_empty_obj_value_yields_no_calls(tmp_path: Path) -> None:
+    """When an instance errors before any step registers, the obj_log is
+    written with empty ``data``/``notes`` mappings. The loader must succeed
+    and produce zero call segments — the chart writer relies on this to
+    skip such instances cleanly."""
+    obj_log = {
+        "obj_value": {"name": "obj_value", "data": {}, "notes": {}},
+        "obj_bound": {"name": "obj_bound", "data": {}, "notes": {}},
+    }
+    obj_log_path, manifest_path = _write_pair(
+        tmp_path, obj_log_payload=obj_log, manifest_payload=_manifest()
+    )
+
+    prog = load_instance_progression(obj_log_path, manifest_path)
+    assert prog.obj_value_calls == ()
+    assert prog.obj_bound_calls == ()
+    assert build_endpoint_df([prog]).empty
+    assert build_raw_progression_df([prog]).empty
+
+
+def test_malformed_series_block_raises(tmp_path: Path) -> None:
+    """An obj_value block that is not a mapping must raise instead of
+    silently producing no rows."""
+    obj_log = {
+        "obj_value": "not-a-mapping",
+        "obj_bound": {"name": "obj_bound", "data": {}, "notes": {}},
+    }
+    obj_log_path, manifest_path = _write_pair(
+        tmp_path, obj_log_payload=obj_log, manifest_payload=_manifest()
+    )
+    with pytest.raises(ValueError, match="expected mapping"):
+        load_instance_progression(obj_log_path, manifest_path)

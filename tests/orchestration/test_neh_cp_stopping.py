@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 from routix.stopping_criteria import StoppingCriteria
 
+from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.neh_cp.dispatcher import NehCpDispatcher
 from ffc_ddw_sum_et.algorithm.neh_cp.option import NehCpOption
 from ffc_ddw_sum_et.orchestration.controller import FFcDDWSubroutineController
@@ -38,7 +39,9 @@ def _make_instance(name: str = "neh_cp_orch_stop_test") -> FFcDDWParameters:
     )
 
 
-def test_neh_cp_preflight_guard_returns_stop_report_when_timer_over() -> None:
+def test_neh_cp_preflight_guard_returns_stop_report_when_timer_over(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When the controller's timelimit is already exceeded at NEH-CP entry,
     the pre-flight guard should return a stop-report without invoking the
     dispatcher (no incumbent registered)."""
@@ -49,12 +52,25 @@ def test_neh_cp_preflight_guard_returns_stop_report_when_timer_over() -> None:
     )
     controller.timer.set_start_time(datetime.now() - timedelta(seconds=10))
 
+    spy = {"calls": 0}
+
+    def spy_run(self_disp, spec):  # type: ignore[no-untyped-def]
+        spy["calls"] += 1
+        raise AssertionError("Dispatcher must not be invoked when preflight fires")
+
+    monkeypatch.setattr(NehCpDispatcher, "run", spy_run)
+
     controller.run()
 
+    # The dispatcher must never run when the outer routix guard or the
+    # neh_cp preflight guard rejects the step.
+    assert spy["calls"] == 0
     assert controller.solution_manager.best_obj_value is None
 
 
-def test_neh_cp_registers_recovered_schedule_when_stop_fires_mid_dispatch() -> None:
+def test_neh_cp_registers_recovered_schedule_when_stop_fires_mid_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When stop_predicate fires inside the dispatcher's batch loop, the
     dispatcher recovers a full schedule (dispatch remaining jobs by
     earliest start) and the controller registers it as an incumbent."""
@@ -74,8 +90,27 @@ def test_neh_cp_registers_recovered_schedule_when_stop_fires_mid_dispatch() -> N
 
     controller.is_stopping_condition = fake_stopping_condition  # type: ignore[method-assign]
 
+    captured: dict[str, object] = {}
+    original_run = NehCpDispatcher.run
+
+    def capture_run(self_disp, spec):  # type: ignore[no-untyped-def]
+        record = original_run(self_disp, spec)
+        captured["record"] = record
+        return record
+
+    monkeypatch.setattr(NehCpDispatcher, "run", capture_run)
+
     controller.run()
 
+    # Recovery-path proof: dispatcher returned STOP_REQUESTED and emitted
+    # the recovered_jobs marker that only the recovery branch sets.
+    assert "record" in captured, "dispatcher was never invoked"
+    record = captured["record"]
+    assert record.termination_reason == TerminationReason.STOP_REQUESTED  # type: ignore[attr-defined]
+    assert record.result is not None  # type: ignore[attr-defined]
+    assert record.result.metrics is not None  # type: ignore[attr-defined]
+    assert "recovered_jobs" in record.result.metrics  # type: ignore[attr-defined]
+    # And the controller registered the recovered schedule as incumbent.
     assert controller.solution_manager.best_obj_value is not None
 
 
