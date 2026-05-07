@@ -525,6 +525,7 @@ class FFcDDWReporter:
         self._write_statistics_yaml()
         self._write_excel_report()
         self._write_post_run_pivot_artifacts()
+        self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
 
     def _write_post_run_pivot_artifacts(self) -> None:
@@ -544,6 +545,27 @@ class FFcDDWReporter:
             layout=self.layout,
             hybrid_match_csv=self.ins_index_source,
             bks_table_csv=self.bks_table_csv_path,
+        )
+
+    def _write_post_run_subroutine_chart_artifacts(self) -> None:
+        """Emit per-scenario RPDf scatter HTMLs + run-level subroutine flow
+        comparison HTML driven by per-instance ``obj_log_json`` files.
+        """
+        if not self.ins_index_source or not self.ins_index_source.exists():
+            return
+        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
+            return
+        instance_table_csv = self.ins_index_source.parent / "pra2017_instance_table.csv"
+        if not instance_table_csv.exists():
+            return
+
+        from ..report import write_post_run_subroutine_chart_artifacts
+
+        write_post_run_subroutine_chart_artifacts(
+            layout=self.layout,
+            hybrid_match_csv=self.ins_index_source,
+            bks_table_csv=self.bks_table_csv_path,
+            instance_table_csv=instance_table_csv,
         )
 
     def _write_summary_csv(self) -> None:

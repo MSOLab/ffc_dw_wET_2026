@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260507/mcf_lb_base_cpsat_debug.yaml")
+CONFIG_PATH = Path("metadata/20260507/progress_plot_debug.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
