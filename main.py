@@ -142,10 +142,7 @@ def main() -> None:
         final = runner.run()
         setup_logging(*main_logging_args, is_main=True)
         total_err = sum(
-            1
-            for sr in getattr(final, "scenario_results", []) or []
-            for ir in getattr(sr, "instance_results", []) or []
-            if getattr(ir, "error", None)
+            1 for sr in final.scenario_results for ir in sr.instance_results if ir.error
         )
         if total_err:
             logger.error(
