@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260505/mcf_lb_init_38_config.yaml")
+CONFIG_PATH = Path("metadata/20260507/20260507_mcf_lb_best_neh_cp_best_base_cpsat.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -139,9 +139,19 @@ def main() -> None:
         len(scenario_configs),
     )
     try:
-        runner.run()
+        final = runner.run()
         setup_logging(*main_logging_args, is_main=True)
-        logger.info("Experiment run completed successfully.")
+        total_err = sum(
+            1 for sr in final.scenario_results for ir in sr.instance_results if ir.error
+        )
+        if total_err:
+            logger.error(
+                "Experiment run finished with %d instance error(s); "
+                "see per-scenario MultiInstanceRunner logs for tracebacks.",
+                total_err,
+            )
+        else:
+            logger.info("Experiment run completed successfully.")
     finally:
         setup_logging(*main_logging_args, is_main=True)
         time_main_end = time.monotonic()

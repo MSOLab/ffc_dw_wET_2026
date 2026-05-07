@@ -116,7 +116,17 @@ def test_dispatcher_custom_job_sequence_rejects_extra_ids() -> None:
         NehCpDispatcher().run(spec)
 
 
-def test_dispatcher_progress_log_and_step_log_align() -> None:
+def test_dispatcher_progress_log_tracks_main_problem_obj_value() -> None:
+    """``progress_log`` must hold a main-problem-valid trajectory:
+
+    - All ``obj_bound`` values are ``None`` — sub-problem bounds (and even
+      the last batch's CP-SAT bound under PF constraints) are not valid
+      lower bounds on the main problem.
+    - ``elapsed_sec`` is monotonically non-decreasing.
+    - The final entry equals the post-processed ``result.obj_value``.
+    - ``step_log`` (per-batch summary) remains a separate metric and
+      is no longer aligned with ``progress_log`` length.
+    """
     instance = _make_instance()
     spec = AlgSpec(instance=instance, option=NehCpOption(cp_tl_seconds=1.0))
 
@@ -124,14 +134,14 @@ def test_dispatcher_progress_log_and_step_log_align() -> None:
 
     assert record.progress_log is not None
     assert record.result is not None
-    assert record.result.metrics is not None
+    assert record.result.obj_value is not None
+    assert len(record.progress_log) >= 1
+
     step_log = record.result.metrics["step_log"]
     assert isinstance(step_log, tuple)
     assert all(isinstance(entry, NehCpStepEntry) for entry in step_log)
-    assert len(record.progress_log) == len(step_log)
-    for idx, (progress_entry, step_entry) in enumerate(
-        zip(record.progress_log, step_log)
-    ):
-        assert step_entry.step == idx
-        assert step_entry.sub_obj == progress_entry.obj_value
-        assert step_entry.sub_obj_lb == progress_entry.obj_bound
+
+    assert all(entry.obj_bound is None for entry in record.progress_log)
+    times = [entry.elapsed_sec for entry in record.progress_log]
+    assert times == sorted(times)
+    assert record.progress_log[-1].obj_value == record.result.obj_value

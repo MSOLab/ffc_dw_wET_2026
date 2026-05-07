@@ -1,0 +1,62 @@
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# Large instances — NEH-CP cannot finish under the tight outer TL, so
+# the dispatcher's stop_predicate / wall_clock_deadline paths and the
+# composite's pre-flight is_stopping_condition guard are exercised on
+# every instance. (MCFLBStopRequested raise/catch is unreachable via
+# config due to routix's pre-step guard at _run_flow:172 — verified
+# directly in tests/algorithm/mcf_lb/test_solve_mcf_lb_stop_predicate.py.)
+ins_index: [ 199, 499, 999, 1199 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260506
+
+instance_worker_cnt: 4
+
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  # S1 (7060ee7): NEH-CP dispatcher honors stop_predicate at batch
+  # boundaries AND recovers a full schedule (earliest-start dispatch +
+  # make_semi_active + insert_idle_time) on early stop.
+  # Verify: every instance gets a non-None obj_value (recovery
+  # succeeded); _step_log records termination_reason=STOP_REQUESTED and
+  # metrics["stopped_after_batch"]; elapsed_time stays around the 5s
+  # timelimit (modest overrun from final cleanup is fine).
+  - name: neh_cp_tight_tl
+    timelimit: 5.0
+    output_subdir: neh_cp_tight_tl
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+
+  # S2 (7060ee7 composite): MCF solve followed by NEH-CP TL recovery
+  # in a single scenario. Verify: MCF completes, NEH-CP enters, then
+  # stops at a batch boundary with the recovery path producing a
+  # registered incumbent. The composite's pre-flight
+  # is_stopping_condition guard between MCF and NEH-CP is also
+  # exercised when MCF alone consumes most of the TL.
+  - name: mcf_lb_then_neh_cp_tight_tl
+    timelimit: 5.0
+    output_subdir: mcf_lb_then_neh_cp_tight_tl
+    subroutine_flow:
+      - method: run_mcf_lb_then_neh_cp
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        cp_tl: "0.024nc"
+        neh_cp_total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true

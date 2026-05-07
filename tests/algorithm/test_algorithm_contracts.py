@@ -87,7 +87,6 @@ def test_alg_record_can_be_created_with_work_status_only() -> None:
     assert record.algorithm_id is None
     assert record.option is None
     assert record.result is None
-    assert record.timing is None
     assert record.progress_log is None
     assert record.termination_reason is None
     assert record.error is None

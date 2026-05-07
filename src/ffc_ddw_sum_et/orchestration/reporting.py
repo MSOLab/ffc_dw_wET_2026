@@ -370,6 +370,16 @@ class FFcDDWMultiScenarioRunner(
                     "Error in scenario %d: %s", i + 1, scenario_name, exc_info=True
                 )
                 self.results.append(None)
+            else:
+                if isinstance(result, list):
+                    n_err = sum(1 for ir in result if getattr(ir, "error", None))
+                    if n_err:
+                        logger.error(
+                            "Scenario %s: %d/%d instances finished with errors",
+                            scenario_name,
+                            n_err,
+                            len(result),
+                        )
             logger.info(
                 "--- Finished Scenario %d/%d: %s ---", i + 1, runner_cnt, scenario_name
             )
@@ -515,6 +525,7 @@ class FFcDDWReporter:
         self._write_statistics_yaml()
         self._write_excel_report()
         self._write_post_run_pivot_artifacts()
+        self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
 
     def _write_post_run_pivot_artifacts(self) -> None:
@@ -534,6 +545,27 @@ class FFcDDWReporter:
             layout=self.layout,
             hybrid_match_csv=self.ins_index_source,
             bks_table_csv=self.bks_table_csv_path,
+        )
+
+    def _write_post_run_subroutine_chart_artifacts(self) -> None:
+        """Emit per-scenario RPDf scatter HTMLs + run-level subroutine flow
+        comparison HTML driven by per-instance ``obj_log_json`` files.
+        """
+        if not self.ins_index_source or not self.ins_index_source.exists():
+            return
+        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
+            return
+        instance_table_csv = self.ins_index_source.parent / "pra2017_instance_table.csv"
+        if not instance_table_csv.exists():
+            return
+
+        from ..report import write_post_run_subroutine_chart_artifacts
+
+        write_post_run_subroutine_chart_artifacts(
+            layout=self.layout,
+            hybrid_match_csv=self.ins_index_source,
+            bks_table_csv=self.bks_table_csv_path,
+            instance_table_csv=instance_table_csv,
         )
 
     def _write_summary_csv(self) -> None:

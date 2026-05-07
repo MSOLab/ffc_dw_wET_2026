@@ -61,8 +61,10 @@ def test_a_is_better_obj_value_minimization() -> None:
     assert manager._a_is_better_obj_value(3.0, None) is True
 
 
-def test_a_is_better_obj_bound_always_false() -> None:
+def test_a_is_better_obj_bound_maximization() -> None:
     manager = FFcDDWSolutionManager()
 
+    assert manager._a_is_better_obj_bound(5.0, 3.0) is True
     assert manager._a_is_better_obj_bound(3.0, 5.0) is False
-    assert manager._a_is_better_obj_bound(3.0, None) is False
+    assert manager._a_is_better_obj_bound(3.0, 3.0) is False
+    assert manager._a_is_better_obj_bound(3.0, None) is True

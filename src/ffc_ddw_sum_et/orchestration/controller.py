@@ -10,7 +10,9 @@ from ortools.sat.python import cp_model
 from routix.io import dump_yaml
 from routix.report import SubroutineReport
 
+from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
+from ffc_ddw_sum_et.algorithm.cpsat_adapter import CpsatAdapter, CpsatOption
 from ffc_ddw_sum_et.algorithm.cumulative import (
     BaseModelBuilder,
     PFMethod,
@@ -35,7 +37,10 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import (
     run_phase3,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.phase4_profile_fix import run_phase4
-from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import solve_mcf_lb
+from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import (
+    MCFLBStopRequested,
+    solve_mcf_lb,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb.utils import (
     pm_pmtn_sort_job_sequence_with_log,
 )
@@ -105,9 +110,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=obj_value,
                 obj_bound=obj_bound,
             )
-            self.solution_manager.register(report, fam_solution)
+            self._register(report, fam_solution)
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None)
 
         return report
 
@@ -185,9 +190,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=obj_value,
                 obj_bound=obj_bound,
             )
-            self.solution_manager.register(report, bn2d_solution)
+            self._register(report, bn2d_solution)
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None)
 
         return report
 
@@ -373,7 +378,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=None
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
 
         sum_e, sum_t = compute_weighted_earliness_tardiness(best_sch, instance)
@@ -392,7 +397,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=best_sch, obj_value=obj_value, obj_bound=None),
         )
@@ -435,6 +440,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_half: bool = False,
+        _register_report: bool = True,
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
@@ -531,15 +537,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             nonlocal ls_only_makespan, makespan_delta
             if makespan_delta is not None:
                 return
-            incumbent = self.solution_manager.get_incumbent()
-            if incumbent is None or incumbent.schedule is None:
+            ref_sol = self.adjust_ref_full_sol
+            if ref_sol is None:
+                ref_sol = self.solution_manager.get_incumbent()
+            if ref_sol is None or ref_sol.schedule is None:
                 raise ValueError(
                     "apply_lb_by_mcf with "
                     "adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch"
-                    "=True requires an incumbent schedule on "
-                    "self.solution_manager."
+                    "=True requires either self.adjust_ref_full_sol or an "
+                    "incumbent schedule on self.solution_manager."
                 )
-            incumbent_makespan = int(incumbent.schedule.makespan)
+            incumbent_makespan = int(ref_sol.schedule.makespan)
             if uses_ls_only_pmtn:
                 if self.mcf_preemptive_schedule is None:
                     raise ValueError(
@@ -619,6 +627,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             effective_r_increment = r_increment + r_adjust
 
         start_elapsed = time.monotonic()
+        prev_diag = self.mcf_lb_diagnostic
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
 
@@ -649,12 +658,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 self.instance, last_stage_id, effective_p_increment
             )
 
-        mcf_result = solve_mcf_lb(
-            instance_for_mcf,
-            diag,
-            r_multiplier=r_multiplier,
-            r_increment=effective_r_increment,
-        )
+        try:
+            mcf_result = solve_mcf_lb(
+                instance_for_mcf,
+                diag,
+                r_multiplier=r_multiplier,
+                r_increment=effective_r_increment,
+                stop_predicate=self.is_stopping_condition,
+                logger=self.logger,
+            )
+        except MCFLBStopRequested:
+            self.mcf_lb_diagnostic = prev_diag
+            self.logger.info(
+                "apply_lb_by_mcf: stop predicate fired before MCF solve; skipping."
+            )
+            return self._make_stop_report(start_elapsed)
         obj_bound_by_mcf = mcf_result.mcf_lb
 
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
@@ -710,7 +728,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=None,
             obj_bound=(obj_bound_by_mcf if obj_bound_is_valid else None),
         )
-        self.solution_manager.register(report, None)
+        if _register_report:
+            self._register(report, None)
         return report
 
     def neh_cp_last_stage_only_sch_from_mcf_lb(
@@ -790,13 +809,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             solver_log_path_getter=self.get_file_path_for_subroutine,
         )
 
-        # Publish the MCF LB as the global ``obj_bound``; ``result.obj_bound``
-        # is only the last NEH-CP iteration's sub-instance CP LB and is not
-        # a valid global lower bound (see NehCpLastStageOnlyResult docstring).
+        # Publish the MCF LB as the global ``obj_bound`` only when the
+        # diagnostic confirms it is a valid LB on the original problem
+        # (no positive p/r augmentation). ``result.obj_bound`` is only the
+        # last NEH-CP iteration's sub-instance CP LB and is not a valid
+        # global lower bound (see NehCpLastStageOnlyResult docstring).
+        valid_global_mcf_lb = (
+            mcf_lb if self.mcf_lb_diagnostic.mcf_lb_is_valid_for_main_problem else None
+        )
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=result.schedule,
             obj_value=result.obj_value,
-            obj_bound=mcf_lb,
+            obj_bound=valid_global_mcf_lb,
         )
         self.last_stage_only_sol_p_increment = 0
         self.mcf_lb_phase_schedules.extend(result.intermediate_schedules)
@@ -810,7 +834,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             "(cp solves total=%.2fs).",
             result.status,
             result.obj_value,
-            int(mcf_lb),
+            int(valid_global_mcf_lb) if valid_global_mcf_lb is not None else None,
             result.obj_bound,
             result.elapsed_time,
             result.cp_solve_sec,
@@ -818,9 +842,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         report = SubroutineReport(
             elapsed_time=result.elapsed_time,
             obj_value=result.obj_value,
-            obj_bound=mcf_lb,
+            obj_bound=valid_global_mcf_lb,
         )
-        self.solution_manager.register(report, None)
+        self._register(report, None)
         return report
 
     def single_pass_last_stage_only_sch_from_mcf_lb(
@@ -958,7 +982,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(report, None)
+        self._register(report, None)
         return report
 
     def heuristic_last_stage_only_sch_from_mcf_lb(
@@ -973,6 +997,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
         adjust_r_by_half: bool = False,
+        _register_report: bool = True,
     ) -> SubroutineReport:
         """Step method: midpoint warm-start across all jobs from the MCF
         preemptive LB, then a CP-free heuristic refinement
@@ -1073,15 +1098,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             nonlocal ls_only_makespan, makespan_delta
             if makespan_delta is not None:
                 return
-            incumbent = self.solution_manager.get_incumbent()
-            if incumbent is None or incumbent.schedule is None:
+            ref_sol = self.adjust_ref_full_sol
+            if ref_sol is None:
+                ref_sol = self.solution_manager.get_incumbent()
+            if ref_sol is None or ref_sol.schedule is None:
                 raise ValueError(
                     "heuristic_last_stage_only_sch_from_mcf_lb with "
                     "adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch"
-                    "=True requires an incumbent schedule on "
-                    "self.solution_manager."
+                    "=True requires either self.adjust_ref_full_sol or an "
+                    "incumbent schedule on self.solution_manager."
                 )
-            incumbent_makespan = int(incumbent.schedule.makespan)
+            incumbent_makespan = int(ref_sol.schedule.makespan)
             if uses_ls_only_pmtn:
                 # self.mcf_preemptive_schedule presence already enforced by the
                 # method-level precondition above.
@@ -1159,18 +1186,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         if uses_ls_only_pmtn or uses_ls_only_full:
             if uses_ls_only_pmtn:
-                self.mcf_lb_diagnostic.adjust_params_last_stage_only_pmtn_makespan = (
-                    ls_only_pmtn_makespan
-                )
+                if (
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_pmtn_makespan
+                    is None
+                ):
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_pmtn_makespan = ls_only_pmtn_makespan
             else:
-                self.mcf_lb_diagnostic.adjust_params_last_stage_only_makespan = (
-                    ls_only_makespan
+                if (
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_makespan
+                    is None
+                ):
+                    self.mcf_lb_diagnostic.adjust_params_last_stage_only_makespan = (
+                        ls_only_makespan
+                    )
+            if self.mcf_lb_diagnostic.adjust_params_incumbent_makespan is None:
+                self.mcf_lb_diagnostic.adjust_params_incumbent_makespan = (
+                    incumbent_makespan
                 )
-            self.mcf_lb_diagnostic.adjust_params_incumbent_makespan = incumbent_makespan
-            self.mcf_lb_diagnostic.adjust_params_makespan_delta = makespan_delta
-        if fire_p:
+            if self.mcf_lb_diagnostic.adjust_params_makespan_delta is None:
+                self.mcf_lb_diagnostic.adjust_params_makespan_delta = makespan_delta
+        if fire_p and self.mcf_lb_diagnostic.adjust_p_increment_added is None:
             self.mcf_lb_diagnostic.adjust_p_increment_added = p_adjust
-        if fire_r:
+        if fire_r and self.mcf_lb_diagnostic.adjust_r_increment_added is None:
             self.mcf_lb_diagnostic.adjust_r_increment_added = r_adjust
 
         if r_multiplier != 1.0 or effective_r_increment != 0:
@@ -1229,7 +1266,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(report, None)
+        if _register_report:
+            self._register(report, None)
         return report
 
     def build_full_sch_from_last_stage_only_sch(
@@ -1270,9 +1308,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         Returns:
             ``SubroutineReport`` with ``obj_value`` = dispatched weighted ET
-            and ``obj_bound = 0.0``. The step itself does not compute a
+            and ``obj_bound = None``. The step itself does not compute a
             global LB; callers chain ``apply_lb_by_mcf`` (or
             ``run_mcf_lb_4``) earlier in the flow when an LB is needed.
+        """
+        report, solution = self._build_full_sch_core()
+        self._register(report, solution)
+        return report
+
+    def _build_full_sch_core(
+        self,
+    ) -> tuple[SubroutineReport, FFcDDWSolution | None]:
+        """Compute the full schedule from ``self.last_stage_only_sol`` without
+        registering. Returns ``(report, solution_or_none)`` so callers can
+        choose when to register (composite steps register once at the end).
         """
         if self.last_stage_only_sol is None:
             raise ValueError(
@@ -1300,11 +1349,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "build_full_sch_from_last_stage_only_sch: reverse-dispatch "
                 "produced no schedule"
             )
-            report = SubroutineReport(
-                elapsed_time=elapsed, obj_value=None, obj_bound=0.0
+            return (
+                SubroutineReport(elapsed_time=elapsed, obj_value=None, obj_bound=None),
+                None,
             )
-            self.solution_manager.register(report, None)
-            return report
 
         if state.ls_only_sch_before_delay is not None:
             self.mcf_lb_phase_schedules.append(
@@ -1336,17 +1384,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=state.dispatched_obj,
-            obj_bound=0.0,
+            obj_bound=None,
         )
-        self.solution_manager.register(
-            report,
-            FFcDDWSolution(
-                schedule=state.full_sch_from_ls_only_sch,
-                obj_value=state.dispatched_obj,
-                obj_bound=0.0,
-            ),
+        solution = FFcDDWSolution(
+            schedule=state.full_sch_from_ls_only_sch,
+            obj_value=state.dispatched_obj,
+            obj_bound=None,
         )
-        return report
+        return report, solution
 
     def calc_mcf_lb_and_derive_full_sch(
         self,
@@ -1360,26 +1405,27 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """Composite step: MCF-LB → full schedule, then a conditional
         second round with p/r adjustments.
 
-        Round 1 always runs:
-          1. ``apply_lb_by_mcf`` (base)
-          2. ``heuristic_last_stage_only_sch_from_mcf_lb`` (base)
-          3. ``build_full_sch_from_last_stage_only_sch`` → registers
-             solution #1 on ``self.solution_manager``.
+        Round 1 always runs (via the no-register internals
+        ``apply_lb_by_mcf(_register_report=False)``,
+        ``heuristic_last_stage_only_sch_from_mcf_lb(_register_report=False)``,
+        ``_build_full_sch_core``).
 
         Round 2 runs **only when both** of the following hold:
           * ``adjust_p or adjust_r`` is ``True``;
-          * ``makespan_delta = incumbent_makespan -
+          * ``makespan_delta = round1_makespan -
             self.mcf_preemptive_schedule.makespan > 0`` (computed with no
             ``max(..., 0)`` clamp; this differs from the per-step
             ``adjust_*`` flags on ``apply_lb_by_mcf`` /
             ``heuristic_last_stage_only_sch_from_mcf_lb``, which clamp
             their internal delta at zero).
 
-        When round 2 fires it forwards the three flags to both MCF
-        and heuristic steps and registers a second incumbent via a
-        second ``build_full_sch_from_last_stage_only_sch``. So the
-        solution is registered twice in the typical ``delta > 0`` case
-        and exactly once when round 2 is skipped.
+        Registers exactly once per call: a single synthesized
+        ``SubroutineReport`` whose ``obj_bound`` carries round 1's MCF LB
+        and whose paired solution is the better of round 1 / round 2
+        results. Stop guards that fire before round 1 produces a full
+        schedule return ``_make_stop_report`` without registering;
+        guards that fire after round 1 has a result still register the
+        round-1 result once before returning.
 
         Args:
             draw_pmtn_sch_heatmap: Forwarded as ``draw_heatmap`` to
@@ -1407,55 +1453,125 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 is bundled with ``adjust_r`` in this composite.
 
         Returns:
-            ``SubroutineReport`` from round-2's
-            ``build_full_sch_from_last_stage_only_sch`` when round 2
-            fires; otherwise from round-1's.
+            The single registered ``SubroutineReport`` whose
+            ``obj_bound`` is round-1's MCF LB and whose ``obj_value``
+            matches the registered (best) solution. When
+            ``is_stopping_condition`` fires before round 1 produces a
+            full schedule, returns a stop-report from
+            ``_make_stop_report`` without registering.
         """
-        self.apply_lb_by_mcf(
+        start_elapsed = time.monotonic()
+        self.adjust_ref_full_sol = None
+
+        if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired at entry "
+                "(before round1_apply_lb_by_mcf)"
+            )
+            return self._make_stop_report(start_elapsed)
+        r_lb_r1 = self.apply_lb_by_mcf(
             draw_heatmap=draw_pmtn_sch_heatmap,
             heatmap_sort=heatmap_sort,
+            _register_report=False,
         )
+        if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round1_heuristic_last_stage_only"
+            )
+            return self._make_stop_report(start_elapsed)
+
+        def _register_final(
+            best_r: SubroutineReport, best_s: FFcDDWSolution | None
+        ) -> SubroutineReport:
+            final_report = SubroutineReport(
+                elapsed_time=time.monotonic() - start_elapsed,
+                obj_value=best_r.obj_value,
+                obj_bound=r_lb_r1.obj_bound,
+            )
+            self._register(final_report, best_s)
+            self.adjust_ref_full_sol = None
+            return final_report
+
         self.heuristic_last_stage_only_sch_from_mcf_lb(
             job_priority=job_placement_priority,
             placement_priority=last_stage_only_placement_criteria,
+            _register_report=False,
         )
-        report = self.build_full_sch_from_last_stage_only_sch()
+        if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round1_build_full_sch"
+            )
+            return self._make_stop_report(start_elapsed)
+        r1, s1 = self._build_full_sch_core()
+        self.adjust_ref_full_sol = s1
 
         if not (adjust_p or adjust_r):
-            return report
+            return _register_final(r1, s1)
+        if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_check (registering round1 result)"
+            )
+            return _register_final(r1, s1)
 
-        incumbent = self.solution_manager.get_incumbent()
-        if incumbent is None or incumbent.schedule is None:
-            return report
-        incumbent_makespan = int(incumbent.schedule.makespan)
+        if s1 is None:
+            return _register_final(r1, s1)
+        incumbent_makespan = int(s1.schedule.makespan)
         ls_only_pmtn_makespan = int(self.mcf_preemptive_schedule.makespan)
         makespan_delta = incumbent_makespan - ls_only_pmtn_makespan
 
         if makespan_delta <= 0:
             self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: incumbent makespan=%d, "
+                "calc_mcf_lb_and_derive_full_sch: round1 makespan=%d, "
                 "ls_only_pmtn makespan=%d, delta=%d <= 0 — skipping adjust round",
                 incumbent_makespan,
                 ls_only_pmtn_makespan,
                 makespan_delta,
             )
-            return report
+            return _register_final(r1, s1)
 
+        if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_apply_lb_by_mcf (registering round1 result)"
+            )
+            return _register_final(r1, s1)
         self.apply_lb_by_mcf(
             draw_heatmap=draw_pmtn_sch_heatmap,
             heatmap_sort=heatmap_sort,
             adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
             adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
             adjust_r_by_half=adjust_r,
+            _register_report=False,
         )
+        if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_heuristic_last_stage_only (registering round1 result)"
+            )
+            return _register_final(r1, s1)
         self.heuristic_last_stage_only_sch_from_mcf_lb(
             job_priority=job_placement_priority,
             placement_priority=last_stage_only_placement_criteria,
             adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
             adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
             adjust_r_by_half=adjust_r,
+            _register_report=False,
         )
-        return self.build_full_sch_from_last_stage_only_sch()
+        if self.is_stopping_condition():
+            self.logger.info(
+                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                "round2_build_full_sch (registering round1 result)"
+            )
+            return _register_final(r1, s1)
+        r2, s2 = self._build_full_sch_core()
+
+        best_r, best_s = r1, s1
+        if s2 is not None and (s1 is None or s2.obj_value <= s1.obj_value):
+            best_r, best_s = r2, s2
+        return _register_final(best_r, best_s)
 
     def run_mcf_lb_4(
         self,
@@ -1612,7 +1728,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=phase2.last_stage_only_schedule,
@@ -1644,7 +1760,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report = SubroutineReport(
                 elapsed_time=elapsed, obj_value=None, obj_bound=obj_bound_by_mcf
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
         if phase3.ls_only_sch_delayed is not None:
             self.mcf_lb_phase_schedules.append(
@@ -1660,18 +1776,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         self.mcf_lb_phase_schedules.append(
             ("6_full_sch_from_ls_only_sch", phase3.full_sch_from_ls_only_sch)
-        )
-        self.solution_manager.register(
-            SubroutineReport(
-                elapsed_time=time.monotonic() - start_elapsed,
-                obj_value=phase3.dispatched_obj,
-                obj_bound=obj_bound_by_mcf,
-            ),
-            FFcDDWSolution(
-                schedule=phase3.full_sch_from_ls_only_sch,
-                obj_value=phase3.dispatched_obj,
-                obj_bound=obj_bound_by_mcf,
-            ),
         )
 
         # Phase 4: profile-fix CP-SAT full solve.
@@ -1701,7 +1805,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         elapsed = time.monotonic() - start_elapsed
         if phase4.final_schedule is None:
-            # Infeasible profile-fix: keep the phase-3 incumbent; the
+            # Infeasible profile-fix: register the phase-3 incumbent; the
             # profile-fix bound is not a valid global bound, so report
             # the MCF LB instead.
             report = SubroutineReport(
@@ -1709,7 +1813,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=phase3.dispatched_obj,
                 obj_bound=obj_bound_by_mcf,
             )
-            self.solution_manager.register(report, None)
+            self._register(
+                report,
+                FFcDDWSolution(
+                    schedule=phase3.full_sch_from_ls_only_sch,
+                    obj_value=phase3.dispatched_obj,
+                    obj_bound=obj_bound_by_mcf,
+                ),
+            )
             return report
         self.mcf_lb_phase_schedules.append(("7_final_schedule", phase4.final_schedule))
 
@@ -1718,7 +1829,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=phase4.final_obj,
             obj_bound=obj_bound_by_mcf,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(
                 schedule=phase4.final_schedule,
@@ -1848,7 +1959,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=None,
                 obj_bound=mcf_lb,
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
 
         j_i_2_start = {
@@ -1880,7 +1991,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=cp_obj,
             obj_bound=obj_bound if obj_bound is not None else mcf_lb,
         )
-        self.solution_manager.register(report, None)
+        self._register(report, None)
         return report
 
     def _dispatch_by_sequence(
@@ -2042,7 +2153,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
@@ -2064,7 +2175,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
@@ -2185,7 +2296,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_value=None,
                 obj_bound=None,
             )
-            self.solution_manager.register(report, None)
+            self._register(report, None)
             return report
 
         j_i_2_start = {
@@ -2217,10 +2328,109 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,  # objBound by profile-fixed model is not a valid global bound
         )
-        self.solution_manager.register(
+        self._register(
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value),
         )
+        return report
+
+    def solve_base_model_cpsat(
+        self,
+        timelimit: float | str | None = None,
+        solver_thread_cnt: int = 1,
+        log_search_progress: bool = False,
+        error_if_infeasible: bool = False,
+        draw_gantt: bool = False,
+    ) -> SubroutineReport:
+        """Step method: solve the FFc-DDW base CP model on the full instance
+        via :class:`CpsatAdapter`, optionally warm-started from the
+        incumbent schedule.
+
+        ``timelimit`` is the user-specified per-call cap (absolute seconds, or
+        any expression supported by :func:`resolve_value_expr`). The actual
+        time budget passed to the algorithm is the strict-min of ``timelimit``
+        and the controller's remaining global time. ``timelimit=None`` means
+        "no per-call cap" — only the global time limit is enforced.
+        """
+        start_elapsed = time.monotonic()
+        instance = self.instance
+
+        timelimit_resolved = resolve_value_expr(
+            timelimit,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        eff_timelimit_sec = (
+            min(timelimit_resolved, remaining_sec)
+            if timelimit_resolved is not None
+            else remaining_sec
+        )
+
+        incumbent = self.solution_manager.get_incumbent()
+        ref_solution = incumbent.schedule if incumbent is not None else None
+
+        valid_lb = self.get_current_valid_lb()
+        obj_lb = valid_lb if valid_lb > 0 else None
+
+        self.logger.info(
+            "solve_base_model_cpsat: effective=%.3fs (timelimit=%s, "
+            "remaining=%.3fs), ref_solution=%s, obj_lb=%s",
+            eff_timelimit_sec,
+            f"{timelimit_resolved:.3f}s" if timelimit_resolved is not None else "None",
+            remaining_sec,
+            "given" if ref_solution is not None else "None",
+            f"{obj_lb:.2f}" if obj_lb is not None else "None",
+        )
+
+        option = CpsatOption(
+            timelimit_sec=eff_timelimit_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            log_search_progress=log_search_progress,
+            error_if_infeasible=error_if_infeasible,
+            draw_gantt=draw_gantt,
+            obj_lb=obj_lb,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            ref_solution=ref_solution,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = CpsatAdapter().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        obj_bound = (
+            float(result.obj_bound)
+            if result is not None and result.obj_bound is not None
+            else None
+        )
+        schedule = result.schedule if result is not None else None
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound,
+        )
+        cpsat_progress_log = record.progress_log or ()
+        if schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(
+                    schedule=schedule, obj_value=obj_value, obj_bound=obj_bound
+                ),
+                progress_log=cpsat_progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=cpsat_progress_log)
         return report
 
     def neh_cp(
@@ -2253,6 +2463,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         working directory.
         """
         start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
         instance = self.instance
         n = instance.job_count
         c = instance.stage_count
@@ -2281,6 +2493,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             skip_pf_below_obj
         )
 
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+
+        valid_lb = self.get_current_valid_lb()
+        obj_lb = valid_lb if valid_lb > 0 else None
+
+        self.logger.info(
+            "neh_cp: threading wall_clock_deadline=%.3fs (remaining=%.3fs), obj_lb=%s",
+            wall_clock_deadline_sec,
+            remaining_sec,
+            f"{obj_lb:.2f}" if obj_lb is not None else "None",
+        )
+
         option = NehCpOption(
             job_priority=job_priority,
             solver_thread_cnt=solver_thread_cnt,
@@ -2299,9 +2524,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             minimize_makespan_lex=minimize_makespan_lex,
             cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
+            objective_lower_bound=obj_lb,
         )
-        spec = AlgSpec(instance=instance, option=option, logger=self.logger)
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
         record = NehCpDispatcher().run(spec)
+
+        if record.termination_reason == TerminationReason.STOP_REQUESTED:
+            stopped_after = (
+                record.result.metrics.get("stopped_after_batch")
+                if record.result is not None and record.result.metrics is not None
+                else None
+            )
+            self.logger.info(
+                "neh_cp: dispatcher stopped early after batch %s; "
+                "registering recovered schedule.",
+                stopped_after,
+            )
 
         elapsed = time.monotonic() - start_elapsed
         result = record.result
@@ -2315,13 +2559,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=None,
         )
+        neh_cp_progress_log = record.progress_log or ()
         if result is not None and result.schedule is not None:
-            self.solution_manager.register(
+            self._register(
                 report,
                 FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
+                progress_log=neh_cp_progress_log,
             )
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None, progress_log=neh_cp_progress_log)
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")
@@ -2389,14 +2635,30 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         for diagnostics only.
         """
         start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
         instance = self.instance
         n = instance.job_count
         c = instance.stage_count
         m = instance.last_stage_mc_count
 
+        prev_diag = self.mcf_lb_diagnostic
         diag = MCFLBDiagnostic()
         self.mcf_lb_diagnostic = diag
-        mcf_result = solve_mcf_lb(instance, diag)
+        try:
+            mcf_result = solve_mcf_lb(
+                instance,
+                diag,
+                stop_predicate=self.is_stopping_condition,
+                logger=self.logger,
+            )
+        except MCFLBStopRequested:
+            self.mcf_lb_diagnostic = prev_diag
+            self.logger.info(
+                "run_mcf_lb_then_neh_cp: stop predicate fired before MCF solve; "
+                "skipping."
+            )
+            return self._make_stop_report(start_elapsed)
         obj_bound_by_mcf = mcf_result.mcf_lb
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
@@ -2404,6 +2666,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
         self.logger.info("run_mcf_lb_then_neh_cp: MCF LB = %d", int(obj_bound_by_mcf))
+
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
 
         if draw_heatmap:
             from ..io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
@@ -2448,6 +2713,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             skip_pf_below_obj
         )
 
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+
+        valid_lb = self.get_current_valid_lb()
+        obj_lb = valid_lb if valid_lb > 0 else None
+
+        self.logger.info(
+            "run_mcf_lb_then_neh_cp: threading wall_clock_deadline=%.3fs "
+            "(remaining=%.3fs), obj_lb=%s",
+            wall_clock_deadline_sec,
+            remaining_sec,
+            f"{obj_lb:.2f}" if obj_lb is not None else "None",
+        )
+
         option = NehCpOption(
             custom_job_sequence=tuple(custom_job_sequence),
             solver_thread_cnt=solver_thread_cnt,
@@ -2467,9 +2746,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
             keep_step_schedules=keep_step_schedules,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
+            objective_lower_bound=obj_lb,
         )
-        spec = AlgSpec(instance=instance, option=option, logger=self.logger)
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
         record = NehCpDispatcher().run(spec)
+
+        if record.termination_reason == TerminationReason.STOP_REQUESTED:
+            stopped_after = (
+                record.result.metrics.get("stopped_after_batch")
+                if record.result is not None and record.result.metrics is not None
+                else None
+            )
+            self.logger.info(
+                "run_mcf_lb_then_neh_cp: dispatcher stopped early after batch %s; "
+                "registering recovered schedule.",
+                stopped_after,
+            )
 
         elapsed = time.monotonic() - start_elapsed
         result = record.result
@@ -2483,17 +2781,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=obj_value,
             obj_bound=obj_bound_by_mcf,
         )
+        neh_cp_progress_log = record.progress_log or ()
         if result is not None and result.schedule is not None:
-            self.solution_manager.register(
+            self._register(
                 report,
                 FFcDDWSolution(
                     schedule=result.schedule,
                     obj_value=obj_value,
                     obj_bound=obj_bound_by_mcf,
                 ),
+                progress_log=neh_cp_progress_log,
             )
         else:
-            self.solution_manager.register(report, None)
+            self._register(report, None, progress_log=neh_cp_progress_log)
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")

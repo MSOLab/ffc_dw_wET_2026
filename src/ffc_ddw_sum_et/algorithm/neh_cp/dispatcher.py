@@ -22,10 +22,10 @@ from ..base.alg_record import (
     AlgResult,
     ProgressLogEntry,
     TerminationReason,
-    TimingInfo,
     WorkStatus,
 )
 from ..base.alg_spec import AlgSpec
+from ..cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from ..cumulative import BaseModelBuilder, decode_pf_method
 from ..dispatcher import MixedDispatcher
 from .option import NehCpOption
@@ -101,6 +101,20 @@ class NehCpDispatcher:
             logger=logger,
         )
 
+        logger.info(
+            "neh_cp: %d jobs split into %d batches (sizes=%s); "
+            "objective_lower_bound=%s, wall_clock_deadline_sec=%s",
+            n,
+            len(batches),
+            [len(b) for b in batches],
+            f"{option.objective_lower_bound:.2f}"
+            if option.objective_lower_bound is not None
+            else "None",
+            f"{option.wall_clock_deadline_sec:.3f}"
+            if option.wall_clock_deadline_sec is not None
+            else "None",
+        )
+
         partial_sol: FFcSchedule | None = None
         current_jobs: list[str] = []
         step_entries: list[NehCpStepEntry] = []
@@ -119,6 +133,8 @@ class NehCpDispatcher:
 
         last_obj_value: float | int = 0
         prev_elapsed_seconds = 0.0
+        stopped_early = False
+        scheduled_job_set: set[str] = set()
 
         start_elapsed = time.monotonic()
 
@@ -129,7 +145,21 @@ class NehCpDispatcher:
             )
 
             builder = BaseModelBuilder()
-            mdl, params, op_vars, et_vars = builder.build(sub_instance, horizon=horizon)
+            is_last_batch = step == len(batches) - 1
+            obj_lb_for_build = (
+                option.objective_lower_bound
+                if is_last_batch and option.objective_lower_bound is not None
+                else None
+            )
+            if obj_lb_for_build is not None:
+                logger.info(
+                    "neh_cp step %d: last batch — passing obj_lb=%.2f to CP-SAT",
+                    step,
+                    obj_lb_for_build,
+                )
+            mdl, params, op_vars, et_vars = builder.build(
+                sub_instance, horizon=horizon, obj_lb=obj_lb_for_build
+            )
             skip_pf = False
             if option.skip_pf_below_obj is not None:
                 if option.skip_pf_below_obj == "makespan":
@@ -224,8 +254,41 @@ class NehCpDispatcher:
                 else:
                     solver.parameters.max_time_in_seconds = step_tl
                     applied_tl_seconds = step_tl
+            if option.wall_clock_deadline_sec is not None:
+                remaining_deadline = option.wall_clock_deadline_sec - time.monotonic()
+                if remaining_deadline <= 0:
+                    logger.info(
+                        "neh_cp: wall_clock_deadline_sec exceeded before batch "
+                        "%d/%d primary CP-SAT solve; stopping.",
+                        step + 1,
+                        len(batches),
+                    )
+                    stopped_early = True
+                    break
+                if (
+                    applied_tl_seconds is None
+                    or remaining_deadline < applied_tl_seconds
+                ):
+                    solver.parameters.max_time_in_seconds = remaining_deadline
+                    applied_tl_seconds = remaining_deadline
             solver.parameters.num_workers = option.solver_thread_cnt
-            status = solver.solve(mdl)
+            value_recorder: ObjectiveValueRecorder | None = None
+            if is_last_batch:
+                value_recorder = ObjectiveValueRecorder()
+                status = solver.solve(mdl, solution_callback=value_recorder)
+            else:
+                status = solver.solve(mdl)
+
+            if value_recorder is not None:
+                offset_sec = value_recorder.time_started - start_elapsed
+                for t_rec, vb in value_recorder.entries:
+                    progress_entries.append(
+                        ProgressLogEntry(
+                            elapsed_sec=t_rec + offset_sec,
+                            obj_value=float(vb.value),
+                            obj_bound=None,
+                        )
+                    )
 
             raw_lb = (
                 solver.best_objective_bound
@@ -233,6 +296,21 @@ class NehCpDispatcher:
                 else None
             )
             sub_obj_lb = float(raw_lb) if raw_lb is not None else 0.0
+
+            logger.info(
+                "neh_cp step %d: primary CP-SAT status=%s, obj=%s, "
+                "bound=%.2f, wall=%.3fs, applied_tl=%s",
+                step,
+                solver.StatusName(status),
+                f"{int(solver.ObjectiveValue())}"
+                if status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+                else "None",
+                sub_obj_lb,
+                solver.wall_time,
+                f"{applied_tl_seconds:.3f}"
+                if applied_tl_seconds is not None
+                else "None",
+            )
 
             cp_obj: float | None = None
             semi_active_obj: float | None = None
@@ -291,6 +369,7 @@ class NehCpDispatcher:
                     solver.StatusName(status),
                 )
                 partial_sol = dispatched
+            scheduled_job_set = set(current_jobs)
 
             if option.keep_step_schedules:
                 step_schedules.append(
@@ -335,6 +414,24 @@ class NehCpDispatcher:
                 if cp_tl_2nd_obj_seconds is not None:
                     solver_2.parameters.max_time_in_seconds = cp_tl_2nd_obj_seconds
                 solver_2.parameters.num_workers = option.solver_thread_cnt
+                if option.wall_clock_deadline_sec is not None:
+                    remaining_deadline_2 = (
+                        option.wall_clock_deadline_sec - time.monotonic()
+                    )
+                    if remaining_deadline_2 <= 0:
+                        logger.info(
+                            "neh_cp: wall_clock_deadline_sec exceeded before "
+                            "stage-2 makespan solve at batch %d/%d; stopping.",
+                            step + 1,
+                            len(batches),
+                        )
+                        stopped_early = True
+                        break
+                    if (
+                        cp_tl_2nd_obj_seconds is None
+                        or remaining_deadline_2 < cp_tl_2nd_obj_seconds
+                    ):
+                        solver_2.parameters.max_time_in_seconds = remaining_deadline_2
                 status_2 = solver_2.solve(mdl_2)
                 if status_2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                     j_i_2_start_2 = {
@@ -397,47 +494,113 @@ class NehCpDispatcher:
                     semi_active_obj=semi_active_obj,
                 )
             )
-            progress_entries.append(
-                ProgressLogEntry(
-                    elapsed_ms=step_elapsed_seconds * 1000.0,
-                    obj_value=ub,
-                    obj_bound=sub_obj_lb,
-                )
-            )
             prev_elapsed_seconds = step_elapsed_seconds
             last_obj_value = se + st
 
-        elapsed_seconds = time.monotonic() - start_elapsed
-        timing = TimingInfo(wall_ms=elapsed_seconds * 1000.0)
-
-        if partial_sol is None:
-            if option.error_if_infeasible:
-                raise RuntimeError(
-                    f"neh_cp produced no schedule for instance {instance.name}."
+            if spec.stop_predicate is not None and spec.stop_predicate():
+                logger.info(
+                    "neh_cp: stop_predicate fired after batch %d/%d; stopping.",
+                    step + 1,
+                    len(batches),
                 )
-            logger.warning("neh_cp produced no schedule; returning empty record.")
-            metrics_infeasible: dict = {"step_log": tuple(step_entries)}
+                stopped_early = True
+                break
+            if option.wall_clock_deadline_sec is not None:
+                remaining_post = option.wall_clock_deadline_sec - time.monotonic()
+                if remaining_post <= 0:
+                    logger.info(
+                        "neh_cp: wall_clock_deadline_sec exceeded after batch "
+                        "%d/%d; stopping.",
+                        step + 1,
+                        len(batches),
+                    )
+                    stopped_early = True
+                    break
+
+        if stopped_early:
+            # Recovery dispatch is best-effort with respect to
+            # ``wall_clock_deadline_sec``: ``dispatch_job_by_stages`` /
+            # ``make_semi_active`` / ``insert_idle_time`` are not
+            # interruptible, so on very large remainders this branch can
+            # exceed the deadline. The contract is "stop the CP-SAT loop
+            # at the deadline and emit *some* feasible incumbent", not
+            # "honor the deadline as a hard wall".
+            remaining_jobs = [j for j in job_sequence if j not in scheduled_job_set]
+            logger.info(
+                "neh_cp: recovery dispatch — %d/%d remaining jobs (scheduled=%d).",
+                len(remaining_jobs),
+                n,
+                len(scheduled_job_set),
+            )
+            if remaining_jobs:
+                if partial_sol is None:
+                    partial_sol = FFcSchedule(
+                        jobs=instance.job_id_list,
+                        stages=instance.stage_id_list,
+                        machines_per_stage=instance.stage_2_machines_map,
+                    )
+                for j in remaining_jobs:
+                    partial_sol.dispatch_job_by_stages(j, job_2_stage_2_p[j])
+                partial_sol.make_semi_active(stage_2_job_2_p)
+                partial_sol.insert_idle_time(due_window_map, ewt_map, twt_map)
+
+            assert partial_sol is not None
+            sum_e_stop, sum_t_stop = compute_weighted_earliness_tardiness(
+                partial_sol, instance
+            )
+            obj_value_stop = float(sum_e_stop + sum_t_stop)
+            progress_entries.append(
+                ProgressLogEntry(
+                    elapsed_sec=float(time.monotonic() - start_elapsed),
+                    obj_value=obj_value_stop,
+                    obj_bound=None,
+                )
+            )
+            metrics_stopped: dict = {
+                "sum_earliness": sum_e_stop,
+                "sum_tardiness": sum_t_stop,
+                "makespan": partial_sol.makespan,
+                "step_log": tuple(step_entries),
+                "stopped_after_batch": step,
+                "recovered_jobs": tuple(remaining_jobs),
+            }
             if option.keep_step_schedules:
-                metrics_infeasible["step_schedules"] = tuple(step_schedules)
+                metrics_stopped["step_schedules"] = tuple(step_schedules)
             return AlgRecord(
-                work_status=WorkStatus.INFEASIBLE,
+                work_status=WorkStatus.FEASIBLE,
                 instance_id=instance.name,
                 algorithm_id=self.algorithm_id,
                 option=option,
                 result=AlgResult(
-                    schedule=None,
-                    obj_value=None,
+                    schedule=partial_sol,
+                    obj_value=obj_value_stop,
                     obj_bound=None,
-                    metrics=metrics_infeasible,
+                    metrics=metrics_stopped,
                 ),
                 progress_log=tuple(progress_entries),
-                timing=timing,
-                termination_reason=TerminationReason.COMPLETED,
+                termination_reason=TerminationReason.STOP_REQUESTED,
             )
+
+        assert partial_sol is not None, (
+            "partial_sol should not be None if we didn't stop early."
+        )
 
         final = partial_sol
         sum_e, sum_t = compute_weighted_earliness_tardiness(final, instance)
         obj_value = float(sum_e + sum_t)
+        progress_entries.append(
+            ProgressLogEntry(
+                elapsed_sec=float(time.monotonic() - start_elapsed),
+                obj_value=obj_value,
+                obj_bound=None,
+            )
+        )
+        logger.info(
+            "neh_cp: completed all %d batches naturally; obj=%.0f, makespan=%d.",
+            len(batches),
+            obj_value,
+            int(final.makespan),
+        )
         metrics_feasible: dict = {
             "sum_earliness": sum_e,
             "sum_tardiness": sum_t,
@@ -458,7 +621,6 @@ class NehCpDispatcher:
                 metrics=metrics_feasible,
             ),
             progress_log=tuple(progress_entries),
-            timing=timing,
             termination_reason=TerminationReason.COMPLETED,
         )
 

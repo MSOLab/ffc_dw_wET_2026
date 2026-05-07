@@ -63,5 +63,19 @@ class FFcDDWMultiInstanceRunner(
             self.runners.append(runner)
 
     def post_run_process(self) -> list[Any]:
-        """Aggregates per-instance results."""
+        """Aggregates per-instance results.
+
+        Mirror per-instance error tracebacks (already captured by SIR as
+        ``traceback.format_exc()`` strings on ``InstanceResult.error``) into
+        the parent process's MIR-scoped log. Without this, instance failures
+        only surface in ``<scenario>/<instance>/*_SingleInstanceRunner.log``.
+        """
+        for ir in self.results:
+            err = getattr(ir, "error", None)
+            if err:
+                self.logger.error(
+                    "Instance %s failed:\n%s",
+                    getattr(ir, "instance_name", "<unknown>"),
+                    err,
+                )
         return list(self.results)

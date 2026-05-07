@@ -177,3 +177,51 @@ because only the legacy path populates the diag-dict copy.)
   helper.
 
 Until then, leave as-is.
+
+## SubroutineController file log level controllable via CLI flag
+
+`attach_fh_to_logger` in routix ([routix/logging.py:51](../../routix/src/routix/logging.py#L51))
+hardcodes the file handler level to `logging.DEBUG`, so `*_SubroutineController.log` always
+captures DEBUG regardless of the `-v`/`-vv` flag.
+
+The `quiet`/`verbose` values are already unpacked at line 140 of
+`ffcddw_single_instance_runner.py`, just above the `attach_fh_to_logger` call at line 157,
+so once routix exposes a `level` parameter the caller can pass it immediately.
+
+**Changes needed:**
+
+1. **routix** — add `level=logging.DEBUG` parameter to `attach_fh_to_logger`.
+2. **`ffcddw_single_instance_runner.py`** — pass the appropriate level derived from
+   `verbose`: DEBUG only for `-vv` (verbose ≥ 2), INFO otherwise.
+
+**Why:** SubroutineController log files accumulate DEBUG-level noise on every run even
+when it is not needed, inflating file size and making logs harder to scan.
+
+**When to act:** When log file size or noise becomes a real problem, or when routix API
+is being tidied up and the change can be bundled in.
+
+## `routix.io.dump_json` accept formatting kwargs
+
+`routix.io.dump_json` ([routix/io/json.py:22](../../routix/src/routix/io/json.py#L22)) is
+hardcoded to `json.dump(obj, f, indent=2, default=...)`. Compact output
+(`separators=(",", ":")`, `indent=None`) is impossible without bypassing the helper.
+
+`ffc_ddw_sum_et`'s `_obj_log.json` writer (added 2026-05-07 in
+`orchestration/ffcddw_single_instance_runner.py`) uses inline `json.dump(...)` to get
+single-line, compact output, sidestepping the helper entirely. That's a precedent that
+will recur whenever a JSON artifact wants compact / sort_keys / non-default separators.
+
+**Changes needed:**
+
+1. **routix** — extend `dump_json(obj, path, *, encoding="utf-8", indent=2,
+   separators=None, sort_keys=False)` (or accept `**dump_kwargs` forwarded to
+   `json.dump`). Keep current default (`indent=2`) so existing callers don't change.
+2. **`ffcddw_single_instance_runner._save_obj_log`** — switch from inline
+   `json.dump(...)` back to `dump_json(payload, out_path, indent=None,
+   separators=(",", ":"))`.
+
+**Why:** Centralize JSON serialization (encoding, default fallback for paths and
+to_dict objects) instead of duplicating it inline at every compact-JSON call site.
+
+**When to act:** When a second compact-JSON site appears in ffc_ddw_sum_et, or when
+routix is being tidied up and the change can be bundled in.

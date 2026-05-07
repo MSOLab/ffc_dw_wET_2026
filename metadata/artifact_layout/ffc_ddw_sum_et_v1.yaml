@@ -10,6 +10,16 @@ overlay_for: routix.io._default_artifact_layout
 #   - scope=run / scenario: zone FORBIDDEN.
 
 artifacts:
+  # ---- instance / final ----
+  # Compact JSON variant of routix's default `obj_log` (yaml). Same logical
+  # contents (per-step trajectory of obj_value / obj_bound), single-line
+  # serialization to keep file size small. The default `obj_log` (yaml) kind
+  # is left registered by routix but unused by this project.
+  - scope: instance
+    zone: final
+    kind: obj_log_json
+    file_template: "{instance_name}_obj_log.json"
+
   # ---- instance / progress (per-instance solve trajectory) ----
   - scope: instance
     zone: progress
@@ -40,6 +50,11 @@ artifacts:
   - scope: scenario
     kind: mcf_lb_analysis
     file_template: "{scenario_name}_mcf_lb_analysis.csv"
+  # Per-scenario interactive RPDf vs Time% chart, fed by per-instance
+  # obj_log_json + manifest. Used by report/rpdf_scatter_chart.
+  - scope: scenario
+    kind: subroutine_rpdf_scatter_html
+    file_template: "summary_method_rpdf_and_norm_time_scatter.html"
 
   # ---- run ----
   - scope: run
@@ -81,3 +96,8 @@ artifacts:
   - scope: run
     kind: time_p_dashboard
     file_template: "{run_id}_time_p_dashboard.html"
+  # Run-level multi-scenario subroutine flow comparison chart. Aggregates
+  # endpoint/progression frames built from each scenario's obj_log_jsons.
+  - scope: run
+    kind: multi_scenario_subroutine_flow_comparison_html
+    file_template: "{run_id}_multi_scenario_subroutine_flow_comparison.html"

@@ -7,15 +7,24 @@ not pull in the seed-generation machinery.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ..parallel_mc_pmtn import ParallelMachinePreemptionMcf
 from .diagnostic import MCFLBDiagnostic
 
-__all__ = ["McfLbResult", "solve_mcf_lb"]
+__all__ = ["McfLbResult", "MCFLBStopRequested", "solve_mcf_lb"]
+
+
+class MCFLBStopRequested(Exception):
+    """Raised by ``solve_mcf_lb`` when the caller's ``stop_predicate``
+    returned True before the MCF LP was solved. Callers should catch and
+    short-circuit to a stop-report.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -39,6 +48,8 @@ def solve_mcf_lb(
     *,
     r_multiplier: float = 1.0,
     r_increment: int = 0,
+    stop_predicate: Callable[[], bool] | None = None,
+    logger: logging.Logger | None = None,
 ) -> McfLbResult:
     """Solve the MCF relaxation and record the bound on ``diagnostic``.
 
@@ -58,10 +69,24 @@ def solve_mcf_lb(
             preserves the current behaviour. Any positive value pushes
             releases later than the original instance and therefore
             makes the resulting MCF objective no longer a global LB.
+        stop_predicate: Optional caller-side termination probe. Checked
+            once before ``mcf.solve()``; raises ``MCFLBStopRequested`` if
+            it returns True. The MCF LP itself is not interruptible mid-
+            solve, so post-solve termination is left to the caller.
 
     Raises:
         RuntimeError: if the MCF flow is not optimal for ``instance``.
+        MCFLBStopRequested: if ``stop_predicate`` requested stop before
+            solve.
     """
+    if stop_predicate is not None and stop_predicate():
+        if logger is not None:
+            logger.info(
+                "solve_mcf_lb: stop_predicate True before LP solve; "
+                "raising MCFLBStopRequested."
+            )
+        raise MCFLBStopRequested
+
     last_stage_id = instance.stage_id_list[-1]
 
     t_mcf = time.monotonic()
@@ -75,6 +100,15 @@ def solve_mcf_lb(
     diagnostic.mcf_solve_sec = time.monotonic() - t_mcf
     diagnostic.mcf_lb = mcf_lb
     diagnostic.reached_phase = "mcf"
+    if logger is not None:
+        logger.info(
+            "solve_mcf_lb: solved in %.3fs, mcf_lb=%.2f "
+            "(r_multiplier=%.4g, r_increment=%d)",
+            diagnostic.mcf_solve_sec,
+            mcf_lb,
+            r_multiplier,
+            r_increment,
+        )
 
     mcf_preemptive_schedule = MCFPreemptiveSchedule.from_flow_dict(
         mcf.get_variable_value_dict(),

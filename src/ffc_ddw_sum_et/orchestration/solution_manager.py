@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from routix.report import SubroutineReport
 from routix.solution_manager import SolutionManager
 
 from ..solution.ffc_schedule import FFcSchedule
+from .subroutine_report import FFcDDWSubroutineReport
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -19,7 +19,7 @@ class FFcDDWSolution:
     obj_bound: float | None = None
 
 
-class FFcDDWSolutionManager(SolutionManager[SubroutineReport, FFcDDWSolution]):
+class FFcDDWSolutionManager(SolutionManager[FFcDDWSubroutineReport, FFcDDWSolution]):
     """Tracks the incumbent best solution across multiple FAM runs."""
 
     def _get_obj_value(self, solution: FFcDDWSolution) -> float:
@@ -35,5 +35,12 @@ class FFcDDWSolutionManager(SolutionManager[SubroutineReport, FFcDDWSolution]):
         return value_a < value_b
 
     def _a_is_better_obj_bound(self, bound_a: float, bound_b: float | None) -> bool:
-        # FAM does not produce useful bounds
-        return False
+        # Soundness contract: `best_obj_bound` is consumed by
+        # `controller_core.get_current_valid_lb` as a *valid* global LB.
+        # This manager therefore trusts every register site to gate on
+        # validity (i.e. only forward `obj_bound` for the original problem,
+        # not augmented/sub-problem bounds). See
+        # `controller_core.get_current_valid_lb` for the full invariant.
+        if bound_b is None:
+            return True
+        return bound_a > bound_b
