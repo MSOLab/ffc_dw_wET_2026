@@ -518,6 +518,13 @@ class NehCpDispatcher:
                     break
 
         if stopped_early:
+            # Recovery dispatch is best-effort with respect to
+            # ``wall_clock_deadline_sec``: ``dispatch_job_by_stages`` /
+            # ``make_semi_active`` / ``insert_idle_time`` are not
+            # interruptible, so on very large remainders this branch can
+            # exceed the deadline. The contract is "stop the CP-SAT loop
+            # at the deadline and emit *some* feasible incumbent", not
+            # "honor the deadline as a hard wall".
             remaining_jobs = [j for j in job_sequence if j not in scheduled_job_set]
             logger.info(
                 "neh_cp: recovery dispatch — %d/%d remaining jobs (scheduled=%d).",

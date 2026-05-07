@@ -35,6 +35,12 @@ class FFcDDWSolutionManager(SolutionManager[FFcDDWSubroutineReport, FFcDDWSoluti
         return value_a < value_b
 
     def _a_is_better_obj_bound(self, bound_a: float, bound_b: float | None) -> bool:
+        # Soundness contract: `best_obj_bound` is consumed by
+        # `controller_core.get_current_valid_lb` as a *valid* global LB.
+        # This manager therefore trusts every register site to gate on
+        # validity (i.e. only forward `obj_bound` for the original problem,
+        # not augmented/sub-problem bounds). See
+        # `controller_core.get_current_valid_lb` for the full invariant.
         if bound_b is None:
             return True
         return bound_a > bound_b

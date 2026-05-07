@@ -134,7 +134,13 @@ class FFcDDWSingleInstanceRunner(
         n = self.instance.job_count
         c = self.instance.stage_count
         m = self.instance.last_stage_mc_count
-        resolved = float(resolve_value_expr(raw_tl, n, c, m))
+        raw_resolved = resolve_value_expr(raw_tl, n, c, m)
+        if raw_resolved is None:
+            raise ValueError(
+                f"Scenario timelimit expression {raw_tl!r} resolved to None "
+                f"(n={n}, c={c}, m={m}); expected a numeric value."
+            )
+        resolved = float(raw_resolved)
         self.stopping_criteria = {**sc, "timelimit": resolved}
         self.logger.debug(
             "Resolved scenario timelimit '%s' for %s (n=%d, c=%d, m=%d) -> %.3fs",

@@ -18,6 +18,13 @@ class TimeStampedRecorder(Generic[RecordValT]):
     Not declared as ``abc.ABC`` because subclasses combined with SWIG-generated
     bases (``CpSolverSolutionCallback``) hit a metaclass conflict with
     ``ABCMeta``. Override-by-convention; the default ``on_record`` is a no-op.
+
+    Thread-safety contract: ``record()`` is invoked from CP-SAT's solution-
+    callback thread, while ``self.entries`` is read from the main thread by
+    callers like ``cpsat_adapter._build_progress_log``. Reads are only safe
+    *after* ``solver.solve()`` returns (i.e. after the callback thread has
+    joined). Do not iterate ``entries`` mid-solve from the main thread, and
+    do not share a recorder instance across concurrent solves.
     """
 
     def __init__(self, **kwargs) -> None:

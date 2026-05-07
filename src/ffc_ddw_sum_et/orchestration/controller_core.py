@@ -103,6 +103,7 @@ class FFcDDWSubroutineControllerCore(
         # Outer wall-clock around `run()`. Set in the run() override below;
         # the runner reads this for the per-instance summary `elapsedTime`.
         self.total_elapsed_time: float = 0.0  # TODO: apply to routix
+        self._optimality_logged: bool = False
 
     def is_stopping_condition(self, **kwargs: Any) -> bool:
         """Stop when the timelimit is exceeded or optimality is proven."""
@@ -152,7 +153,7 @@ class FFcDDWSubroutineControllerCore(
         silently accepted.
         """
         proven = self._optimality_proven_no_log()
-        if proven and not getattr(self, "_optimality_logged", False):
+        if proven and not self._optimality_logged:
             lb = self.get_current_valid_lb()
             ub = self.solution_manager.best_obj_value
             self.logger.info(
