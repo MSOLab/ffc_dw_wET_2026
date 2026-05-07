@@ -809,13 +809,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             solver_log_path_getter=self.get_file_path_for_subroutine,
         )
 
-        # Publish the MCF LB as the global ``obj_bound``; ``result.obj_bound``
-        # is only the last NEH-CP iteration's sub-instance CP LB and is not
-        # a valid global lower bound (see NehCpLastStageOnlyResult docstring).
+        # Publish the MCF LB as the global ``obj_bound`` only when the
+        # diagnostic confirms it is a valid LB on the original problem
+        # (no positive p/r augmentation). ``result.obj_bound`` is only the
+        # last NEH-CP iteration's sub-instance CP LB and is not a valid
+        # global lower bound (see NehCpLastStageOnlyResult docstring).
+        valid_global_mcf_lb = (
+            mcf_lb if self.mcf_lb_diagnostic.mcf_lb_is_valid_for_main_problem else None
+        )
         self.last_stage_only_sol = FFcDDWSolution(
             schedule=result.schedule,
             obj_value=result.obj_value,
-            obj_bound=mcf_lb,
+            obj_bound=valid_global_mcf_lb,
         )
         self.last_stage_only_sol_p_increment = 0
         self.mcf_lb_phase_schedules.extend(result.intermediate_schedules)
@@ -829,7 +834,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             "(cp solves total=%.2fs).",
             result.status,
             result.obj_value,
-            int(mcf_lb),
+            int(valid_global_mcf_lb) if valid_global_mcf_lb is not None else None,
             result.obj_bound,
             result.elapsed_time,
             result.cp_solve_sec,
@@ -837,7 +842,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         report = SubroutineReport(
             elapsed_time=result.elapsed_time,
             obj_value=result.obj_value,
-            obj_bound=mcf_lb,
+            obj_bound=valid_global_mcf_lb,
         )
         self._register(report, None)
         return report
@@ -2366,13 +2371,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         incumbent = self.solution_manager.get_incumbent()
         ref_solution = incumbent.schedule if incumbent is not None else None
 
+        valid_lb = self.get_current_valid_lb()
+        obj_lb = valid_lb if valid_lb > 0 else None
+
         self.logger.info(
             "solve_base_model_cpsat: effective=%.3fs (timelimit=%s, "
-            "remaining=%.3fs), ref_solution=%s",
+            "remaining=%.3fs), ref_solution=%s, obj_lb=%s",
             eff_timelimit_sec,
             f"{timelimit_resolved:.3f}s" if timelimit_resolved is not None else "None",
             remaining_sec,
             "given" if ref_solution is not None else "None",
+            f"{obj_lb:.2f}" if obj_lb is not None else "None",
         )
 
         option = CpsatOption(
@@ -2381,6 +2390,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             log_search_progress=log_search_progress,
             error_if_infeasible=error_if_infeasible,
             draw_gantt=draw_gantt,
+            obj_lb=obj_lb,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2487,16 +2497,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         wall_clock_deadline_sec = time.monotonic() + remaining_sec
 
         valid_lb = self.get_current_valid_lb()
-        objective_lower_bound = valid_lb if valid_lb > 0 else None
+        obj_lb = valid_lb if valid_lb > 0 else None
 
         self.logger.info(
-            "neh_cp: threading wall_clock_deadline=%.3fs (remaining=%.3fs), "
-            "objective_lower_bound=%s",
+            "neh_cp: threading wall_clock_deadline=%.3fs (remaining=%.3fs), obj_lb=%s",
             wall_clock_deadline_sec,
             remaining_sec,
-            f"{objective_lower_bound:.2f}"
-            if objective_lower_bound is not None
-            else "None",
+            f"{obj_lb:.2f}" if obj_lb is not None else "None",
         )
 
         option = NehCpOption(
@@ -2518,7 +2525,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             cp_tl_2nd_obj_seconds=cp_tl_2nd_obj_seconds,
             error_if_infeasible=error_if_infeasible,
             wall_clock_deadline_sec=wall_clock_deadline_sec,
-            objective_lower_bound=objective_lower_bound,
+            objective_lower_bound=obj_lb,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2710,16 +2717,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         wall_clock_deadline_sec = time.monotonic() + remaining_sec
 
         valid_lb = self.get_current_valid_lb()
-        objective_lower_bound = valid_lb if valid_lb > 0 else None
+        obj_lb = valid_lb if valid_lb > 0 else None
 
         self.logger.info(
             "run_mcf_lb_then_neh_cp: threading wall_clock_deadline=%.3fs "
-            "(remaining=%.3fs), objective_lower_bound=%s",
+            "(remaining=%.3fs), obj_lb=%s",
             wall_clock_deadline_sec,
             remaining_sec,
-            f"{objective_lower_bound:.2f}"
-            if objective_lower_bound is not None
-            else "None",
+            f"{obj_lb:.2f}" if obj_lb is not None else "None",
         )
 
         option = NehCpOption(
@@ -2742,7 +2747,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible=error_if_infeasible,
             keep_step_schedules=keep_step_schedules,
             wall_clock_deadline_sec=wall_clock_deadline_sec,
-            objective_lower_bound=objective_lower_bound,
+            objective_lower_bound=obj_lb,
         )
         spec = AlgSpec(
             instance=instance,

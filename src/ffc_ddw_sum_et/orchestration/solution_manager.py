@@ -35,5 +35,6 @@ class FFcDDWSolutionManager(SolutionManager[FFcDDWSubroutineReport, FFcDDWSoluti
         return value_a < value_b
 
     def _a_is_better_obj_bound(self, bound_a: float, bound_b: float | None) -> bool:
-        # FAM does not produce useful bounds
-        return False
+        if bound_b is None:
+            return True
+        return bound_a > bound_b

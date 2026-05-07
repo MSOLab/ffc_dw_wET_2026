@@ -55,6 +55,7 @@ class CpsatOption(AlgOption):
     log_search_progress: bool = False
     error_if_infeasible: bool = False
     draw_gantt: bool = False
+    obj_lb: float | None = None
 
 
 class CpsatAdapter:
@@ -72,7 +73,9 @@ class CpsatAdapter:
         params_for_horizon = BaseModelBuilder.make_params(instance)
         horizon = sum(params_for_horizon.p.values())
         builder = BaseModelBuilder()
-        mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
+        mdl, params, op_vars, et_vars = builder.build(
+            instance, horizon=horizon, obj_lb=option.obj_lb
+        )
 
         ref_schedule = spec.ref_solution
         if ref_schedule is not None:
@@ -98,11 +101,13 @@ class CpsatAdapter:
         solver.best_bound_callback = bound_recorder
 
         logger.info(
-            "CpsatAdapter: instance=%s, ref_solution=%s, eff_tl=%s, num_workers=%d",
+            "CpsatAdapter: instance=%s, ref_solution=%s, eff_tl=%s, num_workers=%d, "
+            "obj_lb=%s",
             instance.name,
             "given" if ref_schedule is not None else "None",
             f"{eff_tl:.3f}s" if eff_tl is not None else "None",
             option.solver_thread_cnt,
+            f"{option.obj_lb:.2f}" if option.obj_lb is not None else "None",
         )
 
         status = solver.solve(mdl, solution_callback=value_recorder)
@@ -161,13 +166,24 @@ class CpsatAdapter:
         }
         schedule = build_schedule_from_op_starts(instance, j_i_2_start, j_i_2_end)
         schedule.make_semi_active(instance.stage_2_job_2_p_map)
+        schedule.insert_idle_time(
+            instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+        )
 
         sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
         obj_value = float(sum_e + sum_t)
         cp_obj = float(solver.objective_value)
-        if obj_value != cp_obj:
+        if obj_value > cp_obj:
             logger.warning(
-                "CpsatAdapter: post-semi-active objective %.3f != CP-SAT objective %.3f",
+                "CpsatAdapter: post-process objective %.3f > CP-SAT objective %.3f",
+                obj_value,
+                cp_obj,
+            )
+        elif obj_value < cp_obj:
+            logger.info(
+                "CpsatAdapter: post-process objective %.3f < CP-SAT objective %.3f",
                 obj_value,
                 cp_obj,
             )

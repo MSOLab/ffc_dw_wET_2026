@@ -111,19 +111,21 @@ class FFcDDWSubroutineControllerCore(
             or self._optimality_proven()
         )
 
-    def get_current_valid_lb(self) -> float:
-        """Return the latest MCF LB if it is a valid global LB for the
-        original (un-augmented) problem; otherwise ``0.0`` (the trivial
-        valid LB for weighted earliness/tardiness).
+    def get_current_valid_lb(self) -> int:
+        """Return the running max valid global LB tracked by the solution
+        manager (updated on every ``register(...)`` whose report carries a
+        non-None ``obj_bound``), rounded up via ``math.ceil`` so the value
+        is never weakened. Returns ``0`` (the trivial valid LB for weighted
+        earliness/tardiness) when no step has reported a bound yet.
+
+        Soundness invariant: every register site in this codebase that
+        emits ``report.obj_bound is not None`` must already gate on
+        validity for the original problem (see ``apply_lb_by_mcf``
+        controller.py:720-729 and the composite synthesizer at
+        controller.py:1485). The getter trusts that gate.
         """
-        diag = self.mcf_lb_diagnostic
-        if diag is None:
-            return 0.0
-        if diag.mcf_lb is None:
-            return 0.0
-        if not diag.mcf_lb_is_valid_for_main_problem:
-            return 0.0
-        return float(diag.mcf_lb)
+        lb = self.solution_manager.best_obj_bound
+        return math.ceil(lb) if lb is not None else 0
 
     def _optimality_proven_no_log(self) -> bool:
         """``_optimality_proven`` without the transition log; used by
@@ -133,7 +135,7 @@ class FFcDDWSubroutineControllerCore(
         ub = self.solution_manager.best_obj_value
         if ub is None:
             return False
-        lb_int = math.ceil(self.get_current_valid_lb())
+        lb_int = self.get_current_valid_lb()
         ub_int = int(ub)
         if lb_int > ub_int:
             raise ValueError(
@@ -154,10 +156,9 @@ class FFcDDWSubroutineControllerCore(
             lb = self.get_current_valid_lb()
             ub = self.solution_manager.best_obj_value
             self.logger.info(
-                "_optimality_proven: ceil(LB)=%d == int(UB)=%d (LB=%.2f, UB=%.2f)",
-                math.ceil(lb),
-                int(ub),
+                "_optimality_proven: LB=%d == int(UB)=%d (UB=%.2f)",
                 lb,
+                int(ub),
                 ub,
             )
             self._optimality_logged = True
@@ -165,21 +166,15 @@ class FFcDDWSubroutineControllerCore(
 
     def _make_stop_report(self, start_elapsed: float | None = None) -> SubroutineReport:
         """Stop-report with elapsed_time measured from start_elapsed (0.0
-        when not provided) and obj_bound from a valid LB when available.
+        when not provided) and obj_bound from the current running best
+        valid LB tracked by the solution manager.
         """
-        diag = self.mcf_lb_diagnostic
-        bound = (
-            float(diag.mcf_lb)
-            if diag is not None
-            and diag.mcf_lb is not None
-            and diag.mcf_lb_is_valid_for_main_problem
-            else None
-        )
         elapsed = time.monotonic() - start_elapsed if start_elapsed is not None else 0.0
         timelimit = self.stopping_criteria.timelimit
         timer_elapsed = self.timer.elapsed_sec
         ub = self.solution_manager.best_obj_value
         lb = self.get_current_valid_lb()
+        bound = float(lb) if lb > 0 else None
         if self.timer.time_over(timelimit):
             reason = "timelimit"
         elif self._optimality_proven_no_log():
@@ -188,7 +183,7 @@ class FFcDDWSubroutineControllerCore(
             reason = "unknown"
         self.logger.info(
             "_make_stop_report: reason=%s, subroutine_elapsed=%.3fs, "
-            "timer_elapsed=%.3fs/%.3fs, valid_lb=%.2f, best_ub=%s, bound=%s",
+            "timer_elapsed=%.3fs/%.3fs, valid_lb=%d, best_ub=%s, bound=%s",
             reason,
             elapsed,
             timer_elapsed,
