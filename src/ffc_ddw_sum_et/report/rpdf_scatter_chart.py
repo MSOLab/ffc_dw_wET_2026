@@ -173,6 +173,41 @@ def _build_marker_meta_by_time(
     return meta_by_time
 
 
+def _keep_strict_global_improvements_or_endpoints(
+    progression_grp: pd.DataFrame,
+) -> pd.DataFrame:
+    """Keep rows whose ``rpd_f`` strictly improves the *global* running min
+    over the whole instance trajectory, plus each ``call_index`` group's
+    last row (endpoint, always kept regardless of improvement).
+
+    The marker y-value plotted by the chart is the global best-so-far at the
+    marker's time; filtering by per-call improvement leaves clusters of
+    markers all stacked at the same y when a call's per-point rpd_f never
+    beats the global best set by an earlier call. Filtering by global
+    improvement guarantees each non-endpoint marker sits at a distinct y.
+
+    Sort key is ``norm_time`` with ``global_sec`` as a tiebreaker when
+    present. Required columns: ``call_index``, ``rpd_f``, ``norm_time``.
+    """
+    if progression_grp.empty:
+        return progression_grp
+    sort_cols = [c for c in ["norm_time", "global_sec"] if c in progression_grp.columns]
+    ordered = progression_grp.sort_values(sort_cols)
+    endpoint_indices: set = set()
+    for _, sub_grp in ordered.groupby("call_index", sort=False):
+        endpoint_indices.add(sub_grp.index[-1])
+    keep_indices: list = []
+    running_min = float("inf")
+    for idx, rpdf in zip(ordered.index, ordered["rpd_f"].tolist()):
+        is_strict = rpdf < running_min
+        is_endpoint = idx in endpoint_indices
+        if is_strict or is_endpoint:
+            keep_indices.append(idx)
+        if is_strict:
+            running_min = rpdf
+    return progression_grp.loc[keep_indices].sort_values(sort_cols)
+
+
 def _build_raw_instance_progression(
     instance_id: object,
     endpoint_grp: pd.DataFrame,
@@ -184,16 +219,12 @@ def _build_raw_instance_progression(
     endpoint_meta = _build_marker_meta_by_time(
         instance_id, endpoint_grp, t_factor, r_factor
     )
-    raw_source = (
-        endpoint_grp
-        if progression_grp is None or progression_grp.empty
-        else progression_grp
-    )
-    raw_meta = _build_marker_meta_by_time(instance_id, raw_source, t_factor, r_factor)
     if progression_grp is None or progression_grp.empty:
-        points = _build_best_so_far_progression_points(endpoint_grp)
+        raw_source = endpoint_grp
     else:
-        points = _build_best_so_far_progression_points(progression_grp)
+        raw_source = _keep_strict_global_improvements_or_endpoints(progression_grp)
+    raw_meta = _build_marker_meta_by_time(instance_id, raw_source, t_factor, r_factor)
+    points = _build_best_so_far_progression_points(raw_source)
     return _RawInstanceProgression(
         series_id=series_id,
         instance_id=str(instance_id),
@@ -258,7 +289,9 @@ def _build_raw_instance_progression_models(
 
     models: list[_RawInstanceProgression] = []
     for ins, ep_grp in endpoint_df.groupby("instance_id", sort=True):
-        ep_grp = ep_grp.sort_values(["norm_time", "subroutine_order", "subroutine_name"])
+        ep_grp = ep_grp.sort_values(
+            ["norm_time", "subroutine_order", "subroutine_name"]
+        )
         t_val = float(ep_grp["t_factor"].iloc[0])
         r_val = float(ep_grp["r_factor"].iloc[0])
         models.append(
@@ -337,9 +370,7 @@ def _build_mean_series_payload(
         r_str = _format_factor(r_factor)
         series_id = f"mean(T={t_str},R={r_str})"
         step_x, step_y = _build_step_path(mean_x, mean_y)
-        point_customdata = [
-            [series_id, t_str, r_str, len(models)] for _ in mean_x
-        ]
+        point_customdata = [[series_id, t_str, r_str, len(models)] for _ in mean_x]
         step_customdata = _build_step_aligned_values(point_customdata, mean_y)
         guides = _build_mean_vertical_guides(models)
         out.append(
