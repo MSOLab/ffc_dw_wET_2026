@@ -14,7 +14,6 @@ __all__ = [
     "AlgRecord",
     "ProgressLogEntry",
     "TerminationReason",
-    "TimingInfo",
     "WorkStatus",
 ]
 
@@ -39,18 +38,10 @@ class TerminationReason(StrEnum):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class TimingInfo:
-    """Timing information for one execution."""
-
-    wall_ms: float
-    cpu_ms: float | None = None
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class ProgressLogEntry:
     """Machine-readable progress snapshot for one run."""
 
-    elapsed_ms: float
+    elapsed_sec: float
     obj_value: int | float | None = None
     obj_bound: int | float | None = None
     note: str | None = None
@@ -81,7 +72,6 @@ class AlgRecord:
     algorithm_id: str | None = None
     option: AlgOption | None = None
     result: AlgResult | None = None
-    timing: TimingInfo | None = None
     progress_log: tuple[ProgressLogEntry, ...] | None = None
     termination_reason: TerminationReason | None = None
     error: str | None = None

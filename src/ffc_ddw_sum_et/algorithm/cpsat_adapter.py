@@ -27,7 +27,6 @@ from .base.alg_record import (
     AlgRecord,
     AlgResult,
     TerminationReason,
-    TimingInfo,
     WorkStatus,
 )
 from .base.alg_spec import AlgSpec
@@ -100,7 +99,6 @@ class CpsatAdapter:
         )
 
         status = solver.solve(mdl)
-        elapsed_ms = (time.monotonic() - start) * 1000.0
         status_name = solver.status_name(status)
 
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
@@ -128,7 +126,6 @@ class CpsatAdapter:
                     obj_bound=None,
                     metrics={"cpsat_status": status_name},
                 ),
-                timing=TimingInfo(wall_ms=elapsed_ms),
                 termination_reason=(
                     TerminationReason.COMPLETED
                     if status == cp_model.INFEASIBLE
@@ -190,7 +187,6 @@ class CpsatAdapter:
                     "makespan": schedule.makespan,
                 },
             ),
-            timing=TimingInfo(wall_ms=elapsed_ms),
             termination_reason=(
                 TerminationReason.COMPLETED
                 if status == cp_model.OPTIMAL

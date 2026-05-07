@@ -113,6 +113,6 @@ def test_apply_lb_by_mcf_catches_mcflbstoprequested_with_stale_timer(
     assert any(
         "apply_lb_by_mcf: stop predicate fired before MCF solve" in m for m in messages
     ), f"expected apply_lb_by_mcf catch log; got {messages}"
-    assert any(
-        "_make_stop_report: reason=timelimit" in m for m in messages
-    ), f"expected _make_stop_report log; got {messages}"
+    assert any("_make_stop_report: reason=timelimit" in m for m in messages), (
+        f"expected _make_stop_report log; got {messages}"
+    )

@@ -125,9 +125,12 @@ class CpsatAdapter:
    into `spec.alg_root` (use the same helper other algorithms use; if
    none yet, log a TODO and skip — drawing infra is out of scope).
 9. Build and return `AlgRecord(work_status=..., result=AlgResult(schedule=...,
-   obj_value=..., obj_bound=..., metrics={...}), timing=TimingInfo(wall_ms=...),
+   obj_value=..., obj_bound=..., metrics={...}),
    termination_reason=..., option=option, instance_id=instance.instance_id,
    algorithm_id="cpsat_adapter")`.
+
+   > Note: `TimingInfo`/`AlgRecord.timing`은 후속 정리에서 제거됨 — wall-clock은
+   > 오케스트레이션 레이어의 `controller.total_elapsed_time`(sec)이 단일 출처.
 
 ### Notes
 

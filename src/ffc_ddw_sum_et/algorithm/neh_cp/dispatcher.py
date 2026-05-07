@@ -22,7 +22,6 @@ from ..base.alg_record import (
     AlgResult,
     ProgressLogEntry,
     TerminationReason,
-    TimingInfo,
     WorkStatus,
 )
 from ..base.alg_spec import AlgSpec
@@ -480,7 +479,7 @@ class NehCpDispatcher:
             )
             progress_entries.append(
                 ProgressLogEntry(
-                    elapsed_ms=step_elapsed_seconds * 1000.0,
+                    elapsed_sec=step_elapsed_seconds,
                     obj_value=ub,
                     obj_bound=sub_obj_lb,
                 )
@@ -508,14 +507,10 @@ class NehCpDispatcher:
                     stopped_early = True
                     break
 
-        elapsed_seconds = time.monotonic() - start_elapsed
-        timing = TimingInfo(wall_ms=elapsed_seconds * 1000.0)
-
         if stopped_early:
             remaining_jobs = [j for j in job_sequence if j not in scheduled_job_set]
             logger.info(
-                "neh_cp: recovery dispatch — %d/%d remaining jobs "
-                "(scheduled=%d).",
+                "neh_cp: recovery dispatch — %d/%d remaining jobs (scheduled=%d).",
                 len(remaining_jobs),
                 n,
                 len(scheduled_job_set),
@@ -559,7 +554,6 @@ class NehCpDispatcher:
                     metrics=metrics_stopped,
                 ),
                 progress_log=tuple(progress_entries),
-                timing=timing,
                 termination_reason=TerminationReason.STOP_REQUESTED,
             )
 
@@ -571,8 +565,7 @@ class NehCpDispatcher:
         sum_e, sum_t = compute_weighted_earliness_tardiness(final, instance)
         obj_value = float(sum_e + sum_t)
         logger.info(
-            "neh_cp: completed all %d batches naturally; obj=%.0f, "
-            "makespan=%d.",
+            "neh_cp: completed all %d batches naturally; obj=%.0f, makespan=%d.",
             len(batches),
             obj_value,
             int(final.makespan),
@@ -597,7 +590,6 @@ class NehCpDispatcher:
                 metrics=metrics_feasible,
             ),
             progress_log=tuple(progress_entries),
-            timing=timing,
             termination_reason=TerminationReason.COMPLETED,
         )
 

@@ -215,7 +215,7 @@ Today's `sub_step_log` entry is a dict with 9 fields. Map to
 | current `sub_step_log` field | new home                                      |
 |------------------------------|-----------------------------------------------|
 | `step`                       | derived from index in `progress_log` tuple    |
-| `elapsed_time`               | `ProgressLogEntry.elapsed_ms` (× 1000)        |
+| `elapsed_time`               | `ProgressLogEntry.elapsed_sec`                |
 | `sub_obj` (UB)               | `ProgressLogEntry.obj_value`                  |
 | `sub_obj_lb`                 | `ProgressLogEntry.obj_bound`                  |
 | `TL`, `elapsed_portion`, `gap`, `job_count`, `makespan`, `ran_2nd_obj` | `ProgressLogEntry.note` as a structured `dict` if we widen `note`, OR keep them in a side dataclass `NehCpStepEntry` referenced from `AlgRecord` via a separate field |
@@ -223,7 +223,7 @@ Today's `sub_step_log` entry is a dict with 9 fields. Map to
 Two routes — pick one before implementing:
 
 - **Route A (preferred).** Keep `ProgressLogEntry` slim (only
-  `obj_value` / `obj_bound` / `elapsed_ms` / `note: str | None`). The
+  `obj_value` / `obj_bound` / `elapsed_sec` / `note: str | None`). The
   extra NEH-CP-specific fields (`gap`, `makespan`, `TL`, …) get a
   dedicated `NehCpStepEntry` tuple stored in
   `AlgRecord.result.metrics["step_log"]` (loosens `metrics` typing to
@@ -280,10 +280,12 @@ once at the top of `run(...)`.
 3. Build `AlgSpec(instance=self.instance, option=opt, logger=self.logger,
    alg_root=self.get_file_path_for_subroutine("").parent)`.
 4. Call `record = NehCpDispatcher().run(spec)`.
-5. Build `SubroutineReport(elapsed_time=record.timing.wall_ms / 1000,
-   obj_value=record.result.obj_value, obj_bound=None)`. (Add a
-   `wall_ms` field to `record.timing` — `NehCpDispatcher` measures with
-   `time.monotonic()`.)
+5. Build `SubroutineReport(elapsed_time=<measured-by-controller>,
+   obj_value=record.result.obj_value, obj_bound=None)`. Wall-clock comes
+   from the controller frame (`time.monotonic()` around `.run(spec)`),
+   not from the `AlgRecord` — `TimingInfo`/`AlgRecord.timing` were
+   removed as YAGNI; algorithm-side ortools `solver.wall_time` is
+   already in sec.
 6. `self.solution_manager.register(report,
        FFcDDWSolution(schedule=record.result.schedule,
                       obj_value=record.result.obj_value))`.
