@@ -16,7 +16,12 @@ from routix.subroutine_controller import SubroutineController
 from ..algorithm.base.alg_record import WorkStatus
 from ..algorithm.mcf_lb.diagnostic import MCFLBDiagnostic
 from ..parameters.ffc_ddw_params import FFcDDWParameters
-from ..solution.ffc_schedule import FFcSchedule
+from ..solution.ffc_schedule import (
+    FFcSchedule,
+    validate_duration,
+    validate_no_overlap,
+    validate_precedence,
+)
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
 
@@ -229,8 +234,107 @@ class FFcDDWSubroutineControllerCore(
         finally:  # TODO: apply to routix
             self.total_elapsed_time = time.monotonic() - start
 
+    def check_feasibility(
+        self, start_time_map: dict[tuple[str, str, str], int]
+    ) -> None:
+        """Validate structural feasibility of a complete schedule given by
+        ``start_time_map``.
+
+        The objective value (wET) is **not** computed here; that lives in
+        ``solution.objectives.compute_weighted_earliness_tardiness`` and is
+        attached to ``FFcDDWSolution.obj_value`` upstream.
+
+        Checks (in order, fail-fast):
+
+        1. ``start_time >= 0`` for every entry.
+        2. ``j`` is a known job in ``instance.job_id_list``.
+        3. ``i`` is a known stage in ``instance.stage_id_list``.
+        4. ``k`` is a machine that exists at stage ``i`` according to
+           ``instance.stage_2_machines_map[i]``.
+        5. No ``(j, i)`` pair appears more than once.
+        6. Every ``(j, i)`` in ``job_id_list × stage_id_list`` appears at
+           least once (no missing operation).
+        7. ``end_time - start_time == p_{j,i}`` for every entry
+           (``validate_duration``).
+        8. For every job, each stage's start time is no earlier than the
+           previous stage's end time (``validate_precedence``).
+        9. No two operations overlap on the same machine
+           (``validate_no_overlap``).
+
+        Args:
+            start_time_map: Mapping from ``(job, stage, machine)`` to the
+                operation's start time. Must cover every ``(job, stage)``
+                pair in the instance exactly once.
+
+        Raises:
+            ValueError: when any of the checks above fails. The message
+                identifies the offending entry (or set of missing pairs).
+        """
+        self.logger.info("Feasibility check starts")
+
+        instance = self.instance
+        job_id_set = set(instance.job_id_list)
+        stage_id_set = set(instance.stage_id_list)
+        stage_2_machine_set = {
+            stage_id: set(machines)
+            for stage_id, machines in instance.stage_2_machines_map.items()
+        }
+        job_2_stage_2_p = instance.job_2_stage_2_p_map
+
+        end_time_map: dict[tuple[str, str, str], int] = {}
+        seen_pairs: set[tuple[str, str]] = set()
+        for (j, i, k), start_time in start_time_map.items():
+            if start_time < 0:
+                raise ValueError(
+                    f"Invalid start time for job {j}, stage {i}, "
+                    f"machine {k}: {start_time}"
+                )
+            if j not in job_id_set:
+                raise ValueError(
+                    f"Unknown job {j} in start_time_map entry ({j}, {i}, {k})"
+                )
+            if i not in stage_id_set:
+                raise ValueError(
+                    f"Unknown stage {i} in start_time_map entry ({j}, {i}, {k})"
+                )
+            if k not in stage_2_machine_set[i]:
+                raise ValueError(
+                    f"Machine {k} is not available at stage {i} "
+                    f"(entry: job {j}, stage {i}, machine {k})"
+                )
+            if (j, i) in seen_pairs:
+                raise ValueError(f"Job {j} scheduled multiple times at stage {i}")
+            seen_pairs.add((j, i))
+            end_time_map[(j, i, k)] = start_time + job_2_stage_2_p[j][i]
+
+        expected_pairs = {
+            (j, i) for j in instance.job_id_list for i in instance.stage_id_list
+        }
+        missing_pairs = expected_pairs - seen_pairs
+        if missing_pairs:
+            raise ValueError(
+                f"Missing (job, stage) operations in start_time_map: "
+                f"{sorted(missing_pairs)}"
+            )
+
+        validate_duration(
+            start_time_map, end_time_map, self.instance.stage_2_job_2_p_map
+        )
+        validate_precedence(start_time_map, end_time_map, self.instance.stage_id_list)
+        validate_no_overlap(
+            start_time_map,
+            end_time_map,
+            self.instance.stage_id_list,
+            self.instance.stage_2_machines_map,
+        )
+
+        self.logger.info("Feasibility check passed")
+
     def post_run_process(self) -> None:
-        """Nothing to do at the controller level — the runner handles file I/O."""
+        """Validate the incumbent's structural feasibility, if any."""
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is not None:
+            self.check_feasibility(incumbent.schedule.get_jik_2_start_time_map())
 
     @property
     def best_solution(self) -> FFcDDWSolution | None:
