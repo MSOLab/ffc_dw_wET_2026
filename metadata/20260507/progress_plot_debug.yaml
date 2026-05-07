@@ -2,19 +2,19 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+ins_index: [ 0, 1, 20, 21, 40, 41, 60, 61, 80, 81 ]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260507_debug
 
-instance_worker_cnt: 8
+instance_worker_cnt: 10
 
 draw_gantt: false
 painter_thread_cnt: 16
 
 scenarios:
   - name: mcf_lb_best_base_cpsat
-    timelimit: "0.06nc"
+    timelimit: "0.09nc"
     output_subdir: mcf_lb_best_base_cpsat
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
@@ -25,8 +25,25 @@ scenarios:
         adjust_r: true
       - method: solve_base_model_cpsat
         solver_thread_cnt: 8
+  - name: neh_cp_best_base_cpsat
+    timelimit: "0.09nc"
+    output_subdir: neh_cp_best_base_cpsat
+    subroutine_flow:
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.024nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+      - method: solve_base_model_cpsat
+        solver_thread_cnt: 8
   - name: mcf_lb_best_neh_cp_best_base_cpsat
-    timelimit: "0.06nc"
+    timelimit: "0.09nc"
     output_subdir: mcf_lb_best_neh_cp_best_base_cpsat
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch

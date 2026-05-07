@@ -25,6 +25,7 @@ from ..base.alg_record import (
     WorkStatus,
 )
 from ..base.alg_spec import AlgSpec
+from ..cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from ..cumulative import BaseModelBuilder, decode_pf_method
 from ..dispatcher import MixedDispatcher
 from .option import NehCpOption
@@ -271,7 +272,23 @@ class NehCpDispatcher:
                     solver.parameters.max_time_in_seconds = remaining_deadline
                     applied_tl_seconds = remaining_deadline
             solver.parameters.num_workers = option.solver_thread_cnt
-            status = solver.solve(mdl)
+            value_recorder: ObjectiveValueRecorder | None = None
+            if is_last_batch:
+                value_recorder = ObjectiveValueRecorder()
+                status = solver.solve(mdl, solution_callback=value_recorder)
+            else:
+                status = solver.solve(mdl)
+
+            if value_recorder is not None:
+                offset_sec = value_recorder.time_started - start_elapsed
+                for t_rec, vb in value_recorder.entries:
+                    progress_entries.append(
+                        ProgressLogEntry(
+                            elapsed_sec=t_rec + offset_sec,
+                            obj_value=float(vb.value),
+                            obj_bound=None,
+                        )
+                    )
 
             raw_lb = (
                 solver.best_objective_bound
@@ -477,13 +494,6 @@ class NehCpDispatcher:
                     semi_active_obj=semi_active_obj,
                 )
             )
-            progress_entries.append(
-                ProgressLogEntry(
-                    elapsed_sec=step_elapsed_seconds,
-                    obj_value=ub,
-                    obj_bound=sub_obj_lb,
-                )
-            )
             prev_elapsed_seconds = step_elapsed_seconds
             last_obj_value = se + st
 
@@ -532,6 +542,13 @@ class NehCpDispatcher:
                 partial_sol, instance
             )
             obj_value_stop = float(sum_e_stop + sum_t_stop)
+            progress_entries.append(
+                ProgressLogEntry(
+                    elapsed_sec=float(time.monotonic() - start_elapsed),
+                    obj_value=obj_value_stop,
+                    obj_bound=None,
+                )
+            )
             metrics_stopped: dict = {
                 "sum_earliness": sum_e_stop,
                 "sum_tardiness": sum_t_stop,
@@ -564,6 +581,13 @@ class NehCpDispatcher:
         final = partial_sol
         sum_e, sum_t = compute_weighted_earliness_tardiness(final, instance)
         obj_value = float(sum_e + sum_t)
+        progress_entries.append(
+            ProgressLogEntry(
+                elapsed_sec=float(time.monotonic() - start_elapsed),
+                obj_value=obj_value,
+                obj_bound=None,
+            )
+        )
         logger.info(
             "neh_cp: completed all %d batches naturally; obj=%.0f, makespan=%d.",
             len(batches),
