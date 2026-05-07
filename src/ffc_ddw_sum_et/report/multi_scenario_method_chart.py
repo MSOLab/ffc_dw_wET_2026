@@ -35,6 +35,18 @@ def _positive_axis_upper(values: list[float]) -> float:
     return max_value * 1.05
 
 
+def _x_axis_upper(values: list[float]) -> float:
+    if not values:
+        return 1.0
+    return max(1.0, max(values))
+
+
+def _y_axis_lower(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return min(0.0, min(values))
+
+
 def _normalize_scenario_input(
     scenario_input: tuple[str, pd.DataFrame] | dict[str, Any],
 ) -> dict[str, Any]:
@@ -73,7 +85,9 @@ def _prepare_scenario_progression_df(
     work_df = raw_progression_df.copy()
     order_map = {
         name: idx
-        for idx, name in enumerate(pd.unique(order_source_df["subroutine_name"]), start=1)
+        for idx, name in enumerate(
+            pd.unique(order_source_df["subroutine_name"]), start=1
+        )
     }
     work_df["subroutine_order"] = work_df["subroutine_name"].map(order_map)
     return work_df.dropna(subset=["subroutine_order"]).copy()
@@ -97,7 +111,9 @@ def _build_scenario_progression_models(
 
     models: list[dict[str, Any]] = []
     for ins, ep_grp in endpoint_df.groupby("instance_id", sort=True):
-        ep_grp = ep_grp.sort_values(["norm_time", "subroutine_order", "subroutine_name"])
+        ep_grp = ep_grp.sort_values(
+            ["norm_time", "subroutine_order", "subroutine_name"]
+        )
         prog_grp = progression_by_instance.get(str(ins))
         source_grp = ep_grp if prog_grp is None or prog_grp.empty else prog_grp
         models.append(
@@ -222,7 +238,8 @@ def _build_payload(
         all_y.extend(float(y) for y in mean_series["step_y"])
     return {
         "traces": traces,
-        "x_max": _positive_axis_upper(all_x),
+        "x_max": _x_axis_upper(all_x),
+        "y_min": _y_axis_lower(all_y),
         "y_max": _positive_axis_upper(all_y),
     }
 
@@ -310,7 +327,7 @@ _HTML_TEMPLATE = Template("""<!doctype html>
     const layout = {
       title: { text: "Subroutine flow mean over-time RPDf by scenario" },
       xaxis: { title: { text: "Normalized time" }, tickformat: ".$x_percent_decimals%", range: [0, payload.x_max] },
-      yaxis: { title: { text: "Mean RPDf" }, tickformat: ".$y_percent_decimals%", range: [0, payload.y_max] },
+      yaxis: { title: { text: "Mean RPDf" }, tickformat: ".$y_percent_decimals%", range: [payload.y_min, payload.y_max] },
       template: "plotly_white",
       hovermode: "closest",
       legend: { orientation: "h", groupclick: "togglegroup" },
