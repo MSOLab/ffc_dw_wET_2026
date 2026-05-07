@@ -1,0 +1,35 @@
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 1 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260507_one_register_debug
+
+instance_worker_cnt: 2
+
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  - name: run_mcf_lb_4
+    timelimit: 30.0
+    output_subdir: run_mcf_lb_4
+    subroutine_flow:
+      - method: run_mcf_lb_4
+        last_stage_only_cp_solver_thread_cnt: 4
+        last_stage_only_tl: 5.0
+        full_cp_solver_thread_cnt: 4
+        full_cp_tl: 10.0
+
+  - name: calc_mcf_lb_and_derive_full_sch
+    timelimit: 30.0
+    output_subdir: calc_mcf_lb_and_derive_full_sch
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: true
+        adjust_r: true

@@ -153,14 +153,14 @@ def test_build_full_sch_from_last_stage_only_sch() -> None:
     report = controller.build_full_sch_from_last_stage_only_sch()
 
     assert report.obj_value is not None
-    assert report.obj_bound == 0.0
+    assert report.obj_bound is None
     assert report.elapsed_time >= 0
 
     incumbent = controller.solution_manager.get_incumbent()
     assert incumbent is not None
     assert incumbent.schedule is not None
     assert incumbent.obj_value == report.obj_value
-    assert incumbent.obj_bound == 0.0
+    assert incumbent.obj_bound is None
 
     # Every instance job must be scheduled at every stage.
     for stage_id in instance.stage_id_list:
@@ -216,7 +216,7 @@ def test_heuristic_last_stage_only_sch_then_build_full() -> None:
     report = controller.build_full_sch_from_last_stage_only_sch()
 
     assert report.obj_value is not None
-    assert report.obj_bound == 0.0
+    assert report.obj_bound is None
 
     incumbent = controller.solution_manager.get_incumbent()
     assert incumbent is not None
