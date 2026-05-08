@@ -49,15 +49,15 @@ logger = logging.getLogger(__name__)
 
 
 def _rpdf(obj: float, ref: float) -> float:
-    """RPDf = 2 * (obj - ref) / (obj + ref). NaN when undefined.
+    """RPDf = (obj - ref) / ((obj + ref) / 2).
 
-    Returning ``NaN`` (rather than ``0.0``) for the degenerate
-    ``obj + ref == 0`` case ensures the row is excluded by downstream
-    pandas operations (``dropna`` etc.) instead of being plotted as a
-    real "matched baseline" zero — which would silently bias the chart.
+    ``obj == ref == 0`` → 0.0 by definition (both solutions are equally zero).
+    ``obj + ref == 0`` but ``obj != ref`` → NaN (undefined; excluded by dropna).
     """
     denom = obj + ref
-    return math.nan if denom == 0 else 2 * (obj - ref) / denom
+    if denom == 0:
+        return 0.0 if obj == ref else math.nan
+    return 2 * (obj - ref) / denom
 
 
 def load_baseline_df(
