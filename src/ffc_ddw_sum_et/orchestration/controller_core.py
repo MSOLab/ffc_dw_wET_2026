@@ -94,15 +94,6 @@ class FFcDDWSubroutineControllerCore(
             CalcMcfLbAndDeriveFullSchDiagnostic | None
         ) = None
         self.last_stage_only_sol: FFcDDWSolution | None = None
-        # Composite-step hand-off slot for ``adjust_*_by_full_sch_*`` fallback.
-        # When a composite (e.g. ``calc_mcf_lb_and_derive_full_sch``) builds an
-        # intermediate full schedule it has not yet registered as incumbent,
-        # it stores it here so subsequent ``apply_lb_by_mcf`` /
-        # ``heuristic_last_stage_only_sch_from_mcf_lb`` calls invoked with
-        # ``adjust_*_by_full_sch_*`` flags can read the reference makespan
-        # without going through ``solution_manager.get_incumbent()``. The
-        # composite clears this back to ``None`` before returning.
-        self.adjust_ref_full_sol: FFcDDWSolution | None = None
         # `p_increment` value used by the producing step; ``None`` until the
         # step has run. When non-zero, the recorded MCF preemptive schedule
         # / last-stage-only solution belong to an *augmented* problem (last

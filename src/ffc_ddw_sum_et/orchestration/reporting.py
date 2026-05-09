@@ -138,6 +138,7 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
     title = _build_gantt_title(data, png_path, makespan=makespan)
 
     try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
         GanttPlotter().export(
             png_path,
             start_map,
@@ -216,6 +217,7 @@ def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
     is_preemptive = K.SEGMENTS in data
 
     try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
         if is_preemptive:
             segment_records = data.get(K.SEGMENTS) or []
             if not segment_records:
@@ -1549,6 +1551,37 @@ class FFcDDWReporter:
                                 ),
                             )
                         )
+                # Round-nested ``calc_mcf_lb_phase_schedule`` JSONs live under
+                # ``progress/<inst>/calc_mcf_lb_and_derive_full_sch/<round>/<n>_<label>.json``.
+                # ``find_artifacts`` substitutes ``*`` for the unspecified
+                # ``{round}`` / ``{index}`` / ``{label}`` placeholders so the
+                # 2-level glob ``calc_mcf_lb_and_derive_full_sch/*/*_*.json``
+                # picks them up. Re-derive ``round`` / ``index`` / ``label``
+                # from the path so the paired PNG path resolves.
+                for phase_json in self.layout.find_artifacts(
+                    "calc_mcf_lb_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
+                ):
+                    round_part = phase_json.parent.name
+                    stem = phase_json.stem
+                    sep = stem.find("_")
+                    if sep <= 0:
+                        continue
+                    index_str, label = stem[:sep], stem[sep + 1 :]
+                    jobs.append(
+                        (
+                            _render_phase_gantt_from_json,
+                            phase_json,
+                            self.layout.artifact_path(
+                                "calc_mcf_lb_phase_gantt_png",
+                                round=round_part,
+                                index=index_str,
+                                label=label,
+                                **scope,
+                            ),
+                        )
+                    )
 
         gantt_count = len(jobs)
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the

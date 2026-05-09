@@ -23,6 +23,10 @@ from .lb_last_stage_pmtn import (
     apply_lb_by_mcf,
     solve_mcf_lb,
 )
+from .mcf_lb_pipeline import (
+    CalcMcfLbAndDeriveFullSchResult,
+    calc_mcf_lb_and_derive_full_sch,
+)
 from .option import MCFLBOption
 
 __all__ = [
@@ -30,6 +34,7 @@ __all__ = [
     "BuildFullSchDiagnostic",
     "BuildFullSchResult",
     "CalcMcfLbAndDeriveFullSchDiagnostic",
+    "CalcMcfLbAndDeriveFullSchResult",
     "HeuristicLastStageOnlyDiagnostic",
     "HeuristicLastStageOnlyResult",
     "MCFLBDiagnostic",
@@ -39,6 +44,7 @@ __all__ = [
     "Phase3State",
     "apply_lb_by_mcf",
     "build_full_sch_from_last_stage_only_sch",
+    "calc_mcf_lb_and_derive_full_sch",
     "heuristic_last_stage_only_from_mcf_lb",
     "reverse_dispatch_full_schedule",
     "solve_mcf_lb",

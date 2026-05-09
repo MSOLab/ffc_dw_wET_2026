@@ -33,6 +33,7 @@ from ffc_ddw_sum_et.algorithm.flip_makespan_cp import (
 from ffc_ddw_sum_et.algorithm.mcf_lb import (
     BuildFullSchDiagnostic,
     CalcMcfLbAndDeriveFullSchDiagnostic,
+    CalcMcfLbAndDeriveFullSchResult,
     HeuristicLastStageOnlyDiagnostic,
     MCFLBDiagnostic,
 )
@@ -46,6 +47,11 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.lb_last_stage_pmtn import (
     MCFLBStopRequested,
     apply_lb_by_mcf as algo_apply_lb_by_mcf,
 )
+from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
+    calc_mcf_lb_and_derive_full_sch as algo_calc_mcf_lb_and_derive_full_sch,
+)
+from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
+from ffc_ddw_sum_et.solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpBatchTlMode,
     NehCpDispatcher,
@@ -62,12 +68,10 @@ from ffc_ddw_sum_et.solution.objectives import (
 )
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
-from .controller_core import FFcDDWSubroutineControllerCore
+from .controller_core import FFcDDWSubroutineControllerCore, MCFLBPhaseSchedule
 from .mcf_lb_phase_labels import (
-    MCF_LB_LOCAL_NAME_RE,
     MCF_LB_R1_LABEL_ORDER,
     MCF_LB_R2_LABEL_ORDER,
-    MCF_LB_ROUND_RE,
 )
 from .solution_manager import FFcDDWSolution
 from .value_resolver import resolve_value_expr
@@ -459,12 +463,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_increment: int = 0,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
-        adjust_p_by_full_sch_and_last_stage_only_pmtn_sch: bool = False,
-        adjust_r_by_full_sch_and_last_stage_only_pmtn_sch: bool = False,
-        adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
-        adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
-        adjust_r_by_half: bool = False,
-        _register_report: bool = True,
     ) -> SubroutineReport:
         """Step method: compute the MCF preemptive lower bound and report it
         without constructing a feasible full schedule.
@@ -534,151 +532,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 f"r_increment must be 0 or a positive integer; got {r_increment}."
             )
 
-        uses_ls_only_pmtn = (
-            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch
-            or adjust_r_by_full_sch_and_last_stage_only_pmtn_sch
-        )
-        uses_ls_only_full = (
-            adjust_p_by_full_sch_and_last_stage_only_sch
-            or adjust_r_by_full_sch_and_last_stage_only_sch
-        )
-        if uses_ls_only_pmtn and uses_ls_only_full:
-            raise ValueError(
-                "apply_lb_by_mcf: cannot combine "
-                "adjust_*_by_full_sch_and_last_stage_only_pmtn_sch with "
-                "adjust_*_by_full_sch_and_last_stage_only_sch in a "
-                "single call; pick one reference schedule."
-            )
-
-        ls_only_pmtn_makespan: int | None = None
-        ls_only_makespan: int | None = None
-        incumbent_makespan: int | None = None
-        makespan_delta: int | None = None
-
-        def _ensure_makespans() -> None:
-            nonlocal incumbent_makespan, ls_only_pmtn_makespan
-            nonlocal ls_only_makespan, makespan_delta
-            if makespan_delta is not None:
-                return
-            ref_sol = self.adjust_ref_full_sol
-            if ref_sol is None:
-                ref_sol = self.solution_manager.get_incumbent()
-            if ref_sol is None or ref_sol.schedule is None:
-                raise ValueError(
-                    "apply_lb_by_mcf with "
-                    "adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch"
-                    "=True requires either self.adjust_ref_full_sol or an "
-                    "incumbent schedule on self.solution_manager."
-                )
-            incumbent_makespan = int(ref_sol.schedule.makespan)
-            if uses_ls_only_pmtn:
-                if self.mcf_preemptive_schedule is None:
-                    raise ValueError(
-                        "apply_lb_by_mcf with "
-                        "adjust_(p|r)_by_full_sch_and_last_stage_only_pmtn_sch"
-                        "=True requires self.mcf_preemptive_schedule set by a "
-                        "prior step."
-                    )
-                ls_only_pmtn_makespan = int(self.mcf_preemptive_schedule.makespan)
-                makespan_delta = max(incumbent_makespan - ls_only_pmtn_makespan, 0)
-            else:
-                if (
-                    self.last_stage_only_sol is None
-                    or self.last_stage_only_sol.schedule is None
-                ):
-                    raise ValueError(
-                        "apply_lb_by_mcf with "
-                        "adjust_(p|r)_by_full_sch_and_last_stage_only_sch=True "
-                        "requires self.last_stage_only_sol.schedule set by a "
-                        "prior step."
-                    )
-                ls_only_makespan = int(self.last_stage_only_sol.schedule.makespan)
-                makespan_delta = max(incumbent_makespan - ls_only_makespan, 0)
-
-        ref_label = "ls_only_pmtn" if uses_ls_only_pmtn else "ls_only"
-
-        effective_p_increment = p_increment
-        p_adjust = 0
-        fire_p = (
-            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch
-            or adjust_p_by_full_sch_and_last_stage_only_sch
-        )
-        if fire_p:
-            _ensure_makespans()
-            n = self.instance.job_count
-            m_last = self.instance.last_stage_mc_count
-            p_adjust = math.ceil(makespan_delta * m_last / n)
-            ref_value = ls_only_pmtn_makespan if uses_ls_only_pmtn else ls_only_makespan
-            self.logger.info(
-                "apply_lb_by_mcf: adjust_p_by_full_sch_and_last_stage_%s_sch=True, "
-                "incumbent makespan=%d, %s makespan=%d, delta=%d, "
-                "n=%d, m_last=%d, p_adjust=%d",
-                ref_label,
-                incumbent_makespan,
-                ref_label,
-                ref_value,
-                makespan_delta,
-                n,
-                m_last,
-                p_adjust,
-            )
-            effective_p_increment = p_increment + p_adjust
-
-        effective_r_increment = r_increment
-        r_adjust = 0
-        fire_r = (
-            adjust_r_by_full_sch_and_last_stage_only_pmtn_sch
-            or adjust_r_by_full_sch_and_last_stage_only_sch
-        )
-        if fire_r:
-            _ensure_makespans()
-            r_adjust = makespan_delta
-            if adjust_r_by_half:
-                r_adjust = math.ceil(makespan_delta / 2)
-            ref_value = ls_only_pmtn_makespan if uses_ls_only_pmtn else ls_only_makespan
-            self.logger.info(
-                "apply_lb_by_mcf: adjust_r_by_full_sch_and_last_stage_%s_sch=True, "
-                "incumbent makespan=%d, %s makespan=%d, delta=%d, "
-                "r_adjust=%d",
-                ref_label,
-                incumbent_makespan,
-                ref_label,
-                ref_value,
-                makespan_delta,
-                r_adjust,
-            )
-            effective_r_increment = r_increment + r_adjust
-
         start_elapsed = time.monotonic()
-        # Diagnostic is created only when this method is invoked as a
-        # top-level subroutine flow step. Composite drivers
-        # (``_register_report=False``) own their own diagnostic and do
-        # not let leaf-method invocations clobber it.
         prev_diag = self.mcf_lb_diagnostic
-        diag: MCFLBDiagnostic | None
-        if _register_report:
-            diag = MCFLBDiagnostic(
-                p_increment_used=effective_p_increment,
-                r_multiplier_used=r_multiplier,
-                r_increment_used=effective_r_increment,
-            )
-            self.mcf_lb_diagnostic = diag
-        else:
-            diag = None
+        diag = MCFLBDiagnostic(
+            p_increment_used=p_increment,
+            r_multiplier_used=r_multiplier,
+            r_increment_used=r_increment,
+        )
+        self.mcf_lb_diagnostic = diag
 
-        if r_multiplier != 1.0 or effective_r_increment != 0:
+        if r_multiplier != 1.0 or r_increment != 0:
             self._log_effective_release_stats(
                 "apply_lb_by_mcf",
                 r_multiplier=r_multiplier,
-                r_increment=effective_r_increment,
+                r_increment=r_increment,
             )
 
         try:
             result = algo_apply_lb_by_mcf(
                 self.instance,
-                p_increment=effective_p_increment,
+                p_increment=p_increment,
                 r_multiplier=r_multiplier,
-                r_increment=effective_r_increment,
+                r_increment=r_increment,
                 draw_heatmap=draw_heatmap,
                 heatmap_sort=heatmap_sort,
                 heatmap_yaml_path=(
@@ -695,28 +570,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "apply_lb_by_mcf: stop predicate fired before MCF solve; skipping."
             )
             return self._make_stop_report(start_elapsed)
-        if diag is not None:
-            diag.mcf_lb = result.mcf_lb
-            diag.mcf_solve_sec = result.mcf_solve_sec
+        diag.mcf_lb = result.mcf_lb
+        diag.mcf_solve_sec = result.mcf_solve_sec
 
         self.mcf_preemptive_schedule = result.mcf_preemptive_schedule
-        self.mcf_preemptive_sch_p_increment = effective_p_increment
-        # Composite drivers (``_register_report=False``) own the phase list
-        # and clear it once at composite entry; clearing here would wipe
-        # snapshots produced by an earlier round of the composite.
-        if _register_report:
-            self.mcf_lb_phase_schedules.clear()
+        self.mcf_preemptive_sch_p_increment = p_increment
+        self.mcf_lb_phase_schedules.clear()
         self._record_mcf_lb_phase(("1_mcf_preemptive", result.mcf_preemptive_schedule))
 
         self.logger.info(
-            "apply_lb_by_mcf: MCF LB = %d, p_increment=%d (effective=%d), "
-            "r_multiplier=%.4g, r_increment=%d (effective=%d)",
+            "apply_lb_by_mcf: MCF LB = %d, p_increment=%d, "
+            "r_multiplier=%.4g, r_increment=%d",
             int(result.mcf_lb),
             p_increment,
-            effective_p_increment,
             r_multiplier,
             r_increment,
-            effective_r_increment,
         )
 
         elapsed = time.monotonic() - start_elapsed
@@ -725,8 +593,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=None,
             obj_bound=(result.mcf_lb if result.obj_bound_is_valid else None),
         )
-        if _register_report:
-            self._register(report, None)
+        self._register(report, None)
         return report
 
     def heuristic_last_stage_only_sch_from_mcf_lb(
@@ -736,12 +603,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_increment: int = 0,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
-        adjust_p_by_full_sch_and_last_stage_only_pmtn_sch: bool = False,
-        adjust_r_by_full_sch_and_last_stage_only_pmtn_sch: bool = False,
-        adjust_p_by_full_sch_and_last_stage_only_sch: bool = False,
-        adjust_r_by_full_sch_and_last_stage_only_sch: bool = False,
-        adjust_r_by_half: bool = False,
-        _register_report: bool = True,
     ) -> SubroutineReport:
         """Step method: midpoint warm-start across all jobs from the MCF
         preemptive LB, then a CP-free heuristic refinement
@@ -811,148 +672,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "apply_lb_by_mcf step to populate self.mcf_preemptive_schedule."
             )
 
-        uses_ls_only_pmtn = (
-            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch
-            or adjust_r_by_full_sch_and_last_stage_only_pmtn_sch
+        h_diag = HeuristicLastStageOnlyDiagnostic(
+            p_increment_used=p_increment,
+            r_multiplier_used=r_multiplier,
+            r_increment_used=r_increment,
         )
-        uses_ls_only_full = (
-            adjust_p_by_full_sch_and_last_stage_only_sch
-            or adjust_r_by_full_sch_and_last_stage_only_sch
-        )
-        if uses_ls_only_pmtn and uses_ls_only_full:
-            raise ValueError(
-                "heuristic_last_stage_only_sch_from_mcf_lb: cannot combine "
-                "adjust_*_by_full_sch_and_last_stage_only_pmtn_sch with "
-                "adjust_*_by_full_sch_and_last_stage_only_sch in a "
-                "single call; pick one reference schedule."
-            )
+        self.heuristic_last_stage_only_diagnostic = h_diag
 
-        ls_only_pmtn_makespan: int | None = None
-        ls_only_makespan: int | None = None
-        incumbent_makespan: int | None = None
-        makespan_delta: int | None = None
-
-        def _ensure_makespans() -> None:
-            nonlocal incumbent_makespan, ls_only_pmtn_makespan
-            nonlocal ls_only_makespan, makespan_delta
-            if makespan_delta is not None:
-                return
-            ref_sol = self.adjust_ref_full_sol
-            if ref_sol is None:
-                ref_sol = self.solution_manager.get_incumbent()
-            if ref_sol is None or ref_sol.schedule is None:
-                raise ValueError(
-                    "heuristic_last_stage_only_sch_from_mcf_lb with "
-                    "adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch"
-                    "=True requires either self.adjust_ref_full_sol or an "
-                    "incumbent schedule on self.solution_manager."
-                )
-            incumbent_makespan = int(ref_sol.schedule.makespan)
-            if uses_ls_only_pmtn:
-                # self.mcf_preemptive_schedule presence already enforced by the
-                # method-level precondition above.
-                ls_only_pmtn_makespan = int(self.mcf_preemptive_schedule.makespan)
-                makespan_delta = max(incumbent_makespan - ls_only_pmtn_makespan, 0)
-            else:
-                if (
-                    self.last_stage_only_sol is None
-                    or self.last_stage_only_sol.schedule is None
-                ):
-                    raise ValueError(
-                        "heuristic_last_stage_only_sch_from_mcf_lb with "
-                        "adjust_(p|r)_by_full_sch_and_last_stage_only_sch=True "
-                        "requires self.last_stage_only_sol.schedule set by a "
-                        "prior step."
-                    )
-                ls_only_makespan = int(self.last_stage_only_sol.schedule.makespan)
-                makespan_delta = max(incumbent_makespan - ls_only_makespan, 0)
-
-        ref_label = "ls_only_pmtn" if uses_ls_only_pmtn else "ls_only"
-
-        effective_p_increment = p_increment
-        p_adjust = 0
-        fire_p = (
-            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch
-            or adjust_p_by_full_sch_and_last_stage_only_sch
-        )
-        if fire_p:
-            _ensure_makespans()
-            n = self.instance.job_count
-            m_last = self.instance.last_stage_mc_count
-            p_adjust = math.ceil(makespan_delta * m_last / n)
-            ref_value = ls_only_pmtn_makespan if uses_ls_only_pmtn else ls_only_makespan
-            self.logger.info(
-                "heuristic_last_stage_only_sch_from_mcf_lb: "
-                "adjust_p_by_full_sch_and_last_stage_%s_sch=True, "
-                "incumbent makespan=%d, %s makespan=%d, delta=%d, "
-                "n=%d, m_last=%d, p_adjust=%d",
-                ref_label,
-                incumbent_makespan,
-                ref_label,
-                ref_value,
-                makespan_delta,
-                n,
-                m_last,
-                p_adjust,
-            )
-            effective_p_increment = p_increment + p_adjust
-
-        effective_r_increment = r_increment
-        r_adjust = 0
-        fire_r = (
-            adjust_r_by_full_sch_and_last_stage_only_pmtn_sch
-            or adjust_r_by_full_sch_and_last_stage_only_sch
-        )
-        if fire_r:
-            _ensure_makespans()
-            r_adjust = makespan_delta
-            if adjust_r_by_half:
-                r_adjust = math.ceil(makespan_delta / 2)
-            ref_value = ls_only_pmtn_makespan if uses_ls_only_pmtn else ls_only_makespan
-            self.logger.info(
-                "heuristic_last_stage_only_sch_from_mcf_lb: "
-                "adjust_r_by_full_sch_and_last_stage_%s_sch=True, "
-                "incumbent makespan=%d, %s makespan=%d, delta=%d, "
-                "r_adjust=%d",
-                ref_label,
-                incumbent_makespan,
-                ref_label,
-                ref_value,
-                makespan_delta,
-                r_adjust,
-            )
-            effective_r_increment = r_increment + r_adjust
-
-        # Build the per-call diagnostic only when this method is invoked
-        # as a top-level subroutine flow step. Composite drivers
-        # (``_register_report=False``) own their own diagnostic.
-        h_diag: HeuristicLastStageOnlyDiagnostic | None
-        if _register_report:
-            h_diag = HeuristicLastStageOnlyDiagnostic(
-                p_increment_used=effective_p_increment,
-                r_multiplier_used=r_multiplier,
-                r_increment_used=effective_r_increment,
-            )
-            if uses_ls_only_pmtn or uses_ls_only_full:
-                h_diag.incumbent_makespan = incumbent_makespan
-                if uses_ls_only_pmtn:
-                    h_diag.last_stage_only_pmtn_makespan = ls_only_pmtn_makespan
-                else:
-                    h_diag.last_stage_only_makespan = ls_only_makespan
-                h_diag.makespan_delta = makespan_delta
-            if fire_p:
-                h_diag.p_increment_added = p_adjust
-            if fire_r:
-                h_diag.r_increment_added = r_adjust
-            self.heuristic_last_stage_only_diagnostic = h_diag
-        else:
-            h_diag = None
-
-        if r_multiplier != 1.0 or effective_r_increment != 0:
+        if r_multiplier != 1.0 or r_increment != 0:
             self._log_effective_release_stats(
                 "heuristic_last_stage_only_sch_from_mcf_lb",
                 r_multiplier=r_multiplier,
-                r_increment=effective_r_increment,
+                r_increment=r_increment,
             )
 
         result = heuristic_last_stage_only_from_mcf_lb(
@@ -961,9 +692,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             logger=self.logger,
             job_priority=job_priority,
             placement_priority=placement_priority,
-            p_increment=effective_p_increment,
+            p_increment=p_increment,
             r_multiplier=r_multiplier,
-            r_increment=effective_r_increment,
+            r_increment=r_increment,
         )
 
         self.last_stage_only_sol = FFcDDWSolution(
@@ -971,7 +702,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.obj_value,
             obj_bound=None,
         )
-        self.last_stage_only_sol_p_increment = effective_p_increment
+        self.last_stage_only_sol_p_increment = p_increment
         self._record_mcf_lb_phases(
             [(f"2_{label}", sched) for label, sched in result.intermediate_schedules]
         )
@@ -979,31 +710,27 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ("3_lastS_only_from_mcf_lb_after_sa_iti", result.schedule)
         )
 
-        if h_diag is not None:
-            h_diag.status = result.status
-            h_diag.obj_value = result.obj_value
-            h_diag.elapsed_sec = result.elapsed_time
+        h_diag.status = result.status
+        h_diag.obj_value = result.obj_value
+        h_diag.elapsed_sec = result.elapsed_time
 
         self.logger.info(
             "heuristic_last_stage_only_sch_from_mcf_lb: status=%s, "
-            "obj=%.2f, elapsed=%.2fs, p_increment=%d (effective=%d), "
-            "r_multiplier=%.4g, r_increment=%d (effective=%d).",
+            "obj=%.2f, elapsed=%.2fs, p_increment=%d, "
+            "r_multiplier=%.4g, r_increment=%d.",
             result.status,
             result.obj_value,
             result.elapsed_time,
             p_increment,
-            effective_p_increment,
             r_multiplier,
             r_increment,
-            effective_r_increment,
         )
         report = SubroutineReport(
             elapsed_time=result.elapsed_time,
             obj_value=result.obj_value,
             obj_bound=None,
         )
-        if _register_report:
-            self._register(report, None)
+        self._register(report, None)
         return report
 
     def build_full_sch_from_last_stage_only_sch(
@@ -1014,12 +741,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         (Phase 3 of the MCF-LB pipeline applied standalone).
 
         Pre-condition (else ``ValueError``): ``self.last_stage_only_sol`` is
-        set by a prior ``heuristic_last_stage_only_sch_from_mcf_lb`` call
-        (or the equivalent sub-call inside
-        ``calc_mcf_lb_and_derive_full_sch``).
+        set by a prior ``heuristic_last_stage_only_sch_from_mcf_lb`` call.
 
         The reversed dispatcher is run twice (``machine_then_job=False``
-        and ``machine_then_job=True``) in `reverse_dispatch_full_schedule`;
+        and ``machine_then_job=True``) in ``reverse_dispatch_full_schedule``;
         the candidate with the shorter makespan is unflipped.
 
         Side effects:
@@ -1043,27 +768,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             global LB; callers chain ``apply_lb_by_mcf`` earlier in the
             flow when an LB is needed.
         """
-        report, solution = self._build_full_sch_core()
-        b_diag = BuildFullSchDiagnostic(
-            dispatched_obj=report.obj_value,
-            full_sch_makespan=(
-                int(solution.schedule.makespan)
-                if solution is not None and solution.schedule is not None
-                else None
-            ),
-            dispatch_sec=report.elapsed_time,
-        )
-        self.build_full_sch_diagnostic = b_diag
-        self._register(report, solution)
-        return report
-
-    def _build_full_sch_core(
-        self,
-    ) -> tuple[SubroutineReport, FFcDDWSolution | None]:
-        """Compute the full schedule from ``self.last_stage_only_sol`` without
-        registering. Returns ``(report, solution_or_none)`` so callers can
-        choose when to register (composite steps register once at the end).
-        """
         if self.last_stage_only_sol is None:
             raise ValueError(
                 "build_full_sch_from_last_stage_only_sch requires "
@@ -1085,14 +789,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "build_full_sch_from_last_stage_only_sch: reverse-dispatch "
                 "produced no schedule"
             )
-            return (
-                SubroutineReport(
-                    elapsed_time=result.dispatch_sec,
-                    obj_value=None,
-                    obj_bound=None,
-                ),
-                None,
+            report = SubroutineReport(
+                elapsed_time=result.dispatch_sec,
+                obj_value=None,
+                obj_bound=None,
             )
+            self.build_full_sch_diagnostic = BuildFullSchDiagnostic(
+                dispatched_obj=None,
+                full_sch_makespan=None,
+                dispatch_sec=result.dispatch_sec,
+            )
+            self._register(report, None)
+            return report
 
         for label, sched in result.intermediate_schedules:
             self._record_mcf_lb_phase(
@@ -1116,17 +824,27 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_value=result.dispatched_obj,
             obj_bound=None,
         )
-        return report, solution
+        self.build_full_sch_diagnostic = BuildFullSchDiagnostic(
+            dispatched_obj=result.dispatched_obj,
+            full_sch_makespan=int(result.schedule.makespan),
+            dispatch_sec=result.dispatch_sec,
+        )
+        self._register(report, solution)
+        return report
 
-    def _emit_calc_mcf_lb_phase_metrics_csv(self) -> None:
-        """Write per-instance wET / makespan CSVs for the snapshots recorded
-        under the current ``calc_mcf_lb_and_derive_full_sch`` call.
+    def _emit_calc_mcf_lb_phase_metrics_csv(
+        self, result: CalcMcfLbAndDeriveFullSchResult
+    ) -> None:
+        """Write per-instance wET / makespan CSVs from a composite result.
 
-        Always-on (gated only by artifact layout availability). When the
-        controller is running without a layout (tests, scripted use), the
-        method silently no-ops. Round-2 cells are blank when round 2 did
-        not run; wET cells are blank for snapshots living on the reversed
-        instance (``flipped``, ``fullS_before_unflip``).
+        Iterates ``r1_phase_schedules`` / ``r2_phase_schedules`` directly
+        (no regex parsing). Strips the ``"<n>_"`` index prefix to recover
+        the unprefixed label, then looks each label up against
+        ``MCF_LB_R1_LABEL_ORDER`` / ``MCF_LB_R2_LABEL_ORDER``. Silently
+        no-ops when the controller has no artifact layout bound (tests,
+        scripted use). Round-2 cells are blank when round 2 did not run;
+        wET cells are blank for reversed-instance snapshots (``flipped``,
+        ``fullS_before_unflip``).
         """
         layout = self._artifact_layout
         scenario = self._artifact_scenario_name
@@ -1134,18 +852,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if layout is None or scenario is None or instance is None:
             return
 
-        per_round: dict[str, dict[str, object]] = {"r1": {}, "r2": {}}
-        for full_name, sched in self.mcf_lb_phase_schedules:
-            round_match = MCF_LB_ROUND_RE.search(full_name)
-            local_match = MCF_LB_LOCAL_NAME_RE.search(full_name)
-            if round_match is None or local_match is None:
-                continue
-            round_key = f"r{round_match.group(1)}"
-            label = local_match.group(2)
-            # First writer wins; later snapshots with the same label are
-            # ignored. The composite's recording order matches the
-            # user-spec order, so this is a no-op in practice.
-            per_round[round_key].setdefault(label, sched)
+        def _strip_index(label: str) -> str:
+            sep = label.find("_")
+            return label[sep + 1 :] if sep >= 0 else label
+
+        per_round: dict[str, dict[str, MCFLBPhaseSchedule]] = {
+            "r1": {
+                _strip_index(lbl): sched for lbl, sched in result.r1_phase_schedules
+            },
+            "r2": {
+                _strip_index(lbl): sched for lbl, sched in result.r2_phase_schedules
+            },
+        }
 
         obj_path = layout.artifact_path(
             "mcf_lb_phase_obj_csv",
@@ -1185,6 +903,129 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             for r, label, _, ms_cell in rows:
                 writer.writerow([r, label, ms_cell])
 
+    def _emit_calc_mcf_lb_phase_schedule_jsons(
+        self, result: CalcMcfLbAndDeriveFullSchResult
+    ) -> None:
+        """Dump per-round JSON snapshots from a composite result under
+        ``progress/<scenario>/<instance>/calc_mcf_lb_and_derive_full_sch/<round>/``.
+
+        Mirrors the runner's flat dispatcher
+        (`MCFPreemptiveSchedule` → ``dump_preemptive_schedule_json``;
+        `FFcSchedule` → ``dump_solution_json``) but resolves paths via
+        the ``calc_mcf_lb_phase_schedule`` artifact kind so the on-disk
+        layout is round-nested. Silently no-ops without a bound layout.
+        """
+        layout = self._artifact_layout
+        scenario = self._artifact_scenario_name
+        instance = self._artifact_instance_name
+        if layout is None or scenario is None or instance is None:
+            return
+
+        for round_key, items in (
+            ("r1", result.r1_phase_schedules),
+            ("r2", result.r2_phase_schedules),
+        ):
+            for prefixed_label, sched in items:
+                if sched is None:
+                    continue
+                sep = prefixed_label.find("_")
+                if sep < 0:
+                    continue
+                index_str, label = prefixed_label[:sep], prefixed_label[sep + 1 :]
+                json_path = layout.artifact_path(
+                    "calc_mcf_lb_phase_schedule",
+                    scenario_name=scenario,
+                    instance_name=instance,
+                    round=round_key,
+                    index=index_str,
+                    label=label,
+                )
+                json_path.parent.mkdir(parents=True, exist_ok=True)
+                phase_obj = compute_phase_obj_value(sched, self.instance)
+                if isinstance(sched, MCFPreemptiveSchedule):
+                    dump_preemptive_schedule_json(
+                        json_path,
+                        instance_name=instance,
+                        stage_id=sched.stage_id,
+                        machines=sched.machines,
+                        jobs=self.instance.job_id_list,
+                        segments=sched.to_gantt_segments(),
+                        all_jobs=self.instance.job_id_list,
+                        obj_value=phase_obj,
+                        compact=True,
+                    )
+                else:
+                    dump_solution_json(
+                        sched,
+                        json_path,
+                        instance_name=instance,
+                        obj_value=phase_obj,
+                        compact=True,
+                    )
+
+    def _emit_calc_mcf_lb_makespan_delta_yaml(
+        self,
+        result: CalcMcfLbAndDeriveFullSchResult,
+    ) -> None:
+        """Write the ``r1/makespan_delta.yaml`` sidecar from a composite
+        result. Always written when an artifact layout is bound, so the
+        Rep3-style ``delta <= 0`` rows are auditable on disk even when
+        round 2 produced no JSON snapshots.
+
+        Six fields:
+          - ``lastStageOnlyPmtnMakespan`` from the r1 MCF preemptive
+            schedule.
+          - ``lastStageOnlyMakespan`` from the r1 heuristic's final
+            (post-sa-iti) schedule.
+          - ``incumbentMakespan`` from the r1 full schedule.
+          - ``makespanDelta`` (signed; can be negative).
+          - ``pIncrementAdded`` / ``rIncrementAdded`` mirror the
+            run-level ``adjust_params_by_makespan_delta_csv`` semantics:
+            ``None`` when round 2 did not run, the actual increment
+            (which is 0 when the matching ``adjust_*`` flag was off
+            but round 2 still ran for the other knob) otherwise.
+        """
+        layout = self._artifact_layout
+        scenario = self._artifact_scenario_name
+        instance = self._artifact_instance_name
+        if layout is None or scenario is None or instance is None:
+            return
+
+        last_stage_only_pmtn_makespan = (
+            int(result.r1_apply.mcf_preemptive_schedule.makespan)
+            if result.r1_apply is not None
+            else None
+        )
+        last_stage_only_makespan = (
+            int(result.r1_heuristic.schedule.makespan)
+            if result.r1_heuristic is not None
+            else None
+        )
+        incumbent_makespan = (
+            int(result.r1_build_full.schedule.makespan)
+            if result.r1_build_full is not None
+            and result.r1_build_full.schedule is not None
+            else None
+        )
+        p_increment_added = result.r2_p_increment if result.r2_ran else None
+        r_increment_added = result.r2_r_increment if result.r2_ran else None
+
+        payload = {
+            "lastStageOnlyPmtnMakespan": last_stage_only_pmtn_makespan,
+            "lastStageOnlyMakespan": last_stage_only_makespan,
+            "incumbentMakespan": incumbent_makespan,
+            "makespanDelta": result.makespan_delta,
+            "pIncrementAdded": p_increment_added,
+            "rIncrementAdded": r_increment_added,
+        }
+        out_path = layout.artifact_path(
+            "calc_mcf_lb_makespan_delta_yaml",
+            scenario_name=scenario,
+            instance_name=instance,
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_yaml(payload, out_path)
+
     def calc_mcf_lb_and_derive_full_sch(
         self,
         draw_pmtn_sch_heatmap: bool = False,
@@ -1198,253 +1039,186 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """Composite step: MCF-LB → full schedule, then a conditional
         second round with p/r adjustments.
 
-        Round 1 always runs (via the no-register internals
-        ``apply_lb_by_mcf(_register_report=False)``,
-        ``heuristic_last_stage_only_sch_from_mcf_lb(_register_report=False)``,
-        ``_build_full_sch_core``). Each round's chain runs inside
-        ``self.temporarily_extended_context("r1" | "r2")`` so the
-        recorded ``mcf_lb_phase_schedules`` entries are namespaced and
-        round 2's recordings do not overwrite round 1's.
+        Thin wrapper around the algorithm-side
+        ``mcf_lb_pipeline.calc_mcf_lb_and_derive_full_sch`` pipeline.
+        Round 1 always runs (no augmentation, so the resulting MCF LB
+        is a valid global bound on the original instance). Round 2 runs
+        only when ``(adjust_p or adjust_r)`` is True, the stop predicate
+        is False, r1 produced a full schedule, AND the signed makespan
+        delta ``r1_full_sch_makespan − r1_ls_only_pmtn_makespan`` is
+        strictly positive (raw, no clamp at zero — Rep3 fix preserves
+        the negative delta on the diagnostic for downstream auditing).
 
-        Round 2 runs **only when both** of the following hold:
-          * ``adjust_p or adjust_r`` is ``True``;
-          * ``makespan_delta = round1_makespan -
-            self.mcf_preemptive_schedule.makespan > 0`` (computed with no
-            ``max(..., 0)`` clamp; this differs from the per-step
-            ``adjust_*`` flags on ``apply_lb_by_mcf`` /
-            ``heuristic_last_stage_only_sch_from_mcf_lb``, which clamp
-            their internal delta at zero).
-
-        Registers exactly once per call: a single synthesized
-        ``SubroutineReport`` whose ``obj_bound`` carries round 1's MCF LB
-        and whose paired solution is the better of round 1 / round 2
+        Registers exactly once per call: the synthesized
+        ``SubroutineReport`` whose ``obj_bound`` is round-1's MCF LB and
+        whose paired solution is the better of round-1 / round-2
         results. Stop guards that fire before round 1 produces a full
         schedule return ``_make_stop_report`` without registering;
         guards that fire after round 1 has a result still register the
         round-1 result once before returning.
 
         Side effects (always, when an artifact layout is bound):
-          * Two per-instance phase-metric CSVs are emitted under the
-            ``progress`` zone via the ``mcf_lb_phase_obj_csv`` and
-            ``mcf_lb_phase_makespan_csv`` artifact kinds. One row per
-            user-spec snapshot in fixed order; r2 rows carry blank
+          * Two per-instance phase-metric CSVs are emitted via the
+            ``mcf_lb_phase_obj_csv`` / ``mcf_lb_phase_makespan_csv``
+            kinds. One row per user-spec snapshot; r2 rows carry blank
             cells when round 2 did not run. wET cells are blank for
-            snapshots on the reversed instance (``flipped`` /
-            ``fullS_before_unflip``) since the original due-window frame
-            does not apply.
+            reversed-instance snapshots (``flipped``,
+            ``fullS_before_unflip``).
+          * One per-instance ``r1/makespan_delta.yaml`` sidecar via
+            the ``calc_mcf_lb_makespan_delta_yaml`` kind.
+
+        When ``emit_phase_schedules=True``, also emits per-round JSON
+        snapshots under
+        ``progress/<inst>/calc_mcf_lb_and_derive_full_sch/<round>/<n>_<label>.json``
+        via the ``calc_mcf_lb_phase_schedule`` kind. The runner-side
+        flat ``mcf_lb_phase_schedule`` emission is bypassed for this
+        step (the composite never appends to
+        ``self.mcf_lb_phase_schedules``).
 
         Args:
-            draw_pmtn_sch_heatmap: Forwarded as ``draw_heatmap`` to
-                round-1 and round-2 ``apply_lb_by_mcf``. Renamed at
-                the composite layer to make clear it controls the
-                MCF preemptive schedule's C-cost heatmap (not a
-                heatmap of the full schedule).
-            heatmap_sort: Forwarded to round-1 and round-2
-                ``apply_lb_by_mcf``.
-            job_placement_priority: Forwarded to round-1 and round-2
-                ``heuristic_last_stage_only_sch_from_mcf_lb``.
+            draw_pmtn_sch_heatmap: When True, ``apply_lb_by_mcf`` dumps
+                the C-cost heatmap YAML for each round.
+            heatmap_sort: Forwarded to ``apply_lb_by_mcf``.
+            job_placement_priority: Forwarded as ``job_priority`` to
+                the heuristic.
             last_stage_only_placement_criteria: Forwarded as
-                ``placement_priority`` to round-1 and round-2
-                ``heuristic_last_stage_only_sch_from_mcf_lb``. Renamed
-                at the composite layer to make clear it is the
-                last-stage heuristic's tiebreak knob, not an MCF-step
-                option.
-            adjust_p: When ``True``, round 2 enables
-                ``adjust_p_by_full_sch_and_last_stage_only_pmtn_sch``
-                on both the MCF and heuristic steps. Default
-                ``False``.
-            adjust_r: When ``True``, round 2 enables
-                ``adjust_r_by_full_sch_and_last_stage_only_pmtn_sch``
-                **and** ``adjust_r_by_half`` together; the half-adjust
-                is bundled with ``adjust_r`` in this composite.
-            emit_phase_schedules: When ``True``, the composite's
-                per-snapshot ``mcf_lb_phase_schedule`` JSON files (and
-                downstream ``phase_gantt_png`` renderings) are kept on
-                disk. Default ``False`` — the composite clears its own
-                appended entries from ``mcf_lb_phase_schedules`` before
-                returning so the runner does not dump them. The
-                per-instance phase-metric CSVs are emitted regardless.
+                ``placement_priority`` to the heuristic.
+            adjust_p: When True, round 2 inflates last-stage processing
+                times by ``ceil(makespan_delta * m_last / n)``.
+            adjust_r: When True, round 2 inflates per-job releases by
+                ``ceil(makespan_delta / 2)`` (the historical
+                ``adjust_r_by_half`` behaviour is bundled here).
+            emit_phase_schedules: Gates the per-round JSON / paired
+                Gantt-PNG output. Default ``False``.
 
         Returns:
             The single registered ``SubroutineReport`` whose
             ``obj_bound`` is round-1's MCF LB and whose ``obj_value``
-            matches the registered (best) solution. When
-            ``is_stopping_condition`` fires before round 1 produces a
-            full schedule, returns a stop-report from
-            ``_make_stop_report`` without registering.
+            matches the registered (best) solution. When the stop
+            predicate fires before round 1 produces a full schedule,
+            returns a stop-report from ``_make_stop_report`` without
+            registering.
         """
         start_elapsed = time.monotonic()
-        self.adjust_ref_full_sol = None
-        # Composite owns the phase-schedule list for this call: clear once
-        # at entry so each round's recordings live side-by-side under their
-        # ``temporarily_extended_context`` namespace prefix.
-        self.mcf_lb_phase_schedules.clear()
-        # Composite owns its own diagnostic. r1/r2 raw sub-results are
-        # recorded as flat fields here; leaf-method invocations made via
-        # ``_register_report=False`` do NOT create their own diagnostic
-        # records, so this composite diag is the single source of truth
-        # for the call.
+
         c_diag = CalcMcfLbAndDeriveFullSchDiagnostic()
         self.calc_mcf_lb_and_derive_full_sch_diagnostic = c_diag
 
-        def _stop(label: str) -> SubroutineReport:
-            self.logger.info("calc_mcf_lb_and_derive_full_sch: %s", label)
+        r1_heatmap_yaml_path = (
+            self.try_get_file_path_for_subroutine("_r1_C_heatmap.yaml")
+            if draw_pmtn_sch_heatmap
+            else None
+        )
+        r2_heatmap_yaml_path = (
+            self.try_get_file_path_for_subroutine("_r2_C_heatmap.yaml")
+            if draw_pmtn_sch_heatmap
+            else None
+        )
+
+        result = algo_calc_mcf_lb_and_derive_full_sch(
+            self.instance,
+            draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
+            heatmap_sort=heatmap_sort,
+            job_placement_priority=job_placement_priority,
+            last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+            adjust_p=adjust_p,
+            adjust_r=adjust_r,
+            stop_predicate=self.is_stopping_condition,
+            logger=self.logger,
+            r1_heatmap_yaml_path=r1_heatmap_yaml_path,
+            r2_heatmap_yaml_path=r2_heatmap_yaml_path,
+        )
+
+        # ---- Populate diagnostic from result (mostly straight-through). ----
+        if result.r1_apply is not None:
+            c_diag.r1_mcf_lb = (
+                result.r1_apply.mcf_lb if result.r1_apply.obj_bound_is_valid else None
+            )
+            c_diag.r1_mcf_solve_sec = result.r1_apply.mcf_solve_sec
+            c_diag.r1_ls_only_pmtn_makespan = int(
+                result.r1_apply.mcf_preemptive_schedule.makespan
+            )
+        if (
+            result.r1_build_full is not None
+            and result.r1_build_full.schedule is not None
+        ):
+            c_diag.r1_full_sch_makespan = int(result.r1_build_full.schedule.makespan)
+            c_diag.r1_full_sch_obj = (
+                float(result.r1_build_full.dispatched_obj)
+                if result.r1_build_full.dispatched_obj is not None
+                else None
+            )
+        c_diag.makespan_delta = result.makespan_delta
+        c_diag.r2_ran = result.r2_ran
+        c_diag.r2_skip_reason = result.r2_skip_reason
+        if result.r2_apply is not None:
+            c_diag.r2_mcf_lb = (
+                result.r2_apply.mcf_lb if result.r2_apply.obj_bound_is_valid else None
+            )
+            c_diag.r2_mcf_solve_sec = result.r2_apply.mcf_solve_sec
+            c_diag.r2_ls_only_pmtn_makespan = int(
+                result.r2_apply.mcf_preemptive_schedule.makespan
+            )
+        if (
+            result.r2_build_full is not None
+            and result.r2_build_full.schedule is not None
+        ):
+            c_diag.r2_full_sch_makespan = int(result.r2_build_full.schedule.makespan)
+            c_diag.r2_full_sch_obj = (
+                float(result.r2_build_full.dispatched_obj)
+                if result.r2_build_full.dispatched_obj is not None
+                else None
+            )
+        c_diag.r2_p_increment_added = result.r2_p_increment if result.r2_ran else None
+        c_diag.r2_r_increment_added = result.r2_r_increment if result.r2_ran else None
+
+        # ---- Maintain backward-compat state slots so subsequent steps that
+        # read these attributes (e.g. a follow-on
+        # ``build_full_sch_from_last_stage_only_sch``) keep working. ----
+        last_apply = result.r2_apply or result.r1_apply
+        last_p_inc = result.r2_p_increment if result.r2_ran else 0
+        if last_apply is not None:
+            self.mcf_preemptive_schedule = last_apply.mcf_preemptive_schedule
+            self.mcf_preemptive_sch_p_increment = last_p_inc
+        last_heuristic = result.r2_heuristic or result.r1_heuristic
+        if last_heuristic is not None:
+            self.last_stage_only_sol = FFcDDWSolution(
+                schedule=last_heuristic.schedule,
+                obj_value=last_heuristic.obj_value,
+                obj_bound=None,
+            )
+            self.last_stage_only_sol_p_increment = last_p_inc
+
+        # ---- Stop case: r1 was halted before producing a build_full result. ----
+        if result.r1_build_full is None:
             c_diag.elapsed_sec = time.monotonic() - start_elapsed
             return self._make_stop_report(start_elapsed)
 
-        if self.is_stopping_condition():
-            return _stop("stop guard fired at entry (before round1_apply_lb_by_mcf)")
+        # ---- Artifact emission (always when layout bound). ----
+        if emit_phase_schedules:
+            self._emit_calc_mcf_lb_phase_schedule_jsons(result)
+        self._emit_calc_mcf_lb_makespan_delta_yaml(result)
+        self._emit_calc_mcf_lb_phase_metrics_csv(result)
 
-        with self.temporarily_extended_context("r1"):
-            r_lb_r1 = self.apply_lb_by_mcf(
-                draw_heatmap=draw_pmtn_sch_heatmap,
-                heatmap_sort=heatmap_sort,
-                _register_report=False,
+        # ---- Build best solution + register exactly once. ----
+        best_sol: FFcDDWSolution | None = None
+        if result.best_schedule is not None:
+            best_sol = FFcDDWSolution(
+                schedule=result.best_schedule,
+                obj_value=result.best_obj,
+                obj_bound=result.final_obj_bound,
             )
-            c_diag.r1_mcf_lb = r_lb_r1.obj_bound
-            if self.mcf_preemptive_schedule is not None:
-                c_diag.r1_ls_only_pmtn_makespan = int(
-                    self.mcf_preemptive_schedule.makespan
-                )
-            if self.is_stopping_condition():
-                return _stop("stop guard fired before round1_heuristic_last_stage_only")
-            self.heuristic_last_stage_only_sch_from_mcf_lb(
-                job_priority=job_placement_priority,
-                placement_priority=last_stage_only_placement_criteria,
-                _register_report=False,
-            )
-            if self.is_stopping_condition():
-                return _stop("stop guard fired before round1_build_full_sch")
-            r1, s1 = self._build_full_sch_core()
-        self.adjust_ref_full_sol = s1
-        if s1 is not None and s1.schedule is not None:
-            c_diag.r1_full_sch_makespan = int(s1.schedule.makespan)
-            c_diag.r1_full_sch_obj = (
-                float(s1.obj_value) if s1.obj_value is not None else None
-            )
-
-        def _finalize(
-            best_r: SubroutineReport, best_s: FFcDDWSolution | None
-        ) -> SubroutineReport:
-            self._emit_calc_mcf_lb_phase_metrics_csv()
-            if not emit_phase_schedules:
-                self.mcf_lb_phase_schedules.clear()
-            final_report = SubroutineReport(
-                elapsed_time=time.monotonic() - start_elapsed,
-                obj_value=best_r.obj_value,
-                obj_bound=r_lb_r1.obj_bound,
-            )
-            c_diag.final_obj = best_r.obj_value
-            c_diag.final_obj_bound = r_lb_r1.obj_bound
-            c_diag.elapsed_sec = final_report.elapsed_time
-            self._register(final_report, best_s)
-            self.adjust_ref_full_sol = None
-            return final_report
-
-        if not (adjust_p or adjust_r):
-            c_diag.r2_skip_reason = "no_adjust"
-            return _finalize(r1, s1)
-        if self.is_stopping_condition():
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                "round2_check (registering round1 result)"
-            )
-            c_diag.r2_skip_reason = "stop_guard"
-            return _finalize(r1, s1)
-        if s1 is None:
-            c_diag.r2_skip_reason = "s1_none"
-            return _finalize(r1, s1)
-
-        # Compute and record the raw signed makespan delta BEFORE the
-        # skip decision so the diagnostic captures the gap regardless of
-        # whether round 2 actually runs (this is the Rep3 fix — instances
-        # where ``r1_full_sch_makespan <= r1_ls_only_pmtn_makespan`` used
-        # to be silently dropped).
-        incumbent_makespan = int(s1.schedule.makespan)
-        ls_only_pmtn_makespan = int(self.mcf_preemptive_schedule.makespan)
-        makespan_delta = incumbent_makespan - ls_only_pmtn_makespan
-        c_diag.makespan_delta = makespan_delta
-        if makespan_delta <= 0:
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: round1 makespan=%d, "
-                "ls_only_pmtn makespan=%d, delta=%d <= 0 — skipping adjust round",
-                incumbent_makespan,
-                ls_only_pmtn_makespan,
-                makespan_delta,
-            )
-            c_diag.r2_skip_reason = "delta_le_0"
-            return _finalize(r1, s1)
-
-        if self.is_stopping_condition():
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                "round2_apply_lb_by_mcf (registering round1 result)"
-            )
-            c_diag.r2_skip_reason = "stop_guard"
-            return _finalize(r1, s1)
-
-        # Compute the r2 increments here so they are recorded on the
-        # composite's own diagnostic (the leaf calls below recompute the
-        # same values internally; that redundancy is removed in the
-        # algorithm-folder extraction step).
-        n = self.instance.job_count
-        m_last = self.instance.last_stage_mc_count
-        r2_p_increment = math.ceil(makespan_delta * m_last / n) if adjust_p else 0
-        # ``adjust_r_by_half=adjust_r`` in this composite, so the r-add
-        # is always halved when adjust_r is on.
-        r2_r_increment = math.ceil(makespan_delta / 2) if adjust_r else 0
-
-        with self.temporarily_extended_context("r2"):
-            r_lb_r2 = self.apply_lb_by_mcf(
-                draw_heatmap=draw_pmtn_sch_heatmap,
-                heatmap_sort=heatmap_sort,
-                adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
-                adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
-                adjust_r_by_half=adjust_r,
-                _register_report=False,
-            )
-            c_diag.r2_mcf_lb = r_lb_r2.obj_bound
-            if self.mcf_preemptive_schedule is not None:
-                c_diag.r2_ls_only_pmtn_makespan = int(
-                    self.mcf_preemptive_schedule.makespan
-                )
-            if self.is_stopping_condition():
-                self.logger.info(
-                    "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                    "round2_heuristic_last_stage_only (registering round1 result)"
-                )
-                c_diag.r2_skip_reason = "stop_guard"
-                return _finalize(r1, s1)
-            self.heuristic_last_stage_only_sch_from_mcf_lb(
-                job_priority=job_placement_priority,
-                placement_priority=last_stage_only_placement_criteria,
-                adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
-                adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
-                adjust_r_by_half=adjust_r,
-                _register_report=False,
-            )
-            if self.is_stopping_condition():
-                self.logger.info(
-                    "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                    "round2_build_full_sch (registering round1 result)"
-                )
-                c_diag.r2_skip_reason = "stop_guard"
-                return _finalize(r1, s1)
-            r2, s2 = self._build_full_sch_core()
-        c_diag.r2_ran = True
-        c_diag.r2_skip_reason = None
-        c_diag.r2_p_increment_added = r2_p_increment
-        c_diag.r2_r_increment_added = r2_r_increment
-        if s2 is not None and s2.schedule is not None:
-            c_diag.r2_full_sch_makespan = int(s2.schedule.makespan)
-            c_diag.r2_full_sch_obj = (
-                float(s2.obj_value) if s2.obj_value is not None else None
-            )
-
-        best_r, best_s = r1, s1
-        if s2 is not None and (s1 is None or s2.obj_value <= s1.obj_value):
-            best_r, best_s = r2, s2
-        return _finalize(best_r, best_s)
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=result.best_obj,
+            obj_bound=result.final_obj_bound,
+        )
+        c_diag.final_obj = result.best_obj
+        c_diag.final_obj_bound = result.final_obj_bound
+        c_diag.elapsed_sec = elapsed
+        self._register(report, best_sol)
+        return report
 
     def _dispatch_by_sequence(
         self,

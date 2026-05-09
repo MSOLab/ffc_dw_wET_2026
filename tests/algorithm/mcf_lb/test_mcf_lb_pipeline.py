@@ -1,0 +1,198 @@
+"""Direct tests for ``calc_mcf_lb_and_derive_full_sch``.
+
+Verify the algorithm-level composite that ties ``apply_lb_by_mcf``,
+``heuristic_last_stage_only_from_mcf_lb``, and
+``build_full_sch_from_last_stage_only_sch``: per-round phase snapshots,
+``r2`` skip-reason gates (``no_adjust`` / ``s1_none`` / ``delta_le_0`` /
+``stop_guard``), the signed makespan delta recorded *before* the skip
+decision (Rep3 fix), and the round-2 increment math.
+"""
+
+from __future__ import annotations
+
+import math
+
+import pandas as pd
+
+from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
+    CalcMcfLbAndDeriveFullSchResult,
+    calc_mcf_lb_and_derive_full_sch,
+)
+from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
+from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+
+
+def _make_multi_stage_instance() -> FFcDDWParameters:
+    return FFcDDWParameters(
+        name="pipeline_multi",
+        job_id_list=["j0", "j1", "j2"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0", "i0_1"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="pipeline_multi_p",
+            df=pd.DataFrame([[2, 3], [2, 2], [2, 1]]),
+        ),
+        job_2_due_window_map={"j0": (4, 5), "j1": (3, 4), "j2": (0, 10)},
+        job_2_ewt_map={"j0": 1, "j1": 1, "j2": 1},
+        job_2_twt_map={"j0": 1, "j1": 1, "j2": 1},
+    )
+
+
+def _make_single_stage_instance() -> FFcDDWParameters:
+    return FFcDDWParameters(
+        name="pipeline_single",
+        job_id_list=["j0", "j1"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="pipeline_single_p",
+            df=pd.DataFrame([[3], [2]]),
+        ),
+        job_2_due_window_map={"j0": (4, 5), "j1": (3, 4)},
+        job_2_ewt_map={"j0": 1, "j1": 1},
+        job_2_twt_map={"j0": 1, "j1": 1},
+    )
+
+
+def test_default_flow_skips_r2_with_no_adjust_reason() -> None:
+    """``adjust_p=False, adjust_r=False`` — round 2 is skipped with
+    reason ``no_adjust`` and the r1 build_full result is returned.
+    """
+    instance = _make_multi_stage_instance()
+
+    result = calc_mcf_lb_and_derive_full_sch(instance)
+
+    assert isinstance(result, CalcMcfLbAndDeriveFullSchResult)
+    assert result.r1_apply is not None
+    assert result.r1_heuristic is not None
+    assert result.r1_build_full is not None
+    assert result.r1_build_full.schedule is not None
+    assert result.best_schedule is result.r1_build_full.schedule
+    assert result.best_obj == result.r1_build_full.dispatched_obj
+    assert result.final_obj_bound == result.r1_apply.mcf_lb
+    # No-adjust skip leaves r2 sub-results empty and skip_reason set.
+    assert result.r2_ran is False
+    assert result.r2_skip_reason == "no_adjust"
+    assert result.r2_apply is None
+    assert result.r2_heuristic is None
+    assert result.r2_build_full is None
+    assert result.makespan_delta is None
+    assert result.r2_p_increment is None
+    assert result.r2_r_increment is None
+    # Round 1 emits 8 numbered phase snapshots; round 2 emits none.
+    r1_labels = [label for label, _ in result.r1_phase_schedules]
+    assert r1_labels == [
+        "1_mcf_preemptive",
+        "2_lastS_only_from_mcf_lb_before_sa_iti",
+        "3_lastS_only_from_mcf_lb_after_sa_iti",
+        "4_lastS_only_after_rs",
+        "5_lastS_only_flipped",
+        "6_fullS_before_unflip",
+        "7_fullS_after_unflip",
+        "8_fullS_after_sa_iti",
+    ]
+    assert result.r2_phase_schedules == []
+
+
+def test_single_stage_short_circuits_through_r1_only() -> None:
+    """Single-stage instances skip the reverse-dispatch path inside
+    ``build_full_sch_from_last_stage_only_sch``; only ``mcf_preemptive``,
+    the two heuristic snapshots, and ``fullS_after_sa_iti`` are emitted
+    in round 1.
+    """
+    instance = _make_single_stage_instance()
+
+    result = calc_mcf_lb_and_derive_full_sch(instance)
+
+    assert result.r1_build_full is not None
+    assert result.r1_build_full.schedule is not None
+    r1_labels = [label for label, _ in result.r1_phase_schedules]
+    assert r1_labels == [
+        "1_mcf_preemptive",
+        "2_lastS_only_from_mcf_lb_before_sa_iti",
+        "3_lastS_only_from_mcf_lb_after_sa_iti",
+        "8_fullS_after_sa_iti",
+    ]
+
+
+def test_adjust_runs_r2_or_records_signed_delta() -> None:
+    """``adjust_p=True, adjust_r=True``: either round 2 actually runs
+    (``makespan_delta > 0``) and the recorded increments match the
+    documented arithmetic, or round 2 is skipped via
+    ``delta_le_0`` with the signed delta still recorded on the result
+    (the Rep3 fix). Either branch is acceptable for the test fixture;
+    the assertion shape captures both invariants.
+    """
+    instance = _make_multi_stage_instance()
+
+    result = calc_mcf_lb_and_derive_full_sch(instance, adjust_p=True, adjust_r=True)
+
+    assert result.r1_build_full is not None
+    assert result.r1_build_full.schedule is not None
+    assert result.makespan_delta is not None
+    if result.r2_ran:
+        n = instance.job_count
+        m_last = instance.last_stage_mc_count
+        assert result.r2_skip_reason is None
+        assert result.r2_apply is not None
+        assert result.r2_heuristic is not None
+        assert result.r2_build_full is not None
+        assert result.r2_p_increment == math.ceil(result.makespan_delta * m_last / n)
+        assert result.r2_r_increment == math.ceil(result.makespan_delta / 2)
+        # final_obj_bound is always r1's MCF LB (the global LB on the
+        # original instance) — r2's bound is on the augmented problem.
+        assert result.final_obj_bound == result.r1_apply.mcf_lb
+        # best_schedule is from r1 or r2 (whichever has lower dispatched obj).
+        assert result.best_schedule in (
+            result.r1_build_full.schedule,
+            result.r2_build_full.schedule,
+        )
+    else:
+        assert result.r2_skip_reason == "delta_le_0"
+        assert result.makespan_delta <= 0
+        assert result.r2_apply is None
+        assert result.r2_heuristic is None
+        assert result.r2_build_full is None
+        assert result.r2_p_increment is None
+        assert result.r2_r_increment is None
+        # best_schedule falls through to r1 in the skip case.
+        assert result.best_schedule is result.r1_build_full.schedule
+
+
+def test_adjust_p_only_zeroes_r_increment_when_r2_runs() -> None:
+    """When only ``adjust_p`` is on and round 2 runs, the recorded
+    ``r2_r_increment`` is 0 (not ``None``).
+    """
+    instance = _make_multi_stage_instance()
+
+    result = calc_mcf_lb_and_derive_full_sch(instance, adjust_p=True)
+
+    if result.r2_ran:
+        assert result.r2_p_increment is not None
+        assert result.r2_p_increment > 0
+        assert result.r2_r_increment == 0
+    else:
+        # The fixture didn't trigger r2; the contract is documented in
+        # the other test (``test_adjust_runs_r2_or_records_signed_delta``).
+        assert result.r2_skip_reason == "delta_le_0"
+
+
+def test_stop_predicate_at_entry_returns_empty_result() -> None:
+    """Stop predicate firing before round 1 begins: no sub-results
+    populated, ``best_schedule`` is ``None``, ``r1_build_full`` is
+    ``None`` so the orchestration wrapper short-circuits to a
+    stop-report.
+    """
+    instance = _make_multi_stage_instance()
+
+    result = calc_mcf_lb_and_derive_full_sch(instance, stop_predicate=lambda: True)
+
+    assert result.r1_apply is None
+    assert result.r1_heuristic is None
+    assert result.r1_build_full is None
+    assert result.best_schedule is None
+    assert result.best_obj is None
+    assert result.r2_ran is False
+    assert result.r2_skip_reason == "stop_guard"
+    assert result.r1_phase_schedules == []
+    assert result.r2_phase_schedules == []

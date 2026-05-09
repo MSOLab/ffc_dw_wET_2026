@@ -55,6 +55,23 @@ artifacts:
     zone: progress
     kind: mcf_lb_phase_makespan_csv
     file_template: "{instance_name}_calc_mcf_lb_phase_makespan.csv"
+  # ``calc_mcf_lb_and_derive_full_sch``-scoped per-round JSON snapshots.
+  # Two-level nested layout under ``calc_mcf_lb_and_derive_full_sch/{r1|r2}/``;
+  # filenames are pre-numbered (``{index}_{label}.json``). Same dual JSON
+  # shapes as ``mcf_lb_phase_schedule`` (operations[] vs segments[]).
+  # Emitted only when ``emit_phase_schedules=True`` on the composite step.
+  - scope: instance
+    zone: progress
+    kind: calc_mcf_lb_phase_schedule
+    file_template: "calc_mcf_lb_and_derive_full_sch/{round}/{index}_{label}.json"
+  # Sidecar YAML written under r1/ summarising the round-1 makespan delta and
+  # the increments fed into round 2 (or null when round 2 did not run).
+  # Always emitted (independent of ``emit_phase_schedules``) so downstream
+  # auditors can see the Rep3-style negative-delta cases without round-2 JSONs.
+  - scope: instance
+    zone: progress
+    kind: calc_mcf_lb_makespan_delta_yaml
+    file_template: "calc_mcf_lb_and_derive_full_sch/r1/makespan_delta.yaml"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
@@ -70,6 +87,12 @@ artifacts:
     zone: report
     kind: phase_gantt_png
     file_template: "{phase_name}_gantt.png"
+  # Paired Gantt PNG for ``calc_mcf_lb_phase_schedule``. Two-level nested
+  # layout mirrors the source JSON tree.
+  - scope: instance
+    zone: report
+    kind: calc_mcf_lb_phase_gantt_png
+    file_template: "calc_mcf_lb_and_derive_full_sch/{round}/{index}_{label}_gantt.png"
 
   # ---- scenario ----
   - scope: scenario
