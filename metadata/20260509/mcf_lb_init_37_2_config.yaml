@@ -1,0 +1,110 @@
+# Re-run of the 6-scenario sweep from
+# metadata/20260505/mcf_lb_init_37_config.yaml on the new
+# `calc_mcf_lb_and_derive_full_sch` composite, with two settings
+# fixed across all scenarios:
+#
+#   - makespan_delta_ref: "lastStageOnlyMakespan"
+#       Use the r1 heuristic non-preemptive last-stage schedule's
+#       makespan as the LB-side reference for `makespan_delta`,
+#       instead of the MCF preemptive LP makespan (which was the
+#       implicit reference in the original 37-config).
+#   - proceed_r2_when_nonpositive_cmax: true
+#       Run round 2 even when the signed delta is <= 0 (delta is
+#       clamped to >=1 for increment math), instead of skipping via
+#       `delta_le_0`. The raw signed delta is still recorded.
+#
+# The six scenarios sweep the (adjust_p, adjust_r, r_adjust_coeff)
+# space:
+#   1. base                         — no augmentation
+#   2. p_adjust                     — adjust_p only
+#   3. r_adjust                     — adjust_r with r_adjust_coeff=1   (full delta)
+#   4. p_adjust_r_adjust            — both,        r_adjust_coeff=1
+#   5. r_half_adjust                — adjust_r with r_adjust_coeff=0.5 (legacy `_by_half`)
+#   6. p_adjust_r_half_adjust       — both,        r_adjust_coeff=0.5
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [ 0, 10, 20, 30, 40, 50, 60, 70, 80 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260509
+
+instance_worker_cnt: 96
+
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  - name: build_full_sch_base
+    timelimit: 300.0
+    output_subdir: build_full_sch_base
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p_adjust
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_adjust
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_r_adjust
+    timelimit: 300.0
+    output_subdir: build_full_sch_r_adjust
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_r: true
+        r_adjust_coeff: 1
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p_adjust_r_adjust
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_adjust_r_adjust
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 1
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_r_half_adjust
+    timelimit: 300.0
+    output_subdir: build_full_sch_r_half_adjust
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p_adjust_r_half_adjust
+    timelimit: 300.0
+    output_subdir: build_full_sch_p_adjust_r_half_adjust
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true

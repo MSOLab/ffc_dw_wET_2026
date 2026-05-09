@@ -1054,15 +1054,23 @@ class FFcDDWReporter:
 
         One row per ``(scenario, instance)`` pair where a
         ``calc_mcf_lb_and_derive_full_sch`` composite ran past round 1
-        (its ``makespan_delta`` is non-null), OR where a standalone
-        ``heuristic_last_stage_only_sch_from_mcf_lb`` step fired an
-        adjust knob.
+        (its ``makespanDelta`` is non-null in the r1 sidecar). Sourced
+        from per-instance ``calc_mcf_lb_r1_summary_yaml`` sidecars —
+        the same single source of truth that
+        ``_write_calc_mcf_lb_summary_csv`` uses — so this run-level CSV
+        and the per-scenario summary CSV cannot drift.
 
-        Composite rows record the *raw signed* delta
-        (``r1_full_sch_makespan − r1_ls_only_pmtn_makespan``) so the
-        ``delta <= 0`` skip case is captured rather than dropped. The
-        ``pIncrementAdded`` / ``rIncrementAdded`` columns are blank for
-        rows where round 2 did not run.
+        ``makespanDelta`` is the *raw signed* delta recorded by the
+        composite (``r1_full_sch_makespan - ref_makespan``, where the
+        reference is the r1 MCF preemptive makespan or the r1 heuristic
+        last-stage-only makespan depending on
+        ``makespan_delta_ref``); ``delta <= 0`` rows are captured
+        rather than dropped. Both ``lastStageOnlyPmtnMakespan`` and
+        ``lastStageOnlyMakespan`` are populated whenever the
+        corresponding r1 schedule exists, regardless of which one was
+        used as the delta reference. ``pIncrementAdded`` /
+        ``rIncrementAdded`` are blank for rows where round 2 did not
+        run.
 
         Columns: ``scenarioName, insIndex, instanceName,
         lastStageOnlyPmtnMakespan, lastStageOnlyMakespan,
@@ -1076,7 +1084,7 @@ class FFcDDWReporter:
                 str,
                 int | None,
                 int | None,
-                int,
+                int | None,
                 int,
                 int | None,
                 int | None,
@@ -1084,70 +1092,29 @@ class FFcDDWReporter:
         ] = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
-                # Prefer composite diagnostic when present; fall back
-                # to standalone heuristic.
-                calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic
-                heuristic_diag = ir.heuristic_last_stage_only_diagnostic
-                if (
-                    calc_diag is not None
-                    and calc_diag.get("makespan_delta") is not None
-                ):
-                    rows.append(
-                        (
-                            sc.name,
-                            self._resolve_ins_index(ir.instance_name),
-                            ir.instance_name,
-                            (
-                                int(calc_diag["r1_ls_only_pmtn_makespan"])
-                                if calc_diag.get("r1_ls_only_pmtn_makespan") is not None
-                                else None
-                            ),
-                            None,
-                            int(calc_diag["r1_full_sch_makespan"])
-                            if calc_diag.get("r1_full_sch_makespan") is not None
-                            else 0,
-                            int(calc_diag["makespan_delta"]),
-                            (
-                                int(calc_diag["r2_p_increment_added"])
-                                if calc_diag.get("r2_p_increment_added") is not None
-                                else None
-                            ),
-                            (
-                                int(calc_diag["r2_r_increment_added"])
-                                if calc_diag.get("r2_r_increment_added") is not None
-                                else None
-                            ),
-                        )
+                r1_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r1_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                if not r1_path.exists():
+                    continue
+                r1_data: dict[str, Any] = load_yaml(r1_path) or {}
+                if r1_data.get("makespanDelta") is None:
+                    continue
+                rows.append(
+                    (
+                        sc.name,
+                        self._resolve_ins_index(ir.instance_name),
+                        ir.instance_name,
+                        r1_data.get("mcfLbMakespan"),
+                        r1_data.get("lastStageOnlyMakespan"),
+                        r1_data.get("fullSchMakespan"),
+                        r1_data["makespanDelta"],
+                        r1_data.get("pIncrementAdded"),
+                        r1_data.get("rIncrementAdded"),
                     )
-                elif (
-                    heuristic_diag is not None
-                    and heuristic_diag.get("makespan_delta") is not None
-                ):
-                    p_inc_raw = heuristic_diag.get("p_increment_added")
-                    r_inc_raw = heuristic_diag.get("r_increment_added")
-                    rows.append(
-                        (
-                            sc.name,
-                            self._resolve_ins_index(ir.instance_name),
-                            ir.instance_name,
-                            (
-                                int(heuristic_diag["last_stage_only_pmtn_makespan"])
-                                if heuristic_diag.get("last_stage_only_pmtn_makespan")
-                                is not None
-                                else None
-                            ),
-                            (
-                                int(heuristic_diag["last_stage_only_makespan"])
-                                if heuristic_diag.get("last_stage_only_makespan")
-                                is not None
-                                else None
-                            ),
-                            int(heuristic_diag["incumbent_makespan"]),
-                            int(heuristic_diag["makespan_delta"]),
-                            int(p_inc_raw) if p_inc_raw is not None else None,
-                            int(r_inc_raw) if r_inc_raw is not None else None,
-                        )
-                    )
+                )
         if not rows:
             return
         rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
@@ -1185,7 +1152,7 @@ class FFcDDWReporter:
                         instance_name,
                         "" if ls_only_pmtn_makespan is None else ls_only_pmtn_makespan,
                         "" if ls_only_makespan is None else ls_only_makespan,
-                        incumbent_makespan,
+                        "" if incumbent_makespan is None else incumbent_makespan,
                         delta,
                         "" if p_inc_added is None else p_inc_added,
                         "" if r_inc_added is None else r_inc_added,
