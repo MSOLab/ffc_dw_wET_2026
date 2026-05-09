@@ -1,30 +1,21 @@
-"""Phase 3 of the MCF-LB pipeline.
+"""Reverse-dispatch core for the MCF-LB pipeline.
 
-Reverse-dispatch with the last stage pinned as seed, then unflip back
-to the original instance. Produces the full dispatched schedule that
-Phase 4 will warm-start its profile-fix CP-SAT model from.
-
-The reverse-dispatch core is exposed as :func:`reverse_dispatch_full_schedule`
-so other subroutines (e.g. ``build_full_sch_from_last_stage_only_sch``) can
-build a feasible full schedule from any last-stage-only ``FFcSchedule``
-without going through Phase 1 / Phase 2 first.
+Builds a feasible full schedule from a last-stage-only ``FFcSchedule`` by
+reverse-dispatching with the last stage pinned as seed, then unflipping
+back to the original instance.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.objectives import compute_weighted_earliness_tardiness
 from ..dispatcher import MixedDispatcher
-from .diagnostic import MCFLBDiagnostic
-from .phase1_mcf import Phase1State
-from .phase2_last_stage import Phase2State
 
-__all__ = ["Phase3State", "reverse_dispatch_full_schedule", "run_phase3"]
+__all__ = ["Phase3State", "reverse_dispatch_full_schedule"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -103,8 +94,8 @@ def reverse_dispatch_full_schedule(
             input as the starting point for both the single-stage
             short-circuit and the multi-stage delay/reverse-dispatch
             path. Use this when the input schedule was produced under
-            inflated last-stage durations
-            (e.g. ``single_pass_last_stage_only_sch_from_mcf_lb`` with
+            inflated last-stage durations (e.g. by
+            ``heuristic_last_stage_only_sch_from_mcf_lb`` invoked with
             ``p_increment != 0``) so downstream consumers operate on a
             problem-feasible schedule. The rebuilt schedule is exposed
             on ``Phase3State.ls_only_sch_before_delay``.
@@ -253,36 +244,3 @@ def reverse_dispatch_full_schedule(
         full_sch_before_unflip=full_sch_before_unflip,
         full_sch_after_unflip=full_sch_after_unflip,
     )
-
-
-def run_phase3(
-    phase1: Phase1State,
-    phase2: Phase2State,
-    instance: FFcDDWParameters,
-    diagnostic: MCFLBDiagnostic,
-    *,
-    logger: logging.Logger | None = None,
-) -> Phase3State | None:
-    """Phase-3 wrapper around :func:`reverse_dispatch_full_schedule`.
-
-    Mutates ``diagnostic``: ``single_stage``, ``dispatch_sec``,
-    ``dispatched_obj``, advances ``reached_phase`` to ``"dispatched"``.
-    """
-    diagnostic.single_stage = instance.stage_count == 1
-    t_disp = time.monotonic()
-
-    state = reverse_dispatch_full_schedule(
-        instance,
-        phase2.last_stage_only_schedule,
-        last_stage_id=phase1.last_stage_id,
-        job_2_pos=phase1.job_2_pos,
-        logger=logger,
-    )
-    if state is None:
-        return None
-
-    diagnostic.dispatch_sec = time.monotonic() - t_disp
-    diagnostic.dispatched_obj = state.dispatched_obj
-    diagnostic.reached_phase = "dispatched"
-
-    return state

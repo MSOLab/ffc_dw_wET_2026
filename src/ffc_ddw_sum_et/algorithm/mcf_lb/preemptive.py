@@ -1,8 +1,6 @@
 """MCF preemptive lower bound: solve and result wrapper.
 
-Owns ``solve_mcf_lb`` and ``McfLbResult``. Kept separate from
-``phase1_mcf`` so callers that only need the LB / preemptive schedule do
-not pull in the seed-generation machinery.
+Owns ``solve_mcf_lb`` and ``McfLbResult``.
 """
 
 from __future__ import annotations
@@ -15,7 +13,6 @@ from typing import Callable
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ..parallel_mc_pmtn import ParallelMachinePreemptionMcf
-from .diagnostic import MCFLBDiagnostic
 
 __all__ = ["McfLbResult", "MCFLBStopRequested", "solve_mcf_lb"]
 
@@ -31,30 +28,27 @@ class MCFLBStopRequested(Exception):
 class McfLbResult:
     """Bare result of solving the MCF relaxation: bound + preemptive schedule.
 
-    Used by ``run_phase1`` to seed the full 4-phase pipeline, and by
-    LB-only subroutines that report a global lower bound with no schedule.
-    The ``mcf`` handle is retained so callers can extract MCF-derived
-    priority maps without re-solving.
+    Used by ``apply_lb_by_mcf`` to report a global lower bound and by
+    downstream heuristics that consume the preemptive schedule. The
+    ``mcf`` handle is retained so callers can extract MCF-derived priority
+    maps without re-solving.
     """
 
     mcf_lb: float
     mcf_preemptive_schedule: MCFPreemptiveSchedule
     mcf: ParallelMachinePreemptionMcf  # TODO: remove; use mcf_preemptive_schedule instead
+    mcf_solve_sec: float
 
 
 def solve_mcf_lb(
     instance: FFcDDWParameters,
-    diagnostic: MCFLBDiagnostic,
     *,
     r_multiplier: float = 1.0,
     r_increment: int = 0,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
 ) -> McfLbResult:
-    """Solve the MCF relaxation and record the bound on ``diagnostic``.
-
-    Mutates ``diagnostic`` in place: sets ``mcf_solve_sec``, ``mcf_lb``,
-    and advances ``reached_phase`` to ``"mcf"``.
+    """Solve the MCF relaxation and return the bound + preemptive schedule.
 
     Args:
         r_multiplier: Scales the MCF release dates ``r_j`` (sum of upstream
@@ -97,14 +91,12 @@ def solve_mcf_lb(
     if not mcf.is_optimal():
         raise RuntimeError(f"MCF not optimal for instance {instance.name}")
     mcf_lb = float(mcf.get_obj_value())
-    diagnostic.mcf_solve_sec = time.monotonic() - t_mcf
-    diagnostic.mcf_lb = mcf_lb
-    diagnostic.reached_phase = "mcf"
+    mcf_solve_sec = time.monotonic() - t_mcf
     if logger is not None:
         logger.info(
             "solve_mcf_lb: solved in %.3fs, mcf_lb=%.2f "
             "(r_multiplier=%.4g, r_increment=%d)",
-            diagnostic.mcf_solve_sec,
+            mcf_solve_sec,
             mcf_lb,
             r_multiplier,
             r_increment,
@@ -119,4 +111,5 @@ def solve_mcf_lb(
         mcf_lb=mcf_lb,
         mcf_preemptive_schedule=mcf_preemptive_schedule,
         mcf=mcf,
+        mcf_solve_sec=mcf_solve_sec,
     )

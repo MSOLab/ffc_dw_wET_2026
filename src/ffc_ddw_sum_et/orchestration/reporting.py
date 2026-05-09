@@ -677,8 +677,17 @@ class FFcDDWReporter:
         logger.info("Summary CSV written to %s", path)
 
     def _build_mcf_lb_extras(self, ir: InstanceResult) -> dict[str, Any]:
-        """Flatten the controller's MCF-LB diagnostic + BKS into summary columns."""
-        diag = ir.mcf_lb_diagnostic or {}
+        """Flatten the controller's MCF-LB diagnostics + BKS into summary columns.
+
+        Reads from the per-entry-point diagnostic that was actually
+        populated for this run. Standalone ``apply_lb_by_mcf`` populates
+        ``mcf_lb_diagnostic``; the composite step populates
+        ``calc_mcf_lb_and_derive_full_sch_diagnostic`` with r1/r2
+        sub-results as flat fields.
+        """
+        mcf_diag = ir.mcf_lb_diagnostic or {}
+        calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic or {}
+        build_diag = ir.build_full_sch_diagnostic or {}
 
         ins_index = self._resolve_ins_index(ir.instance_name)
         bks = (
@@ -687,43 +696,21 @@ class FFcDDWReporter:
             else None
         )
 
-        # Mirrors controller.py: obj_bound_final = max(mcf_lb, pf_bound).
-        reported_obj_bound: float | None = None
-        if diag.get("mcf_lb") is not None:
-            reported_obj_bound = diag["mcf_lb"]
-            if diag.get("profile_fix_bound") is not None:
-                reported_obj_bound = max(reported_obj_bound, diag["profile_fix_bound"])
-
-        def _gap(a_key: str, b_key: str) -> float | None:
-            a, b = diag.get(a_key), diag.get(b_key)
-            return a - b if a is not None and b is not None else None
-
-        pf_vs_bks = (
-            diag["profile_fix_obj"] - bks
-            if diag.get("profile_fix_obj") is not None and bks is not None
-            else None
+        # Composite reports r1's MCF LB as the global LB (always valid);
+        # standalone apply_lb_by_mcf reports its own.
+        mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
+        mcf_solve_sec = mcf_diag.get("mcf_solve_sec") or calc_diag.get(
+            "r1_mcf_solve_sec"
         )
+        dispatched_obj = build_diag.get("dispatched_obj") or calc_diag.get("final_obj")
 
         return {
-            "mcfLb": diag.get("mcf_lb"),
-            "lastStageOnlyBound": diag.get("last_stage_only_bound"),
-            "lastStageOnlyObj": diag.get("last_stage_only_obj"),
+            "mcfLb": mcf_lb,
             "bks": bks,
-            "dispatchedObj": diag.get("dispatched_obj"),
-            "profileFixObj": diag.get("profile_fix_obj"),
-            "profileFixBound": diag.get("profile_fix_bound"),
-            "reportedObjBound": reported_obj_bound,
-            "lastStageBoundMinusMcfGap": _gap("last_stage_only_bound", "mcf_lb"),
-            "lastStagePrimalMinusBoundGap": _gap(
-                "last_stage_only_obj", "last_stage_only_bound"
-            ),
-            "dispatchedMinusProfileFixGap": _gap("dispatched_obj", "profile_fix_obj"),
-            "profileFixMinusBksGap": pf_vs_bks,
-            "mcfSolveSec": diag.get("mcf_solve_sec"),
-            "lastStageCpSatSec": diag.get("last_stage_cp_sat_sec"),
-            "dispatchSec": diag.get("dispatch_sec"),
-            "profileFixCpSatSec": diag.get("profile_fix_cp_sat_sec"),
-            "mcfLbReachedPhase": diag.get("reached_phase") or "",
+            "dispatchedObj": dispatched_obj,
+            "reportedObjBound": mcf_lb,
+            "mcfSolveSec": mcf_solve_sec,
+            "dispatchSec": build_diag.get("dispatch_sec"),
         }
 
     def _aggregate_scenario(self, sc: ScenarioResult) -> dict[str, Any]:
@@ -776,16 +763,11 @@ class FFcDDWReporter:
         "R",
         "W",
         "mcfLb",
-        "lastStageOnlyBound",
         "lastStageOnlyObj",
         "bks",
         "dispatchedObj",
-        "profileFixObj",
-        "profileFixBound",
         "mcfSolveSec",
-        "lastStageCpSatSec",
         "dispatchSec",
-        "profileFixCpSatSec",
     )
 
     def _write_calc_mcf_lb_phase_metric_summaries(self) -> None:
@@ -901,7 +883,12 @@ class FFcDDWReporter:
         """
         for sc in self.scenario_results:
             rows = [
-                ir for ir in sc.instance_results if ir.mcf_lb_diagnostic is not None
+                ir
+                for ir in sc.instance_results
+                if (
+                    ir.mcf_lb_diagnostic is not None
+                    or ir.calc_mcf_lb_and_derive_full_sch_diagnostic is not None
+                )
             ]
             if not rows:
                 continue
@@ -926,9 +913,9 @@ class FFcDDWReporter:
         """Run-scoped long-format CSV of MCF-preemptive objective values.
 
         Columns: ``scenarioName, insIndex, objValue``. One row per
-        ``(scenario, instance)`` pair where ``mcf_lb_diagnostic.mcf_lb`` is
-        non-null. Rows are sorted by ``(scenarioName, insIndex)``. Skipped
-        entirely if no scenario produced an MCF LB.
+        ``(scenario, instance)`` pair where an MCF LB was produced
+        (either by a top-level ``apply_lb_by_mcf`` step or by the
+        composite ``calc_mcf_lb_and_derive_full_sch``'s round 1).
 
         Note: ``MCFPreemptiveSchedule`` does not carry a weighted-E+T
         objective (it is preemptive and stage-disaggregated), so we use the
@@ -937,10 +924,9 @@ class FFcDDWReporter:
         rows: list[tuple[str, int | None, float]] = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
-                diag = ir.mcf_lb_diagnostic
-                if diag is None:
-                    continue
-                mcf_lb = diag.get("mcf_lb")
+                mcf_diag = ir.mcf_lb_diagnostic or {}
+                calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic or {}
+                mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
                 if mcf_lb is None:
                     continue
                 rows.append(
@@ -970,22 +956,22 @@ class FFcDDWReporter:
     def _write_adjust_params_by_makespan_delta_csv(self) -> None:
         """Run-scoped long-format CSV of makespan-delta-driven param adjusts.
 
-        Unifies the per-instance diagnostic produced by the
-        ``adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch``
-        knobs. One row per ``(scenario, instance)`` pair where any knob
-        fired (i.e. ``adjust_params_makespan_delta`` is non-null on the
-        diagnostic).
+        One row per ``(scenario, instance)`` pair where a
+        ``calc_mcf_lb_and_derive_full_sch`` composite ran past round 1
+        (its ``makespan_delta`` is non-null), OR where a standalone
+        ``heuristic_last_stage_only_sch_from_mcf_lb`` step fired an
+        adjust knob.
+
+        Composite rows record the *raw signed* delta
+        (``r1_full_sch_makespan − r1_ls_only_pmtn_makespan``) so the
+        ``delta <= 0`` skip case is captured rather than dropped. The
+        ``pIncrementAdded`` / ``rIncrementAdded`` columns are blank for
+        rows where round 2 did not run.
 
         Columns: ``scenarioName, insIndex, instanceName,
         lastStageOnlyPmtnMakespan, lastStageOnlyMakespan,
         incumbentMakespan, makespanDelta, pIncrementAdded,
-        rIncrementAdded``. Exactly one of ``lastStageOnlyPmtnMakespan`` /
-        ``lastStageOnlyMakespan`` is populated per row (the two
-        reference-schedule sources are mutually exclusive within a
-        single call). ``pIncrementAdded`` is ``ceil(delta * m_last / n)``;
-        ``rIncrementAdded`` is the delta itself (the adjust-r knob adds
-        ``makespan_delta`` straight to ``r_increment``). The empty
-        string is written for whichever knob did not fire.
+        rIncrementAdded``.
         """
         rows: list[
             tuple[
@@ -1002,36 +988,70 @@ class FFcDDWReporter:
         ] = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
-                diag = ir.mcf_lb_diagnostic
-                if diag is None:
-                    continue
-                makespan_delta = diag.get("adjust_params_makespan_delta")
-                if makespan_delta is None:
-                    continue
-                ls_only_pmtn_makespan = diag.get(
-                    "adjust_params_last_stage_only_pmtn_makespan"
-                )
-                ls_only_makespan = diag.get("adjust_params_last_stage_only_makespan")
-                incumbent_makespan = diag.get("adjust_params_incumbent_makespan")
-                p_inc_raw = diag.get("adjust_p_increment_added")
-                r_inc_raw = diag.get("adjust_r_increment_added")
-                p_inc_added = int(p_inc_raw) if p_inc_raw is not None else None
-                r_inc_added = int(r_inc_raw) if r_inc_raw is not None else None
-                rows.append(
-                    (
-                        sc.name,
-                        self._resolve_ins_index(ir.instance_name),
-                        ir.instance_name,
-                        int(ls_only_pmtn_makespan)
-                        if ls_only_pmtn_makespan is not None
-                        else None,
-                        int(ls_only_makespan) if ls_only_makespan is not None else None,
-                        int(incumbent_makespan),
-                        int(makespan_delta),
-                        p_inc_added,
-                        r_inc_added,
+                # Prefer composite diagnostic when present; fall back
+                # to standalone heuristic.
+                calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic
+                heuristic_diag = ir.heuristic_last_stage_only_diagnostic
+                if (
+                    calc_diag is not None
+                    and calc_diag.get("makespan_delta") is not None
+                ):
+                    rows.append(
+                        (
+                            sc.name,
+                            self._resolve_ins_index(ir.instance_name),
+                            ir.instance_name,
+                            (
+                                int(calc_diag["r1_ls_only_pmtn_makespan"])
+                                if calc_diag.get("r1_ls_only_pmtn_makespan") is not None
+                                else None
+                            ),
+                            None,
+                            int(calc_diag["r1_full_sch_makespan"])
+                            if calc_diag.get("r1_full_sch_makespan") is not None
+                            else 0,
+                            int(calc_diag["makespan_delta"]),
+                            (
+                                int(calc_diag["r2_p_increment_added"])
+                                if calc_diag.get("r2_p_increment_added") is not None
+                                else None
+                            ),
+                            (
+                                int(calc_diag["r2_r_increment_added"])
+                                if calc_diag.get("r2_r_increment_added") is not None
+                                else None
+                            ),
+                        )
                     )
-                )
+                elif (
+                    heuristic_diag is not None
+                    and heuristic_diag.get("makespan_delta") is not None
+                ):
+                    p_inc_raw = heuristic_diag.get("p_increment_added")
+                    r_inc_raw = heuristic_diag.get("r_increment_added")
+                    rows.append(
+                        (
+                            sc.name,
+                            self._resolve_ins_index(ir.instance_name),
+                            ir.instance_name,
+                            (
+                                int(heuristic_diag["last_stage_only_pmtn_makespan"])
+                                if heuristic_diag.get("last_stage_only_pmtn_makespan")
+                                is not None
+                                else None
+                            ),
+                            (
+                                int(heuristic_diag["last_stage_only_makespan"])
+                                if heuristic_diag.get("last_stage_only_makespan")
+                                is not None
+                                else None
+                            ),
+                            int(heuristic_diag["incumbent_makespan"]),
+                            int(heuristic_diag["makespan_delta"]),
+                            int(p_inc_raw) if p_inc_raw is not None else None,
+                            int(r_inc_raw) if r_inc_raw is not None else None,
+                        )
+                    )
         if not rows:
             return
         rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
@@ -1082,11 +1102,10 @@ class FFcDDWReporter:
 
         Columns: ``scenarioName, insIndex, objValue``. One row per
         ``(scenario, instance)`` pair where the controller produced a
-        last-stage-only schedule (``run_mcf_lb_4`` /
-        ``run_last_stage_cp_sat_lb`` /
-        ``neh_cp_last_stage_only_sch_from_mcf_lb`` /
-        ``single_pass_last_stage_only_sch_from_mcf_lb``). Skipped
-        entirely if no scenario produced one.
+        last-stage-only schedule (``heuristic_last_stage_only_sch_from_mcf_lb``
+        directly, or via the equivalent sub-call inside
+        ``calc_mcf_lb_and_derive_full_sch``). Skipped entirely if no
+        scenario produced one.
         """
         rows: list[tuple[str, int | None, float]] = []
         for sc in self.scenario_results:
@@ -1134,16 +1153,14 @@ class FFcDDWReporter:
         per_instance: dict[int, dict[str, float]] = {}
         for sc in self.scenario_results:
             for ir in sc.instance_results:
-                diag = ir.mcf_lb_diagnostic
-                if diag is None:
-                    continue
-                val = diag.get("last_stage_only_obj")
-                if val is None:
+                if ir.last_stage_only_obj is None:
                     continue
                 ins_index = self._resolve_ins_index(ir.instance_name)
                 if ins_index is None:
                     continue
-                per_instance.setdefault(ins_index, {})[sc.name] = float(val)
+                per_instance.setdefault(ins_index, {})[sc.name] = float(
+                    ir.last_stage_only_obj
+                )
 
         if not per_instance:
             return
@@ -1203,18 +1220,10 @@ class FFcDDWReporter:
                 writer.writerow([name, best_counts[name], lt_bks_counts[name]])
         logger.info("Last-stage-only-obj count CSV written to %s", count_path)
 
-    _MCF_LB_REF_OBJ_COLUMNS: tuple[str, ...] = (
-        "lastStageOnlyBound",
-        "lastStageOnlyObj",
-        "dispatchedObj",
-        "profileFixObj",
-        "profileFixBound",
-    )
+    _MCF_LB_REF_OBJ_COLUMNS: tuple[str, ...] = ("dispatchedObj",)
     _MCF_LB_STEP_SEC_COLUMNS: tuple[str, ...] = (
         "mcfSolveSec",
-        "lastStageCpSatSec",
         "dispatchSec",
-        "profileFixCpSatSec",
     )
     _MCF_LB_REF_BLANK_COLUMNS: tuple[str, ...] = (
         *_MCF_LB_STEP_SEC_COLUMNS,
@@ -1432,12 +1441,20 @@ class FFcDDWReporter:
         logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie table written to %s", path)
 
     def _mcf_lb_analysis_row(self, ir: InstanceResult) -> list[str]:
-        diag = ir.mcf_lb_diagnostic or {}
+        mcf_diag = ir.mcf_lb_diagnostic or {}
+        calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic or {}
+        build_diag = ir.build_full_sch_diagnostic or {}
         ins_index = self._resolve_ins_index(ir.instance_name)
         meta = self._index_to_meta.get(ins_index, {}) if ins_index is not None else {}
 
         def _s(v: Any) -> str:
             return "" if v is None else str(v)
+
+        mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
+        mcf_solve_sec = mcf_diag.get("mcf_solve_sec") or calc_diag.get(
+            "r1_mcf_solve_sec"
+        )
+        dispatched_obj = build_diag.get("dispatched_obj") or calc_diag.get("final_obj")
 
         values: dict[str, Any] = {
             "insIndex": ins_index,
@@ -1448,17 +1465,12 @@ class FFcDDWReporter:
             "T": meta.get("T"),
             "R": meta.get("R"),
             "W": meta.get("W"),
-            "mcfLb": diag.get("mcf_lb"),
-            "lastStageOnlyBound": diag.get("last_stage_only_bound"),
-            "lastStageOnlyObj": diag.get("last_stage_only_obj"),
+            "mcfLb": mcf_lb,
+            "lastStageOnlyObj": ir.last_stage_only_obj,
             "bks": meta.get("BKS"),
-            "dispatchedObj": diag.get("dispatched_obj"),
-            "profileFixObj": diag.get("profile_fix_obj"),
-            "mcfSolveSec": diag.get("mcf_solve_sec"),
-            "lastStageCpSatSec": diag.get("last_stage_cp_sat_sec"),
-            "dispatchSec": diag.get("dispatch_sec"),
-            "profileFixCpSatSec": diag.get("profile_fix_cp_sat_sec"),
-            "profileFixBound": diag.get("profile_fix_bound"),
+            "dispatchedObj": dispatched_obj,
+            "mcfSolveSec": mcf_solve_sec,
+            "dispatchSec": build_diag.get("dispatch_sec"),
         }
         return [_s(values[col]) for col in self._MCF_LB_ANALYSIS_COLUMNS]
 

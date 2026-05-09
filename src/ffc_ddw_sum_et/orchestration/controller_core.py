@@ -14,7 +14,12 @@ from routix.stopping_criteria import StoppingCriteria
 from routix.subroutine_controller import SubroutineController
 
 from ..algorithm.base.alg_record import ProgressLogEntry, WorkStatus
-from ..algorithm.mcf_lb.diagnostic import MCFLBDiagnostic
+from ..algorithm.mcf_lb.diagnostic import (
+    BuildFullSchDiagnostic,
+    CalcMcfLbAndDeriveFullSchDiagnostic,
+    HeuristicLastStageOnlyDiagnostic,
+    MCFLBDiagnostic,
+)
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import (
     FFcSchedule,
@@ -76,7 +81,18 @@ class FFcDDWSubroutineControllerCore(
     def _define_states(self) -> None:
         """Define all state attributes used across subroutine phases."""
         self.mcf_preemptive_schedule: MCFPreemptiveSchedule | None = None
+        # Per-entry-point diagnostic slots. Each is populated only by
+        # the controller method whose name matches the slot — composite
+        # steps record their r1/r2 sub-results on their own diagnostic
+        # rather than nesting other diagnostics.
         self.mcf_lb_diagnostic: MCFLBDiagnostic | None = None
+        self.heuristic_last_stage_only_diagnostic: (
+            HeuristicLastStageOnlyDiagnostic | None
+        ) = None
+        self.build_full_sch_diagnostic: BuildFullSchDiagnostic | None = None
+        self.calc_mcf_lb_and_derive_full_sch_diagnostic: (
+            CalcMcfLbAndDeriveFullSchDiagnostic | None
+        ) = None
         self.last_stage_only_sol: FFcDDWSolution | None = None
         # Composite-step hand-off slot for ``adjust_*_by_full_sch_*`` fallback.
         # When a composite (e.g. ``calc_mcf_lb_and_derive_full_sch``) builds an

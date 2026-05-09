@@ -64,9 +64,7 @@ def compute_weighted_et_from_preemptive(
     return sum_earliness, sum_tardiness
 
 
-def compute_phase_obj_value(
-    sched: Any, instance: FFcDDWParameters
-) -> float | None:
+def compute_phase_obj_value(sched: Any, instance: FFcDDWParameters) -> float | None:
     """Return weighted ET on ``sched`` against ``instance``, or ``None`` when
     ``sched`` is on the reversed instance (its "last stage" is then the
     original *first* stage, which has no due window).

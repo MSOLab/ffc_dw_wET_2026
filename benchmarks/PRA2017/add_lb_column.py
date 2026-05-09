@@ -1,7 +1,7 @@
 """Compute MCF-based lower bounds for PRA2017 instances and append an LB column.
 
 Reads every PRA2017 instance under ``large/``, runs
-``FFcDDWSubroutineController.run_mcf_lb`` on each, and rewrites
+``FFcDDWSubroutineController.apply_lb_by_mcf`` on each, and rewrites
 ``pra2017_instance_table.csv`` with a new ``LB`` column next to ``BKS``.
 
 Idempotent: overwrites any pre-existing ``LB`` column.
@@ -25,15 +25,15 @@ INSTANCE_DIR = HERE / "large"
 
 
 def compute_lb(instance: FFcDDWParameters) -> int:
-    # timelimit is unused here: run_mcf_lb_4() is called directly, not via
-    # ctrlr.run()'s subroutine loop. The value is only a formal argument
-    # required by the controller constructor.
+    # timelimit is unused here: apply_lb_by_mcf() is called directly, not
+    # via ctrlr.run()'s subroutine loop. The value is only a formal
+    # argument required by the controller constructor.
     ctrlr = FFcDDWSubroutineController(
         instance=instance,
         subroutine_flow=[],
         stopping_criteria={"timelimit": 1.0},
     )
-    report = ctrlr.run_mcf_lb_4()
+    report = ctrlr.apply_lb_by_mcf()
     assert report.obj_bound is not None
     return int(report.obj_bound)
 

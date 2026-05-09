@@ -60,16 +60,23 @@ class InstanceResult:
     stage_count: int | None = None
     machines_per_stage: int | None = None
     timelimit: float | None = None
+    # Per-entry-point diagnostic dicts. Each is populated only when the
+    # matching controller method was invoked as a top-level subroutine
+    # flow step (composite invocations record on
+    # ``calc_mcf_lb_and_derive_full_sch_diagnostic`` instead).
     mcf_lb_diagnostic: dict[str, Any] | None = None
+    heuristic_last_stage_only_diagnostic: dict[str, Any] | None = None
+    build_full_sch_diagnostic: dict[str, Any] | None = None
+    calc_mcf_lb_and_derive_full_sch_diagnostic: dict[str, Any] | None = None
     makespan: float | None = None
 
     last_stage_only_obj: float | None = None
     """
-    Weighted E+T of ``self.last_stage_only_sol`` when the
-    controller produced a last-stage-only schedule
-    (run_mcf_lb_4 / run_last_stage_cp_sat_lb /
-    neh_cp_last_stage_only_sch_from_mcf_lb /
-    single_pass_last_stage_only_sch_from_mcf_lb). ``None`` otherwise.
+    Weighted E+T of ``self.last_stage_only_sol`` when the controller
+    produced a last-stage-only schedule
+    (``heuristic_last_stage_only_sch_from_mcf_lb`` or the equivalent
+    sub-call inside ``calc_mcf_lb_and_derive_full_sch``).
+    ``None`` otherwise.
     """
 
 
@@ -361,18 +368,37 @@ class FFcDDWSingleInstanceRunner(
                     "Error saving %s json for %s", name, self.ins_name
                 )
 
-        diag = getattr(controller, "mcf_lb_diagnostic", None)
-        diag_dict: dict[str, Any] | None = asdict(diag) if diag is not None else None
+        def _diag_to_dict(attr_name: str) -> dict[str, Any] | None:
+            d = getattr(controller, attr_name, None)
+            return asdict(d) if d is not None else None
+
+        diag_dict = _diag_to_dict("mcf_lb_diagnostic")
+        heuristic_diag_dict = _diag_to_dict("heuristic_last_stage_only_diagnostic")
+        build_full_diag_dict = _diag_to_dict("build_full_sch_diagnostic")
+        calc_diag_dict = _diag_to_dict("calc_mcf_lb_and_derive_full_sch_diagnostic")
         ls_only_sol = getattr(controller, "last_stage_only_sol", None)
         last_stage_only_obj = (
             float(ls_only_sol.obj_value)
             if ls_only_sol is not None and ls_only_sol.obj_value is not None
             else None
         )
-        if diag_dict is not None:
+        if any(
+            d is not None
+            for d in (
+                diag_dict,
+                heuristic_diag_dict,
+                build_full_diag_dict,
+                calc_diag_dict,
+            )
+        ):
             try:
                 dump_yaml(
-                    diag_dict,
+                    {
+                        "mcf_lb_diagnostic": diag_dict,
+                        "heuristic_last_stage_only_diagnostic": heuristic_diag_dict,
+                        "build_full_sch_diagnostic": build_full_diag_dict,
+                        "calc_mcf_lb_and_derive_full_sch_diagnostic": calc_diag_dict,
+                    },
                     layout.artifact_path("mcf_lb_diagnostic", **scope),
                 )
             except Exception:
@@ -418,6 +444,9 @@ class FFcDDWSingleInstanceRunner(
             machines_per_stage=mps,
             timelimit=timelimit,
             mcf_lb_diagnostic=diag_dict,
+            heuristic_last_stage_only_diagnostic=heuristic_diag_dict,
+            build_full_sch_diagnostic=build_full_diag_dict,
+            calc_mcf_lb_and_derive_full_sch_diagnostic=calc_diag_dict,
             makespan=makespan,
             last_stage_only_obj=last_stage_only_obj,
         )

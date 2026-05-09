@@ -1,10 +1,9 @@
 """Direct verification of solve_mcf_lb's stop_predicate path.
 
-The catch sites in `controller.apply_lb_by_mcf` and
-`controller.run_mcf_lb_then_neh_cp` are essentially unreachable in normal
-subroutine_flow execution because routix's `_run_flow` checks
-`is_stopping_condition()` before each step (see
-`routix/subroutine_controller.py:172`). These tests bypass that
+The catch site in ``controller.apply_lb_by_mcf`` is essentially
+unreachable in normal subroutine_flow execution because routix's
+``_run_flow`` checks ``is_stopping_condition()`` before each step (see
+``routix/subroutine_controller.py:172``). These tests bypass that
 pre-step guard so the raise → catch path can be deterministically
 exercised.
 """
@@ -19,7 +18,6 @@ import pytest
 from routix.report import SubroutineReport
 from routix.stopping_criteria import StoppingCriteria
 
-from ffc_ddw_sum_et.algorithm.mcf_lb.diagnostic import MCFLBDiagnostic
 from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import (
     MCFLBStopRequested,
     solve_mcf_lb,
@@ -53,28 +51,22 @@ def test_solve_mcf_lb_raises_mcflbstoprequested_on_true_predicate(
     and emit the new INFO log line on the supplied logger.
     """
     instance = _make_instance()
-    diag = MCFLBDiagnostic()
     test_logger = logging.getLogger("test_solve_mcf_lb_stop_predicate")
 
     with caplog.at_level(logging.INFO, logger=test_logger.name):
         with pytest.raises(MCFLBStopRequested):
             solve_mcf_lb(
                 instance,
-                diag,
                 stop_predicate=lambda: True,
                 logger=test_logger,
             )
 
-    # The new INFO log fired (proves we hit the predicate-True branch,
+    # The INFO log fired (proves we hit the predicate-True branch,
     # not some downstream LP failure).
     assert any(
         "solve_mcf_lb: stop_predicate True before LP solve" in rec.message
         for rec in caplog.records
     ), f"expected raise log; got {[r.message for r in caplog.records]}"
-
-    # diagnostic was not mutated (we exited before recording solve_sec).
-    assert diag.mcf_solve_sec is None
-    assert diag.mcf_lb is None
 
 
 def test_apply_lb_by_mcf_catches_mcflbstoprequested_with_stale_timer(

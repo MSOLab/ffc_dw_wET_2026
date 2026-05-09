@@ -13,6 +13,23 @@ draw_gantt: true
 painter_thread_cnt: 16
 
 scenarios:
+  - name: "build_full_sch_base"
+    timelimit: 300.0
+    output_subdir: "build_full_sch_base"
+    subroutine_flow:
+      - method: apply_lb_by_mcf
+        draw_heatmap: false
+        heatmap_sort: "end_time"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 0
+      - method: heuristic_last_stage_only_sch_from_mcf_lb
+        job_priority: "end_time"
+        placement_priority: "dist"
+        p_increment: 0
+        r_multiplier: 1.0
+        r_increment: 0
+      - method: build_full_sch_from_last_stage_only_sch
   - name: flip_makespan_cp_from_incumbent
     timelimit: "0.09nc"
     output_subdir: flip_makespan_cp_from_incumbent
