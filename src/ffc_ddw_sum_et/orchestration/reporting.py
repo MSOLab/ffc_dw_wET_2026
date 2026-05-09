@@ -1409,24 +1409,28 @@ class FFcDDWReporter:
                             self.layout.artifact_path("gantt_png", **scope),
                         )
                     )
-                for phase_json in self.layout.find_artifacts(
+                for phase_kind in (
                     "mcf_lb_phase_schedule",
-                    scenario_name=sc.name,
-                    instance_name=ins,
+                    "flip_makespan_cp_phase_schedule",
                 ):
-                    # phase_name == file stem (template is "{phase_name}.json")
-                    phase_name = phase_json.stem
-                    jobs.append(
-                        (
-                            _render_phase_gantt_from_json,
-                            phase_json,
-                            self.layout.artifact_path(
-                                "phase_gantt_png",
-                                phase_name=phase_name,
-                                **scope,
-                            ),
+                    for phase_json in self.layout.find_artifacts(
+                        phase_kind,
+                        scenario_name=sc.name,
+                        instance_name=ins,
+                    ):
+                        # phase_name == file stem (template is "{phase_name}.json")
+                        phase_name = phase_json.stem
+                        jobs.append(
+                            (
+                                _render_phase_gantt_from_json,
+                                phase_json,
+                                self.layout.artifact_path(
+                                    "phase_gantt_png",
+                                    phase_name=phase_name,
+                                    **scope,
+                                ),
+                            )
                         )
-                    )
 
         gantt_count = len(jobs)
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the

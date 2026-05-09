@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import time
+from pathlib import Path
 from typing import Callable, Literal, Sequence
 
 from ortools.sat.python import cp_model
@@ -24,6 +25,10 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
     MixedDispatcher,
 )
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
+from ffc_ddw_sum_et.algorithm.flip_makespan_cp import (
+    FlipMakespanCpDispatcher,
+    FlipMakespanCpOption,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb import MCFLBDiagnostic
 from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
     heuristic_last_stage_only_from_mcf_lb,
@@ -2324,6 +2329,153 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value),
         )
+        return report
+
+    def _build_flip_phase_path_getter(self) -> Callable[[str], Path] | None:
+        """Return a callable that maps a phase_label (e.g. ``"01_incumbent"``)
+        to the registered ``flip_makespan_cp_phase_schedule`` artifact path,
+        or ``None`` if the artifact layout/scope is not bound (test/scripted
+        runs).
+
+        The closure prepends the call_context (``<step_idx>-<method_name>``)
+        to the phase_label before resolving via ``artifact_path``, so files
+        sort by subroutine-flow step on disk and don't collide with phases
+        from other steps. Routing through ``artifact_path`` is what makes
+        the reporter's ``find_artifacts`` call discover the file.
+        """
+        layout = self._artifact_layout
+        scenario_name = self._artifact_scenario_name
+        instance_name = self._artifact_instance_name
+        if layout is None or scenario_name is None or instance_name is None:
+            return None
+        call_context = self._get_call_context_of_current_method()
+
+        def _phase_path(phase_label: str) -> Path:
+            return layout.artifact_path(
+                "flip_makespan_cp_phase_schedule",
+                phase_name=f"{call_context}_{phase_label}",
+                scenario_name=scenario_name,
+                instance_name=instance_name,
+            )
+
+        return _phase_path
+
+    def run_flip_makespan_cp_from_incumbent(
+        self,
+        cp_tl: float | str | None = None,
+        solver_thread_cnt: int = 1,
+        log_search_progress: bool = False,
+        emit_phase_schedules: bool = False,
+    ) -> SubroutineReport:
+        """Step method: stage-flip + makespan CP-SAT, warm-started from the
+        incumbent.
+
+        Right-shifts the incumbent's last stage (per-job ET-non-positive),
+        time-flips the right-shifted incumbent onto the stage-reversed
+        instance, fixes the (now-first) reverse-stage, hints the rest, and
+        minimises makespan with CP-SAT. Re-flips and applies the standard
+        ``make_semi_active`` + ``insert_idle_time`` post-process.
+
+        ``cp_tl`` is the user-specified per-call cap (absolute seconds, or any
+        :func:`resolve_value_expr` expression). The actual time budget passed
+        to the dispatcher is the strict-min of ``cp_tl`` and the controller's
+        remaining global time. ``cp_tl=None`` means "no per-call cap" — only
+        the global time limit is enforced.
+
+        ``emit_phase_schedules=True`` writes compact-JSON snapshots of the
+        seven load-bearing intermediate schedules into the instance's
+        progress zone, mirroring the ``mcf_lb_phase_schedule`` convention.
+        """
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
+
+        instance = self.instance
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            raise RuntimeError(
+                "run_flip_makespan_cp_from_incumbent requires an incumbent "
+                "schedule; chain it after a seeding subroutine such as "
+                "calc_mcf_lb_and_derive_full_sch."
+            )
+
+        cp_tl_resolved = resolve_value_expr(
+            cp_tl,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        eff_tl_sec = (
+            min(cp_tl_resolved, remaining_sec)
+            if cp_tl_resolved is not None
+            else remaining_sec
+        )
+
+        self.logger.info(
+            "run_flip_makespan_cp_from_incumbent: effective=%.3fs (cp_tl=%s, "
+            "remaining=%.3fs), incumbent_obj=%s",
+            eff_tl_sec,
+            f"{cp_tl_resolved:.3f}s" if cp_tl_resolved is not None else "None",
+            remaining_sec,
+            f"{incumbent.obj_value:.2f}" if incumbent.obj_value is not None else "None",
+        )
+
+        option = FlipMakespanCpOption(
+            cp_tl_seconds=eff_tl_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            log_search_progress=log_search_progress,
+            solver_log_path_getter=self.get_file_path_for_subroutine,
+            emit_phase_schedules=emit_phase_schedules,
+            phase_schedule_path_getter=self._build_flip_phase_path_getter()
+            if emit_phase_schedules
+            else None,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            ref_solution=incumbent.schedule,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = FlipMakespanCpDispatcher().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        schedule = result.schedule if result is not None else None
+
+        prev_obj = incumbent.obj_value
+        if obj_value is None:
+            obj_value_str = "None"
+        elif prev_obj is None:
+            obj_value_str = f"{int(obj_value)}"
+        else:
+            obj_value_str = f"{int(obj_value)}({int(obj_value) - int(prev_obj):+d})"
+        self.logger.info(
+            "run_flip_makespan_cp_from_incumbent: elapsed=%.3fs, obj_value=%s",
+            elapsed,
+            obj_value_str,
+        )
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        progress_log = record.progress_log or ()
+        if schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(schedule=schedule, obj_value=obj_value),
+                progress_log=progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=progress_log)
         return report
 
     def solve_base_model_cpsat(

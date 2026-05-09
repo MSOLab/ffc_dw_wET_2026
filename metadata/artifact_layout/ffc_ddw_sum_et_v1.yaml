@@ -35,6 +35,14 @@ artifacts:
     zone: progress
     kind: mcf_lb_phase_schedule
     file_template: "{phase_name}.json"
+  # Compact-JSON phase snapshots from FlipMakespanCpDispatcher. Same shape as
+  # `solution_json` (operations[]), so the reporter reuses
+  # `_render_gantt_from_solution_json` to produce a `phase_gantt_png` per file.
+  # `phase_name` carries the controller call_context prefix.
+  - scope: instance
+    zone: progress
+    kind: flip_makespan_cp_phase_schedule
+    file_template: "{phase_name}.json"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
