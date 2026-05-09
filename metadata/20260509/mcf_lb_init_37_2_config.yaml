@@ -26,7 +26,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [ 0, 10, 20, 30, 40, 50, 60, 70, 80 ]
+# ins_index: [ 0, 10, 20, 30, 40, 50, 60, 70, 80 ]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260509
@@ -38,7 +38,7 @@ painter_thread_cnt: 16
 
 scenarios:
   - name: build_full_sch_base
-    timelimit: 300.0
+    timelimit: "0.09nc"
     output_subdir: build_full_sch_base
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
@@ -48,7 +48,7 @@ scenarios:
         makespan_delta_ref: "lastStageOnlyMakespan"
         proceed_r2_when_nonpositive_cmax: true
   - name: build_full_sch_p_adjust
-    timelimit: 300.0
+    timelimit: "0.09nc"
     output_subdir: build_full_sch_p_adjust
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
@@ -59,7 +59,7 @@ scenarios:
         adjust_p: true
         proceed_r2_when_nonpositive_cmax: true
   - name: build_full_sch_r_adjust
-    timelimit: 300.0
+    timelimit: "0.09nc"
     output_subdir: build_full_sch_r_adjust
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
@@ -71,7 +71,7 @@ scenarios:
         r_adjust_coeff: 1
         proceed_r2_when_nonpositive_cmax: true
   - name: build_full_sch_p_adjust_r_adjust
-    timelimit: 300.0
+    timelimit: "0.09nc"
     output_subdir: build_full_sch_p_adjust_r_adjust
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
@@ -84,7 +84,7 @@ scenarios:
         r_adjust_coeff: 1
         proceed_r2_when_nonpositive_cmax: true
   - name: build_full_sch_r_half_adjust
-    timelimit: 300.0
+    timelimit: "0.09nc"
     output_subdir: build_full_sch_r_half_adjust
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
@@ -96,7 +96,7 @@ scenarios:
         r_adjust_coeff: 0.5
         proceed_r2_when_nonpositive_cmax: true
   - name: build_full_sch_p_adjust_r_half_adjust
-    timelimit: 300.0
+    timelimit: "0.09nc"
     output_subdir: build_full_sch_p_adjust_r_half_adjust
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
