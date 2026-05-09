@@ -1142,8 +1142,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         heatmap_sort: HeatmapSort = "end_time",
         job_placement_priority: PmPrmpSortKey = "end_time",
         last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+        makespan_delta_ref: Literal[
+            "mcfLbMakespan", "lastStageOnlyMakespan"
+        ] = "mcfLbMakespan",
         adjust_p: bool = False,
         adjust_r: bool = False,
+        r_adjust_coeff: float = 0.5,
         proceed_r2_when_nonpositive_cmax: bool = False,
         emit_phase_schedules: bool = False,
     ) -> SubroutineReport:
@@ -1156,11 +1160,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         is a valid global bound on the original instance). Round 2 runs
         when ``(adjust_p or adjust_r)`` is True, the stop predicate is
         False, r1 produced a full schedule, AND either the signed
-        makespan delta ``r1_full_sch_makespan − r1_ls_only_pmtn_makespan``
+        makespan delta ``r1_full_sch_makespan - ref_makespan``
         is strictly positive OR ``proceed_r2_when_nonpositive_cmax`` is
         True (in which case the delta is clamped to ``>=1`` for
         increment computation only — the raw signed delta is still
         recorded on the diagnostic, preserving the Rep3-fix invariant).
+        The reference makespan source is selected by
+        ``makespan_delta_ref`` (default ``"mcfLbMakespan"``).
 
         Registers exactly once per call: the synthesized
         ``SubroutineReport`` whose ``obj_bound`` is round-1's MCF LB and
@@ -1198,11 +1204,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 the heuristic.
             last_stage_only_placement_criteria: Forwarded as
                 ``placement_priority`` to the heuristic.
+            makespan_delta_ref: Reference makespan in
+                ``makespan_delta = r1_full_sch_makespan - ref_makespan``.
+                ``"mcfLbMakespan"`` (default) uses the r1 MCF preemptive
+                LP schedule's makespan; ``"lastStageOnlyMakespan"`` uses
+                the r1 heuristic non-preemptive last-stage schedule's
+                makespan. Any other value raises ``ValueError`` from the
+                algorithm-side function.
             adjust_p: When True, round 2 inflates last-stage processing
                 times by ``ceil(makespan_delta * m_last / n)``.
             adjust_r: When True, round 2 inflates per-job releases by
-                ``ceil(makespan_delta / 2)`` (the historical
-                ``adjust_r_by_half`` behaviour is bundled here).
+                ``ceil(makespan_delta * r_adjust_coeff)`` (the historical
+                ``adjust_r_by_half`` behaviour is the default).
+            r_adjust_coeff: Coefficient on ``makespan_delta`` used in
+                the ``adjust_r`` formula. Default ``0.5`` reproduces the
+                historical ``ceil(delta / 2)`` factor.
             proceed_r2_when_nonpositive_cmax: When False (default),
                 preserves the historical ``delta_le_0`` skip — round 2
                 is skipped whenever the signed delta is ``<= 0``. When
@@ -1241,8 +1257,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             heatmap_sort=heatmap_sort,
             job_placement_priority=job_placement_priority,
             last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+            makespan_delta_ref=makespan_delta_ref,
             adjust_p=adjust_p,
             adjust_r=adjust_r,
+            r_adjust_coeff=r_adjust_coeff,
             proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
             stop_predicate=self.is_stopping_condition,
             logger=self.logger,
@@ -1259,6 +1277,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             c_diag.r1_ls_only_pmtn_makespan = int(
                 result.r1_apply.mcf_preemptive_schedule.makespan
             )
+        if result.r1_heuristic is not None:
+            c_diag.r1_ls_only_makespan = int(result.r1_heuristic.schedule.makespan)
         if (
             result.r1_build_full is not None
             and result.r1_build_full.schedule is not None
@@ -1270,6 +1290,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 else None
             )
         c_diag.makespan_delta = result.makespan_delta
+        if result.makespan_delta is not None:
+            c_diag.makespan_delta_ref_used = makespan_delta_ref
         c_diag.r2_ran = result.r2_ran
         c_diag.r2_skip_reason = result.r2_skip_reason
         if result.r2_apply is not None:

@@ -95,17 +95,29 @@ class CalcMcfLbAndDeriveFullSchDiagnostic:
     """Diagnostic for ``calc_mcf_lb_and_derive_full_sch``.
 
     Owns r1/r2 raw sub-results as flat fields. ``makespan_delta`` is the
-    raw signed delta (``r1_full_sch_makespan − r1_ls_only_pmtn_makespan``)
-    recorded *before* the round-2 skip decision, so a non-positive delta
-    is captured rather than dropped.
+    raw signed delta (``r1_full_sch_makespan - ref_makespan``) recorded
+    *before* the round-2 skip decision, so a non-positive delta is
+    captured rather than dropped. The reference makespan source is
+    recorded on ``makespan_delta_ref_used``: ``"mcfLbMakespan"`` uses
+    ``r1_ls_only_pmtn_makespan`` as the ref; ``"lastStageOnlyMakespan"``
+    uses ``r1_ls_only_makespan``. Both makespans are populated whenever
+    their source schedule exists, regardless of which one was used for
+    the delta.
     """
 
     # r1 always runs.
     r1_mcf_lb: float | None = None
     r1_mcf_solve_sec: float | None = None
     r1_ls_only_pmtn_makespan: int | None = None
+    # Non-preemptive last-stage-only schedule makespan from the r1
+    # heuristic. Populated whenever ``r1.heuristic`` is non-None.
+    r1_ls_only_makespan: int | None = None
     r1_full_sch_makespan: int | None = None
     r1_full_sch_obj: float | None = None
+    # Reference-makespan mode used for the delta computation:
+    # "mcfLbMakespan" | "lastStageOnlyMakespan" | None (None when r1 did
+    # not reach the delta computation).
+    makespan_delta_ref_used: str | None = None
     # Raw signed delta; <= 0 is recorded as-is.
     makespan_delta: int | None = None
     r2_ran: bool = False

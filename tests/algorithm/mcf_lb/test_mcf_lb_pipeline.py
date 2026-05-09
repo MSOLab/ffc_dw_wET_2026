@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 
 import pandas as pd
+import pytest
 
 from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
     CalcMcfLbAndDeriveFullSchResult,
@@ -235,6 +236,87 @@ def test_proceed_r2_when_nonpositive_cmax_forces_r2_with_clamped_delta() -> None
         result.r1_build_full.schedule,
         result.r2_build_full.schedule,
     )
+
+
+def test_r_adjust_coeff_scales_r_increment() -> None:
+    """``r_adjust_coeff`` scales the ``adjust_r`` formula:
+    ``r_increment = ceil(delta_for_inc * r_adjust_coeff)``. Default
+    ``0.5`` reproduces the historical ``ceil(delta / 2)``; passing
+    ``1.0`` doubles the increment (when delta is even).
+    """
+    instance = _make_multi_stage_instance()
+
+    baseline = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        adjust_r=True,
+        proceed_r2_when_nonpositive_cmax=True,
+    )
+    doubled = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        adjust_r=True,
+        r_adjust_coeff=1.0,
+        proceed_r2_when_nonpositive_cmax=True,
+    )
+
+    assert baseline.r2_ran is True
+    assert doubled.r2_ran is True
+    assert baseline.r2_r_increment is not None
+    assert doubled.r2_r_increment is not None
+
+    delta_for_inc = max(baseline.makespan_delta, 1)
+    assert baseline.r2_r_increment == math.ceil(delta_for_inc * 0.5)
+    assert doubled.r2_r_increment == math.ceil(delta_for_inc * 1.0)
+
+
+def test_makespan_delta_ref_last_stage_only_uses_heuristic_makespan() -> None:
+    """``makespan_delta_ref="lastStageOnlyMakespan"`` computes the delta
+    against ``r1.heuristic.schedule.makespan`` (non-preemptive last-stage
+    schedule) instead of ``r1.apply.mcf_preemptive_schedule.makespan``.
+    The recorded delta equals ``full_sch_makespan - chosen_ref`` for
+    each mode (the two refs may or may not coincide on a given fixture).
+    """
+    instance = _make_multi_stage_instance()
+
+    mcf_ref = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        makespan_delta_ref="mcfLbMakespan",
+        adjust_p=True,
+        adjust_r=True,
+        proceed_r2_when_nonpositive_cmax=True,
+    )
+    ls_ref = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        makespan_delta_ref="lastStageOnlyMakespan",
+        adjust_p=True,
+        adjust_r=True,
+        proceed_r2_when_nonpositive_cmax=True,
+    )
+
+    assert mcf_ref.r1_build_full is not None
+    assert mcf_ref.r1_build_full.schedule is not None
+    assert mcf_ref.r1_apply is not None
+    assert mcf_ref.r1_heuristic is not None
+
+    full_sch_makespan = int(mcf_ref.r1_build_full.schedule.makespan)
+    pmtn_makespan = int(mcf_ref.r1_apply.mcf_preemptive_schedule.makespan)
+    ls_only_makespan = int(mcf_ref.r1_heuristic.schedule.makespan)
+
+    assert mcf_ref.makespan_delta == full_sch_makespan - pmtn_makespan
+    assert ls_ref.makespan_delta == full_sch_makespan - ls_only_makespan
+
+
+def test_invalid_makespan_delta_ref_raises() -> None:
+    """Any value outside the two literals raises ``ValueError`` from
+    the composite (defense-in-depth alongside the ``Literal`` annotation,
+    since callers from YAML aren't type-checked).
+    """
+    instance = _make_multi_stage_instance()
+
+    with pytest.raises(ValueError, match="makespan_delta_ref"):
+        calc_mcf_lb_and_derive_full_sch(
+            instance,
+            makespan_delta_ref="foo",  # type: ignore[arg-type]
+        )
 
 
 def test_stop_predicate_at_entry_returns_empty_result() -> None:

@@ -10,12 +10,16 @@ Round 1 always runs with no augmentation, so the resulting MCF LB is a
 valid global bound on the original instance. Round 2 runs only when
 ``(adjust_p or adjust_r)`` is True, the stop predicate is False, r1
 produced a full schedule, AND either the signed makespan delta
-``r1_full_sch_makespan - r1_ls_only_pmtn_makespan`` is strictly
-positive OR ``proceed_r2_when_nonpositive_cmax`` is True (in which case
-the delta is clamped to ``>=1`` for increment computation only — the
-raw signed delta is still recorded). The ``proceed_r2_when_nonpositive_cmax``
-flag defaults to False; with the default, behavior matches the original
-``delta_le_0`` skip semantics exactly.
+``r1_full_sch_makespan - ref_makespan`` is strictly positive OR
+``proceed_r2_when_nonpositive_cmax`` is True (in which case the delta
+is clamped to ``>=1`` for increment computation only — the raw signed
+delta is still recorded). The reference makespan is selected by
+``makespan_delta_ref``: ``"mcfLbMakespan"`` (default) uses
+``r1.apply.mcf_preemptive_schedule.makespan``;
+``"lastStageOnlyMakespan"`` uses ``r1.heuristic.schedule.makespan``.
+The ``proceed_r2_when_nonpositive_cmax`` flag defaults to False; with
+the default, behavior matches the original ``delta_le_0`` skip
+semantics exactly.
 """
 
 from __future__ import annotations
@@ -293,6 +297,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     makespan_delta: int,
     adjust_p: bool,
     adjust_r: bool,
+    r_adjust_coeff: float = 0.5,
     draw_pmtn_sch_heatmap: bool = False,
     heatmap_sort: HeatmapSort = "end_time",
     job_placement_priority: PmPrmpSortKey = "end_time",
@@ -312,6 +317,10 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     so callers may invoke r2 even on a non-positive incumbent-vs-LP gap
     (the gating policy lives in the composite). The clamp is a no-op
     when ``delta > 0``.
+
+    ``r_adjust_coeff`` (default ``0.5``) scales the ``adjust_r`` formula:
+    ``r_increment = ceil(delta_for_inc * r_adjust_coeff)``. The default
+    matches the historical hard-coded ``ceil(delta_for_inc / 2)`` factor.
     """
     start_elapsed = time.monotonic()
     phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
@@ -320,7 +329,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     n = instance.job_count
     m_last = instance.last_stage_mc_count
     p_increment = math.ceil(delta_for_inc * m_last / n) if adjust_p else 0
-    r_increment = math.ceil(delta_for_inc / 2) if adjust_r else 0
+    r_increment = math.ceil(delta_for_inc * r_adjust_coeff) if adjust_r else 0
 
     def _stop_check() -> bool:
         return stop_predicate is not None and stop_predicate()
@@ -413,8 +422,12 @@ def calc_mcf_lb_and_derive_full_sch(
     heatmap_sort: HeatmapSort = "end_time",
     job_placement_priority: PmPrmpSortKey = "end_time",
     last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    makespan_delta_ref: Literal[
+        "mcfLbMakespan", "lastStageOnlyMakespan"
+    ] = "mcfLbMakespan",
     adjust_p: bool = False,
     adjust_r: bool = False,
+    r_adjust_coeff: float = 0.5,
     proceed_r2_when_nonpositive_cmax: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
@@ -437,15 +450,27 @@ def calc_mcf_lb_and_derive_full_sch(
             ``heuristic_last_stage_only_from_mcf_lb`` for both rounds.
         last_stage_only_placement_criteria: Forwarded as
             ``placement_priority`` to the heuristic for both rounds.
+        makespan_delta_ref: Reference makespan used as the LB-side term
+            in ``makespan_delta = r1_full_sch_makespan - ref_makespan``.
+            ``"mcfLbMakespan"`` (default) uses the r1 MCF preemptive LP
+            schedule's makespan (``r1.apply.mcf_preemptive_schedule``),
+            preserving prior behaviour. ``"lastStageOnlyMakespan"`` uses
+            the r1 heuristic non-preemptive last-stage schedule's
+            makespan (``r1.heuristic.schedule``). Any other value raises
+            ``ValueError``.
         adjust_p: When True, round 2 inflates last-stage processing
             times by ``ceil(makespan_delta * m_last / n)``.
         adjust_r: When True, round 2 inflates per-job releases by
-            ``ceil(makespan_delta / 2)`` (the historical
-            ``adjust_r_by_half`` behaviour is bundled here).
+            ``ceil(makespan_delta * r_adjust_coeff)`` (the historical
+            ``adjust_r_by_half`` behaviour is the default).
+        r_adjust_coeff: Coefficient on ``makespan_delta`` in the
+            ``adjust_r`` formula. Default ``0.5`` reproduces the
+            historical ``ceil(delta / 2)`` factor; pass a different
+            value to scale the release-time augmentation.
         proceed_r2_when_nonpositive_cmax: When False (default), the
             historical ``delta_le_0`` skip applies — round 2 is skipped
             with ``r2_skip_reason="delta_le_0"`` whenever the signed
-            ``r1_full_sch_makespan - r1_ls_only_pmtn_makespan`` is
+            ``r1_full_sch_makespan - ref_makespan`` is
             ``<= 0``. When True, that skip is bypassed and round 2
             runs with the delta clamped to ``>=1`` for increment math.
             The raw signed delta is preserved on
@@ -460,6 +485,12 @@ def calc_mcf_lb_and_derive_full_sch(
             paths for the per-round C-cost heatmap YAML. Ignored when
             ``draw_pmtn_sch_heatmap`` is False.
     """
+    if makespan_delta_ref not in ("mcfLbMakespan", "lastStageOnlyMakespan"):
+        raise ValueError(
+            "makespan_delta_ref must be 'mcfLbMakespan' or "
+            f"'lastStageOnlyMakespan'; got {makespan_delta_ref!r}"
+        )
+
     start_elapsed = time.monotonic()
 
     def _stop_check() -> bool:
@@ -560,16 +591,24 @@ def calc_mcf_lb_and_derive_full_sch(
         )
 
     incumbent_makespan = int(s1_schedule.makespan)
-    ls_only_pmtn_makespan = int(r1.apply.mcf_preemptive_schedule.makespan)
-    makespan_delta = incumbent_makespan - ls_only_pmtn_makespan
+    if makespan_delta_ref == "mcfLbMakespan":
+        ref_makespan = int(r1.apply.mcf_preemptive_schedule.makespan)
+    else:
+        # "lastStageOnlyMakespan" — r1.heuristic is non-None whenever
+        # r1.build_full is non-None (build_full requires the heuristic
+        # output as input), and we already returned above when
+        # ``r1.build_full is None``.
+        ref_makespan = int(r1.heuristic.schedule.makespan)
+    makespan_delta = incumbent_makespan - ref_makespan
 
     if makespan_delta <= 0 and not proceed_r2_when_nonpositive_cmax:
         if logger is not None:
             logger.info(
                 "calc_mcf_lb_and_derive_full_sch: round1 makespan=%d, "
-                "ls_only_pmtn makespan=%d, delta=%d <= 0 — skipping adjust round",
+                "ref_makespan=%d (ref=%s), delta=%d <= 0 — skipping adjust round",
                 incumbent_makespan,
-                ls_only_pmtn_makespan,
+                ref_makespan,
+                makespan_delta_ref,
                 makespan_delta,
             )
         return _assemble(
@@ -599,6 +638,7 @@ def calc_mcf_lb_and_derive_full_sch(
         makespan_delta=makespan_delta,
         adjust_p=adjust_p,
         adjust_r=adjust_r,
+        r_adjust_coeff=r_adjust_coeff,
         draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
         heatmap_sort=heatmap_sort,
         job_placement_priority=job_placement_priority,
