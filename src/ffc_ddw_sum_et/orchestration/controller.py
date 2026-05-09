@@ -986,11 +986,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
           - ``totalTime`` sum of the three r1 stage seconds (LP solve +
             heuristic + reverse-dispatch).
           - ``makespanDelta`` (signed; can be negative).
-          - ``pIncrementAdded`` / ``rIncrementAdded`` mirror the
-            run-level ``adjust_params_by_makespan_delta_csv`` semantics:
-            ``None`` when round 2 did not run, the actual increment
-            (which is 0 when the matching ``adjust_*`` flag was off
-            but round 2 still ran for the other knob) otherwise.
+          - ``pIncrementAdded`` / ``rIncrementAdded``: ``None`` when
+            round 2 did not run, the actual increment (which is 0 when
+            the matching ``adjust_*`` flag was off but round 2 still
+            ran for the other knob) otherwise.
         """
         layout = self._artifact_layout
         scenario = self._artifact_scenario_name

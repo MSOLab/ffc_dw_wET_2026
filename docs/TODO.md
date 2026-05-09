@@ -137,16 +137,7 @@ into a shared `adjust_params_*` triple):
      ls-only schedule, two reports can show different (or
      null-vs-non-null) values for what is conceptually the same quantity.
 
-2. **CSV column duplicate inside
-   `{run_id}_adjust_params_by_makespan_delta.csv`.** When `adjust_r`
-   fired (and `adjust_p` did not), `makespanDelta` and `rIncrementAdded`
-   are guaranteed equal — `effective_r_increment = r_increment +
-   makespan_delta`, so the "increment added" *is* the delta. The column
-   exists because the writer also handles `adjust_p`, where the
-   "increment added" is `ceil(delta * m_last / n)` and so genuinely
-   differs from the delta.
-
-3. **Setter blocks for shared `adjust_params_*` triple are duplicated
+2. **Setter blocks for shared `adjust_params_*` triple are duplicated
    between `apply_lb_by_mcf` and `heuristic_last_stage_only_sch_from_mcf_lb`
    in `orchestration/controller.py`.** Same three-line write of
    `adjust_params_{last_stage_only_makespan, incumbent_makespan,
@@ -168,11 +159,7 @@ because only the legacy path populates the diag-dict copy.)
   and route both consumers through `InstanceResult.last_stage_only_obj`,
   *or* have the new subroutines also write into the diag (single source
   of truth either way).
-- Item #2: when adding a third knob in the same family, OR when a
-  reader explicitly complains about the redundant column. Likely fix:
-  drop `rIncrementAdded`, document that for `adjust_r` rows the value
-  equals `makespanDelta`.
-- Item #3: when a third subroutine grows the same setter block, OR when
+- Item #2: when a third subroutine grows the same setter block, OR when
   any of the field names rotate again. Likely fix: extract a single
   helper.
 

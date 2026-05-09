@@ -563,11 +563,11 @@ class FFcDDWReporter:
 
         self._write_summary_csv()
         self._write_mcf_preemptive_obj_csv()
-        self._write_adjust_params_by_makespan_delta_csv()
         self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
         self._write_calc_mcf_lb_phase_metric_summaries()
         self._write_calc_mcf_lb_summary_csv()
+        self._write_calc_mcf_lb_run_summary_csv()
         self._write_mcf_lb_pivot_artifacts()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_table()
@@ -950,6 +950,115 @@ class FFcDDWReporter:
                     writer.writerow(cells)
             logger.info("calc_mcf_lb summary CSV written to %s", path)
 
+    def _write_calc_mcf_lb_run_summary_csv(self) -> None:
+        """Run-level CSV aggregating every per-scenario summary into one
+        table with ``scenarioName`` as the leading column.
+
+        Reads the same per-instance r1/r2 sidecars that
+        ``_write_calc_mcf_lb_summary_csv`` uses, so the run-level table
+        cannot drift from the per-scenario tables.
+
+        For rows where the r2 sidecar is absent (e.g., the composite
+        step's ``no_adjust`` or ``stop_guard`` skip path), six r2
+        obj/makespan cells are filled with the matching r1 values, and
+        ``pIncrementAdded`` / ``rIncrementAdded`` / ``r2_totalTime``
+        are written as ``0``. ``makespanDelta`` is left blank in that
+        case (i.e., whatever the r1 sidecar carries — typically
+        ``None`` when r2 was skipped via ``no_adjust``).
+
+        Rows are ordered by scenario (the order ``self.scenario_results``
+        was given to the reporter), then by ``insIndex``.
+        """
+        meta_columns = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W", "BKS"]
+        r1_columns = [f"r1_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        r2_columns = [f"r2_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        delta_columns = ["makespanDelta", "pIncrementAdded", "rIncrementAdded"]
+        column_headers = (
+            ["scenarioName"]
+            + meta_columns
+            + ["instanceName"]
+            + r1_columns
+            + delta_columns
+            + r2_columns
+        )
+
+        def _cell(value: Any) -> str:
+            return "" if value is None else str(value)
+
+        rows: list[tuple[int, int | None, str, list[str]]] = []
+        for sc_idx, sc in enumerate(self.scenario_results):
+            for ir in sc.instance_results:
+                r1_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r1_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                if not r1_path.exists():
+                    continue
+                r1_data: dict[str, Any] = load_yaml(r1_path) or {}
+                r2_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r2_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                r2_present = r2_path.exists()
+                r2_data: dict[str, Any] = (load_yaml(r2_path) or {}) if r2_present else {}
+
+                ins_idx = self._resolve_ins_index(ir.instance_name)
+                meta = (
+                    self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
+                )
+                meta_cells = ["" if ins_idx is None else str(ins_idx)] + [
+                    _cell(meta.get(col)) for col in meta_columns[1:]
+                ]
+                r1_cells = [
+                    _cell(r1_data.get(f)) for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                ]
+                if r2_present:
+                    delta_cells = [_cell(r1_data.get(c)) for c in delta_columns]
+                    r2_cells = [
+                        _cell(r2_data.get(f))
+                        for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                    ]
+                else:
+                    # Synthesize r2 cells from r1: 6 obj/makespan fields
+                    # mirror r1; totalTime is forced to 0.
+                    delta_cells = [
+                        _cell(r1_data.get("makespanDelta")),
+                        "0",
+                        "0",
+                    ]
+                    r2_cells = [
+                        "0" if f == "totalTime" else _cell(r1_data.get(f))
+                        for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                    ]
+                rows.append(
+                    (
+                        sc_idx,
+                        ins_idx,
+                        ir.instance_name,
+                        [sc.name]
+                        + meta_cells
+                        + [ir.instance_name]
+                        + r1_cells
+                        + delta_cells
+                        + r2_cells,
+                    )
+                )
+
+        if not rows:
+            return
+        rows.sort(
+            key=lambda r: (r[0], r[1] if r[1] is not None else -1, r[2])
+        )
+        path = self.layout.artifact_path("calc_mcf_lb_run_summary_csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(column_headers)
+            for _, _, _, cells in rows:
+                writer.writerow(cells)
+        logger.info("calc_mcf_lb run summary CSV written to %s", path)
+
     @staticmethod
     def _read_phase_metric_csv(
         path: Path, value_column: str
@@ -1048,117 +1157,6 @@ class FFcDDWReporter:
                     )
                 )
         logger.info("MCF preemptive obj CSV written to %s", path)
-
-    def _write_adjust_params_by_makespan_delta_csv(self) -> None:
-        """Run-scoped long-format CSV of makespan-delta-driven param adjusts.
-
-        One row per ``(scenario, instance)`` pair where a
-        ``calc_mcf_lb_and_derive_full_sch`` composite ran past round 1
-        (its ``makespanDelta`` is non-null in the r1 sidecar). Sourced
-        from per-instance ``calc_mcf_lb_r1_summary_yaml`` sidecars —
-        the same single source of truth that
-        ``_write_calc_mcf_lb_summary_csv`` uses — so this run-level CSV
-        and the per-scenario summary CSV cannot drift.
-
-        ``makespanDelta`` is the *raw signed* delta recorded by the
-        composite (``r1_full_sch_makespan - ref_makespan``, where the
-        reference is the r1 MCF preemptive makespan or the r1 heuristic
-        last-stage-only makespan depending on
-        ``makespan_delta_ref``); ``delta <= 0`` rows are captured
-        rather than dropped. Both ``lastStageOnlyPmtnMakespan`` and
-        ``lastStageOnlyMakespan`` are populated whenever the
-        corresponding r1 schedule exists, regardless of which one was
-        used as the delta reference. ``pIncrementAdded`` /
-        ``rIncrementAdded`` are blank for rows where round 2 did not
-        run.
-
-        Columns: ``scenarioName, insIndex, instanceName,
-        lastStageOnlyPmtnMakespan, lastStageOnlyMakespan,
-        incumbentMakespan, makespanDelta, pIncrementAdded,
-        rIncrementAdded``.
-        """
-        rows: list[
-            tuple[
-                str,
-                int | None,
-                str,
-                int | None,
-                int | None,
-                int | None,
-                int,
-                int | None,
-                int | None,
-            ]
-        ] = []
-        for sc in self.scenario_results:
-            for ir in sc.instance_results:
-                r1_path = self.layout.artifact_path(
-                    "calc_mcf_lb_r1_summary_yaml",
-                    scenario_name=sc.name,
-                    instance_name=ir.instance_name,
-                )
-                if not r1_path.exists():
-                    continue
-                r1_data: dict[str, Any] = load_yaml(r1_path) or {}
-                if r1_data.get("makespanDelta") is None:
-                    continue
-                rows.append(
-                    (
-                        sc.name,
-                        self._resolve_ins_index(ir.instance_name),
-                        ir.instance_name,
-                        r1_data.get("mcfLbMakespan"),
-                        r1_data.get("lastStageOnlyMakespan"),
-                        r1_data.get("fullSchMakespan"),
-                        r1_data["makespanDelta"],
-                        r1_data.get("pIncrementAdded"),
-                        r1_data.get("rIncrementAdded"),
-                    )
-                )
-        if not rows:
-            return
-        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
-        path = self.layout.artifact_path("adjust_params_by_makespan_delta_csv")
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                (
-                    "scenarioName",
-                    "insIndex",
-                    "instanceName",
-                    "lastStageOnlyPmtnMakespan",
-                    "lastStageOnlyMakespan",
-                    "incumbentMakespan",
-                    "makespanDelta",
-                    "pIncrementAdded",
-                    "rIncrementAdded",
-                )
-            )
-            for (
-                scenario_name,
-                ins_index,
-                instance_name,
-                ls_only_pmtn_makespan,
-                ls_only_makespan,
-                incumbent_makespan,
-                delta,
-                p_inc_added,
-                r_inc_added,
-            ) in rows:
-                writer.writerow(
-                    (
-                        scenario_name,
-                        "" if ins_index is None else ins_index,
-                        instance_name,
-                        "" if ls_only_pmtn_makespan is None else ls_only_pmtn_makespan,
-                        "" if ls_only_makespan is None else ls_only_makespan,
-                        "" if incumbent_makespan is None else incumbent_makespan,
-                        delta,
-                        "" if p_inc_added is None else p_inc_added,
-                        "" if r_inc_added is None else r_inc_added,
-                    )
-                )
-        logger.info("adjust_params_by_makespan_delta CSV written to %s", path)
 
     def _write_last_stage_only_obj_csv(self) -> None:
         """Run-scoped long-format CSV of ``last_stage_only_sol`` objs.

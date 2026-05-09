@@ -143,9 +143,6 @@ artifacts:
     kind: mcf_preemptive_obj_csv
     file_template: "{run_id}_mcf_preemptive_obj.csv"
   - scope: run
-    kind: adjust_params_by_makespan_delta_csv
-    file_template: "{run_id}_adjust_params_by_makespan_delta.csv"
-  - scope: run
     kind: last_stage_only_obj_csv
     file_template: "{run_id}_last_stage_only_obj.csv"
   - scope: run
@@ -177,3 +174,9 @@ artifacts:
   - scope: run
     kind: multi_scenario_subroutine_flow_comparison_html
     file_template: "{run_id}_multi_scenario_subroutine_flow_comparison.html"
+  # Run-level table aggregating every per-scenario
+  # calc_mcf_lb_and_derive_full_sch summary into one CSV with
+  # `scenarioName` as the leading column.
+  - scope: run
+    kind: calc_mcf_lb_run_summary_csv
+    file_template: "{run_id}_calc_mcf_lb_and_derive_full_sch_summary.csv"
