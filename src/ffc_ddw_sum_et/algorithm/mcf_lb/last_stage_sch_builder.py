@@ -64,6 +64,7 @@ def heuristic_last_stage_only_from_mcf_lb(
     logger: logging.Logger | None = None,
     job_priority: PmPrmpSortKey = "1_rj_prmp_rel_dev",
     placement_priority: Literal["contrib", "dist"] = "contrib",
+    p_increment: int = 0,
     r_multiplier: float = 1.0,
     r_increment: int = 0,
 ) -> HeuristicLastStageOnlyResult:
@@ -79,6 +80,15 @@ def heuristic_last_stage_only_from_mcf_lb(
     single-pass / NEH-CP variants).
 
     Args:
+        p_increment: Integer ``>= 0``. When non-zero, the placement +
+            heuristic refinement run on an *augmented* instance whose
+            last-stage processing times are increased by ``p_increment``
+            for every job. The returned schedule is feasible for the
+            augmented problem only; downstream consumers (e.g.
+            ``build_full_sch_from_last_stage_only_sch`` with
+            ``rebuild_last_stage_with_original_p=True``) must rebuild it
+            under original durations before reverse-dispatch. ``0``
+            (default) preserves the current behaviour.
         r_multiplier: Scales the per-job release times used for both
             midpoint placement and the subsequent ``make_semi_active``
             left-shift; each value becomes ``ceil(r_j * r_multiplier)``.
@@ -88,6 +98,10 @@ def heuristic_last_stage_only_from_mcf_lb(
             release becomes ``ceil(r_j * r_multiplier) + r_increment``.
             ``0`` (default) preserves the current behaviour.
     """
+    if p_increment < 0:
+        raise ValueError(
+            f"p_increment must be 0 or a positive integer; got {p_increment}."
+        )
     if r_multiplier < 0:
         raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
     if r_increment < 0:
@@ -97,9 +111,17 @@ def heuristic_last_stage_only_from_mcf_lb(
     log = logger or logging.getLogger(__name__)
     start = time.monotonic()
 
-    last_stage_id = instance.stage_id_list[-1]
-    duration_map = instance.get_job_2_p_map_for_stage(last_stage_id)
-    job_2_release_map = instance.get_job_2_p_sum_except_last_stage()
+    if p_increment == 0:
+        instance_for_solve = instance
+    else:
+        last_stage_id_for_aug = instance.stage_id_list[-1]
+        instance_for_solve = FFcDDWParameters.with_stage_processing_time_increment(
+            instance, last_stage_id_for_aug, p_increment
+        )
+
+    last_stage_id = instance_for_solve.stage_id_list[-1]
+    duration_map = instance_for_solve.get_job_2_p_map_for_stage(last_stage_id)
+    job_2_release_map = instance_for_solve.get_job_2_p_sum_except_last_stage()
     if r_multiplier != 1.0:
         job_2_release_map = {
             j: math.ceil(v * r_multiplier) for j, v in job_2_release_map.items()
@@ -108,19 +130,19 @@ def heuristic_last_stage_only_from_mcf_lb(
         job_2_release_map = {j: v + r_increment for j, v in job_2_release_map.items()}
 
     window_map = window_map_from_preemptive_schedule(
-        mcf_preemptive_schedule, instance.job_id_list
+        mcf_preemptive_schedule, instance_for_solve.job_id_list
     )
     job_sequence = pm_pmtn_sort_job_sequence_with_log(
         window_map,
         duration_map,
-        instance,
+        instance_for_solve,
         logger=log,
         job_priority=job_priority,
     )
 
     schedule = _insert_jobs_at_desired_starts(
         None,
-        instance,
+        instance_for_solve,
         last_stage_id=last_stage_id,
         job_2_release=job_2_release_map,
         duration_map=duration_map,
@@ -131,17 +153,17 @@ def heuristic_last_stage_only_from_mcf_lb(
     before_sa_iti = schedule.deepcopy()
 
     schedule.make_semi_active(
-        instance.stage_2_job_2_p_map,
+        instance_for_solve.stage_2_job_2_p_map,
         start_from_stage=last_stage_id,
         job_2_release_map=job_2_release_map,
     )
     schedule.insert_idle_time(
-        instance.job_2_due_window_map,
-        instance.job_2_ewt_map,
-        instance.job_2_twt_map,
+        instance_for_solve.job_2_due_window_map,
+        instance_for_solve.job_2_ewt_map,
+        instance_for_solve.job_2_twt_map,
     )
 
-    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance_for_solve)
     obj_value = float(sum_e + sum_t)
 
     elapsed = time.monotonic() - start

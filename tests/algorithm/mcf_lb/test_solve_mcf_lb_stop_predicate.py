@@ -18,7 +18,7 @@ import pytest
 from routix.report import SubroutineReport
 from routix.stopping_criteria import StoppingCriteria
 
-from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import (
+from ffc_ddw_sum_et.algorithm.mcf_lb.lb_last_stage_pmtn import (
     MCFLBStopRequested,
     solve_mcf_lb,
 )

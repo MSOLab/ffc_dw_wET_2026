@@ -36,15 +36,15 @@ from ffc_ddw_sum_et.algorithm.mcf_lb import (
     HeuristicLastStageOnlyDiagnostic,
     MCFLBDiagnostic,
 )
-from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_only import (
+from ffc_ddw_sum_et.algorithm.mcf_lb.full_sch_builder import (
+    build_full_sch_from_last_stage_only_sch as algo_build_full_sch_from_last_stage_only_sch,
+)
+from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_sch_builder import (
     heuristic_last_stage_only_from_mcf_lb,
 )
-from ffc_ddw_sum_et.algorithm.mcf_lb.phase3_dispatch import (
-    reverse_dispatch_full_schedule,
-)
-from ffc_ddw_sum_et.algorithm.mcf_lb.preemptive import (
+from ffc_ddw_sum_et.algorithm.mcf_lb.lb_last_stage_pmtn import (
     MCFLBStopRequested,
-    solve_mcf_lb,
+    apply_lb_by_mcf as algo_apply_lb_by_mcf,
 )
 from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpBatchTlMode,
@@ -73,6 +73,20 @@ from .solution_manager import FFcDDWSolution
 from .value_resolver import resolve_value_expr
 
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
+
+
+# Maps unprefixed phase labels emitted by
+# ``build_full_sch_from_last_stage_only_sch`` (algorithm-side) onto the
+# numbered prefixes the controller records on
+# ``mcf_lb_phase_schedules`` (and therefore the on-disk filenames).
+_BUILD_FULL_SCH_LABEL_TO_INDEX: dict[str, int] = {
+    "lastS_only_before_rs": 4,
+    "lastS_only_after_rs": 5,
+    "lastS_only_flipped": 6,
+    "fullS_before_unflip": 7,
+    "fullS_after_unflip": 8,
+    "fullS_after_sa_iti": 9,
+}
 
 
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
@@ -659,19 +673,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 r_increment=effective_r_increment,
             )
 
-        if effective_p_increment == 0:
-            instance_for_mcf = self.instance
-        else:
-            last_stage_id = self.instance.stage_id_list[-1]
-            instance_for_mcf = FFcDDWParameters.with_stage_processing_time_increment(
-                self.instance, last_stage_id, effective_p_increment
-            )
-
         try:
-            mcf_result = solve_mcf_lb(
-                instance_for_mcf,
+            result = algo_apply_lb_by_mcf(
+                self.instance,
+                p_increment=effective_p_increment,
                 r_multiplier=r_multiplier,
                 r_increment=effective_r_increment,
+                draw_heatmap=draw_heatmap,
+                heatmap_sort=heatmap_sort,
+                heatmap_yaml_path=(
+                    self.try_get_file_path_for_subroutine("_C_heatmap.yaml")
+                    if draw_heatmap
+                    else None
+                ),
                 stop_predicate=self.is_stopping_condition,
                 logger=self.logger,
             )
@@ -682,25 +696,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
             return self._make_stop_report(start_elapsed)
         if diag is not None:
-            diag.mcf_lb = mcf_result.mcf_lb
-            diag.mcf_solve_sec = mcf_result.mcf_solve_sec
-        obj_bound_by_mcf = mcf_result.mcf_lb
+            diag.mcf_lb = result.mcf_lb
+            diag.mcf_solve_sec = result.mcf_solve_sec
 
-        self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
+        self.mcf_preemptive_schedule = result.mcf_preemptive_schedule
         self.mcf_preemptive_sch_p_increment = effective_p_increment
         # Composite drivers (``_register_report=False``) own the phase list
         # and clear it once at composite entry; clearing here would wipe
         # snapshots produced by an earlier round of the composite.
         if _register_report:
             self.mcf_lb_phase_schedules.clear()
-        self._record_mcf_lb_phase(
-            ("1_mcf_preemptive", mcf_result.mcf_preemptive_schedule)
-        )
+        self._record_mcf_lb_phase(("1_mcf_preemptive", result.mcf_preemptive_schedule))
 
         self.logger.info(
             "apply_lb_by_mcf: MCF LB = %d, p_increment=%d (effective=%d), "
             "r_multiplier=%.4g, r_increment=%d (effective=%d)",
-            int(obj_bound_by_mcf),
+            int(result.mcf_lb),
             p_increment,
             effective_p_increment,
             r_multiplier,
@@ -708,40 +719,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             effective_r_increment,
         )
 
-        if draw_heatmap:
-            from ..io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
-
-            yaml_path = self.try_get_file_path_for_subroutine("_C_heatmap.yaml")
-            if yaml_path is not None:
-                heatmap_data = build_signed_cost_matrix(
-                    instance_for_mcf,
-                    sort=heatmap_sort,
-                    x_jt_map=mcf_result.mcf.get_variable_value_dict(),
-                    obj_value=obj_bound_by_mcf,
-                    r_multiplier=r_multiplier,
-                    r_increment=effective_r_increment,
-                )
-                dump_signed_cost_heatmap_yaml(yaml_path, heatmap_data)
-                self.logger.info(
-                    "apply_lb_by_mcf: wrote heatmap YAML to %s "
-                    "(jobs=%d, t-range=[%d..%d], x_jt cells=%d)",
-                    yaml_path,
-                    len(heatmap_data.y_labels),
-                    heatmap_data.t_axis[0],
-                    heatmap_data.t_axis[-1],
-                    len(heatmap_data.x_cells),
-                )
-
-        obj_bound_is_valid = (
-            effective_p_increment == 0
-            and r_multiplier <= 1.0
-            and effective_r_increment == 0
-        )
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=None,
-            obj_bound=(obj_bound_by_mcf if obj_bound_is_valid else None),
+            obj_bound=(result.mcf_lb if result.obj_bound_is_valid else None),
         )
         if _register_report:
             self._register(report, None)
@@ -973,21 +955,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 r_increment=effective_r_increment,
             )
 
-        instance = self.instance
-        if effective_p_increment == 0:
-            instance_for_solve = instance
-        else:
-            last_stage_id = instance.stage_id_list[-1]
-            instance_for_solve = FFcDDWParameters.with_stage_processing_time_increment(
-                instance, last_stage_id, effective_p_increment
-            )
-
         result = heuristic_last_stage_only_from_mcf_lb(
-            instance_for_solve,
+            self.instance,
             self.mcf_preemptive_schedule,
             logger=self.logger,
             job_priority=job_priority,
             placement_priority=placement_priority,
+            p_increment=effective_p_increment,
             r_multiplier=r_multiplier,
             r_increment=effective_r_increment,
         )
@@ -1100,63 +1074,46 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ls_p_inc = self.last_stage_only_sol_p_increment
         rebuild_with_original_p = ls_p_inc is not None and ls_p_inc != 0
 
-        start_elapsed = time.monotonic()
-        state = reverse_dispatch_full_schedule(
+        result = algo_build_full_sch_from_last_stage_only_sch(
             self.instance,
             self.last_stage_only_sol.schedule,
             rebuild_last_stage_with_original_p=rebuild_with_original_p,
             logger=self.logger,
         )
-        elapsed = time.monotonic() - start_elapsed
-        if state is None:
+        if result.schedule is None:
             self.logger.warning(
                 "build_full_sch_from_last_stage_only_sch: reverse-dispatch "
                 "produced no schedule"
             )
             return (
-                SubroutineReport(elapsed_time=elapsed, obj_value=None, obj_bound=None),
+                SubroutineReport(
+                    elapsed_time=result.dispatch_sec,
+                    obj_value=None,
+                    obj_bound=None,
+                ),
                 None,
             )
 
-        if state.ls_only_sch_before_delay is not None:
+        for label, sched in result.intermediate_schedules:
             self._record_mcf_lb_phase(
-                ("4_lastS_only_before_rs", state.ls_only_sch_before_delay)
+                (f"{_BUILD_FULL_SCH_LABEL_TO_INDEX[label]}_{label}", sched)
             )
-        if state.ls_only_sch_delayed is not None:
-            self._record_mcf_lb_phase(
-                ("5_lastS_only_after_rs", state.ls_only_sch_delayed)
-            )
-        if state.ls_only_sch_flipped is not None:
-            self._record_mcf_lb_phase(
-                ("6_lastS_only_flipped", state.ls_only_sch_flipped)
-            )
-        if state.full_sch_before_unflip is not None:
-            self._record_mcf_lb_phase(
-                ("7_fullS_before_unflip", state.full_sch_before_unflip)
-            )
-        if state.full_sch_after_unflip is not None:
-            self._record_mcf_lb_phase(
-                ("8_fullS_after_unflip", state.full_sch_after_unflip)
-            )
-        self._record_mcf_lb_phase(
-            ("9_fullS_after_sa_iti", state.full_sch_from_ls_only_sch)
-        )
 
         self.logger.info(
             "build_full_sch_from_last_stage_only_sch: dispatched obj=%.2f, "
             "makespan=%d, elapsed=%.2fs",
-            state.dispatched_obj,
-            int(state.full_sch_from_ls_only_sch.makespan),
-            elapsed,
+            result.dispatched_obj,
+            result.full_sch_makespan,
+            result.dispatch_sec,
         )
         report = SubroutineReport(
-            elapsed_time=elapsed,
-            obj_value=state.dispatched_obj,
+            elapsed_time=result.dispatch_sec,
+            obj_value=result.dispatched_obj,
             obj_bound=None,
         )
         solution = FFcDDWSolution(
-            schedule=state.full_sch_from_ls_only_sch,
-            obj_value=state.dispatched_obj,
+            schedule=result.schedule,
+            obj_value=result.dispatched_obj,
             obj_bound=None,
         )
         return report, solution

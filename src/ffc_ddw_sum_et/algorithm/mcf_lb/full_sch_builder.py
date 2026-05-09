@@ -1,21 +1,36 @@
-"""Reverse-dispatch core for the MCF-LB pipeline.
+"""Build a full schedule from a last-stage-only ``FFcSchedule``.
 
-Builds a feasible full schedule from a last-stage-only ``FFcSchedule`` by
-reverse-dispatching with the last stage pinned as seed, then unflipping
-back to the original instance.
+Two layers live here:
+
+  - ``reverse_dispatch_full_schedule`` is the pure reverse-dispatch + unflip
+    core. It runs the reversed dispatcher twice, picks the makespan winner,
+    unflips, then post-processes (``make_semi_active`` + ``insert_idle_time``).
+    Returns a ``Phase3State`` with intermediate snapshots.
+
+  - ``build_full_sch_from_last_stage_only_sch`` is the algorithm-level
+    entry point used by the controller wrapper / composite. It wraps
+    ``reverse_dispatch_full_schedule``, measures elapsed wall time, and
+    packages outputs (final schedule, dispatched obj, intermediates) into
+    a ``BuildFullSchResult`` for the caller to record.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.objectives import compute_weighted_earliness_tardiness
 from ..dispatcher import MixedDispatcher
 
-__all__ = ["Phase3State", "reverse_dispatch_full_schedule"]
+__all__ = [
+    "BuildFullSchResult",
+    "Phase3State",
+    "build_full_sch_from_last_stage_only_sch",
+    "reverse_dispatch_full_schedule",
+]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -243,4 +258,96 @@ def reverse_dispatch_full_schedule(
         ls_only_sch_flipped=ls_only_sch_flipped,
         full_sch_before_unflip=full_sch_before_unflip,
         full_sch_after_unflip=full_sch_after_unflip,
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BuildFullSchResult:
+    """Aggregate result of one ``build_full_sch_from_last_stage_only_sch`` call.
+
+    ``schedule`` is the final full schedule on the original (un-reversed)
+    instance after the post-process ``make_semi_active`` + ``insert_idle_time``
+    pass. It is ``None`` only when both reverse-dispatch attempts fail.
+
+    ``intermediate_schedules`` carries the inner phase snapshots in
+    diagnostic order. Labels are unprefixed (callers prepend numbered
+    indices when recording into orchestration-side phase lists). Empty
+    when ``schedule is None``; for ``stage_count == 1`` instances only
+    ``"fullS_after_sa_iti"`` is included, since the reverse-dispatch is
+    skipped.
+    """
+
+    schedule: FFcSchedule | None
+    dispatched_obj: float | None
+    full_sch_makespan: int | None
+    dispatch_sec: float
+    intermediate_schedules: list[tuple[str, FFcSchedule]] = field(default_factory=list)
+
+
+def build_full_sch_from_last_stage_only_sch(
+    instance: FFcDDWParameters,
+    last_stage_only_schedule: FFcSchedule,
+    *,
+    rebuild_last_stage_with_original_p: bool = False,
+    logger: logging.Logger | None = None,
+) -> BuildFullSchResult:
+    """Build the full schedule from a last-stage-only schedule.
+
+    Thin algorithm-level wrapper around ``reverse_dispatch_full_schedule``:
+    measures elapsed time, packages the resulting ``Phase3State`` into a
+    ``BuildFullSchResult`` with an ordered ``intermediate_schedules`` list
+    suitable for the caller to record into ``mcf_lb_phase_schedules``.
+
+    Args:
+        instance: Original (non-reversed) FFcDDW instance.
+        last_stage_only_schedule: Schedule whose last stage is fully
+            populated; treated as immutable.
+        rebuild_last_stage_with_original_p: When ``True``, rebuild the
+            input last-stage schedule using ``instance``'s last-stage
+            processing times before any further processing. Use when the
+            input was produced under inflated last-stage durations (e.g.
+            by ``heuristic_last_stage_only_from_mcf_lb`` invoked with
+            ``p_increment != 0``).
+        logger: Optional logger; warnings are emitted on dispatcher failure.
+
+    Returns:
+        ``BuildFullSchResult``. When both reverse-dispatch attempts fail,
+        returns a result with ``schedule=None`` (and ``intermediate_schedules``
+        empty); the caller should treat this as a no-op build.
+    """
+    start_elapsed = time.monotonic()
+    state = reverse_dispatch_full_schedule(
+        instance,
+        last_stage_only_schedule,
+        rebuild_last_stage_with_original_p=rebuild_last_stage_with_original_p,
+        logger=logger,
+    )
+    elapsed = time.monotonic() - start_elapsed
+    if state is None:
+        return BuildFullSchResult(
+            schedule=None,
+            dispatched_obj=None,
+            full_sch_makespan=None,
+            dispatch_sec=elapsed,
+        )
+
+    intermediates: list[tuple[str, FFcSchedule]] = []
+    if state.ls_only_sch_before_delay is not None:
+        intermediates.append(("lastS_only_before_rs", state.ls_only_sch_before_delay))
+    if state.ls_only_sch_delayed is not None:
+        intermediates.append(("lastS_only_after_rs", state.ls_only_sch_delayed))
+    if state.ls_only_sch_flipped is not None:
+        intermediates.append(("lastS_only_flipped", state.ls_only_sch_flipped))
+    if state.full_sch_before_unflip is not None:
+        intermediates.append(("fullS_before_unflip", state.full_sch_before_unflip))
+    if state.full_sch_after_unflip is not None:
+        intermediates.append(("fullS_after_unflip", state.full_sch_after_unflip))
+    intermediates.append(("fullS_after_sa_iti", state.full_sch_from_ls_only_sch))
+
+    return BuildFullSchResult(
+        schedule=state.full_sch_from_ls_only_sch,
+        dispatched_obj=state.dispatched_obj,
+        full_sch_makespan=int(state.full_sch_from_ls_only_sch.makespan),
+        dispatch_sec=elapsed,
+        intermediate_schedules=intermediates,
     )
