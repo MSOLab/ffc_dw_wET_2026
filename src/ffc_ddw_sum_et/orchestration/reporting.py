@@ -22,8 +22,8 @@ from routix.type_defs import RunMode
 from ..io import schedule_keys as K
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
-from .controller import FFcDDWSubroutineController
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
+from .mcf_lb_phase_labels import MCF_LB_R1_LABEL_ORDER, MCF_LB_R2_LABEL_ORDER
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
 
 logger = logging.getLogger(__name__)
@@ -801,10 +801,8 @@ class FFcDDWReporter:
         Rows are sorted by ``insIndex`` to match other per-scenario tables.
         """
         column_pairs: list[tuple[str, str]] = [
-            ("r1", label) for label in FFcDDWSubroutineController._MCF_LB_R1_LABEL_ORDER
-        ] + [
-            ("r2", label) for label in FFcDDWSubroutineController._MCF_LB_R2_LABEL_ORDER
-        ]
+            ("r1", label) for label in MCF_LB_R1_LABEL_ORDER
+        ] + [("r2", label) for label in MCF_LB_R2_LABEL_ORDER]
         # Metadata columns prepended on the scenario-aggregated wide CSV.
         # Sourced from the reporter's ``_index_to_meta`` (loaded from
         # the PRA2017 instance table) — distinct from any per-instance
@@ -833,10 +831,10 @@ class FFcDDWReporter:
                 obj_cells = self._read_phase_metric_csv(obj_path, "obj_value")
                 ms_cells = self._read_phase_metric_csv(ms_path, "makespan")
                 ins_idx = self._resolve_ins_index(ir.instance_name)
-                meta = self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
-                meta_cells = [
-                    "" if ins_idx is None else str(ins_idx)
-                ] + [
+                meta = (
+                    self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
+                )
+                meta_cells = ["" if ins_idx is None else str(ins_idx)] + [
                     "" if meta.get(col) is None else str(meta.get(col))
                     for col in meta_columns[1:]
                 ]

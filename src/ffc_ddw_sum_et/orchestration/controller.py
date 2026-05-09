@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import math
-import re
 import time
 from pathlib import Path
 from typing import Callable, Literal, Sequence
@@ -69,6 +68,12 @@ from ffc_ddw_sum_et.solution.objectives import (
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
 from .controller_core import FFcDDWSubroutineControllerCore
+from .mcf_lb_phase_labels import (
+    MCF_LB_LOCAL_NAME_RE,
+    MCF_LB_R1_LABEL_ORDER,
+    MCF_LB_R2_LABEL_ORDER,
+    MCF_LB_ROUND_RE,
+)
 from .solution_manager import FFcDDWSolution
 from .value_resolver import resolve_value_expr
 
@@ -1256,10 +1261,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         self.last_stage_only_sol_p_increment = effective_p_increment
         self._record_mcf_lb_phases(
-            [
-                (f"2_{label}", sched)
-                for label, sched in result.intermediate_schedules
-            ]
+            [(f"2_{label}", sched) for label, sched in result.intermediate_schedules]
         )
         self._record_mcf_lb_phase(
             ("3_lastS_only_from_mcf_lb_after_sa_iti", result.schedule)
@@ -1411,39 +1413,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report, solution
 
-    # Local-name suffix extractor for entries recorded under
-    # ``calc_mcf_lb_and_derive_full_sch``. The recorded full name has shape
-    # ``…<inner_step>_<digit>+_<local_name>`` (see
-    # ``FFcDDWSubroutineControllerCore._mcf_lb_phase_name``); we want the
-    # ``<local_name>`` tail.
-    _MCF_LB_LOCAL_NAME_RE = re.compile(r"_(\d+)_([A-Za-z][A-Za-z_]+)$")
-    # Round marker in the call_context comes from
-    # ``temporarily_extended_context("r1" | "r2")`` and is rendered as
-    # ``<count>-r1`` / ``<count>-r2`` inside the dotted context string.
-    _MCF_LB_ROUND_RE = re.compile(r"(?:^|\.)\d+-r([12])(?:[._]|$)")
-
-    _MCF_LB_R1_LABEL_ORDER: tuple[str, ...] = (
-        "mcf_preemptive",
-        "lastS_only_from_mcf_lb_before_sa_iti",
-        "lastS_only_from_mcf_lb_after_sa_iti",
-        "lastS_only_after_rs",
-        "lastS_only_flipped",
-        "fullS_before_unflip",
-        "fullS_after_unflip",
-        "fullS_after_sa_iti",
-    )
-    _MCF_LB_R2_LABEL_ORDER: tuple[str, ...] = (
-        "mcf_preemptive",
-        "lastS_only_from_mcf_lb_before_sa_iti",
-        "lastS_only_from_mcf_lb_after_sa_iti",
-        "lastS_only_before_rs",
-        "lastS_only_after_rs",
-        "lastS_only_flipped",
-        "fullS_before_unflip",
-        "fullS_after_unflip",
-        "fullS_after_sa_iti",
-    )
-
     def _emit_calc_mcf_lb_phase_metrics_csv(self) -> None:
         """Write per-instance wET / makespan CSVs for the snapshots recorded
         under the current ``calc_mcf_lb_and_derive_full_sch`` call.
@@ -1462,8 +1431,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         per_round: dict[str, dict[str, object]] = {"r1": {}, "r2": {}}
         for full_name, sched in self.mcf_lb_phase_schedules:
-            round_match = self._MCF_LB_ROUND_RE.search(full_name)
-            local_match = self._MCF_LB_LOCAL_NAME_RE.search(full_name)
+            round_match = MCF_LB_ROUND_RE.search(full_name)
+            local_match = MCF_LB_LOCAL_NAME_RE.search(full_name)
             if round_match is None or local_match is None:
                 continue
             round_key = f"r{round_match.group(1)}"
@@ -1486,8 +1455,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         rows: list[tuple[str, str, str, str]] = []  # (round, label, obj, ms)
         for round_key, labels in (
-            ("r1", self._MCF_LB_R1_LABEL_ORDER),
-            ("r2", self._MCF_LB_R2_LABEL_ORDER),
+            ("r1", MCF_LB_R1_LABEL_ORDER),
+            ("r2", MCF_LB_R2_LABEL_ORDER),
         ):
             for label in labels:
                 sched = per_round[round_key].get(label)
@@ -1620,18 +1589,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 _register_report=False,
             )
             if self.is_stopping_condition():
-                return _stop(
-                    "stop guard fired before round1_heuristic_last_stage_only"
-                )
+                return _stop("stop guard fired before round1_heuristic_last_stage_only")
             self.heuristic_last_stage_only_sch_from_mcf_lb(
                 job_priority=job_placement_priority,
                 placement_priority=last_stage_only_placement_criteria,
                 _register_report=False,
             )
             if self.is_stopping_condition():
-                return _stop(
-                    "stop guard fired before round1_build_full_sch"
-                )
+                return _stop("stop guard fired before round1_build_full_sch")
             r1, s1 = self._build_full_sch_core()
         self.adjust_ref_full_sol = s1
 
