@@ -49,10 +49,10 @@ class McfLbResult:
     maps without re-solving.
     """
 
-    mcf_lb: float
-    mcf_preemptive_schedule: MCFPreemptiveSchedule
     mcf: ParallelMachinePreemptionMcf  # TODO: remove; use mcf_preemptive_schedule instead
     mcf_solve_sec: float
+    mcf_lb: float
+    mcf_preemptive_schedule: MCFPreemptiveSchedule
 
 
 def solve_mcf_lb(

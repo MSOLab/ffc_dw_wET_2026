@@ -14,8 +14,6 @@ Single algorithm entry point:
     ET-optimal positions.
 """
 
-from __future__ import annotations
-
 import logging
 import math
 import time

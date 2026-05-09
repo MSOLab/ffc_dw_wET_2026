@@ -14,8 +14,6 @@ Two layers live here:
     a ``BuildFullSchResult`` for the caller to record.
 """
 
-from __future__ import annotations
-
 import logging
 import time
 from dataclasses import dataclass, field

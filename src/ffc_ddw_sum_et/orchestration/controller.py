@@ -1,7 +1,5 @@
 """FAM subroutine controller for routix-based experiment orchestration."""
 
-from __future__ import annotations
-
 import csv
 import math
 import time
@@ -45,13 +43,13 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.last_stage_sch_builder import (
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.lb_last_stage_pmtn import (
     MCFLBStopRequested,
+)
+from ffc_ddw_sum_et.algorithm.mcf_lb.lb_last_stage_pmtn import (
     apply_lb_by_mcf as algo_apply_lb_by_mcf,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
     calc_mcf_lb_and_derive_full_sch as algo_calc_mcf_lb_and_derive_full_sch,
 )
-from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
-from ffc_ddw_sum_et.solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpBatchTlMode,
     NehCpDispatcher,
@@ -59,9 +57,11 @@ from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpOption,
 )
 from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
+from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
+from ffc_ddw_sum_et.solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ffc_ddw_sum_et.solution.objectives import (
     compute_phase_obj_value,
     compute_weighted_earliness_tardiness,
@@ -963,21 +963,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         compact=True,
                     )
 
-    def _emit_calc_mcf_lb_makespan_delta_yaml(
+    def _emit_calc_mcf_lb_r1_summary_yaml(
         self,
         result: CalcMcfLbAndDeriveFullSchResult,
     ) -> None:
-        """Write the ``r1/makespan_delta.yaml`` sidecar from a composite
+        """Write the ``r1/r1_summary.yaml`` sidecar from a composite
         result. Always written when an artifact layout is bound, so the
         Rep3-style ``delta <= 0`` rows are auditable on disk even when
         round 2 produced no JSON snapshots.
 
-        Six fields:
-          - ``lastStageOnlyPmtnMakespan`` from the r1 MCF preemptive
+        Eleven fields (round-1 stage timings/objectives/makespans plus
+        delta-driven adjust knobs):
+          - ``mcfLbElapsedTime`` LP solve seconds.
+          - ``mcfLbObjValue`` MCF LP objective value.
+          - ``mcfLbMakespan`` makespan of the MCF preemptive schedule.
+          - ``lastStageOnlyObjValue`` wET of the heuristic last-stage-only
             schedule.
-          - ``lastStageOnlyMakespan`` from the r1 heuristic's final
-            (post-sa-iti) schedule.
-          - ``incumbentMakespan`` from the r1 full schedule.
+          - ``lastStageOnlyMakespan`` makespan of the heuristic last-stage-only
+            schedule.
+          - ``fullSchObjValue`` wET of the full schedule.
+          - ``fullSchMakespan`` makespan of the full schedule.
+          - ``totalTime`` sum of the three r1 stage seconds (LP solve +
+            heuristic + reverse-dispatch).
           - ``makespanDelta`` (signed; can be negative).
           - ``pIncrementAdded`` / ``rIncrementAdded`` mirror the
             run-level ``adjust_params_by_makespan_delta_csv`` semantics:
@@ -991,35 +998,138 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if layout is None or scenario is None or instance is None:
             return
 
-        last_stage_only_pmtn_makespan = (
-            int(result.r1_apply.mcf_preemptive_schedule.makespan)
-            if result.r1_apply is not None
+        r1_apply = result.r1_apply
+        r1_heuristic = result.r1_heuristic
+        r1_build_full = result.r1_build_full
+
+        mcf_lb_elapsed_time = r1_apply.mcf_solve_sec if r1_apply is not None else None
+        mcf_lb_obj_value = (
+            r1_apply.mcf_lb
+            if r1_apply is not None and r1_apply.obj_bound_is_valid
             else None
+        )
+        mcf_lb_makespan = (
+            int(r1_apply.mcf_preemptive_schedule.makespan)
+            if r1_apply is not None
+            else None
+        )
+        last_stage_only_obj_value = (
+            r1_heuristic.obj_value if r1_heuristic is not None else None
         )
         last_stage_only_makespan = (
-            int(result.r1_heuristic.schedule.makespan)
-            if result.r1_heuristic is not None
-            else None
+            int(r1_heuristic.schedule.makespan) if r1_heuristic is not None else None
         )
-        incumbent_makespan = (
-            int(result.r1_build_full.schedule.makespan)
-            if result.r1_build_full is not None
-            and result.r1_build_full.schedule is not None
-            else None
+        full_sch_obj_value = (
+            r1_build_full.dispatched_obj if r1_build_full is not None else None
+        )
+        full_sch_makespan = (
+            r1_build_full.full_sch_makespan if r1_build_full is not None else None
+        )
+        total_time = sum(
+            t
+            for t in (
+                mcf_lb_elapsed_time,
+                r1_heuristic.elapsed_time if r1_heuristic is not None else None,
+                r1_build_full.dispatch_sec if r1_build_full is not None else None,
+            )
+            if t is not None
         )
         p_increment_added = result.r2_p_increment if result.r2_ran else None
         r_increment_added = result.r2_r_increment if result.r2_ran else None
 
         payload = {
-            "lastStageOnlyPmtnMakespan": last_stage_only_pmtn_makespan,
+            "mcfLbElapsedTime": mcf_lb_elapsed_time,
+            "mcfLbObjValue": mcf_lb_obj_value,
+            "mcfLbMakespan": mcf_lb_makespan,
+            "lastStageOnlyObjValue": last_stage_only_obj_value,
             "lastStageOnlyMakespan": last_stage_only_makespan,
-            "incumbentMakespan": incumbent_makespan,
+            "fullSchObjValue": full_sch_obj_value,
+            "fullSchMakespan": full_sch_makespan,
+            "totalTime": total_time,
             "makespanDelta": result.makespan_delta,
             "pIncrementAdded": p_increment_added,
             "rIncrementAdded": r_increment_added,
         }
         out_path = layout.artifact_path(
-            "calc_mcf_lb_makespan_delta_yaml",
+            "calc_mcf_lb_r1_summary_yaml",
+            scenario_name=scenario,
+            instance_name=instance,
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_yaml(payload, out_path)
+
+    def _emit_calc_mcf_lb_r2_summary_yaml(
+        self,
+        result: CalcMcfLbAndDeriveFullSchResult,
+    ) -> None:
+        """Write the ``r2/r2_summary.yaml`` sidecar from a composite
+        result. Emitted only when round 2 was attempted (``r2_apply``
+        populated); silently skipped otherwise.
+
+        Eight fields (round-2 stage timings/objectives/makespans):
+          - ``mcfLbElapsedTime`` / ``mcfLbObjValue`` / ``mcfLbMakespan``
+            from the r2 augmented MCF LP. ``mcfLbObjValue`` is the raw
+            LP objective for the augmented instance — it is *not* a
+            valid global lower bound on the original instance, and is
+            recorded here for inspection only. Downstream consumers
+            (``final_obj_bound``, the reporting pipeline) read only
+            ``r1_apply.mcf_lb`` / ``r1_mcf_lb`` and never use this
+            value as a bound.
+          - ``lastStageOnlyObjValue`` / ``lastStageOnlyMakespan`` from
+            the r2 heuristic's final schedule.
+          - ``fullSchObjValue`` / ``fullSchMakespan`` from the r2 full
+            schedule (``None`` when reverse-dispatch produced nothing).
+          - ``totalTime`` sum of the three r2 stage seconds.
+        """
+        layout = self._artifact_layout
+        scenario = self._artifact_scenario_name
+        instance = self._artifact_instance_name
+        if layout is None or scenario is None or instance is None:
+            return
+
+        r2_apply = result.r2_apply
+        r2_heuristic = result.r2_heuristic
+        r2_build_full = result.r2_build_full
+        if r2_apply is None:
+            return
+
+        mcf_lb_elapsed_time = r2_apply.mcf_solve_sec
+        mcf_lb_obj_value = r2_apply.mcf_lb
+        mcf_lb_makespan = int(r2_apply.mcf_preemptive_schedule.makespan)
+        last_stage_only_obj_value = (
+            r2_heuristic.obj_value if r2_heuristic is not None else None
+        )
+        last_stage_only_makespan = (
+            int(r2_heuristic.schedule.makespan) if r2_heuristic is not None else None
+        )
+        full_sch_obj_value = (
+            r2_build_full.dispatched_obj if r2_build_full is not None else None
+        )
+        full_sch_makespan = (
+            r2_build_full.full_sch_makespan if r2_build_full is not None else None
+        )
+        total_time = sum(
+            t
+            for t in (
+                mcf_lb_elapsed_time,
+                r2_heuristic.elapsed_time if r2_heuristic is not None else None,
+                r2_build_full.dispatch_sec if r2_build_full is not None else None,
+            )
+            if t is not None
+        )
+
+        payload = {
+            "mcfLbElapsedTime": mcf_lb_elapsed_time,
+            "mcfLbObjValue": mcf_lb_obj_value,
+            "mcfLbMakespan": mcf_lb_makespan,
+            "lastStageOnlyObjValue": last_stage_only_obj_value,
+            "lastStageOnlyMakespan": last_stage_only_makespan,
+            "fullSchObjValue": full_sch_obj_value,
+            "fullSchMakespan": full_sch_makespan,
+            "totalTime": total_time,
+        }
+        out_path = layout.artifact_path(
+            "calc_mcf_lb_r2_summary_yaml",
             scenario_name=scenario,
             instance_name=instance,
         )
@@ -1064,8 +1174,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             cells when round 2 did not run. wET cells are blank for
             reversed-instance snapshots (``flipped``,
             ``fullS_before_unflip``).
-          * One per-instance ``r1/makespan_delta.yaml`` sidecar via
-            the ``calc_mcf_lb_makespan_delta_yaml`` kind.
+          * One per-instance ``r1/r1_summary.yaml`` sidecar via the
+            ``calc_mcf_lb_r1_summary_yaml`` kind, plus a matching
+            ``r2/r2_summary.yaml`` via ``calc_mcf_lb_r2_summary_yaml``
+            when round 2 was attempted.
 
         When ``emit_phase_schedules=True``, also emits per-round JSON
         snapshots under
@@ -1197,7 +1309,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # ---- Artifact emission (always when layout bound). ----
         if emit_phase_schedules:
             self._emit_calc_mcf_lb_phase_schedule_jsons(result)
-        self._emit_calc_mcf_lb_makespan_delta_yaml(result)
+        self._emit_calc_mcf_lb_r1_summary_yaml(result)
+        self._emit_calc_mcf_lb_r2_summary_yaml(result)
         self._emit_calc_mcf_lb_phase_metrics_csv(result)
 
         # ---- Build best solution + register exactly once. ----
@@ -1499,9 +1612,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         BaseModelBuilder.apply_end_hints_from_end_time_map(
             mdl, params, op_vars, end_map
         )
-        BaseModelBuilder.apply_et_hints_from_ref_schedule(
-            mdl, params, et_vars, incumbent.schedule
-        )
+        if et_vars is not None:
+            BaseModelBuilder.apply_et_hints_from_ref_schedule(
+                mdl, params, et_vars, incumbent.schedule
+            )
 
         solver = cp_model.CpSolver()
         if cp_tl_seconds is not None:

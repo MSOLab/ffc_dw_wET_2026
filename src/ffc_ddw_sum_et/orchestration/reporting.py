@@ -1,7 +1,5 @@
 """Scenario runner and reporting for FAM experiment orchestration."""
 
-from __future__ import annotations
-
 import csv
 import json
 import logging
@@ -12,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from routix.io import ArtifactLayout
+from routix.io import ArtifactLayout, load_yaml
 from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
@@ -569,6 +567,7 @@ class FFcDDWReporter:
         self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
         self._write_calc_mcf_lb_phase_metric_summaries()
+        self._write_calc_mcf_lb_summary_csv()
         self._write_mcf_lb_pivot_artifacts()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_table()
@@ -855,6 +854,101 @@ class FFcDDWReporter:
                     for _, name, meta_cells, value_cells in rows:
                         writer.writerow(meta_cells + [name] + value_cells)
                 logger.info("Phase metric summary CSV written to %s", path)
+
+    _CALC_MCF_LB_SUMMARY_R_FIELDS: tuple[str, ...] = (
+        "mcfLbObjValue",
+        "mcfLbMakespan",
+        "lastStageOnlyObjValue",
+        "lastStageOnlyMakespan",
+        "fullSchObjValue",
+        "fullSchMakespan",
+        "totalTime",
+    )
+
+    def _write_calc_mcf_lb_summary_csv(self) -> None:
+        """Per-scenario summary CSV aggregating per-instance r1/r2 sidecars.
+
+        Reads each instance's ``calc_mcf_lb_r1_summary_yaml`` and
+        ``calc_mcf_lb_r2_summary_yaml`` (under the per-instance
+        ``progress`` zone) and collates them into one row per instance.
+        Instances without an r1 sidecar (composite step did not run) are
+        skipped. When no instance in a scenario has an r1 sidecar, the
+        summary file is not written. Rows are sorted by ``insIndex``.
+
+        Columns: instance metadata, then r1_<field> for each of seven
+        stage metrics, then ``makespanDelta``, ``pIncrementAdded``,
+        ``rIncrementAdded``, then r2_<field> for the same seven metrics.
+        ``mcfLbElapsedTime`` is omitted (covered by ``totalTime``).
+        """
+        meta_columns = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W"]
+        r1_columns = [f"r1_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        r2_columns = [f"r2_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        delta_columns = ["makespanDelta", "pIncrementAdded", "rIncrementAdded"]
+        column_headers = (
+            meta_columns + ["instanceName"] + r1_columns + delta_columns + r2_columns
+        )
+
+        def _cell(value: Any) -> str:
+            return "" if value is None else str(value)
+
+        for sc in self.scenario_results:
+            rows: list[tuple[int | None, str, list[str]]] = []
+            for ir in sc.instance_results:
+                r1_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r1_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                if not r1_path.exists():
+                    continue
+                r1_data: dict[str, Any] = load_yaml(r1_path) or {}
+                r2_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r2_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                r2_data: dict[str, Any] = (
+                    load_yaml(r2_path) if r2_path.exists() else {}
+                ) or {}
+
+                ins_idx = self._resolve_ins_index(ir.instance_name)
+                meta = (
+                    self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
+                )
+                meta_cells = ["" if ins_idx is None else str(ins_idx)] + [
+                    _cell(meta.get(col)) for col in meta_columns[1:]
+                ]
+                r1_cells = [
+                    _cell(r1_data.get(f)) for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                ]
+                delta_cells = [_cell(r1_data.get(c)) for c in delta_columns]
+                r2_cells = [
+                    _cell(r2_data.get(f)) for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                ]
+                rows.append(
+                    (
+                        ins_idx,
+                        ir.instance_name,
+                        meta_cells
+                        + [ir.instance_name]
+                        + r1_cells
+                        + delta_cells
+                        + r2_cells,
+                    )
+                )
+
+            if not rows:
+                continue
+            rows.sort(key=lambda r: (r[0] if r[0] is not None else -1, r[1]))
+            path = self.layout.artifact_path(
+                "calc_mcf_lb_summary_csv", scenario_name=sc.name
+            )
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(column_headers)
+                for _, _, cells in rows:
+                    writer.writerow(cells)
+            logger.info("calc_mcf_lb summary CSV written to %s", path)
 
     @staticmethod
     def _read_phase_metric_csv(

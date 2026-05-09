@@ -13,9 +13,9 @@ draw_gantt: true
 painter_thread_cnt: 16
 
 scenarios:
-  - name: "build_full_sch_base"
+  - name: build_full_sch_base
     timelimit: 300.0
-    output_subdir: "build_full_sch_base"
+    output_subdir: build_full_sch_base
     subroutine_flow:
       - method: apply_lb_by_mcf
         draw_heatmap: false
