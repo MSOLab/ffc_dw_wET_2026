@@ -177,6 +177,66 @@ def test_adjust_p_only_zeroes_r_increment_when_r2_runs() -> None:
         assert result.r2_skip_reason == "delta_le_0"
 
 
+def test_proceed_r2_when_nonpositive_cmax_forces_r2_with_clamped_delta() -> None:
+    """``proceed_r2_when_nonpositive_cmax=True`` bypasses the
+    ``delta_le_0`` skip: round 2 runs even when the signed delta is
+    ``<= 0``, with the delta clamped to ``>=1`` for increment math.
+    The raw signed delta is still preserved on
+    ``CalcMcfLbAndDeriveFullSchResult.makespan_delta``.
+    """
+    instance = _make_multi_stage_instance()
+
+    result = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        adjust_p=True,
+        adjust_r=True,
+        proceed_r2_when_nonpositive_cmax=True,
+    )
+
+    assert result.r1_build_full is not None
+    assert result.r1_build_full.schedule is not None
+    assert result.makespan_delta is not None
+
+    # Verify the test fixture actually produces a non-positive delta
+    assert result.makespan_delta <= 0, (
+        f"Expected non-positive delta, got {result.makespan_delta}. "
+        f"r1_full_sch_makespan={result.r1_build_full.schedule.makespan}, "
+        f"r1_ls_only_pmtn_makespan={result.r1_apply.mcf_preemptive_schedule.makespan}"
+    )
+
+    # r2 always runs under the flag (modulo the no_adjust gate, which
+    # this test bypasses by passing both adjust_p and adjust_r).
+    assert result.r2_ran is True
+    assert result.r2_skip_reason is None
+    assert result.r2_apply is not None
+    assert result.r2_heuristic is not None
+    assert result.r2_build_full is not None
+
+    # Increments computed from max(makespan_delta, 1). Clamped iff the
+    # raw delta is <= 0; otherwise math matches the un-clamped formula.
+    n = instance.job_count
+    m_last = instance.last_stage_mc_count
+    delta_for_inc = max(result.makespan_delta, 1)
+
+    # Explicitly verify clamping applied (delta=0 → clamped to 1)
+    assert delta_for_inc == 1, (
+        f"Expected clamped delta=1 for raw delta {result.makespan_delta}, got {delta_for_inc}"
+    )
+
+    assert result.r2_p_increment == math.ceil(delta_for_inc * m_last / n)
+    assert result.r2_r_increment == math.ceil(delta_for_inc / 2)
+    assert result.r2_p_increment >= 1
+    assert result.r2_r_increment >= 1
+
+    # final_obj_bound is still r1's MCF LB (the global LB on the original
+    # instance) — r2's bound is on the augmented problem.
+    assert result.final_obj_bound == result.r1_apply.mcf_lb
+    assert result.best_schedule in (
+        result.r1_build_full.schedule,
+        result.r2_build_full.schedule,
+    )
+
+
 def test_stop_predicate_at_entry_returns_empty_result() -> None:
     """Stop predicate firing before round 1 begins: no sub-results
     populated, ``best_schedule`` is ``None``, ``r1_build_full`` is

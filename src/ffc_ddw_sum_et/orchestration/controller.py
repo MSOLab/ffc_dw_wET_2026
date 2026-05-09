@@ -1144,6 +1144,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
         adjust_p: bool = False,
         adjust_r: bool = False,
+        proceed_r2_when_nonpositive_cmax: bool = False,
         emit_phase_schedules: bool = False,
     ) -> SubroutineReport:
         """Composite step: MCF-LB → full schedule, then a conditional
@@ -1153,11 +1154,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``mcf_lb_pipeline.calc_mcf_lb_and_derive_full_sch`` pipeline.
         Round 1 always runs (no augmentation, so the resulting MCF LB
         is a valid global bound on the original instance). Round 2 runs
-        only when ``(adjust_p or adjust_r)`` is True, the stop predicate
-        is False, r1 produced a full schedule, AND the signed makespan
-        delta ``r1_full_sch_makespan − r1_ls_only_pmtn_makespan`` is
-        strictly positive (raw, no clamp at zero — Rep3 fix preserves
-        the negative delta on the diagnostic for downstream auditing).
+        when ``(adjust_p or adjust_r)`` is True, the stop predicate is
+        False, r1 produced a full schedule, AND either the signed
+        makespan delta ``r1_full_sch_makespan − r1_ls_only_pmtn_makespan``
+        is strictly positive OR ``proceed_r2_when_nonpositive_cmax`` is
+        True (in which case the delta is clamped to ``>=1`` for
+        increment computation only — the raw signed delta is still
+        recorded on the diagnostic, preserving the Rep3-fix invariant).
 
         Registers exactly once per call: the synthesized
         ``SubroutineReport`` whose ``obj_bound`` is round-1's MCF LB and
@@ -1200,6 +1203,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             adjust_r: When True, round 2 inflates per-job releases by
                 ``ceil(makespan_delta / 2)`` (the historical
                 ``adjust_r_by_half`` behaviour is bundled here).
+            proceed_r2_when_nonpositive_cmax: When False (default),
+                preserves the historical ``delta_le_0`` skip — round 2
+                is skipped whenever the signed delta is ``<= 0``. When
+                True, round 2 runs anyway with the delta clamped to
+                ``>=1`` for increment math.
             emit_phase_schedules: Gates the per-round JSON / paired
                 Gantt-PNG output. Default ``False``.
 
@@ -1235,6 +1243,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             last_stage_only_placement_criteria=last_stage_only_placement_criteria,
             adjust_p=adjust_p,
             adjust_r=adjust_r,
+            proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
             stop_predicate=self.is_stopping_condition,
             logger=self.logger,
             r1_heatmap_yaml_path=r1_heatmap_yaml_path,

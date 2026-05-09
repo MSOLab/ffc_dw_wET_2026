@@ -13,23 +13,23 @@ draw_gantt: true
 painter_thread_cnt: 16
 
 scenarios:
-  - name: build_full_sch_base
-    timelimit: 300.0
-    output_subdir: build_full_sch_base
-    subroutine_flow:
-      - method: apply_lb_by_mcf
-        draw_heatmap: false
-        heatmap_sort: "end_time"
-        p_increment: 0
-        r_multiplier: 1.0
-        r_increment: 0
-      - method: heuristic_last_stage_only_sch_from_mcf_lb
-        job_priority: "end_time"
-        placement_priority: "dist"
-        p_increment: 0
-        r_multiplier: 1.0
-        r_increment: 0
-      - method: build_full_sch_from_last_stage_only_sch
+  # - name: build_full_sch_base
+  #   timelimit: 300.0
+  #   output_subdir: build_full_sch_base
+  #   subroutine_flow:
+  #     - method: apply_lb_by_mcf
+  #       draw_heatmap: false
+  #       heatmap_sort: "end_time"
+  #       p_increment: 0
+  #       r_multiplier: 1.0
+  #       r_increment: 0
+  #     - method: heuristic_last_stage_only_sch_from_mcf_lb
+  #       job_priority: "end_time"
+  #       placement_priority: "dist"
+  #       p_increment: 0
+  #       r_multiplier: 1.0
+  #       r_increment: 0
+  #     - method: build_full_sch_from_last_stage_only_sch
   - name: flip_makespan_cp_from_incumbent
     timelimit: "0.09nc"
     output_subdir: flip_makespan_cp_from_incumbent
@@ -40,8 +40,9 @@ scenarios:
         last_stage_only_placement_criteria: "dist"
         adjust_p: true
         adjust_r: true
-      - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.01nc"
-        solver_thread_cnt: 8
-        log_search_progress: true
-        emit_phase_schedules: true
+        proceed_r2_when_nonpositive_cmax: true
+      # - method: run_flip_makespan_cp_from_incumbent
+      #   cp_tl: "0.01nc"
+      #   solver_thread_cnt: 8
+      #   log_search_progress: true
+      #   emit_phase_schedules: true
