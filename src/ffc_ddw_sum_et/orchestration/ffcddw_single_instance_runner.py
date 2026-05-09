@@ -21,11 +21,14 @@ from routix.runner.single_instance_runner import (
 )
 from routix.type_defs import RunMode
 
-from ..io import dump_preemptive_schedule_yaml, dump_schedule_yaml, dump_solution_json
+from ..io import dump_preemptive_schedule_json, dump_solution_json
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
-from ..solution.objectives import compute_weighted_earliness_tardiness
+from ..solution.objectives import (
+    compute_weighted_earliness_tardiness,
+    compute_weighted_et_from_preemptive,
+)
 from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
 from .subroutine_report import FFcDDWSubroutineReport
@@ -328,29 +331,34 @@ class FFcDDWSingleInstanceRunner(
         for name, sched in phase_schedules:
             if sched is None:
                 continue
-            yaml_path = layout.artifact_path(
+            json_path = layout.artifact_path(
                 "mcf_lb_phase_schedule", phase_name=name, **scope
             )
             try:
+                phase_obj = self._compute_phase_obj_value(sched)
                 if isinstance(sched, MCFPreemptiveSchedule):
-                    dump_preemptive_schedule_yaml(
-                        yaml_path,
-                        instance_name=f"{self.ins_name}_{name}",
+                    dump_preemptive_schedule_json(
+                        json_path,
+                        instance_name=self.ins_name,
                         stage_id=sched.stage_id,
                         machines=sched.machines,
                         jobs=self.instance.job_id_list,
                         segments=sched.to_gantt_segments(),
                         all_jobs=self.instance.job_id_list,
+                        obj_value=phase_obj,
+                        compact=True,
                     )
                 else:
-                    dump_schedule_yaml(
+                    dump_solution_json(
                         sched,
-                        yaml_path,
-                        instance_name=f"{self.ins_name}_{name}",
+                        json_path,
+                        instance_name=self.ins_name,
+                        obj_value=phase_obj,
+                        compact=True,
                     )
             except Exception:
                 self.logger.exception(
-                    "Error saving %s yaml for %s", name, self.ins_name
+                    "Error saving %s json for %s", name, self.ins_name
                 )
 
         diag = getattr(controller, "mcf_lb_diagnostic", None)
@@ -456,6 +464,29 @@ class FFcDDWSingleInstanceRunner(
         valid = {f.name for f in dataclasses.fields(InstanceResult)}
         projected = {k: v for k, v in raw.items() if k in valid}
         return InstanceResult(**projected)
+
+    def _compute_phase_obj_value(self, sched: Any) -> float | None:
+        """Return weighted ET on ``sched`` against the original instance, or
+        ``None`` when ``sched`` is on the reversed instance (the "last
+        stage" is then the original *first* stage, which has no due window).
+
+        :class:`MCFPreemptiveSchedule` always represents the (preemptive)
+        last stage of the original instance, so a per-job completion-time
+        scan suffices; the value is a lower bound on the original problem's
+        ET (preemption is relaxed away in the upstream MCF).
+        """
+        if isinstance(sched, MCFPreemptiveSchedule):
+            sum_e, sum_t = compute_weighted_et_from_preemptive(sched, self.instance)
+            return float(sum_e + sum_t)
+        if sched.stages and sched.stages[-1] == self.instance.stage_id_list[-1]:
+            try:
+                sum_e, sum_t = compute_weighted_earliness_tardiness(
+                    sched, self.instance
+                )
+            except (KeyError, AttributeError):
+                return None
+            return float(sum_e + sum_t)
+        return None
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:
         """Save best solution as JSON."""

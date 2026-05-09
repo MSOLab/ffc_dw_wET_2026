@@ -678,7 +678,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
         self.mcf_preemptive_sch_p_increment = effective_p_increment
         self.mcf_lb_phase_schedules.clear()
-        self.mcf_lb_phase_schedules.append(
+        self._record_mcf_lb_phase(
             ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
 
@@ -823,10 +823,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=valid_global_mcf_lb,
         )
         self.last_stage_only_sol_p_increment = 0
-        self.mcf_lb_phase_schedules.extend(result.intermediate_schedules)
-        self.mcf_lb_phase_schedules.append(
-            ("2_ls_only_sch_from_neh_cp", result.schedule)
-        )
+        self._record_mcf_lb_phases(result.intermediate_schedules)
+        self._record_mcf_lb_phase(("2_ls_only_sch_from_neh_cp", result.schedule))
 
         self.logger.info(
             "neh_cp_last_stage_only_sch_from_mcf_lb: status=%s, obj=%.2f, "
@@ -963,9 +961,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=None,
         )
         self.last_stage_only_sol_p_increment = p_increment
-        self.mcf_lb_phase_schedules.append(
-            ("2_ls_only_sch_from_mcf_lb", result.schedule)
-        )
+        self._record_mcf_lb_phase(("2_ls_only_sch_from_mcf_lb", result.schedule))
 
         self.logger.info(
             "single_pass_last_stage_only_sch_from_mcf_lb: status=%s, "
@@ -1243,9 +1239,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=None,
         )
         self.last_stage_only_sol_p_increment = effective_p_increment
-        self.mcf_lb_phase_schedules.append(
-            ("2_ls_only_sch_from_mcf_lb_heur", result.schedule)
-        )
+        self._record_mcf_lb_phase(("2_ls_only_sch_from_mcf_lb_heur", result.schedule))
 
         self.logger.info(
             "heuristic_last_stage_only_sch_from_mcf_lb: status=%s, "
@@ -1355,22 +1349,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         if state.ls_only_sch_before_delay is not None:
-            self.mcf_lb_phase_schedules.append(
-                ("2_1_ls_only_sch_before_delayed", state.ls_only_sch_before_delay)
+            self._record_mcf_lb_phase(
+                ("2_ls_only_sch_original_p_before_rs", state.ls_only_sch_before_delay)
             )
         if state.ls_only_sch_delayed is not None:
-            self.mcf_lb_phase_schedules.append(
-                ("3_ls_only_sch_delayed", state.ls_only_sch_delayed)
+            self._record_mcf_lb_phase(
+                ("3_ls_only_sch_rs", state.ls_only_sch_delayed)
             )
         if state.ls_only_sch_flipped is not None:
-            self.mcf_lb_phase_schedules.append(
+            self._record_mcf_lb_phase(
                 ("4_ls_only_sch_flipped", state.ls_only_sch_flipped)
             )
         if state.full_sch_before_unflip is not None:
-            self.mcf_lb_phase_schedules.append(
+            self._record_mcf_lb_phase(
                 ("5_full_sch_before_unflip", state.full_sch_before_unflip)
             )
-        self.mcf_lb_phase_schedules.append(
+        self._record_mcf_lb_phase(
             ("6_full_sch_from_ls_only_sch", state.full_sch_from_ls_only_sch)
         )
 
@@ -1689,11 +1683,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         obj_bound_by_mcf = phase1.mcf_lb
         self.mcf_preemptive_schedule = phase1.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
-        self.mcf_lb_phase_schedules.append(
+        self._record_mcf_lb_phase(
             ("1_mcf_preemptive_sch", phase1.mcf_preemptive_schedule)
         )
         for seed in phase1.last_stage_seeds:
-            self.mcf_lb_phase_schedules.append(
+            self._record_mcf_lb_phase(
                 (f"2_last_stage_only_init_schedule__{seed.tag}", seed.init_schedule)
             )
 
@@ -1737,13 +1731,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         self.last_stage_only_sol_p_increment = 0
         for candidate in phase2.candidates:
-            self.mcf_lb_phase_schedules.append(
+            self._record_mcf_lb_phase(
                 (
                     f"3_last_stage_only_schedule__{candidate.tag}",
                     candidate.last_stage_only_schedule,
                 )
             )
-        self.mcf_lb_phase_schedules.append(
+        self._record_mcf_lb_phase(
             ("3_last_stage_only_schedule_chosen", phase2.last_stage_only_schedule)
         )
 
@@ -1763,18 +1757,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self._register(report, None)
             return report
         if phase3.ls_only_sch_delayed is not None:
-            self.mcf_lb_phase_schedules.append(
+            self._record_mcf_lb_phase(
                 ("3_ls_only_sch_delayed", phase3.ls_only_sch_delayed)
             )
         if phase3.ls_only_sch_flipped is not None:
-            self.mcf_lb_phase_schedules.append(
+            self._record_mcf_lb_phase(
                 ("4_ls_only_sch_flipped", phase3.ls_only_sch_flipped)
             )
         if phase3.full_sch_before_unflip is not None:
-            self.mcf_lb_phase_schedules.append(
+            self._record_mcf_lb_phase(
                 ("5_full_sch_before_unflip", phase3.full_sch_before_unflip)
             )
-        self.mcf_lb_phase_schedules.append(
+        self._record_mcf_lb_phase(
             ("6_full_sch_from_ls_only_sch", phase3.full_sch_from_ls_only_sch)
         )
 
@@ -1822,7 +1816,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 ),
             )
             return report
-        self.mcf_lb_phase_schedules.append(("7_final_schedule", phase4.final_schedule))
+        self._record_mcf_lb_phase(("7_final_schedule", phase4.final_schedule))
 
         report = SubroutineReport(
             elapsed_time=elapsed,
@@ -1981,9 +1975,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             schedule=out_schedule, obj_value=cp_obj, obj_bound=mcf_lb
         )
         self.last_stage_only_sol_p_increment = 0
-        self.mcf_lb_phase_schedules.append(
-            ("2_ls_only_sch_from_cp_sat_lb", out_schedule)
-        )
+        self._record_mcf_lb_phase(("2_ls_only_sch_from_cp_sat_lb", out_schedule))
 
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
@@ -2662,7 +2654,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         obj_bound_by_mcf = mcf_result.mcf_lb
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
         self.mcf_lb_phase_schedules.clear()
-        self.mcf_lb_phase_schedules.append(
+        self._record_mcf_lb_phase(
             ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
         )
         self.logger.info("run_mcf_lb_then_neh_cp: MCF LB = %d", int(obj_bound_by_mcf))
@@ -2814,21 +2806,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     cp_raw_sch,
                     semi_active_sch,
                 ) in step_schedules:
-                    self.mcf_lb_phase_schedules.append(
+                    self._record_mcf_lb_phase(
                         (
                             f"2_neh_cp_step_{step_idx:03d}_a_dispatched",
                             dispatched_sch,
                         )
                     )
                     if cp_raw_sch is not None:
-                        self.mcf_lb_phase_schedules.append(
+                        self._record_mcf_lb_phase(
                             (
                                 f"2_neh_cp_step_{step_idx:03d}_b_cp",
                                 cp_raw_sch,
                             )
                         )
                     if semi_active_sch is not None:
-                        self.mcf_lb_phase_schedules.append(
+                        self._record_mcf_lb_phase(
                             (
                                 f"2_neh_cp_step_{step_idx:03d}_c_semi_active",
                                 semi_active_sch,

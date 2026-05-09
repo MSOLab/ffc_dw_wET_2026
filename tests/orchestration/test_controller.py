@@ -170,13 +170,17 @@ def test_build_full_sch_from_last_stage_only_sch() -> None:
     sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
     assert float(sum_e + sum_t) == report.obj_value
 
-    # Phase schedule entries appended for post-run Gantt rendering.
+    # Phase schedule entries appended for post-run Gantt rendering. Names
+    # are call_context-prefixed (e.g.
+    # "1-calc_mcf_lb_..._6_full_sch_from_ls_only_sch") so the runner-side
+    # filenames sort by subroutine-flow step on disk; assert via suffix
+    # match against the local phase label.
     phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
-    assert "6_full_sch_from_ls_only_sch" in phase_names
+    assert any(name.endswith("_6_full_sch_from_ls_only_sch") for name in phase_names)
     if instance.stage_count > 1:
-        assert "3_ls_only_sch_delayed" in phase_names
-        assert "4_ls_only_sch_flipped" in phase_names
-        assert "5_full_sch_before_unflip" in phase_names
+        assert any(name.endswith("_3_ls_only_sch_rs") for name in phase_names)
+        assert any(name.endswith("_4_ls_only_sch_flipped") for name in phase_names)
+        assert any(name.endswith("_5_full_sch_before_unflip") for name in phase_names)
 
 
 def test_heuristic_last_stage_only_sch_from_mcf_lb_sets_solution() -> None:
@@ -200,7 +204,7 @@ def test_heuristic_last_stage_only_sch_from_mcf_lb_sets_solution() -> None:
     assert controller.last_stage_only_sol_p_increment == 0
 
     phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
-    assert "2_ls_only_sch_from_mcf_lb_heur" in phase_names
+    assert any(name.endswith("_2_ls_only_sch_from_mcf_lb_heur") for name in phase_names)
 
 
 def test_heuristic_last_stage_only_sch_then_build_full() -> None:
@@ -258,7 +262,8 @@ def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
     # MCF preemptive schedule must be retained for the post-run Gantt pipeline.
     assert controller.mcf_preemptive_schedule is not None
     assert any(
-        name == "1_mcf_preemptive_sch" for name, _ in controller.mcf_lb_phase_schedules
+        name.endswith("_1_mcf_preemptive_sch")
+        for name, _ in controller.mcf_lb_phase_schedules
     )
 
 

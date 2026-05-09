@@ -67,8 +67,41 @@ def _compute_rpdf(obj: float | None, bks: float | None) -> float | None:
     return (obj - bks) / denom
 
 
+def _format_obj_for_title(value: Any) -> str:
+    """Render ``objValue``/``objBound`` for the chart title."""
+    if value is None:
+        return "N/A"
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{int(f)}" if f.is_integer() else f"{f:.2f}"
+
+
+def _build_gantt_title(
+    data: dict[str, Any],
+    png_path: Path,
+    *,
+    makespan: int,
+) -> str:
+    """3-line chart title: ``<instance>\\n<file_stem>\\nobj=<o>, makespan=<m>``.
+
+    ``instance`` falls back to the PNG stem if the source carries no
+    ``instanceName`` field (defensive). Line 2 uses the PNG's *stem*
+    (no ``.png`` suffix) so a reader can match chart -> file at a
+    glance without redundant extension noise.
+    """
+    instance = data.get(K.INSTANCE_NAME) or png_path.stem
+    obj = _format_obj_for_title(data.get(K.OBJ_VALUE))
+    return f"{instance}\n{png_path.stem}\nobj={obj}, makespan={makespan}"
+
+
 def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> None:
-    """Render the main Gantt PNG from `<ins>_solution.json`.
+    """Render a Gantt PNG from any ``dump_solution_json``-shaped file.
+
+    Used for the canonical ``<ins>_solution.json`` (final-zone incumbent)
+    and any phase JSON whose source schedule was a non-preemptive
+    :class:`FFcSchedule` (``operations[]`` shape).
 
     Module-level so it's picklable by ``ProcessPoolExecutor``. Imports
     matplotlib inside the worker to keep the algorithm process clean.
@@ -100,6 +133,9 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
         start_map[key] = int(op[K.OP_START])
         end_map[key] = int(op[K.OP_END])
 
+    makespan = max(end_map.values()) if end_map else 0
+    title = _build_gantt_title(data, png_path, makespan=makespan)
+
     try:
         GanttPlotter().export(
             png_path,
@@ -109,6 +145,7 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
             stage_list=data.get(K.STAGES),
             machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
             all_job_list=data.get(K.JOBS),
+            title=title,
         )
     except Exception:
         logger.exception("Failed to render Gantt for %s", solution_path)
@@ -146,35 +183,39 @@ def _render_heatmap_from_yaml(yaml_path: Path, html_path: Path) -> None:
         logger.exception("Failed to render heatmap for %s", yaml_path)
 
 
-def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
-    """Render a phase Gantt PNG from a phase schedule YAML.
+def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
+    """Render a phase Gantt PNG from a compact-JSON phase schedule.
 
-    Auto-detects regular vs preemptive content from the yaml top-level keys
-    and dispatches to the matching plotter.
+    Auto-detects regular vs preemptive content from the top-level keys
+    (``operations[]`` vs ``segments[]``) and dispatches to the matching
+    plotter. Embeds a 3-line chart title:
+
+    1. instance name (from ``instanceName``)
+    2. PNG filename
+    3. ``obj=<v>, makespan=<m>``
+
+    Module-level so it's picklable by ``ProcessPoolExecutor``.
     """
     try:
         import matplotlib
 
         matplotlib.use("Agg")
-        from ..io import load_preemptive_schedule_yaml, load_schedule_yaml
         from ..io.gantt import GanttPlotter, PreemptiveGanttPlotter
     except ImportError:
-        logger.warning("matplotlib not available, skipping %s", yaml_path)
+        logger.warning("matplotlib not available, skipping %s", json_path)
         return
 
     try:
-        from routix.io import load_yaml as _load_yaml
-
-        peek = _load_yaml(yaml_path) or {}
+        with open(json_path) as f:
+            data = json.load(f)
     except Exception:
-        logger.exception("Failed to peek yaml %s", yaml_path)
+        logger.exception("Failed to load phase json %s", json_path)
         return
 
-    is_preemptive = K.SEGMENTS in peek
+    is_preemptive = K.SEGMENTS in data
 
     try:
         if is_preemptive:
-            data = load_preemptive_schedule_yaml(yaml_path)
             segment_records = data.get(K.SEGMENTS) or []
             if not segment_records:
                 return
@@ -193,6 +234,8 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
             machines = machines_per_stage.get(stage_id, []) if stage_id else []
             jobs = data.get(K.JOBS)
             all_jobs = data.get(K.ALL_JOBS) or jobs
+            makespan = max(seg[4] for seg in segments)
+            title = _build_gantt_title(data, png_path, makespan=makespan)
             PreemptiveGanttPlotter().export(
                 png_path,
                 segments,
@@ -200,9 +243,9 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
                 machines=machines,
                 jobs=jobs,
                 all_jobs=all_jobs,
+                title=title,
             )
         else:
-            data = load_schedule_yaml(yaml_path)
             operations = data.get(K.OPERATIONS) or []
             if not operations:
                 return
@@ -212,6 +255,8 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
                 key = (op[K.OP_JOB], op[K.OP_STAGE], op[K.OP_MACHINE])
                 start_map[key] = int(op[K.OP_START])
                 end_map[key] = int(op[K.OP_END])
+            makespan = max(end_map.values()) if end_map else 0
+            title = _build_gantt_title(data, png_path, makespan=makespan)
             GanttPlotter().export(
                 png_path,
                 start_map,
@@ -220,9 +265,10 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
                 stage_list=data.get(K.STAGES),
                 machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
                 all_job_list=data.get(K.JOBS),
+                title=title,
             )
     except Exception:
-        logger.exception("Failed to render Gantt for %s", yaml_path)
+        logger.exception("Failed to render Gantt for %s", json_path)
 
 
 @dataclass
@@ -1363,18 +1409,21 @@ class FFcDDWReporter:
                             self.layout.artifact_path("gantt_png", **scope),
                         )
                     )
-                for phase_yaml in self.layout.find_artifacts(
+                for phase_json in self.layout.find_artifacts(
                     "mcf_lb_phase_schedule",
                     scenario_name=sc.name,
                     instance_name=ins,
                 ):
-                    phase_name = phase_yaml.stem.removeprefix(f"{ins}_")
+                    # phase_name == file stem (template is "{phase_name}.json")
+                    phase_name = phase_json.stem
                     jobs.append(
                         (
-                            _render_phase_gantt_from_yaml,
-                            phase_yaml,
+                            _render_phase_gantt_from_json,
+                            phase_json,
                             self.layout.artifact_path(
-                                "phase_gantt_png", phase_name=phase_name, **scope
+                                "phase_gantt_png",
+                                phase_name=phase_name,
+                                **scope,
                             ),
                         )
                     )

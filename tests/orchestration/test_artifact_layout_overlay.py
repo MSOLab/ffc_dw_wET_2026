@@ -92,9 +92,13 @@ def test_phase_gantt_template_uses_phase_name(tmp_path: Path) -> None:
         "phase_gantt_png",
         scenario_name="sc",
         instance_name="ins",
-        phase_name="6_full_sch_from_ls_only_sch",
+        phase_name="1-calc_mcf_lb_and_derive_full_sch_6_full_sch_from_ls_only_sch",
     )
-    assert p.name == "ins_6_full_sch_from_ls_only_sch_gantt.png"
+    # No instance prefix in filename; instance is encoded in the parent
+    # folder and the chart title.
+    assert p.name == (
+        "1-calc_mcf_lb_and_derive_full_sch_6_full_sch_from_ls_only_sch_gantt.png"
+    )
 
 
 def test_unknown_kind_raises(tmp_path: Path) -> None:

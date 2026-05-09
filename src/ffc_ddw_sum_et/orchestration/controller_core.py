@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 from routix.dynamic_data_object import DynamicDataObject
 from routix.report import SubroutineReport
@@ -270,6 +270,29 @@ class FFcDDWSubroutineControllerCore(
             )
             return zone_dir / filename
         return super().get_file_path_for_subroutine(filename_suffix)
+
+    def _record_mcf_lb_phase(self, item: tuple[str, MCFLBPhaseSchedule]) -> None:
+        """Append one ``(name, schedule)`` tuple to ``mcf_lb_phase_schedules``,
+        prefixing ``name`` with the current method's call_context so the
+        runner-side artifact filenames sort by subroutine-flow step on disk
+        and don't collide across step calls.
+        """
+        name, sched = item
+        self.mcf_lb_phase_schedules.append((self._mcf_lb_phase_name(name), sched))
+
+    def _record_mcf_lb_phases(
+        self, items: Iterable[tuple[str, MCFLBPhaseSchedule]]
+    ) -> None:
+        """Bulk variant of ``_record_mcf_lb_phase`` for sub-call results
+        (e.g. ``result.intermediate_schedules``).
+        """
+        prefix = self._get_call_context_of_current_method()
+        self.mcf_lb_phase_schedules.extend(
+            (f"{prefix}_{name}", sched) for name, sched in items
+        )
+
+    def _mcf_lb_phase_name(self, local_name: str) -> str:
+        return f"{self._get_call_context_of_current_method()}_{local_name}"
 
     def try_get_file_path_for_subroutine(self, suffix: str) -> Path | None:
         """Like ``get_file_path_for_subroutine`` but returns ``None`` instead

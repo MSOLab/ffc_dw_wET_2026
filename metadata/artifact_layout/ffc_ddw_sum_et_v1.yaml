@@ -25,23 +25,31 @@ artifacts:
     zone: progress
     kind: mcf_lb_diagnostic
     file_template: "{instance_name}_mcf_lb_diagnostic.yaml"
+  # MCF LB intermediate schedules. Compact JSON, two shapes share the kind:
+  # FFcSchedule -> dump_solution_json (operations[]); MCFPreemptiveSchedule
+  # -> dump_preemptive_schedule_json (segments[]). `phase_name` already
+  # carries the controller call_context prefix
+  # (e.g. "1-calc_mcf_lb_and_derive_full_sch_1_mcf_preemptive_sch") so files
+  # sort by subroutine-flow step on disk and don't collide across steps.
   - scope: instance
     zone: progress
     kind: mcf_lb_phase_schedule
-    file_template: "{instance_name}_{phase_name}.yaml"
+    file_template: "{phase_name}.json"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
-  # the renderer is picked from the source yaml's content type, so a single
-  # kind suffices.
+  # the renderer is picked from the source content shape (operations[] vs
+  # segments[]), so a single kind suffices.
+  # Filenames omit instance_name (the per-instance folder already identifies
+  # it); the instance name is rendered into the chart title instead.
   - scope: instance
     zone: report
     kind: gantt_png
-    file_template: "{instance_name}_gantt.png"
+    file_template: "solution_gantt.png"
   - scope: instance
     zone: report
     kind: phase_gantt_png
-    file_template: "{instance_name}_{phase_name}_gantt.png"
+    file_template: "{phase_name}_gantt.png"
 
   # ---- scenario ----
   - scope: scenario

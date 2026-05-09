@@ -20,7 +20,7 @@ from .parallel_mc_cost_heatmap import (
     load_signed_cost_heatmap_yaml,
     make_figure,
 )
-from .schedule_json import dump_solution_json
+from .schedule_json import dump_preemptive_schedule_json, dump_solution_json
 from .schedule_yaml import (
     dump_preemptive_schedule_yaml,
     dump_schedule_yaml,
@@ -37,6 +37,7 @@ __all__ = [
     "Table2DManager",
     "TextDataParser",
     "build_signed_cost_matrix",
+    "dump_preemptive_schedule_json",
     "dump_preemptive_schedule_yaml",
     "dump_schedule_yaml",
     "dump_signed_cost_heatmap_yaml",
