@@ -164,6 +164,7 @@ def heuristic_last_stage_only_from_mcf_lb(
         appended=job_sequence,
         placement_priority=placement_priority,
     )
+    before_sa_iti = schedule.deepcopy()
 
     schedule.make_semi_active(
         instance.stage_2_job_2_p_map,
@@ -188,7 +189,9 @@ def heuristic_last_stage_only_from_mcf_lb(
         elapsed_time=elapsed,
         cp_solve_sec=0.0,
         status="HEURISTIC",
-        intermediate_schedules=[],
+        intermediate_schedules=[
+            ("lastS_only_from_mcf_lb_before_sa_iti", before_sa_iti),
+        ],
     )
 
 

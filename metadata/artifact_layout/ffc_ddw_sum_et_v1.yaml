@@ -43,6 +43,18 @@ artifacts:
     zone: progress
     kind: flip_makespan_cp_phase_schedule
     file_template: "{phase_name}.json"
+  # Per-instance phase-metric CSVs emitted by ``calc_mcf_lb_and_derive_full_sch``.
+  # One row per (round, label) snapshot in the user-spec order; r2 rows carry
+  # blank cells when round 2 did not run. Always emitted (independent of
+  # ``emit_phase_schedules``).
+  - scope: instance
+    zone: progress
+    kind: mcf_lb_phase_obj_csv
+    file_template: "{instance_name}_calc_mcf_lb_phase_obj.csv"
+  - scope: instance
+    zone: progress
+    kind: mcf_lb_phase_makespan_csv
+    file_template: "{instance_name}_calc_mcf_lb_phase_makespan.csv"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
@@ -66,6 +78,16 @@ artifacts:
   - scope: scenario
     kind: mcf_lb_analysis
     file_template: "{scenario_name}_mcf_lb_analysis.csv"
+  # Per-scenario aggregated phase-metric summaries — wide-format CSVs with one
+  # row per instance and one column per (round, label). Built by the reporter
+  # by reading every instance's ``mcf_lb_phase_obj_csv`` /
+  # ``mcf_lb_phase_makespan_csv`` under the scenario.
+  - scope: scenario
+    kind: mcf_lb_phase_obj_summary_csv
+    file_template: "{scenario_name}_calc_mcf_lb_phase_obj.csv"
+  - scope: scenario
+    kind: mcf_lb_phase_makespan_summary_csv
+    file_template: "{scenario_name}_calc_mcf_lb_phase_makespan.csv"
   # Per-scenario interactive RPDf vs Time% chart, fed by per-instance
   # obj_log_json + manifest. Used by report/rpdf_scatter_chart.
   - scope: scenario

@@ -26,8 +26,8 @@ from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ..solution.objectives import (
+    compute_phase_obj_value,
     compute_weighted_earliness_tardiness,
-    compute_weighted_et_from_preemptive,
 )
 from .controller import FFcDDWSubroutineController
 from .solution_manager import FFcDDWSolution
@@ -335,7 +335,7 @@ class FFcDDWSingleInstanceRunner(
                 "mcf_lb_phase_schedule", phase_name=name, **scope
             )
             try:
-                phase_obj = self._compute_phase_obj_value(sched)
+                phase_obj = compute_phase_obj_value(sched, self.instance)
                 if isinstance(sched, MCFPreemptiveSchedule):
                     dump_preemptive_schedule_json(
                         json_path,
@@ -464,29 +464,6 @@ class FFcDDWSingleInstanceRunner(
         valid = {f.name for f in dataclasses.fields(InstanceResult)}
         projected = {k: v for k, v in raw.items() if k in valid}
         return InstanceResult(**projected)
-
-    def _compute_phase_obj_value(self, sched: Any) -> float | None:
-        """Return weighted ET on ``sched`` against the original instance, or
-        ``None`` when ``sched`` is on the reversed instance (the "last
-        stage" is then the original *first* stage, which has no due window).
-
-        :class:`MCFPreemptiveSchedule` always represents the (preemptive)
-        last stage of the original instance, so a per-job completion-time
-        scan suffices; the value is a lower bound on the original problem's
-        ET (preemption is relaxed away in the upstream MCF).
-        """
-        if isinstance(sched, MCFPreemptiveSchedule):
-            sum_e, sum_t = compute_weighted_et_from_preemptive(sched, self.instance)
-            return float(sum_e + sum_t)
-        if sched.stages and sched.stages[-1] == self.instance.stage_id_list[-1]:
-            try:
-                sum_e, sum_t = compute_weighted_earliness_tardiness(
-                    sched, self.instance
-                )
-            except (KeyError, AttributeError):
-                return None
-            return float(sum_e + sum_t)
-        return None
 
     def _save_solution(self, solution: FFcDDWSolution) -> str:
         """Save best solution as JSON."""

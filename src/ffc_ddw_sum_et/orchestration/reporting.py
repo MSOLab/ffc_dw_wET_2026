@@ -22,6 +22,7 @@ from routix.type_defs import RunMode
 from ..io import schedule_keys as K
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
+from .controller import FFcDDWSubroutineController
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
 
@@ -565,6 +566,7 @@ class FFcDDWReporter:
         self._write_adjust_params_by_makespan_delta_csv()
         self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
+        self._write_calc_mcf_lb_phase_metric_summaries()
         self._write_mcf_lb_pivot_artifacts()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_table()
@@ -785,6 +787,112 @@ class FFcDDWReporter:
         "dispatchSec",
         "profileFixCpSatSec",
     )
+
+    def _write_calc_mcf_lb_phase_metric_summaries(self) -> None:
+        """Per-scenario aggregated wide-format CSVs for
+        ``calc_mcf_lb_and_derive_full_sch`` snapshot metrics.
+
+        Reads each instance's ``mcf_lb_phase_obj_csv`` and
+        ``mcf_lb_phase_makespan_csv`` (under the per-instance ``progress``
+        zone) and collates them into one row per instance with one column
+        per ``(round, label)`` snapshot. Instances that did not run the
+        composite step (no per-instance CSV) are skipped. When no instance
+        in a scenario has either CSV, the summary file is not written.
+        Rows are sorted by ``insIndex`` to match other per-scenario tables.
+        """
+        column_pairs: list[tuple[str, str]] = [
+            ("r1", label) for label in FFcDDWSubroutineController._MCF_LB_R1_LABEL_ORDER
+        ] + [
+            ("r2", label) for label in FFcDDWSubroutineController._MCF_LB_R2_LABEL_ORDER
+        ]
+        # Metadata columns prepended on the scenario-aggregated wide CSV.
+        # Sourced from the reporter's ``_index_to_meta`` (loaded from
+        # the PRA2017 instance table) — distinct from any per-instance
+        # CSV (which intentionally carries no metadata to keep it terse).
+        meta_columns = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W"]
+        column_headers = (
+            meta_columns
+            + ["instanceName"]
+            + [f"{r}_{label}" for r, label in column_pairs]
+        )
+
+        for sc in self.scenario_results:
+            obj_rows: list[tuple[int | None, str, list[str], list[str]]] = []
+            ms_rows: list[tuple[int | None, str, list[str], list[str]]] = []
+            for ir in sc.instance_results:
+                obj_path = self.layout.artifact_path(
+                    "mcf_lb_phase_obj_csv",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                ms_path = self.layout.artifact_path(
+                    "mcf_lb_phase_makespan_csv",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                obj_cells = self._read_phase_metric_csv(obj_path, "obj_value")
+                ms_cells = self._read_phase_metric_csv(ms_path, "makespan")
+                ins_idx = self._resolve_ins_index(ir.instance_name)
+                meta = self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
+                meta_cells = [
+                    "" if ins_idx is None else str(ins_idx)
+                ] + [
+                    "" if meta.get(col) is None else str(meta.get(col))
+                    for col in meta_columns[1:]
+                ]
+                if obj_cells is not None:
+                    obj_rows.append(
+                        (
+                            ins_idx,
+                            ir.instance_name,
+                            meta_cells,
+                            [obj_cells.get(p, "") for p in column_pairs],
+                        )
+                    )
+                if ms_cells is not None:
+                    ms_rows.append(
+                        (
+                            ins_idx,
+                            ir.instance_name,
+                            meta_cells,
+                            [ms_cells.get(p, "") for p in column_pairs],
+                        )
+                    )
+
+            for kind, rows in (
+                ("mcf_lb_phase_obj_summary_csv", obj_rows),
+                ("mcf_lb_phase_makespan_summary_csv", ms_rows),
+            ):
+                if not rows:
+                    continue
+                rows.sort(key=lambda r: (r[0] if r[0] is not None else -1, r[1]))
+                path = self.layout.artifact_path(kind, scenario_name=sc.name)
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(column_headers)
+                    for _, name, meta_cells, value_cells in rows:
+                        writer.writerow(meta_cells + [name] + value_cells)
+                logger.info("Phase metric summary CSV written to %s", path)
+
+    @staticmethod
+    def _read_phase_metric_csv(
+        path: Path, value_column: str
+    ) -> dict[tuple[str, str], str] | None:
+        """Return a ``{(round, label): cell_value}`` map from a per-instance
+        phase-metric CSV. Returns ``None`` if the file does not exist.
+        """
+        if not path.exists():
+            return None
+        out: dict[tuple[str, str], str] = {}
+        with open(path, encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                round_key = row.get("round", "")
+                label = row.get("label", "")
+                if not round_key or not label:
+                    continue
+                out[(round_key, label)] = row.get(value_column, "")
+        return out
 
     def _write_mcf_lb_analysis_csv(self) -> None:
         """Per-instance lower-bound analysis table.

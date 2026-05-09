@@ -172,15 +172,17 @@ def test_build_full_sch_from_last_stage_only_sch() -> None:
 
     # Phase schedule entries appended for post-run Gantt rendering. Names
     # are call_context-prefixed (e.g.
-    # "1-calc_mcf_lb_..._6_full_sch_from_ls_only_sch") so the runner-side
+    # "1-calc_mcf_lb_..._9_fullS_after_sa_iti") so the runner-side
     # filenames sort by subroutine-flow step on disk; assert via suffix
     # match against the local phase label.
     phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
-    assert any(name.endswith("_6_full_sch_from_ls_only_sch") for name in phase_names)
+    assert any(name.endswith("_9_fullS_after_sa_iti") for name in phase_names)
     if instance.stage_count > 1:
-        assert any(name.endswith("_3_ls_only_sch_rs") for name in phase_names)
-        assert any(name.endswith("_4_ls_only_sch_flipped") for name in phase_names)
-        assert any(name.endswith("_5_full_sch_before_unflip") for name in phase_names)
+        assert any(name.endswith("_4_lastS_only_before_rs") for name in phase_names)
+        assert any(name.endswith("_5_lastS_only_after_rs") for name in phase_names)
+        assert any(name.endswith("_6_lastS_only_flipped") for name in phase_names)
+        assert any(name.endswith("_7_fullS_before_unflip") for name in phase_names)
+        assert any(name.endswith("_8_fullS_after_unflip") for name in phase_names)
 
 
 def test_heuristic_last_stage_only_sch_from_mcf_lb_sets_solution() -> None:
@@ -204,7 +206,14 @@ def test_heuristic_last_stage_only_sch_from_mcf_lb_sets_solution() -> None:
     assert controller.last_stage_only_sol_p_increment == 0
 
     phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
-    assert any(name.endswith("_2_ls_only_sch_from_mcf_lb_heur") for name in phase_names)
+    assert any(
+        name.endswith("_2_lastS_only_from_mcf_lb_before_sa_iti")
+        for name in phase_names
+    )
+    assert any(
+        name.endswith("_3_lastS_only_from_mcf_lb_after_sa_iti")
+        for name in phase_names
+    )
 
 
 def test_heuristic_last_stage_only_sch_then_build_full() -> None:

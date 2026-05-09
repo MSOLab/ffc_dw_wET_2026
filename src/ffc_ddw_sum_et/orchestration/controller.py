@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import math
+import re
 import time
 from pathlib import Path
 from typing import Callable, Literal, Sequence
@@ -60,7 +62,10 @@ from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
-from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
+from ffc_ddw_sum_et.solution.objectives import (
+    compute_phase_obj_value,
+    compute_weighted_earliness_tardiness,
+)
 from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
 
 from .controller_core import FFcDDWSubroutineControllerCore
@@ -682,9 +687,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         self.mcf_preemptive_schedule = mcf_result.mcf_preemptive_schedule
         self.mcf_preemptive_sch_p_increment = effective_p_increment
-        self.mcf_lb_phase_schedules.clear()
+        # Composite drivers (``_register_report=False``) own the phase list
+        # and clear it once at composite entry; clearing here would wipe
+        # snapshots produced by an earlier round of the composite.
+        if _register_report:
+            self.mcf_lb_phase_schedules.clear()
         self._record_mcf_lb_phase(
-            ("1_mcf_preemptive_sch", mcf_result.mcf_preemptive_schedule)
+            ("1_mcf_preemptive", mcf_result.mcf_preemptive_schedule)
         )
 
         self.logger.info(
@@ -1045,8 +1054,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Side effects:
           - Stores the resulting last-stage-only schedule on
             ``self.last_stage_only_sol``.
-          - Appends ``2_ls_only_sch_from_mcf_lb_heur`` to
-            ``self.mcf_lb_phase_schedules``.
+          - Appends ``2_lastS_only_from_mcf_lb_before_sa_iti`` (midpoint
+            placement deepcopy, before ``make_semi_active`` /
+            ``insert_idle_time``) and ``3_lastS_only_from_mcf_lb_after_sa_iti``
+            (final result) to ``self.mcf_lb_phase_schedules``.
 
         The returned ``SubroutineReport.obj_bound`` is always ``None``:
         this step does not produce a lower bound, it only consumes the
@@ -1244,7 +1255,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=None,
         )
         self.last_stage_only_sol_p_increment = effective_p_increment
-        self._record_mcf_lb_phase(("2_ls_only_sch_from_mcf_lb_heur", result.schedule))
+        self._record_mcf_lb_phases(
+            [
+                (f"2_{label}", sched)
+                for label, sched in result.intermediate_schedules
+            ]
+        )
+        self._record_mcf_lb_phase(
+            ("3_lastS_only_from_mcf_lb_after_sa_iti", result.schedule)
+        )
 
         self.logger.info(
             "heuristic_last_stage_only_sch_from_mcf_lb: status=%s, "
@@ -1289,21 +1308,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Side effects:
           - Registers the dispatched schedule as a full incumbent on
             ``self.solution_manager``.
-          - Appends ``3_ls_only_sch_delayed``, ``4_ls_only_sch_flipped``,
-            ``5_full_sch_before_unflip``, and ``6_full_sch_from_ls_only_sch``
-            to ``self.mcf_lb_phase_schedules`` (numbered to match
-            ``run_mcf_lb_4``'s phase-3 outputs so reporter Gantt sort
-            order is consistent across paths). The delayed / flipped /
-            before-unflip entries are skipped when
-            ``self.instance.stage_count == 1``.
-          - When the prior step recorded
-            ``self.last_stage_only_sol_p_increment != 0``, the
-            last-stage-only schedule was solved under inflated last-stage
-            durations. This step rebuilds it under the original
-            processing times (same end times, recomputed starts) before
-            reverse-dispatch, and appends the rebuilt schedule as
-            ``2_1_ls_only_sch_before_delayed`` to
-            ``self.mcf_lb_phase_schedules``.
+          - Appends (in order) ``4_lastS_only_before_rs`` (input deepcopy
+            for multi-stage; rebuilt under original last-stage durations
+            when the prior step inflated them via
+            ``self.last_stage_only_sol_p_increment != 0``),
+            ``5_lastS_only_after_rs`` (right-shifted), ``6_lastS_only_flipped``
+            (reversed-instance seed), ``7_fullS_before_unflip``,
+            ``8_fullS_after_unflip`` (deepcopy after ``as_reversed()``,
+            before final ``make_semi_active`` / ``insert_idle_time``),
+            and ``9_fullS_after_sa_iti`` to ``self.mcf_lb_phase_schedules``.
+            The right-shifted / flipped / before-unflip entries are
+            skipped when ``self.instance.stage_count == 1``.
 
         Returns:
             ``SubroutineReport`` with ``obj_value`` = dispatched weighted ET
@@ -1355,22 +1370,26 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         if state.ls_only_sch_before_delay is not None:
             self._record_mcf_lb_phase(
-                ("2_ls_only_sch_original_p_before_rs", state.ls_only_sch_before_delay)
+                ("4_lastS_only_before_rs", state.ls_only_sch_before_delay)
             )
         if state.ls_only_sch_delayed is not None:
             self._record_mcf_lb_phase(
-                ("3_ls_only_sch_rs", state.ls_only_sch_delayed)
+                ("5_lastS_only_after_rs", state.ls_only_sch_delayed)
             )
         if state.ls_only_sch_flipped is not None:
             self._record_mcf_lb_phase(
-                ("4_ls_only_sch_flipped", state.ls_only_sch_flipped)
+                ("6_lastS_only_flipped", state.ls_only_sch_flipped)
             )
         if state.full_sch_before_unflip is not None:
             self._record_mcf_lb_phase(
-                ("5_full_sch_before_unflip", state.full_sch_before_unflip)
+                ("7_fullS_before_unflip", state.full_sch_before_unflip)
+            )
+        if state.full_sch_after_unflip is not None:
+            self._record_mcf_lb_phase(
+                ("8_fullS_after_unflip", state.full_sch_after_unflip)
             )
         self._record_mcf_lb_phase(
-            ("6_full_sch_from_ls_only_sch", state.full_sch_from_ls_only_sch)
+            ("9_fullS_after_sa_iti", state.full_sch_from_ls_only_sch)
         )
 
         self.logger.info(
@@ -1392,6 +1411,106 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report, solution
 
+    # Local-name suffix extractor for entries recorded under
+    # ``calc_mcf_lb_and_derive_full_sch``. The recorded full name has shape
+    # ``…<inner_step>_<digit>+_<local_name>`` (see
+    # ``FFcDDWSubroutineControllerCore._mcf_lb_phase_name``); we want the
+    # ``<local_name>`` tail.
+    _MCF_LB_LOCAL_NAME_RE = re.compile(r"_(\d+)_([A-Za-z][A-Za-z_]+)$")
+    # Round marker in the call_context comes from
+    # ``temporarily_extended_context("r1" | "r2")`` and is rendered as
+    # ``<count>-r1`` / ``<count>-r2`` inside the dotted context string.
+    _MCF_LB_ROUND_RE = re.compile(r"(?:^|\.)\d+-r([12])(?:[._]|$)")
+
+    _MCF_LB_R1_LABEL_ORDER: tuple[str, ...] = (
+        "mcf_preemptive",
+        "lastS_only_from_mcf_lb_before_sa_iti",
+        "lastS_only_from_mcf_lb_after_sa_iti",
+        "lastS_only_after_rs",
+        "lastS_only_flipped",
+        "fullS_before_unflip",
+        "fullS_after_unflip",
+        "fullS_after_sa_iti",
+    )
+    _MCF_LB_R2_LABEL_ORDER: tuple[str, ...] = (
+        "mcf_preemptive",
+        "lastS_only_from_mcf_lb_before_sa_iti",
+        "lastS_only_from_mcf_lb_after_sa_iti",
+        "lastS_only_before_rs",
+        "lastS_only_after_rs",
+        "lastS_only_flipped",
+        "fullS_before_unflip",
+        "fullS_after_unflip",
+        "fullS_after_sa_iti",
+    )
+
+    def _emit_calc_mcf_lb_phase_metrics_csv(self) -> None:
+        """Write per-instance wET / makespan CSVs for the snapshots recorded
+        under the current ``calc_mcf_lb_and_derive_full_sch`` call.
+
+        Always-on (gated only by artifact layout availability). When the
+        controller is running without a layout (tests, scripted use), the
+        method silently no-ops. Round-2 cells are blank when round 2 did
+        not run; wET cells are blank for snapshots living on the reversed
+        instance (``flipped``, ``fullS_before_unflip``).
+        """
+        layout = self._artifact_layout
+        scenario = self._artifact_scenario_name
+        instance = self._artifact_instance_name
+        if layout is None or scenario is None or instance is None:
+            return
+
+        per_round: dict[str, dict[str, object]] = {"r1": {}, "r2": {}}
+        for full_name, sched in self.mcf_lb_phase_schedules:
+            round_match = self._MCF_LB_ROUND_RE.search(full_name)
+            local_match = self._MCF_LB_LOCAL_NAME_RE.search(full_name)
+            if round_match is None or local_match is None:
+                continue
+            round_key = f"r{round_match.group(1)}"
+            label = local_match.group(2)
+            # First writer wins; later snapshots with the same label are
+            # ignored. The composite's recording order matches the
+            # user-spec order, so this is a no-op in practice.
+            per_round[round_key].setdefault(label, sched)
+
+        obj_path = layout.artifact_path(
+            "mcf_lb_phase_obj_csv",
+            scenario_name=scenario,
+            instance_name=instance,
+        )
+        makespan_path = layout.artifact_path(
+            "mcf_lb_phase_makespan_csv",
+            scenario_name=scenario,
+            instance_name=instance,
+        )
+
+        rows: list[tuple[str, str, str, str]] = []  # (round, label, obj, ms)
+        for round_key, labels in (
+            ("r1", self._MCF_LB_R1_LABEL_ORDER),
+            ("r2", self._MCF_LB_R2_LABEL_ORDER),
+        ):
+            for label in labels:
+                sched = per_round[round_key].get(label)
+                if sched is None:
+                    rows.append((round_key, label, "", ""))
+                    continue
+                obj = compute_phase_obj_value(sched, self.instance)
+                obj_cell = "" if obj is None else f"{obj:.6f}"
+                makespan_cell = str(int(sched.makespan))
+                rows.append((round_key, label, obj_cell, makespan_cell))
+
+        obj_path.parent.mkdir(parents=True, exist_ok=True)
+        with obj_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["round", "label", "obj_value"])
+            for r, label, obj_cell, _ in rows:
+                writer.writerow([r, label, obj_cell])
+        with makespan_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["round", "label", "makespan"])
+            for r, label, _, ms_cell in rows:
+                writer.writerow([r, label, ms_cell])
+
     def calc_mcf_lb_and_derive_full_sch(
         self,
         draw_pmtn_sch_heatmap: bool = False,
@@ -1400,6 +1519,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
         adjust_p: bool = False,
         adjust_r: bool = False,
+        emit_phase_schedules: bool = False,
     ) -> SubroutineReport:
         """Composite step: MCF-LB → full schedule, then a conditional
         second round with p/r adjustments.
@@ -1407,7 +1527,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         Round 1 always runs (via the no-register internals
         ``apply_lb_by_mcf(_register_report=False)``,
         ``heuristic_last_stage_only_sch_from_mcf_lb(_register_report=False)``,
-        ``_build_full_sch_core``).
+        ``_build_full_sch_core``). Each round's chain runs inside
+        ``self.temporarily_extended_context("r1" | "r2")`` so the
+        recorded ``mcf_lb_phase_schedules`` entries are namespaced and
+        round 2's recordings do not overwrite round 1's.
 
         Round 2 runs **only when both** of the following hold:
           * ``adjust_p or adjust_r`` is ``True``;
@@ -1425,6 +1548,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         schedule return ``_make_stop_report`` without registering;
         guards that fire after round 1 has a result still register the
         round-1 result once before returning.
+
+        Side effects (always, when an artifact layout is bound):
+          * Two per-instance phase-metric CSVs are emitted under the
+            ``progress`` zone via the ``mcf_lb_phase_obj_csv`` and
+            ``mcf_lb_phase_makespan_csv`` artifact kinds. One row per
+            user-spec snapshot in fixed order; r2 rows carry blank
+            cells when round 2 did not run. wET cells are blank for
+            snapshots on the reversed instance (``flipped`` /
+            ``fullS_before_unflip``) since the original due-window frame
+            does not apply.
 
         Args:
             draw_pmtn_sch_heatmap: Forwarded as ``draw_heatmap`` to
@@ -1450,6 +1583,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 ``adjust_r_by_full_sch_and_last_stage_only_pmtn_sch``
                 **and** ``adjust_r_by_half`` together; the half-adjust
                 is bundled with ``adjust_r`` in this composite.
+            emit_phase_schedules: When ``True``, the composite's
+                per-snapshot ``mcf_lb_phase_schedule`` JSON files (and
+                downstream ``phase_gantt_png`` renderings) are kept on
+                disk. Default ``False`` — the composite clears its own
+                appended entries from ``mcf_lb_phase_schedules`` before
+                returning so the runner does not dump them. The
+                per-instance phase-metric CSVs are emitted regardless.
 
         Returns:
             The single registered ``SubroutineReport`` whose
@@ -1461,28 +1601,46 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """
         start_elapsed = time.monotonic()
         self.adjust_ref_full_sol = None
+        # Composite owns the phase-schedule list for this call: clear once
+        # at entry so each round's recordings live side-by-side under their
+        # ``temporarily_extended_context`` namespace prefix.
+        self.mcf_lb_phase_schedules.clear()
 
-        if self.is_stopping_condition():
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: stop guard fired at entry "
-                "(before round1_apply_lb_by_mcf)"
-            )
-            return self._make_stop_report(start_elapsed)
-        r_lb_r1 = self.apply_lb_by_mcf(
-            draw_heatmap=draw_pmtn_sch_heatmap,
-            heatmap_sort=heatmap_sort,
-            _register_report=False,
-        )
-        if self.is_stopping_condition():
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                "round1_heuristic_last_stage_only"
-            )
+        def _stop(label: str) -> SubroutineReport:
+            self.logger.info("calc_mcf_lb_and_derive_full_sch: %s", label)
             return self._make_stop_report(start_elapsed)
 
-        def _register_final(
+        if self.is_stopping_condition():
+            return _stop("stop guard fired at entry (before round1_apply_lb_by_mcf)")
+
+        with self.temporarily_extended_context("r1"):
+            r_lb_r1 = self.apply_lb_by_mcf(
+                draw_heatmap=draw_pmtn_sch_heatmap,
+                heatmap_sort=heatmap_sort,
+                _register_report=False,
+            )
+            if self.is_stopping_condition():
+                return _stop(
+                    "stop guard fired before round1_heuristic_last_stage_only"
+                )
+            self.heuristic_last_stage_only_sch_from_mcf_lb(
+                job_priority=job_placement_priority,
+                placement_priority=last_stage_only_placement_criteria,
+                _register_report=False,
+            )
+            if self.is_stopping_condition():
+                return _stop(
+                    "stop guard fired before round1_build_full_sch"
+                )
+            r1, s1 = self._build_full_sch_core()
+        self.adjust_ref_full_sol = s1
+
+        def _finalize(
             best_r: SubroutineReport, best_s: FFcDDWSolution | None
         ) -> SubroutineReport:
+            self._emit_calc_mcf_lb_phase_metrics_csv()
+            if not emit_phase_schedules:
+                self.mcf_lb_phase_schedules.clear()
             final_report = SubroutineReport(
                 elapsed_time=time.monotonic() - start_elapsed,
                 obj_value=best_r.obj_value,
@@ -1492,35 +1650,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self.adjust_ref_full_sol = None
             return final_report
 
-        self.heuristic_last_stage_only_sch_from_mcf_lb(
-            job_priority=job_placement_priority,
-            placement_priority=last_stage_only_placement_criteria,
-            _register_report=False,
-        )
-        if self.is_stopping_condition():
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                "round1_build_full_sch"
-            )
-            return self._make_stop_report(start_elapsed)
-        r1, s1 = self._build_full_sch_core()
-        self.adjust_ref_full_sol = s1
-
         if not (adjust_p or adjust_r):
-            return _register_final(r1, s1)
+            return _finalize(r1, s1)
         if self.is_stopping_condition():
             self.logger.info(
                 "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
                 "round2_check (registering round1 result)"
             )
-            return _register_final(r1, s1)
-
+            return _finalize(r1, s1)
         if s1 is None:
-            return _register_final(r1, s1)
+            return _finalize(r1, s1)
+
         incumbent_makespan = int(s1.schedule.makespan)
         ls_only_pmtn_makespan = int(self.mcf_preemptive_schedule.makespan)
         makespan_delta = incumbent_makespan - ls_only_pmtn_makespan
-
         if makespan_delta <= 0:
             self.logger.info(
                 "calc_mcf_lb_and_derive_full_sch: round1 makespan=%d, "
@@ -1529,48 +1672,50 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 ls_only_pmtn_makespan,
                 makespan_delta,
             )
-            return _register_final(r1, s1)
+            return _finalize(r1, s1)
 
         if self.is_stopping_condition():
             self.logger.info(
                 "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
                 "round2_apply_lb_by_mcf (registering round1 result)"
             )
-            return _register_final(r1, s1)
-        self.apply_lb_by_mcf(
-            draw_heatmap=draw_pmtn_sch_heatmap,
-            heatmap_sort=heatmap_sort,
-            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
-            adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
-            adjust_r_by_half=adjust_r,
-            _register_report=False,
-        )
-        if self.is_stopping_condition():
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                "round2_heuristic_last_stage_only (registering round1 result)"
+            return _finalize(r1, s1)
+
+        with self.temporarily_extended_context("r2"):
+            self.apply_lb_by_mcf(
+                draw_heatmap=draw_pmtn_sch_heatmap,
+                heatmap_sort=heatmap_sort,
+                adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
+                adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
+                adjust_r_by_half=adjust_r,
+                _register_report=False,
             )
-            return _register_final(r1, s1)
-        self.heuristic_last_stage_only_sch_from_mcf_lb(
-            job_priority=job_placement_priority,
-            placement_priority=last_stage_only_placement_criteria,
-            adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
-            adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
-            adjust_r_by_half=adjust_r,
-            _register_report=False,
-        )
-        if self.is_stopping_condition():
-            self.logger.info(
-                "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
-                "round2_build_full_sch (registering round1 result)"
+            if self.is_stopping_condition():
+                self.logger.info(
+                    "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                    "round2_heuristic_last_stage_only (registering round1 result)"
+                )
+                return _finalize(r1, s1)
+            self.heuristic_last_stage_only_sch_from_mcf_lb(
+                job_priority=job_placement_priority,
+                placement_priority=last_stage_only_placement_criteria,
+                adjust_p_by_full_sch_and_last_stage_only_pmtn_sch=adjust_p,
+                adjust_r_by_full_sch_and_last_stage_only_pmtn_sch=adjust_r,
+                adjust_r_by_half=adjust_r,
+                _register_report=False,
             )
-            return _register_final(r1, s1)
-        r2, s2 = self._build_full_sch_core()
+            if self.is_stopping_condition():
+                self.logger.info(
+                    "calc_mcf_lb_and_derive_full_sch: stop guard fired before "
+                    "round2_build_full_sch (registering round1 result)"
+                )
+                return _finalize(r1, s1)
+            r2, s2 = self._build_full_sch_core()
 
         best_r, best_s = r1, s1
         if s2 is not None and (s1 is None or s2.obj_value <= s1.obj_value):
             best_r, best_s = r2, s2
-        return _register_final(best_r, best_s)
+        return _finalize(best_r, best_s)
 
     def run_mcf_lb_4(
         self,

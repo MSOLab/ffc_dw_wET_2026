@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260509/flip_makespan_cp_1_config.yaml")
+CONFIG_PATH = Path("metadata/20260509/flip_makespan_cp_debug.yaml")
 
 
 def _parse_args() -> argparse.Namespace:

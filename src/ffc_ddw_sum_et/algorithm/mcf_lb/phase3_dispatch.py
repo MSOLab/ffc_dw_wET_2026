@@ -34,14 +34,21 @@ class Phase3State:
     full_sch_from_ls_only_sch: FFcSchedule
     dispatched_obj: float
 
-    # Last-stage-only schedule rebuilt with the original instance's
-    # last-stage processing times (same end times, recomputed starts);
-    # only populated when ``rebuild_last_stage_with_original_p=True``.
+    # Last-stage-only schedule used as input to the reverse-dispatch chain.
+    # Populated whenever any reverse-dispatch happens (multi-stage). When
+    # ``rebuild_last_stage_with_original_p=True`` it carries the rebuilt
+    # original-p variant (same end times, recomputed starts). Otherwise it
+    # is a deepcopy of the caller-supplied schedule. ``None`` only on the
+    # single-stage short-circuit.
     ls_only_sch_before_delay: FFcSchedule | None = None
     # Reversed-instance intermediates (None when single-stage short-circuit fires).
     ls_only_sch_delayed: FFcSchedule | None = None
     ls_only_sch_flipped: FFcSchedule | None = None
     full_sch_before_unflip: FFcSchedule | None = None
+    # Full schedule on the original (un-reversed) instance, captured
+    # immediately after ``as_reversed()`` and before the post-process
+    # ``make_semi_active`` + ``insert_idle_time`` left-shift / ET-aligning.
+    full_sch_after_unflip: FFcSchedule | None = None
 
 
 def reverse_dispatch_full_schedule(
@@ -115,6 +122,7 @@ def reverse_dispatch_full_schedule(
     ls_only_sch_delayed: FFcSchedule | None = None
     ls_only_sch_flipped: FFcSchedule | None = None
     full_sch_before_unflip: FFcSchedule | None = None
+    full_sch_after_unflip: FFcSchedule | None = None
 
     if rebuild_last_stage_with_original_p:
         p_map = instance.get_job_2_p_map_for_stage(last_stage_id)
@@ -139,13 +147,16 @@ def reverse_dispatch_full_schedule(
                 start_time=aug_end - p_map[job_id],
                 end_time=aug_end,
             )
-        ls_only_sch_before_delay = init_schedule
     else:
         init_schedule = last_stage_only_schedule
 
     if instance.stage_count == 1:
         full_sch_from_ls_only_sch = init_schedule
     else:
+        # Caller-spec snapshot: ``ls_only_sch_before_delay`` is captured
+        # for every multi-stage call (deepcopy so subsequent mutations on
+        # ``init_schedule`` / its derivatives don't leak back).
+        ls_only_sch_before_delay = init_schedule.deepcopy()
         # Delay last-stage operations to the latest end time that does not
         # worsen per-job ET contribution. Operates on a copy so the caller's
         # input schedule stays untouched.
@@ -217,6 +228,7 @@ def reverse_dispatch_full_schedule(
 
         full_sch_before_unflip = reversed_full
         full_sch_from_ls_only_sch = reversed_full.as_reversed()
+        full_sch_after_unflip = full_sch_from_ls_only_sch.deepcopy()
         # Push left to a semi-active form, then insert idle time on the last
         # stage so the unflipped operations land at ET-optimal positions
         # before scoring (mirrors `_dispatch_by_reversed_sequence_with_iit`).
@@ -239,6 +251,7 @@ def reverse_dispatch_full_schedule(
         ls_only_sch_delayed=ls_only_sch_delayed,
         ls_only_sch_flipped=ls_only_sch_flipped,
         full_sch_before_unflip=full_sch_before_unflip,
+        full_sch_after_unflip=full_sch_after_unflip,
     )
 
 
