@@ -1,14 +1,12 @@
 """Option payload for NehCpDispatcher."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal
 
 from ..base.alg_option import AlgOption
 from ..cumulative import PFMethod
+from ..step_tl_resolver import BatchTlMode
 from .sequence import NehCpJobPriority
-from .tl_schedule import NehCpBatchTlMode
 
 __all__ = ["NehCpOption"]
 
@@ -47,7 +45,7 @@ class NehCpOption(AlgOption):
     cp_tl_seconds: float | None = None
     total_timelimit_seconds: float | None = None
     num_batches: int | None = None
-    batch_tl_mode: NehCpBatchTlMode = "constant"
+    batch_tl_mode: BatchTlMode = "constant"
     batch_tl_offset_seconds: float = 0.01
     apply_cumulative_tl: bool = False
     pf_method: PFMethod = "PF1"

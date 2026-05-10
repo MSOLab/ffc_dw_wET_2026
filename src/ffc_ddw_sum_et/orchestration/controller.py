@@ -51,12 +51,12 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
     calc_mcf_lb_and_derive_full_sch as algo_calc_mcf_lb_and_derive_full_sch,
 )
 from ffc_ddw_sum_et.algorithm.neh_cp import (
-    NehCpBatchTlMode,
     NehCpDispatcher,
     NehCpJobPriority,
     NehCpOption,
 )
 from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
+from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
 from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
@@ -1965,7 +1965,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl: float | str | None = None,
         total_timelimit: float | str | None = None,
         num_batches: int | None = None,
-        batch_tl_mode: NehCpBatchTlMode = "constant",
+        batch_tl_mode: BatchTlMode = "constant",
         batch_tl_offset_seconds: float = 0.01,
         apply_cumulative_tl: bool = False,
         pf_method: PFMethod = "PF1",

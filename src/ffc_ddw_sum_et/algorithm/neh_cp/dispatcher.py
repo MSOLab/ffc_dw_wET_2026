@@ -28,10 +28,11 @@ from ..base.alg_spec import AlgSpec
 from ..cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from ..cumulative import BaseModelBuilder, decode_pf_method
 from ..dispatcher import MixedDispatcher
+from ..step_tl_resolver import resolve_per_step_tl
+from ..utils import trunc4
 from .option import NehCpOption
 from .sequence import neh_cp_job_sequence
-from .step_log import NehCpStepEntry, trunc4
-from .tl_schedule import resolve_per_step_tl
+from .step_log import NehCpStepEntry
 
 __all__ = ["NehCpDispatcher"]
 
