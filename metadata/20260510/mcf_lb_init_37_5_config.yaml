@@ -1,0 +1,226 @@
+# Sweep over p_adjust_coeff in {0, 0.5, 1.0, 1.5, 2.0} and
+# r_adjust_coeff in {0, 0.5, 1.0}, yielding 5×3 = 15 scenarios.
+#
+# Fixed settings across all scenarios:
+#   - makespan_delta_ref: "lastStageOnlyMakespan"
+#       Use the r1 heuristic non-preemptive last-stage schedule's
+#       makespan as the LB-side reference for `makespan_delta`.
+#   - proceed_r2_when_nonpositive_cmax: true
+#       Run round 2 even when the signed delta is <= 0 (delta is
+#       clamped to >=1 for increment math), instead of skipping via
+#       `delta_le_0`. The raw signed delta is still recorded.
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [ 0, 10, 20, 30, 40, 50, 60, 70, 80 ]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260510
+
+instance_worker_cnt: 96
+
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  # r_adjust_coeff = 0
+  - name: build_full_sch_p00_r00
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p00_r00
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p05_r00
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p05_r0
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p10_r00
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p10_r00
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 1.0
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p15_r00
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p15_r00
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 1.5
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p20_r00
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p20_r00
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 2.0
+        proceed_r2_when_nonpositive_cmax: true
+
+  # r_adjust_coeff = 0.5
+  - name: build_full_sch_p00_r05
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p00_r05
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p05_r05
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p05_r05
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 0.5
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p10_r05
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p10_r05
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 1.0
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p15_r05
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p15_r05
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 1.5
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p20_r05
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p20_r05
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 2.0
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+
+  # r_adjust_coeff = 1.0
+  - name: build_full_sch_p00_r10
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p00_r10
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_r: true
+        r_adjust_coeff: 1.0
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p05_r10
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p05_r10
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 0.5
+        adjust_r: true
+        r_adjust_coeff: 1.0
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p10_r10
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p10_r10
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 1.0
+        adjust_r: true
+        r_adjust_coeff: 1.0
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p15_r10
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p15_r10
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 1.5
+        adjust_r: true
+        r_adjust_coeff: 1.0
+        proceed_r2_when_nonpositive_cmax: true
+  - name: build_full_sch_p20_r10
+    timelimit: "0.09nc"
+    output_subdir: build_full_sch_p20_r10
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        p_adjust_coeff: 2.0
+        adjust_r: true
+        r_adjust_coeff: 1.0
+        proceed_r2_when_nonpositive_cmax: true
