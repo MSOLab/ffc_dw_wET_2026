@@ -1146,6 +1146,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ] = "mcfLbMakespan",
         adjust_p: bool = False,
         adjust_r: bool = False,
+        p_adjust_coeff: float = 1.0,
         r_adjust_coeff: float = 0.5,
         proceed_r2_when_nonpositive_cmax: bool = False,
         emit_phase_schedules: bool = False,
@@ -1211,10 +1212,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 makespan. Any other value raises ``ValueError`` from the
                 algorithm-side function.
             adjust_p: When True, round 2 inflates last-stage processing
-                times by ``ceil(makespan_delta * m_last / n)``.
+                times by ``ceil(p_adjust_coeff * makespan_delta * m_last / n)``.
             adjust_r: When True, round 2 inflates per-job releases by
                 ``ceil(makespan_delta * r_adjust_coeff)`` (the historical
                 ``adjust_r_by_half`` behaviour is the default).
+            p_adjust_coeff: Coefficient on ``makespan_delta * m_last / n``
+                used in the ``adjust_p`` formula. Default ``1.0``
+                reproduces the historical ``ceil(delta * m_last / n)``
+                factor.
             r_adjust_coeff: Coefficient on ``makespan_delta`` used in
                 the ``adjust_r`` formula. Default ``0.5`` reproduces the
                 historical ``ceil(delta / 2)`` factor.
@@ -1259,6 +1264,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             makespan_delta_ref=makespan_delta_ref,
             adjust_p=adjust_p,
             adjust_r=adjust_r,
+            p_adjust_coeff=p_adjust_coeff,
             r_adjust_coeff=r_adjust_coeff,
             proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
             stop_predicate=self.is_stopping_condition,

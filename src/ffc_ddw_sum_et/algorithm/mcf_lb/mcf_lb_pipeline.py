@@ -297,6 +297,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     makespan_delta: int,
     adjust_p: bool,
     adjust_r: bool,
+    p_adjust_coeff: float = 1.0,
     r_adjust_coeff: float = 0.5,
     draw_pmtn_sch_heatmap: bool = False,
     heatmap_sort: HeatmapSort = "end_time",
@@ -318,6 +319,11 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     (the gating policy lives in the composite). The clamp is a no-op
     when ``delta > 0``.
 
+    ``p_adjust_coeff`` (default ``1.0``) scales the ``adjust_p`` formula:
+    ``p_increment = ceil(p_adjust_coeff * delta_for_inc * m_last / n)``.
+    The default matches the historical hard-coded
+    ``ceil(delta_for_inc * m_last / n)`` factor.
+
     ``r_adjust_coeff`` (default ``0.5``) scales the ``adjust_r`` formula:
     ``r_increment = ceil(delta_for_inc * r_adjust_coeff)``. The default
     matches the historical hard-coded ``ceil(delta_for_inc / 2)`` factor.
@@ -328,8 +334,10 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     delta_for_inc = max(makespan_delta, 1)
     n = instance.job_count
     m_last = instance.last_stage_mc_count
-    p_increment = math.ceil(delta_for_inc * m_last / n) if adjust_p else 0
-    r_increment = math.ceil(delta_for_inc * r_adjust_coeff) if adjust_r else 0
+    p_increment = (
+        math.ceil(p_adjust_coeff * delta_for_inc * m_last / n) if adjust_p else 0
+    )
+    r_increment = math.ceil(r_adjust_coeff * delta_for_inc) if adjust_r else 0
 
     def _stop_check() -> bool:
         return stop_predicate is not None and stop_predicate()
@@ -427,6 +435,7 @@ def calc_mcf_lb_and_derive_full_sch(
     ] = "mcfLbMakespan",
     adjust_p: bool = False,
     adjust_r: bool = False,
+    p_adjust_coeff: float = 1.0,
     r_adjust_coeff: float = 0.5,
     proceed_r2_when_nonpositive_cmax: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
@@ -459,10 +468,14 @@ def calc_mcf_lb_and_derive_full_sch(
             makespan (``r1.heuristic.schedule``). Any other value raises
             ``ValueError``.
         adjust_p: When True, round 2 inflates last-stage processing
-            times by ``ceil(makespan_delta * m_last / n)``.
+            times by ``ceil(p_adjust_coeff * makespan_delta * m_last / n)``.
         adjust_r: When True, round 2 inflates per-job releases by
             ``ceil(makespan_delta * r_adjust_coeff)`` (the historical
             ``adjust_r_by_half`` behaviour is the default).
+        p_adjust_coeff: Coefficient on ``makespan_delta * m_last / n``
+            in the ``adjust_p`` formula. Default ``1.0`` reproduces the
+            historical ``ceil(delta * m_last / n)`` factor; pass a
+            different value to scale the processing-time augmentation.
         r_adjust_coeff: Coefficient on ``makespan_delta`` in the
             ``adjust_r`` formula. Default ``0.5`` reproduces the
             historical ``ceil(delta / 2)`` factor; pass a different
@@ -638,6 +651,7 @@ def calc_mcf_lb_and_derive_full_sch(
         makespan_delta=makespan_delta,
         adjust_p=adjust_p,
         adjust_r=adjust_r,
+        p_adjust_coeff=p_adjust_coeff,
         r_adjust_coeff=r_adjust_coeff,
         draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
         heatmap_sort=heatmap_sort,
