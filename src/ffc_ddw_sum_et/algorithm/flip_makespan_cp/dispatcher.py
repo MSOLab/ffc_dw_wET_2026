@@ -207,10 +207,10 @@ class FlipMakespanCpDispatcher:
             except Exception:
                 logger.exception("Failed to write CP-SAT search log")
 
-        progress_log = self._build_progress_log(
-            value_recorder=value_recorder, bound_recorder=bound_recorder
-        )
-
+        # AlgRecord.progress_log records the problem objective (weighted E+T)
+        # trajectory by contract; this dispatcher's CP-SAT minimises makespan,
+        # so its solver trajectory cannot be poured into progress_log directly.
+        # The makespan trajectory is kept available via _build_makespan_progress_log.
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
         if not has_solution:
             logger.warning(
@@ -232,7 +232,7 @@ class FlipMakespanCpDispatcher:
                     obj_bound=None,
                     metrics={"cpsat_status": status_name},
                 ),
-                progress_log=progress_log,
+                progress_log=(),
                 termination_reason=(
                     TerminationReason.COMPLETED
                     if status == cp_model.INFEASIBLE
@@ -289,7 +289,7 @@ class FlipMakespanCpDispatcher:
         cp_bound = float(solver.best_objective_bound)
 
         final_elapsed_sec = time.monotonic() - start
-        progress_log = progress_log + (
+        progress_log: tuple[ProgressLogEntry, ...] = (
             ProgressLogEntry(
                 elapsed_sec=final_elapsed_sec,
                 obj_value=obj_value,
@@ -362,11 +362,19 @@ class FlipMakespanCpDispatcher:
         return seed
 
     @staticmethod
-    def _build_progress_log(
+    def _build_makespan_progress_log(
         *,
         value_recorder: ObjectiveValueRecorder,
         bound_recorder: ObjectiveBoundRecorder,
     ) -> tuple[ProgressLogEntry, ...]:
+        """Build a (time, makespan, makespan-bound) trajectory.
+
+        Currently unused; kept for future callers that want the makespan
+        minimisation log. AlgRecord.progress_log is contracted to record
+        the problem objective (weighted E+T), so makespan-scale entries
+        cannot flow through it directly -- this helper is split out as a
+        future hook.
+        """
         entries: list[ProgressLogEntry] = []
         for t, vb in value_recorder.entries:
             entries.append(
