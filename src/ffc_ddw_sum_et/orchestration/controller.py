@@ -55,6 +55,10 @@ from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpJobPriority,
     NehCpOption,
 )
+from ffc_ddw_sum_et.algorithm.pw_cp import (
+    PwCpDispatcher,
+    PwCpOption,
+)
 from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
 from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
 from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
@@ -1604,6 +1608,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl: float | str | None = None,
         solver_thread_cnt: int = 1,
         pf_method: PFMethod = "PF0",
+        horizon_makespan_multiplier: float = 1.25,
     ) -> SubroutineReport:
         """Step method: warm-start CP-SAT from the incumbent by fixing its
         dispatch profile (precedence arcs derived from the incumbent's
@@ -1625,8 +1630,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance.stage_count,
             instance.last_stage_mc_count,
         )
-        params_for_horizon = BaseModelBuilder.make_params(instance)
-        horizon = sum(params_for_horizon.p.values())
+        if horizon_makespan_multiplier < 1.0:
+            raise ValueError(
+                "horizon_makespan_multiplier must be >= 1.0, got "
+                f"{horizon_makespan_multiplier}"
+            )
+        horizon = max(
+            1,
+            int(math.ceil(incumbent.schedule.makespan * horizon_makespan_multiplier)),
+        )
 
         builder = BaseModelBuilder()
         mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
@@ -1864,6 +1876,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         log_search_progress: bool = False,
         error_if_infeasible: bool = False,
         draw_gantt: bool = False,
+        horizon_makespan_multiplier: float = 1.25,
     ) -> SubroutineReport:
         """Step method: solve the FFc-DDW base CP model on the full instance
         via :class:`CpsatAdapter`, optionally warm-started from the
@@ -1914,6 +1927,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible=error_if_infeasible,
             draw_gantt=draw_gantt,
             obj_lb=obj_lb,
+            horizon_makespan_multiplier=horizon_makespan_multiplier,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2103,3 +2117,301 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     )
 
         return report
+
+    def pw_cp(
+        self,
+        solver_thread_cnt: int = 1,
+        batch_size: int = 1,
+        step_size: int = 1,
+        unfixed_batch_count: int = 1,
+        left_profile_fixed_batch_count: int = 0,
+        right_profile_fixed_batch_count: int = 0,
+        enable_promotion_profile_fixed: bool = False,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        error_if_infeasible: bool = False,
+        keep_step_schedules: bool = False,
+        log_search_progress: bool = False,
+        log_search_progress_max_steps: int | None = None,
+        draw_gantt: bool = False,
+        horizon_makespan_multiplier: float = 1.25,
+    ) -> SubroutineReport:
+        """Step method: refine the incumbent via :class:`PwCpDispatcher`.
+
+        Resolves expression-grammar inputs (``cp_tl`` / ``total_timelimit``)
+        into pre-resolved scalars, hands them to :class:`PwCpOption`,
+        dispatches via :class:`PwCpDispatcher` (with the controller-level
+        wall-clock deadline and stop predicate threaded in), then
+        registers the resulting schedule and emits the per-step
+        ``_step_log.yaml`` next to the controller's working directory.
+
+        ``draw_gantt=True`` snapshots the incumbent before/after the call
+        into ``mcf_lb_phase_schedules`` so the post-run reporter renders
+        them as PNGs (the container is generic despite the name).
+
+        Per CLAUDE.md subroutine step contract: a single ``_register``
+        per call, ``elapsed_time`` measured immediately before report
+        construction with no work in between.
+        """
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
+
+        instance = self.instance
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            raise RuntimeError(
+                "pw_cp requires an incumbent schedule; chain it after a "
+                "seeding subroutine such as calc_mcf_lb_and_derive_full_sch."
+            )
+
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+        cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
+        total_timelimit_seconds = (
+            resolve_value_expr(total_timelimit, n, c, m)
+            if total_timelimit is not None
+            else None
+        )
+
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+
+        if draw_gantt:
+            self._record_mcf_lb_phase(("pw_cp_before", incumbent.schedule.deepcopy()))
+
+        option = PwCpOption(
+            solver_thread_cnt=solver_thread_cnt,
+            batch_size=batch_size,
+            step_size=step_size,
+            unfixed_batch_count=unfixed_batch_count,
+            left_profile_fixed_batch_count=left_profile_fixed_batch_count,
+            right_profile_fixed_batch_count=right_profile_fixed_batch_count,
+            enable_promotion_profile_fixed=enable_promotion_profile_fixed,
+            pf_method=pf_method,
+            cp_tl_seconds=cp_tl_seconds,
+            total_timelimit_seconds=total_timelimit_seconds,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
+            error_if_infeasible=error_if_infeasible,
+            keep_step_schedules=keep_step_schedules,
+            log_search_progress=log_search_progress,
+            log_search_progress_max_steps=log_search_progress_max_steps,
+            horizon_makespan_multiplier=horizon_makespan_multiplier,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            ref_solution=incumbent.schedule,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = PwCpDispatcher().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        progress_log = record.progress_log or ()
+        if result is not None and result.schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
+                progress_log=progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=progress_log)
+
+        # Post-register diagnostics (per contract: after _register, not before).
+        if draw_gantt and result is not None and result.schedule is not None:
+            self._record_mcf_lb_phase(("pw_cp_after", result.schedule.deepcopy()))
+
+        if result is not None and result.metrics is not None:
+            step_log = result.metrics.get("step_log")
+            if step_log:
+                log_path = self.try_get_file_path_for_subroutine("_step_log.yaml")
+                if log_path is not None:
+                    dump_yaml(
+                        [entry.as_dict() for entry in step_log],
+                        log_path,
+                    )
+
+        return report
+
+    def incremental_pw_cp(
+        self,
+        solver_thread_cnt: int = 1,
+        batch_size: int = 1,
+        step_size: int = 1,
+        unfixed_batch_count_min: int = 1,
+        unfixed_batch_count_max: int = 1,
+        increment_unfixed_batch_count_flag: Literal[
+            "always", "if_no_improvement"
+        ] = "always",
+        left_profile_fixed_batch_count: int = 0,
+        right_profile_fixed_batch_count: int = 0,
+        enable_promotion_profile_fixed: bool = False,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        error_if_infeasible: bool = False,
+        keep_step_schedules: bool = False,
+        log_search_progress: bool = False,
+        log_search_progress_max_steps: int | None = None,
+        draw_gantt: bool = False,
+        horizon_makespan_multiplier: float = 1.25,
+    ) -> None:
+        """Composite step: iterate :meth:`pw_cp` over a range of
+        ``unfixed_batch_count`` values.
+
+        Mirrors ``hybridflowshop/controller/hfs_cp_lns.py:incremental_pw_cp``.
+        For each ``count`` in ``[unfixed_batch_count_min, unfixed_batch_count_max]``:
+
+        - ``"always"``: invoke ``self.pw_cp(unfixed_batch_count=count, ...)``
+          once.
+        - ``"if_no_improvement"``: invoke ``self.pw_cp(...)`` repeatedly at
+          this count until a pass produces no improvement on the incumbent's
+          weighted E+T (FFcDDW's primary objective, replacing
+          hybridflowshop's makespan criterion).
+
+        Each inner ``pw_cp`` call registers its own report in the standard
+        way; this composite does not register itself. Per-iteration
+        ``temporarily_extended_context`` tags each inner call's
+        ``call_context`` so per-instance step-log paths don't collide
+        across iterations. ``is_stopping_condition()`` short-circuits both
+        loops cleanly.
+        """
+        if unfixed_batch_count_min < 1:
+            raise ValueError("unfixed_batch_count_min must be >= 1")
+        if unfixed_batch_count_max < unfixed_batch_count_min:
+            raise ValueError(
+                "unfixed_batch_count_max must be >= unfixed_batch_count_min"
+            )
+        if increment_unfixed_batch_count_flag not in {"always", "if_no_improvement"}:
+            raise ValueError(
+                "increment_unfixed_batch_count_flag must be one of "
+                "{'always', 'if_no_improvement'}"
+            )
+
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            raise RuntimeError(
+                "incremental_pw_cp requires an incumbent schedule; chain it "
+                "after a seeding subroutine such as "
+                "calc_mcf_lb_and_derive_full_sch."
+            )
+
+        base_kwargs = dict(
+            solver_thread_cnt=solver_thread_cnt,
+            batch_size=batch_size,
+            step_size=step_size,
+            left_profile_fixed_batch_count=left_profile_fixed_batch_count,
+            right_profile_fixed_batch_count=right_profile_fixed_batch_count,
+            enable_promotion_profile_fixed=enable_promotion_profile_fixed,
+            pf_method=pf_method,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            error_if_infeasible=error_if_infeasible,
+            keep_step_schedules=keep_step_schedules,
+            log_search_progress=log_search_progress,
+            log_search_progress_max_steps=log_search_progress_max_steps,
+            draw_gantt=draw_gantt,
+            horizon_makespan_multiplier=horizon_makespan_multiplier,
+        )
+
+        self.logger.info(
+            "incremental_pw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
+            increment_unfixed_batch_count_flag,
+            unfixed_batch_count_min,
+            unfixed_batch_count_max,
+        )
+
+        for unfixed_batch_count in range(
+            unfixed_batch_count_min, unfixed_batch_count_max + 1
+        ):
+            if self.is_stopping_condition():
+                self.logger.info(
+                    "incremental_pw_cp: stopping condition met before "
+                    "unfixed_batch_count=%d",
+                    unfixed_batch_count,
+                )
+                break
+
+            context_name = f"batch_{unfixed_batch_count:03d}"
+            with self.temporarily_extended_context(context_name):
+                if increment_unfixed_batch_count_flag == "if_no_improvement":
+                    self.logger.info(
+                        "incremental_pw_cp[count=%d]: repeat-until-no-improvement.",
+                        unfixed_batch_count,
+                    )
+                    rep = 0
+                    while True:
+                        if self.is_stopping_condition():
+                            self.logger.info(
+                                "incremental_pw_cp[count=%d]: stop after rep=%d.",
+                                unfixed_batch_count,
+                                rep,
+                            )
+                            break
+                        rep += 1
+                        obj_before = self.solution_manager.best_obj_value
+                        with self.temporarily_extended_context(f"reps_{rep:03d}"):
+                            self.pw_cp(
+                                unfixed_batch_count=unfixed_batch_count,
+                                **base_kwargs,
+                            )
+                        obj_after = self.solution_manager.best_obj_value
+                        if (
+                            obj_before is None
+                            or obj_after is None
+                            or obj_after >= obj_before
+                        ):
+                            self.logger.info(
+                                "incremental_pw_cp[count=%d]: no improvement "
+                                "(%s -> %s); advancing to next count.",
+                                unfixed_batch_count,
+                                f"{obj_before:.0f}"
+                                if obj_before is not None
+                                else "None",
+                                f"{obj_after:.0f}"
+                                if obj_after is not None
+                                else "None",
+                            )
+                            break
+                        self.logger.info(
+                            "incremental_pw_cp[count=%d, rep=%d]: improved "
+                            "%.0f -> %.0f; repeating.",
+                            unfixed_batch_count,
+                            rep,
+                            obj_before,
+                            obj_after,
+                        )
+                else:
+                    self.logger.info(
+                        "incremental_pw_cp[count=%d]: single pass.",
+                        unfixed_batch_count,
+                    )
+                    self.pw_cp(
+                        unfixed_batch_count=unfixed_batch_count, **base_kwargs
+                    )

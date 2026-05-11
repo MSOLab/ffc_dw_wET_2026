@@ -14,12 +14,14 @@ from it to derive ``CpSolver.parameters.max_time_in_seconds``.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
 from ..parameters.ffc_ddw_params import FFcDDWParameters
+from ..solution.ffc_schedule import FFcSchedule
 from ..solution.objectives import compute_weighted_earliness_tardiness
 from ..solution.schedule_build import build_schedule_from_op_starts
 from .base.alg_option import AlgOption
@@ -37,6 +39,17 @@ from .cpsat_solver_options import CpsatSolverOptions, get_solver
 from .cumulative import BaseModelBuilder
 
 __all__ = ["CpsatAdapter", "CpsatOption"]
+
+
+def _compute_horizon(
+    instance: FFcDDWParameters,
+    ref_schedule: FFcSchedule | None,
+    multiplier: float,
+) -> int:
+    if ref_schedule is not None:
+        return max(1, int(math.ceil(ref_schedule.makespan * multiplier)))
+    params = BaseModelBuilder.make_params(instance)
+    return sum(params.p.values())
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -57,6 +70,19 @@ class CpsatOption(AlgOption):
     draw_gantt: bool = False
     obj_lb: float | None = None
 
+    horizon_makespan_multiplier: float = 1.25
+    """Multiplier applied to ``spec.ref_solution.makespan`` to size the
+    CP-SAT horizon: ``horizon = ceil(ref_makespan * multiplier)``. Falls
+    back to ``sum(p)`` only when ``ref_solution`` is ``None`` (no
+    incumbent to scale from). Must be ``>= 1.0``."""
+
+    def __post_init__(self) -> None:
+        if self.horizon_makespan_multiplier < 1.0:
+            raise ValueError(
+                "horizon_makespan_multiplier must be >= 1.0, got "
+                f"{self.horizon_makespan_multiplier}"
+            )
+
 
 class CpsatAdapter:
     """Solve the full-instance FFc-DDW base CP model via CP-SAT."""
@@ -70,14 +96,15 @@ class CpsatAdapter:
 
         start = time.monotonic()
 
-        params_for_horizon = BaseModelBuilder.make_params(instance)
-        horizon = sum(params_for_horizon.p.values())
+        ref_schedule = spec.ref_solution
+        horizon = _compute_horizon(
+            instance, ref_schedule, option.horizon_makespan_multiplier
+        )
         builder = BaseModelBuilder()
         mdl, params, op_vars, et_vars = builder.build(
             instance, horizon=horizon, obj_lb=option.obj_lb
         )
 
-        ref_schedule = spec.ref_solution
         if ref_schedule is not None:
             BaseModelBuilder.apply_hints_from_schedule(
                 mdl, params, op_vars, et_vars, ref_schedule

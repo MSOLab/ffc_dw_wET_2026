@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PW-CP Port — Plan vs. Code Gap Analysis</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --surface: #ffffff;
+    --border: #e4e2da;
+    --border-soft: #efede5;
+    --text: #1a1a1a;
+    --muted: #5e5e58;
+    --faint: #8a8a82;
+    --accent: #2454b8;
+    --accent-soft: #e6edfa;
+    --code-bg: #f3f2ec;
+    --code-text: #2c2c28;
+    --ok: #1e7a3a;
+    --ok-bg: #e3f2e9;
+    --warn: #a55a07;
+    --warn-bg: #fbeed5;
+    --danger: #b3261e;
+    --danger-bg: #fbe2e0;
+    --info: #1f5a8a;
+    --info-bg: #e3eff8;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.03);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.62; -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code { font-size: .88em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; color: var(--code-text); }
+  pre { background: #1f2024; color: #e6e6e0; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; margin: 12px 0; }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static !important; height: auto !important; border-right: 0; border-bottom: 1px solid var(--border); }
+  }
+
+  .toc {
+    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    padding: 28px 18px 28px 28px; border-right: 1px solid var(--border-soft);
+    background: var(--bg); font-size: 13px;
+  }
+  .toc .title { font-weight: 600; color: var(--text); font-size: 14px; margin-bottom: 4px; }
+  .toc .crumb { color: var(--faint); font-size: 11px; margin-bottom: 14px; }
+  .toc .label { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 16px 0 6px; }
+  .toc a { display: block; padding: 3px 0; color: var(--muted); border-left: 2px solid transparent; padding-left: 10px; margin-left: -10px; }
+  .toc a:hover { color: var(--text); text-decoration: none; border-left-color: var(--border); }
+  .toc a.peer { color: var(--accent); font-size: 12.5px; }
+  .toc a.sub { padding-left: 22px; font-size: 12px; }
+
+  main { padding: 36px 48px 80px; max-width: 920px; }
+  @media (max-width: 900px) { main { padding: 24px 20px 60px; } }
+
+  h1 { font-size: 28px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -.01em; }
+  h2 { font-size: 19px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); letter-spacing: -.005em; }
+  h3 { font-size: 15.5px; margin: 26px 0 10px; }
+  h4 { font-size: 13.5px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+  .meta { color: var(--faint); font-size: 12.5px; margin-bottom: 24px; }
+
+  .tldr {
+    background: var(--info-bg); border: 1px solid #c9def0; border-radius: 8px;
+    padding: 14px 18px; margin: 18px 0 28px;
+  }
+  .tldr h4 { margin: 0 0 6px; color: var(--info); text-transform: none; letter-spacing: 0; font-size: 13.5px; }
+  .tldr ul { margin: 4px 0 0; padding-left: 20px; }
+  .tldr li { margin: 3px 0; font-size: 14px; }
+
+  .override-banner {
+    background: var(--warn-bg); border: 1px solid #e8c585; border-left: 4px solid var(--warn);
+    border-radius: 6px; padding: 10px 14px; margin: 14px 0 22px; font-size: 13.5px;
+  }
+  .override-banner b { color: var(--warn); }
+
+  .invariants {
+    background: #f4faee; border: 1px solid #c2d5b5; border-radius: 8px;
+    padding: 14px 18px; margin: 14px 0;
+  }
+  .invariants h4 { color: var(--ok); margin: 0 0 6px; text-transform: none; letter-spacing: 0; font-size: 13.5px; }
+
+  .badge {
+    display: inline-block; font-size: 10.5px; font-weight: 600;
+    padding: 2px 7px; border-radius: 10px; vertical-align: middle;
+    text-transform: uppercase; letter-spacing: .04em; line-height: 1.5;
+  }
+  .badge.ok     { background: var(--ok-bg);     color: var(--ok); }
+  .badge.warn   { background: var(--warn-bg);   color: var(--warn); }
+  .badge.danger { background: var(--danger-bg); color: var(--danger); }
+  .badge.info   { background: var(--info-bg);   color: var(--info); }
+  .badge.muted  { background: #e8e7e0;          color: #5a5a55; }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  th { background: #f3f2ec; font-weight: 600; font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #fbfaf3; }
+
+  .helpers code { background: transparent; padding: 0; color: var(--text); font-weight: 500; }
+  .helpers td:nth-child(2) { color: var(--muted); font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 12px 0; }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .card h4 { margin: 0 0 6px; text-transform: none; letter-spacing: 0; font-size: 13.5px; color: var(--text); }
+  .card p { margin: 4px 0; font-size: 13.5px; }
+  .card .path { font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+  .card.template     { border-color: #c2d5b5; background: #f4faee; }
+  .card.template h4  { color: var(--ok); }
+  .card.not-template { border-color: #e7d5c5; background: #fbf3eb; }
+  .card.not-template h4 { color: var(--warn); }
+  .card.plan         { border-color: #d8d7d0; background: #f6f5ee; }
+  .card.plan h4      { color: var(--muted); }
+  .card.code         { border-color: #c9def0; background: #e8f1fa; }
+  .card.code h4      { color: var(--info); }
+
+  .decisions { display: grid; gap: 10px; margin: 14px 0; }
+  .decision {
+    display: grid; grid-template-columns: 170px 1fr; gap: 14px;
+    padding: 10px 14px; border-left: 3px solid var(--accent); background: #f6f8fc; border-radius: 0 6px 6px 0;
+  }
+  .decision .key { font-weight: 600; color: var(--accent); font-size: 13px; }
+  .decision .val { font-size: 13.5px; }
+  .decision.deferred { border-left-color: var(--faint); background: #f4f3ed; }
+  .decision.deferred .key { color: var(--faint); }
+
+  .pipeline {
+    background: var(--info-bg); border: 1px solid #c9def0; border-radius: 8px;
+    padding: 14px 18px; margin: 14px 0; font-size: 13.5px;
+  }
+  .pipeline h4 { color: var(--info); margin: 0 0 8px; text-transform: none; letter-spacing: 0; font-size: 13.5px; }
+  .pipeline .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0; font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+  .pipeline .step { background: #fff; padding: 4px 9px; border-radius: 4px; border: 1px solid #c9def0; }
+  .pipeline .arrow { color: var(--info); font-weight: 600; }
+
+  .modmap {
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    padding: 20px; margin: 14px 0; box-shadow: var(--shadow);
+  }
+  .modmap figcaption {
+    font-size: 12px; color: var(--muted); margin-top: 10px; text-align: center;
+  }
+
+  .risks { display: grid; gap: 10px; margin: 12px 0; }
+  .risk {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+    padding: 12px 16px;
+  }
+  .risk .hd { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .risk .hd h4 { margin: 0; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--text); }
+  .risk .body { font-size: 13.5px; color: var(--muted); margin-top: 6px; }
+  .risk.sev-high { border-left: 4px solid var(--danger); }
+  .risk.sev-med  { border-left: 4px solid var(--warn); }
+  .risk.sev-low  { border-left: 4px solid var(--ok); }
+
+  details { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 8px 14px; margin: 10px 0; }
+  details[open] { background: #fbfaf3; }
+  summary { cursor: pointer; font-weight: 600; font-size: 13.5px; color: var(--muted); user-select: none; }
+  summary:hover { color: var(--text); }
+  details pre, details p { margin-top: 10px; }
+
+  ul.plain { list-style: none; padding-left: 0; }
+  ul.plain li { padding: 4px 0; border-bottom: 1px dashed var(--border-soft); font-size: 12px; }
+  ul.plain li:last-child { border-bottom: 0; }
+
+  .gap-table th:first-child, .gap-table td:first-child { width: 38%; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <div class="title">PW-CP Port — Gap Analysis</div>
+  <div class="crumb">plans/20260510/pw_cp_port_plan_extended.md</div>
+
+  <div class="label">Peers</div>
+  <a class="peer" href="pw_cp_port_plan.html">→ Port plan (main)</a>
+  <a class="peer" href="pw_cp_port_plan_detail.html">→ Detail decisions</a>
+
+  <div class="label">Sections</div>
+  <a href="#tldr">TL;DR</a>
+  <a href="#a">A. Beyond plan (scope+)</a>
+  <a class="sub" href="#a1">A.1 incremental_pw_cp</a>
+  <a class="sub" href="#a2">A.2 horizon multiplier</a>
+  <a class="sub" href="#a3">A.3 log_search_progress</a>
+  <a class="sub" href="#a4">A.4 main.py</a>
+  <a href="#b">B. Shape differences</a>
+  <a class="sub" href="#b1">B.1 PwCpStepEntry</a>
+  <a class="sub" href="#b2">B.2 build_full_schedule_from_cp</a>
+  <a class="sub" href="#b3">B.3 RJ helper extract</a>
+  <a class="sub" href="#b4">B.4 build_operation_partition</a>
+  <a href="#c">C. Missing from code</a>
+  <a class="sub" href="#c1">C.1 TODO entry</a>
+  <a class="sub" href="#c2">C.2 contracts test</a>
+  <a class="sub" href="#c3">C.3 RJ test coverage</a>
+  <a href="#d">D. Present as expected</a>
+  <a href="#reconcile">Suggested reconciliation</a>
+
+  <div class="label">Glossary</div>
+  <ul class="plain">
+    <li><b>RJ</b> — right-justification (objective-preserving delay pass)</li>
+    <li><b>LTF/RTF</b> — left/right time-fixed (boundary ops)</li>
+    <li><b>LPF/RPF</b> — left/right profile-fixed bands</li>
+    <li><b>NTF</b> — non-time-fixed (LPF ∪ unfixed ∪ RPF)</li>
+    <li><b>C_j</b> — last-stage end time of job j</li>
+    <li><b>E/T</b> — earliness / tardiness weighted by d⁻, d⁺</li>
+    <li><b>PF0/PF1</b> — profile-fix precedence variants</li>
+    <li><b>TL</b> — time limit (per-step CP-SAT budget)</li>
+  </ul>
+</nav>
+
+<main>
+
+<h1>PW-CP Port — Plan vs. Uncommitted Code Gap Analysis</h1>
+<div class="meta">
+  <span>plans/20260510/pw_cp_port_plan_extended.md</span> ·
+  <span>Companion to <a href="pw_cp_port_plan.html">pw_cp_port_plan</a> + <a href="pw_cp_port_plan_detail.html">_detail</a></span> ·
+  <span>2026-05-11</span>
+</div>
+
+<p>Companion to <code>pw_cp_port_plan.md</code> and <code>pw_cp_port_plan_detail.md</code>. This
+file captures every point where the current uncommitted change set
+diverges from the two plan documents, as of 2026-05-11. Read together
+with the two plan files; on conflict this file describes <i>what the code
+actually does</i>, while the original plans describe <i>what was intended</i>.</p>
+
+<p>The plan HTMLs (<code>pw_cp_port_plan.html</code>, <code>pw_cp_port_plan_detail.html</code>)
+are direct renders of the same-named MDs, so the comparison below is
+against the MD bodies.</p>
+
+<section id="tldr" class="tldr">
+  <h4>At a glance</h4>
+  <ul>
+    <li><b>Scope additions (§A)</b> — three substantive features in code with zero plan coverage: <code>incremental_pw_cp</code> composite step, <code>horizon_makespan_multiplier</code> (touches <code>cpsat_adapter.py</code> outside plan scope), <code>log_search_progress</code> + its debug scenario.</li>
+    <li><b>Shape differences (§B)</b> — four minor implementation deltas (field rename + extras, tuple return, helper extraction, public partition builder).</li>
+    <li><b>Plan items not done (§C)</b> — one missing TODO entry; one plan instruction (<code>test_algorithm_contracts.py</code> registration) based on an incorrect mental model.</li>
+    <li><b>Test coverage hardened (§C.3, applied 2026-05-11)</b> — 4 invariants from §Risks 1 added as tests; 5 → 9 tests, all pass, no algorithm change.</li>
+    <li><b>Two paths forward</b> — write plan up to code (§reconcile, 8 edits) or pull code back to plan (§A.1/§A.2/§A.3 are revert candidates).</li>
+  </ul>
+</section>
+
+<h2 id="a">A. Code goes beyond plan (scope additions)</h2>
+
+<h3 id="a1">A.1. <code>incremental_pw_cp</code> composite step <span class="badge danger">no plan coverage</span></h3>
+
+<div class="grid-2">
+  <div class="card not-template">
+    <h4>What the code does</h4>
+    <p class="path">src/ffc_ddw_sum_et/orchestration/controller.py:2295-2417 (~137 lines)<br>metadata/20260510/incremental_pw_cp.yaml</p>
+    <p>Iterates <code>unfixed_batch_count</code> from <code>unfixed_batch_count_min</code> to <code>unfixed_batch_count_max</code>. Each inner <code>pw_cp</code> call registers its own report; the composite does not register itself. Uses <code>temporarily_extended_context</code> to disambiguate per-iteration step-log paths.</p>
+  </div>
+  <div class="card plan">
+    <h4>What the plans cover</h4>
+    <p>None. Both plan files describe only the single <code>pw_cp</code> step method.</p>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-top: 6px;">
+  <div class="card">
+    <h4>Policy: <code>"always"</code></h4>
+    <p>Single <code>pw_cp</code> pass per <code>count</code>, advancing to <code>count+1</code> regardless of outcome.</p>
+  </div>
+  <div class="card">
+    <h4>Policy: <code>"if_no_improvement"</code></h4>
+    <p>Repeats <code>pw_cp</code> at the current count until a pass leaves the incumbent's weighted E+T unchanged, then advances.</p>
+  </div>
+</div>
+
+<h3 id="a2">A.2. <code>horizon_makespan_multiplier</code> (incumbent-makespan-based CP horizon) <span class="badge danger">cross-cuts cpsat_adapter</span></h3>
+
+<p>Replaces the plan's <code>horizon = sum(p[j,i])</code> bound with
+<code>horizon = ceil(incumbent.makespan * multiplier)</code>, defaulted to
+<code>1.25</code>. Cross-cutting addition that touches multiple files —
+including <code>cpsat_adapter.py</code>, which is outside the plan's
+declared scope.</p>
+
+<figure class="modmap">
+  <svg viewBox="0 0 780 360" width="100%" style="max-width: 760px; display:block; margin:0 auto;" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#7a7a72"/>
+      </marker>
+      <marker id="arrow-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#a55a07"/>
+      </marker>
+    </defs>
+
+    <!-- Zone A: in-plan-scope (pw_cp package) -->
+    <rect x="20" y="20" width="340" height="200" fill="#f4faee" stroke="#c2d5b5" rx="6"/>
+    <text x="190" y="40" font-size="12" font-weight="700" text-anchor="middle" fill="#1e7a3a" font-family="system-ui">IN PLAN SCOPE — algorithm/pw_cp/</text>
+
+    <rect x="40" y="56" width="300" height="40" fill="#fff" stroke="#2454b8" rx="4"/>
+    <text x="190" y="74" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">option.py:51-57, 92-97</text>
+    <text x="190" y="90" font-size="10.5" text-anchor="middle" fill="#5e5e58" font-family="system-ui">+ PwCpOption.horizon_makespan_multiplier=1.25</text>
+
+    <rect x="40" y="108" width="300" height="40" fill="#fff" stroke="#2454b8" rx="4"/>
+    <text x="190" y="126" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">dispatcher.py:61-64</text>
+    <text x="190" y="142" font-size="10.5" text-anchor="middle" fill="#5e5e58" font-family="system-ui">horizon = ceil(incumbent.makespan × mult)</text>
+
+    <rect x="40" y="160" width="300" height="40" fill="#fff" stroke="#2454b8" rx="4"/>
+    <text x="190" y="178" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">orchestration/controller.py</text>
+    <text x="190" y="194" font-size="10.5" text-anchor="middle" fill="#5e5e58" font-family="system-ui">pw_cp() exposes kwarg</text>
+
+    <!-- Zone B: outside plan scope -->
+    <rect x="400" y="20" width="360" height="120" fill="#fbe2e0" stroke="#e08a82" rx="6"/>
+    <text x="580" y="40" font-size="12" font-weight="700" text-anchor="middle" fill="#b3261e" font-family="system-ui">OUTSIDE PLAN SCOPE</text>
+
+    <rect x="420" y="56" width="320" height="40" fill="#fff" stroke="#b3261e" rx="4"/>
+    <text x="580" y="74" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">algorithm/cpsat_adapter.py:44-83</text>
+    <text x="580" y="90" font-size="10.5" text-anchor="middle" fill="#5e5e58" font-family="system-ui">+ CpsatOption.horizon_makespan_multiplier</text>
+
+    <rect x="420" y="100" width="320" height="32" fill="#fff" stroke="#b3261e" rx="4"/>
+    <text x="580" y="120" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">+ _compute_horizon(instance, ref, mult)</text>
+
+    <!-- Zone C: existing callers that inherited the change -->
+    <rect x="400" y="160" width="360" height="180" fill="#fbeed5" stroke="#e8c585" rx="6"/>
+    <text x="580" y="180" font-size="12" font-weight="700" text-anchor="middle" fill="#a55a07" font-family="system-ui">EXISTING CALLERS — also touched</text>
+
+    <rect x="420" y="196" width="320" height="36" fill="#fff" stroke="#a55a07" rx="4"/>
+    <text x="580" y="214" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">controller.cpsat()</text>
+    <text x="580" y="228" font-size="10" text-anchor="middle" fill="#5e5e58" font-family="system-ui">existing step, new kwarg</text>
+
+    <rect x="420" y="244" width="320" height="36" fill="#fff" stroke="#a55a07" rx="4"/>
+    <text x="580" y="262" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">controller.mixed_dispatcher_warm_start_cp()</text>
+    <text x="580" y="276" font-size="10" text-anchor="middle" fill="#5e5e58" font-family="system-ui">~lines 1608-1640, new kwarg</text>
+
+    <rect x="420" y="292" width="320" height="36" fill="#fff" stroke="#a55a07" rx="4"/>
+    <text x="580" y="310" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">controller.pw_cp()</text>
+    <text x="580" y="324" font-size="10" text-anchor="middle" fill="#5e5e58" font-family="system-ui">new step, new kwarg</text>
+
+    <!-- Arrows: dispatcher → cpsat_adapter (solid, breach) -->
+    <line x1="340" y1="128" x2="420" y2="76" stroke="#b3261e" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+    <!-- Arrows: controller (in scope) → existing callers (out of scope behaviour change) -->
+    <line x1="340" y1="180" x2="420" y2="214" stroke="#a55a07" stroke-width="1.2" marker-end="url(#arrow-warn)"/>
+    <line x1="340" y1="180" x2="420" y2="262" stroke="#a55a07" stroke-width="1.2" marker-end="url(#arrow-warn)"/>
+    <line x1="340" y1="180" x2="420" y2="310" stroke="#a55a07" stroke-width="1.2" marker-end="url(#arrow-warn)"/>
+  </svg>
+  <figcaption>Red arrow: dispatcher.py wires into <code>cpsat_adapter.py</code>, a file the plan declares out of scope. Amber arrows: the new kwarg ripples through two pre-existing step methods on the controller.</figcaption>
+</figure>
+
+<div class="override-banner">
+  <b>Plan coverage.</b> Plan dispatcher pseudocode (<code>pw_cp_port_plan.md:135-136</code>) explicitly uses
+  <code>params_for_horizon = BaseModelBuilder.make_params(instance); horizon = sum(params_for_horizon.p.values())</code>.
+  The <code>cpsat_adapter.py</code> file is not mentioned anywhere in either plan — its declared scope is
+  <code>algorithm/pw_cp/</code> + <code>controller.py</code> + <code>ffc_schedule.py</code> + <code>main.py</code>.
+</div>
+
+<h3 id="a3">A.3. <code>log_search_progress</code> / <code>log_search_progress_max_steps</code> <span class="badge danger">no plan coverage</span></h3>
+
+<p>Per-step CP-SAT solve log capture for hint verification.</p>
+
+<div class="decisions">
+  <div class="decision">
+    <div class="key">pw_cp/option.py:59-71</div>
+    <div class="val">Two new fields on <code>PwCpOption</code>.</div>
+  </div>
+  <div class="decision">
+    <div class="key">pw_cp/dispatcher.py:187-202</div>
+    <div class="val">When enabled, sets <code>solver.parameters.log_search_progress = True</code>, <code>log_to_response = True</code>, <code>log_to_stdout = False</code>, then iterates the captured <code>solver.response_proto.solve_log</code> lines into the logger at INFO. <code>max_steps</code> caps capture to the first N steps to avoid log bloat.</div>
+  </div>
+  <div class="decision">
+    <div class="key">controller.py — pw_cp</div>
+    <div class="val">Exposes both kwargs.</div>
+  </div>
+  <div class="decision">
+    <div class="key">metadata/20260510/pw_cp_hint_check.yaml</div>
+    <div class="val">Dedicated scenario (single instance, single-thread, <code>log_search_progress_max_steps: 1</code>).</div>
+  </div>
+</div>
+
+<h3 id="a4">A.4. <code>main.py</code> CONFIG_PATH points to the hint-check scenario <span class="badge warn">plan mental model wrong</span></h3>
+
+<p>Code change:</p>
+
+<pre><code>-CONFIG_PATH = Path("metadata/20260509/20260509_mcf_lb_best_neh_cp_best_base_cpsat.yaml")
++CONFIG_PATH = Path("metadata/20260510/pw_cp_hint_check.yaml")</code></pre>
+
+<div class="override-banner">
+  <b>Plan vs. reality.</b> Plan body says "wire the new scenario name into the dispatch table (mirror the existing <code>neh_cp</code> / <code>mcf_lb</code> registration)". The repo has <i>no</i> such dispatch table — <code>main.py</code> uses a single <code>CONFIG_PATH</code> constant and YAML's <code>subroutine_flow.method:</code> resolves via <code>getattr</code> (clarified in <code>pw_cp_port_plan_detail.md</code> §"Naming and placement"). The plan's "registration" mental model is incorrect for this repo; the actual change is a single-line <code>CONFIG_PATH</code> redirect, currently aimed at the hint-check scenario rather than the <code>pw_cp_grid.yaml</code> the plan would have implied.
+</div>
+
+<h2 id="b">B. Code differs from plan in shape (intent preserved)</h2>
+
+<h3 id="b1">B.1. <code>PwCpStepEntry</code> field set</h3>
+
+<div class="grid-2">
+  <div class="card plan">
+    <h4>Plan-listed fields <span class="badge muted">pw_cp_port_plan.md:232-243</span></h4>
+    <p><code>step, unfixed_batch_start_idx, non_time_fixed_op_count, incumbent_obj_before, cp_obj, incumbent_obj_after, accepted, status, applied_tl_seconds, wall_seconds</code></p>
+  </div>
+  <div class="card code">
+    <h4>Code-actual fields <span class="badge muted">pw_cp/step_log.py</span></h4>
+    <p><b>Renamed:</b> <code>applied_tl_seconds</code> → <code>TL</code>.</p>
+    <p><b>Added:</b> <code>elapsed_time</code>, <code>elapsed_portion</code>, <code>sub_job_count</code>, <code>cp_divergence_count</code>.</p>
+  </div>
+</div>
+
+<h3 id="b2">B.2. <code>build_full_schedule_from_cp</code> return signature</h3>
+
+<div class="grid-2">
+  <div class="card plan">
+    <h4>Plan</h4>
+    <p>Returns a single <code>FFcSchedule</code>.</p>
+  </div>
+  <div class="card code">
+    <h4>Code <span class="badge muted">pw_cp/cp_model.py:397-457</span></h4>
+    <p>Returns <code>tuple[FFcSchedule, cp_divergence_count: int]</code>. The diagnostic counter measures how many non-time-fixed ops realised a later end than the CP-promised end (cumulative-vs-greedy machine assignment drift, foreseen in <code>pw_cp_port_plan.md:327</code> Risk 3). Logged at DEBUG per step and persisted in <code>PwCpStepEntry</code>.</p>
+  </div>
+</div>
+
+<h3 id="b3">B.3. <code>delay_job_latest_leq_obj_contrib_all_stages</code> extracted helper</h3>
+
+<div class="grid-2">
+  <div class="card plan">
+    <h4>Plan <span class="badge muted">pw_cp_port_plan_detail.md:83-102</span></h4>
+    <p>Pseudocode inlines the per-stage rewrite of <code>__stage_2_mc_2_job_tuple_seq[i][mc_id]</code>.</p>
+  </div>
+  <div class="card code">
+    <h4>Code <span class="badge muted">solution/ffc_schedule.py:1499-1562</span></h4>
+    <p>The per-stage loop body is extracted into private helper <code>_make_stage_right_justified</code>. Behaviour is identical; structural refactor only.</p>
+  </div>
+</div>
+
+<h3 id="b4">B.4. <code>build_operation_partition</code> is public</h3>
+
+<div class="grid-2">
+  <div class="card plan">
+    <h4>Plan</h4>
+    <p>Calls it <code>_build_operation_partition</code> (private, leading underscore).</p>
+  </div>
+  <div class="card code">
+    <h4>Code</h4>
+    <p>Exports it as <code>build_operation_partition</code> and re-exports from <code>algorithm/pw_cp/__init__.py</code> so tests can call it directly.</p>
+  </div>
+</div>
+
+<h2 id="c">C. Plan items missing from code</h2>
+
+<div class="risks">
+  <div class="risk sev-low" id="c1">
+    <div class="hd"><h4>C.1. <code>docs/TODO.md</code> rename note for <code>mcf_lb_phase_schedules</code></h4><span class="badge ok">low</span></div>
+    <div class="body"><code>pw_cp_port_plan_detail.md</code> §"Per-step Gantt" states "a TODO entry should track renaming the container to a generic <code>phase_schedules</code>". No such entry exists in <code>docs/TODO.md</code>.</div>
+  </div>
+  <div class="risk sev-low" id="c2">
+    <div class="hd"><h4>C.2. <code>pw_cp</code> registration in <code>tests/algorithm/test_algorithm_contracts.py</code></h4><span class="badge muted">moot</span></div>
+    <div class="body">Plan §Verification 2 (<code>pw_cp_port_plan.md:305</code>): "register <code>pw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks run". In practice the file does not have an algorithm registry — it tests the generic <code>AlgSpec</code>/<code>AlgRecord</code> shapes against a toy instance with no algorithm-specific hooks. The plan's mental model of a per-algorithm registration slot is incorrect; no code change is actually required, but the plan instruction stands unresolved in literal terms.</div>
+  </div>
+</div>
+
+<h3 id="c3">C.3. Test coverage of right-justification invariants <span class="badge ok">applied 2026-05-11</span></h3>
+
+<p>The plan's §Risks 1 (<code>pw_cp_port_plan.md:323</code>) enumerates the
+correctness invariants for <code>delay_job_latest_leq_obj_contrib_all_stages</code>
+and lists them as test targets. Pre-existing tests in
+<code>tests/solution/test_ffc_schedule_delay_all_stages.py</code> already
+covered durations, per-machine sequence order, total-E+T non-increasing,
+<code>validate_schedule</code>, and monotone-rightward operation movement.
+Four invariants from the risk list were not explicitly asserted; tests
+were added:</p>
+
+<div class="gap-table">
+<table>
+  <thead>
+    <tr><th>Added test</th><th>Invariant pinned</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>test_delay_all_stages_matches_last_stage_helper_on_last_stage</code></td>
+      <td>Earlier-stage passes never mutate any <code>C_j</code> — the last-stage end-times produced by <code>..._all_stages</code> equal those produced by the last-stage delegate alone.</td>
+    </tr>
+    <tr>
+      <td><code>test_delay_all_stages_per_job_objective_non_increasing</code></td>
+      <td>Per-job (not just summed) weighted E+T is non-increasing. Catches a regression where one job's ET could increase while another's decreases and the totals still pass.</td>
+    </tr>
+    <tr>
+      <td><code>test_delay_all_stages_satisfies_explicit_job_stage_precedence</code></td>
+      <td>Risk-listed <code>end[j,i] &lt;= start[j,i+1]</code> over every (j, i with i&lt;c). <code>validate_schedule</code> already implies this, but the explicit assertion makes the contract visible at the test level.</td>
+    </tr>
+    <tr>
+      <td><code>test_delay_all_stages_single_stage_equivalent_to_last_stage_helper</code></td>
+      <td>Boundary: with <code>len(stages) == 1</code> the earlier-stage loop is empty, so <code>..._all_stages</code> is exactly the last-stage delegate.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="invariants">
+  <h4>Result</h4>
+  <ul>
+    <li>5 → 9 tests in the file; <b>all pass</b>; lint clean.</li>
+    <li><b>No algorithm change</b> — pure test hardening.</li>
+  </ul>
+</div>
+
+<p>A few risk-listed invariants are intentionally <i>not</i> added as standalone tests:</p>
+
+<ul>
+  <li><code>new_start[j,i] &gt;= prev_op_end[j,i]_on_same_machine</code> is covered by <code>validate_schedule</code> and is more clearly characterised as a post-hoc property than as a step-by-step invariant. Adding it as an explicit assert duplicates <code>validate_schedule</code>'s overlap check.</li>
+  <li><code>new_end[j,i] - new_start[j,i] == p[j,i]</code> is already pinned by <code>test_delay_all_stages_preserves_durations</code> (which checks <code>end - start</code> equality before/after — duration is the only quantity that matters for FFcDDW since per-job p is fixed).</li>
+</ul>
+
+<h2 id="d">D. Plan items present in code as expected (no gap)</h2>
+
+<p>For completeness — the following are correctly implemented and match the plan:</p>
+
+<div class="invariants">
+  <h4>In place &amp; matching the plan</h4>
+  <ul>
+    <li><code>delay_job_latest_leq_obj_contrib_all_stages</code> (two-pass right-justification, invariants per <code>pw_cp_port_plan_detail.md:104-114</code>).</li>
+    <li><code>PwCpOption</code> base field set (all plan fields present; extras in §A.2, §A.3 above).</li>
+    <li>Five-region operation partition + <code>promote_job_contained_ops</code> + <code>validate_and_get_batch_count</code>.</li>
+    <li>Partition-aware <code>PwCpModelBuilder</code>: non-time-fixed-only op vars, fixed left/right dummy bars sourced from <code>rj_schedule</code>, cumulative capacity, profile-fix precedence via existing <code>add_stage_ops_precedence_constraints_after_dispatch_from_schedule</code>, partial weighted-E/T objective with <code>et_offset_partial</code> for last-stage time-fixed jobs.</li>
+    <li>Dispatcher accept/reject loop with semi-active + idle-time insertion pre-CP and post-merge.</li>
+    <li>Two-phase Gantt via <code>_record_mcf_lb_phase("pw_cp_before" / "_after")</code>.</li>
+    <li><code>_step_log.yaml</code> artifact via <code>try_get_file_path_for_subroutine</code>.</li>
+    <li>All six plan-mandated test files plus <code>tests/solution/test_ffc_schedule_delay_all_stages.py</code>.</li>
+    <li><code>pw_cp_grid.yaml</code> 4-scenario grid (u∈{2,3} × pf∈{PF0,PF1}).</li>
+  </ul>
+</div>
+
+<h2 id="reconcile">Suggested reconciliation</h2>
+
+<h3>Path 1: pull plans up to code (8 edits)</h3>
+
+<p>If the plans should reflect the code as-is:</p>
+
+<div class="decisions">
+  <div class="decision">
+    <div class="key">1. Add subsection</div>
+    <div class="val">Add §"Composite step: <code>incremental_pw_cp</code>" to <code>pw_cp_port_plan_detail.md</code> describing the two policies and the per-iteration <code>temporarily_extended_context</code> tagging.</div>
+  </div>
+  <div class="decision">
+    <div class="key">2. Replace horizon formula</div>
+    <div class="val">Replace <code>horizon = sum(p)</code> references in both plans with the incumbent-makespan-multiplier formula, and document the cross-cutting impact on <code>cpsat_adapter.py</code> (or move that change to its own plan).</div>
+  </div>
+  <div class="decision">
+    <div class="key">3. Document logging knobs</div>
+    <div class="val">Document <code>log_search_progress</code> / <code>log_search_progress_max_steps</code> on <code>PwCpOption</code> and the <code>pw_cp_hint_check.yaml</code> debug scenario.</div>
+  </div>
+  <div class="decision">
+    <div class="key">4. Fix "dispatch table" wording</div>
+    <div class="val">Correct <code>pw_cp_port_plan.md</code> §"File layout" to match <code>pw_cp_port_plan_detail.md</code> §"Naming and placement" (YAML <code>method:</code> → <code>getattr</code> on controller).</div>
+  </div>
+  <div class="decision">
+    <div class="key">5. Update step-entry fields</div>
+    <div class="val">Update <code>PwCpStepEntry</code> field list in <code>pw_cp_port_plan.md</code> to match <code>pw_cp/step_log.py</code> (rename <code>applied_tl_seconds</code> → <code>TL</code>; add <code>elapsed_time</code>, <code>elapsed_portion</code>, <code>sub_job_count</code>, <code>cp_divergence_count</code>).</div>
+  </div>
+  <div class="decision">
+    <div class="key">6. Note tuple return</div>
+    <div class="val">Note the <code>(schedule, cp_divergence_count)</code> return tuple of <code>build_full_schedule_from_cp</code> and its diagnostic role.</div>
+  </div>
+  <div class="decision">
+    <div class="key">7. Resolve TODO entry</div>
+    <div class="val">Either add the deferred-rename entry to <code>docs/TODO.md</code> or drop the instruction from the detail plan.</div>
+  </div>
+  <div class="decision">
+    <div class="key">8. Drop bad instruction</div>
+    <div class="val">Drop the <code>test_algorithm_contracts.py</code> registration instruction (or rewrite the contracts test to actually have a per-algorithm registry).</div>
+  </div>
+</div>
+
+<h3>Path 2: pull code back to plan</h3>
+
+<p>If instead the code should be aligned to the plan, candidates for
+revert / extraction to a follow-up plan:</p>
+
+<div class="decisions">
+  <div class="decision deferred">
+    <div class="key">§A.1 incremental_pw_cp</div>
+    <div class="val">Extract to a follow-up plan; ~137 controller lines + 1 YAML.</div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">§A.2 horizon multiplier</div>
+    <div class="val"><b>At minimum</b> the <code>cpsat_adapter.py</code> portion, since it touches a file outside the plan's declared scope. The <code>pw_cp</code> dispatcher portion is debatable but currently undocumented.</div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">§A.3 log_search_progress</div>
+    <div class="val">Two option fields + dispatcher log capture + <code>pw_cp_hint_check.yaml</code>. Cleanly isolated and easy to revert.</div>
+  </div>
+</div>
+
+<hr>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/pw_cp_port_plan_extended.md</code> (markdown remains authoritative; this HTML is a spatial view).</p>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PW-CP Port — Detail Decisions</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --surface: #ffffff;
+    --border: #e4e2da;
+    --border-soft: #efede5;
+    --text: #1a1a1a;
+    --muted: #5e5e58;
+    --faint: #8a8a82;
+    --accent: #2454b8;
+    --accent-soft: #e6edfa;
+    --code-bg: #f3f2ec;
+    --code-text: #2c2c28;
+    --ok: #1e7a3a;
+    --ok-bg: #e3f2e9;
+    --warn: #a55a07;
+    --warn-bg: #fbeed5;
+    --danger: #b3261e;
+    --danger-bg: #fbe2e0;
+    --info: #1f5a8a;
+    --info-bg: #e3eff8;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.03);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, sans-serif;
+    font-size: 15px; line-height: 1.62; -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: ui-monospace, monospace; }
+  code { font-size: .88em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; color: var(--code-text); }
+  pre { background: #1f2024; color: #e6e6e0; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; margin: 12px 0; }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); max-width: 1200px; margin: 0 auto; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .toc { position: static !important; border-right: 0; border-bottom: 1px solid var(--border); height: auto !important; } }
+
+  .toc {
+    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    padding: 28px 18px 28px 28px; border-right: 1px solid var(--border-soft);
+    background: var(--bg); font-size: 13px;
+  }
+  .toc .label { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 16px 0 6px; }
+  .toc a { display: block; padding: 3px 0; color: var(--muted); border-left: 2px solid transparent; padding-left: 10px; margin-left: -10px; }
+  .toc a:hover { color: var(--text); text-decoration: none; border-left-color: var(--border); }
+  .toc .title { font-weight: 600; color: var(--text); font-size: 14px; margin-bottom: 4px; }
+  .toc .crumb { color: var(--faint); font-size: 11px; margin-bottom: 14px; }
+
+  main { padding: 36px 48px 80px; max-width: 880px; }
+  @media (max-width: 900px) { main { padding: 24px 20px 60px; } }
+
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -.01em; }
+  h2 { font-size: 18px; margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); letter-spacing: -.005em; }
+  h3 { font-size: 14.5px; margin: 22px 0 8px; }
+  h4 { font-size: 12.5px; margin: 16px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+
+  .meta { color: var(--faint); font-size: 12.5px; margin-bottom: 22px; }
+
+  .override-banner {
+    background: var(--warn-bg); border: 1px solid #e8c585; border-left: 4px solid var(--warn);
+    border-radius: 6px; padding: 10px 14px; margin: 14px 0 22px; font-size: 13.5px;
+  }
+  .override-banner b { color: var(--warn); }
+
+  .badge {
+    display: inline-block; font-size: 10.5px; font-weight: 600;
+    padding: 2px 7px; border-radius: 10px; vertical-align: middle;
+    text-transform: uppercase; letter-spacing: .04em; line-height: 1.5;
+  }
+  .badge.ok       { background: var(--ok-bg); color: var(--ok); }
+  .badge.warn     { background: var(--warn-bg); color: var(--warn); }
+  .badge.info     { background: var(--info-bg); color: var(--info); }
+  .badge.muted    { background: #e8e7e0; color: #5a5a55; }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  th { background: #f3f2ec; font-weight: 600; font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #fbfaf3; }
+
+  /* Scenario grid (2x2 matrix) */
+  .scenario-matrix {
+    display: grid; grid-template-columns: 80px 1fr 1fr; gap: 8px; margin: 16px 0; max-width: 540px;
+    font-size: 13.5px;
+  }
+  .scenario-matrix .head { font-weight: 600; color: var(--muted); padding: 6px 8px; text-align: center; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .scenario-matrix .row-head { font-weight: 600; color: var(--muted); padding: 14px 8px; text-align: center; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; align-self: center; }
+  .scenario-matrix .cell {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; box-shadow: var(--shadow); text-align: center;
+  }
+  .scenario-matrix .cell .name { font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--accent); font-weight: 600; }
+  .scenario-matrix .cell .desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  /* Decision strip */
+  .decisions { display: grid; gap: 10px; margin: 12px 0; }
+  .decision {
+    display: grid; grid-template-columns: 170px 1fr; gap: 14px;
+    padding: 10px 14px; border-left: 3px solid var(--accent); background: #f6f8fc; border-radius: 0 6px 6px 0;
+  }
+  .decision .key { font-weight: 600; color: var(--accent); font-size: 13px; }
+  .decision .val { font-size: 13.5px; }
+  .decision.deferred { border-left-color: var(--faint); background: #f4f3ed; }
+  .decision.deferred .key { color: var(--faint); }
+
+  .invariants {
+    background: #f4faee; border: 1px solid #c2d5b5; border-radius: 8px;
+    padding: 14px 18px; margin: 14px 0;
+  }
+  .invariants h4 { color: var(--ok); margin: 0 0 6px; }
+  .invariants ul { margin: 4px 0 0; padding-left: 20px; }
+  .invariants li { font-size: 13.5px; }
+
+  .pipeline {
+    background: var(--info-bg); border: 1px solid #c9def0; border-radius: 8px;
+    padding: 14px 18px; margin: 14px 0; font-size: 13.5px;
+  }
+  .pipeline h4 { color: var(--info); margin: 0 0 8px; }
+  .pipeline .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0; font-family: ui-monospace, monospace; font-size: 12px; }
+  .pipeline .step { background: #fff; padding: 4px 9px; border-radius: 4px; border: 1px solid #c9def0; }
+  .pipeline .arrow { color: var(--info); font-weight: 600; }
+
+  ul.plain { list-style: none; padding-left: 0; }
+  ul.plain li { padding: 4px 0; border-bottom: 1px dashed var(--border-soft); }
+  ul.plain li:last-child { border-bottom: 0; }
+
+  details { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 8px 14px; margin: 10px 0; }
+  details[open] { background: #fbfaf3; }
+  summary { cursor: pointer; font-weight: 600; font-size: 13.5px; color: var(--muted); user-select: none; }
+  summary:hover { color: var(--text); }
+
+  ol.tests { counter-reset: tests; list-style: none; padding-left: 0; }
+  ol.tests li { counter-increment: tests; padding: 6px 12px 6px 38px; position: relative; margin: 4px 0; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 5px; font-family: ui-monospace, monospace; font-size: 12.5px; }
+  ol.tests li::before {
+    content: counter(tests);
+    position: absolute; left: 10px; top: 6px;
+    background: var(--accent); color: white;
+    width: 20px; height: 20px; border-radius: 50%;
+    font-size: 11px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, system-ui, sans-serif;
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <div class="title">PW-CP Detail Decisions</div>
+  <div class="crumb">plans/20260510/</div>
+  <a href="pw_cp_port_plan.html" style="color: var(--accent); font-size: 12.5px;">← Main plan</a>
+
+  <div class="label">Sections</div>
+  <a href="#naming">Naming &amp; placement</a>
+  <a href="#scenarios">Subroutine chain (YAML)</a>
+  <a href="#wallclock">Wall-clock plumbing</a>
+  <a href="#machine-reassign">Machine reassignment</a>
+  <a href="#rj-semantics">delay_*_all_stages semantics</a>
+  <a href="#pfprec">Profile-fix precedence</a>
+  <a href="#steplog">Step-log artifact</a>
+  <a href="#gantt">Per-step Gantt</a>
+  <a href="#boundaries">CP boundary constants</a>
+  <a href="#obj">Objective</a>
+  <a href="#tests">Test scope</a>
+  <a href="#outofscope">Out of scope</a>
+</nav>
+
+<main>
+
+<h1>PW-CP Port — Detail Decisions</h1>
+<div class="meta">
+  <span>plans/20260510/pw_cp_port_plan_detail.md</span> ·
+  <span>Main plan: <a href="pw_cp_port_plan.html">pw_cp_port_plan.html</a></span> ·
+  <span>Frozen: 2026-05-10</span>
+</div>
+
+<div class="override-banner">
+  <b>Override notice.</b> This file freezes the user-confirmed implementation decisions surfaced during the planning conversation on 2026-05-10. Read together with the main plan; <b>this file overrides any conflicting wording</b> in <code>pw_cp_port_plan.md</code>.
+</div>
+
+<h2 id="naming">Naming and placement</h2>
+
+<div class="decisions">
+  <div class="decision">
+    <div class="key">Controller step method</div>
+    <div class="val"><code>pw_cp</code> (no <code>run_</code> prefix). Matches the <code>neh_cp</code> peer. The <code>subroutine_flow.method:</code> key in YAML resolves directly to this attribute.</div>
+  </div>
+  <div class="decision">
+    <div class="key">Algorithm package path</div>
+    <div class="val"><code>src/ffc_ddw_sum_et/algorithm/pw_cp/</code> (<code>__init__</code>, <code>option</code>, <code>step_log</code>, <code>partition</code>, <code>cp_model</code>, <code>dispatcher</code>).</div>
+  </div>
+  <div class="decision">
+    <div class="key">Experiment YAML</div>
+    <div class="val"><code>metadata/20260510/pw_cp_grid.yaml</code>. <span class="badge warn">override</span> The <code>configs/</code> path mentioned in the plan does <b>not</b> exist in this repo — every scenario YAML lives under <code>metadata/&lt;date&gt;/</code>.</div>
+  </div>
+</div>
+
+<h2 id="scenarios">Subroutine chain in YAML</h2>
+
+<p>Each scenario starts with the MCF-LB seed (cheapest seed that produces a fully-feasible incumbent) and refines via PW-CP:</p>
+
+<pre><code>subroutine_flow:
+  - method: calc_mcf_lb_and_derive_full_sch
+    # …default seeding params (mirror 20260507_*)
+  - method: pw_cp
+    # …PW-CP option fields below
+</code></pre>
+
+<h3>Grid: single YAML, 4 scenarios</h3>
+
+<div class="scenario-matrix">
+  <div></div>
+  <div class="head">PF0</div>
+  <div class="head">PF1</div>
+
+  <div class="row-head">u=2</div>
+  <div class="cell"><div class="name">_u2_pf0</div><div class="desc">2 unfixed batches · PF0</div></div>
+  <div class="cell"><div class="name">_u2_pf1</div><div class="desc">2 unfixed batches · PF1</div></div>
+
+  <div class="row-head">u=3</div>
+  <div class="cell"><div class="name">_u3_pf0</div><div class="desc">3 unfixed batches · PF0</div></div>
+  <div class="cell"><div class="name">_u3_pf1</div><div class="desc">3 unfixed batches · PF1</div></div>
+</div>
+
+<h2 id="wallclock">Wall-clock plumbing (controller → dispatcher)</h2>
+
+<div class="pipeline">
+  <h4>Deadline path</h4>
+  <div class="flow">
+    <span class="step">controller.timer.get_remaining_sec(stopping_criteria.timelimit)</span>
+    <span class="arrow">→</span>
+    <span class="step">wall_clock_deadline_sec = monotonic() + remaining</span>
+    <span class="arrow">→</span>
+    <span class="step">PwCpOption.wall_clock_deadline_sec</span>
+    <span class="arrow">→</span>
+    <span class="step">CP-SAT max_time_in_seconds clamp per batch</span>
+  </div>
+</div>
+
+<p>The <code>pw_cp</code> step method computes <code>wall_clock_deadline_sec = time.monotonic() + self.timer.get_remaining_sec(self.stopping_criteria.timelimit)</code> and threads it through <code>PwCpOption.wall_clock_deadline_sec</code>. The dispatcher clamps each batch's CP-SAT <code>max_time_in_seconds</code> by the remaining deadline (mirror <code>neh_cp</code> lines 258-274), and breaks the loop with <code>TerminationReason.STOP_REQUESTED</code> when the deadline is hit.</p>
+
+<p>The controller-side <code>stop_predicate=self.is_stopping_condition</code> is also threaded into <code>AlgSpec</code> so the loop can react to <em>either</em> the deadline or the controller-managed stop predicate.</p>
+
+<h2 id="machine-reassign"><code>_build_full_schedule_from_cp</code> — machine reassignment policy</h2>
+
+<p>Use hybridflowshop's validated pattern (<code>create_pw_cp_schedule</code> in <code>/home/hjt/code/hybridflowshop/.../cpsat_model_2/pw_cp.py</code>):</p>
+
+<ol>
+  <li>Start from <code>rj_schedule.deepcopy()</code> and remove every non-time-fixed <code>(j, i, k)</code> op via <code>FFcSchedule.remove_operations</code>.</li>
+  <li>For each non-time-fixed <code>(j, i)</code>:
+    <ul>
+      <li>sort by <code>(start_time, -end_time)</code> for deterministic dispatch order;</li>
+      <li>call <code>schedule.add_operation_2_stage(stage_id=i, job_id=j, duration=p[j,i], release_t=cp_start)</code> — the stage selects the earliest-start-then-idle machine via the existing <code>select_machine_by_earliest_start_then_idle</code> policy;</li>
+      <li><b>assert <code>schedule.get_job_end_time(i, j) == cp_end</code></b>. If the assertion fires, the cumulative-vs-explicit-machine policy diverged and we want a loud failure rather than a silent skew.</li>
+    </ul>
+  </li>
+</ol>
+
+<h2 id="rj-semantics"><code>delay_job_latest_leq_obj_contrib_all_stages</code> — semantics</h2>
+
+<p>Two-pass right-justification on <code>FFcSchedule</code>:</p>
+
+<h3>Pass 1: Last stage</h3>
+<p>Delegate to existing <code>self.delay_job_latest_leq_obj_contrib(job_2_dw_ub_map)</code>. Freezes every <code>C_j</code> at an objective-non-increasing position (early jobs may slide into the due window, on-time jobs may slide right inside it, tardy jobs are pinned).</p>
+
+<h3>Pass 2: Stages c-1, c-2, …, 1</h3>
+<p>Same shape as hybridflowshop's <code>make_right_justified</code> (verified at <code>/home/hjt/code/hybridflowshop/.../schedule_lite.py:1571</code>):</p>
+
+<pre><code>for stage_idx in range(len(self.stages) - 2, -1, -1):
+    stage_id = self.stages[stage_idx]
+    next_stage_id = self.stages[stage_idx + 1]
+    next_stage_start_map = (cache: job -> start at next stage)
+    for mc_id in machines_per_stage[stage_id]:
+        seq = self.__stage_2_mc_2_job_tuple_seq[stage_id][mc_id]
+        machine_next_start = +inf
+        new_seq_rev = []
+        for job_id, old_start, old_end in reversed(seq):
+            duration = old_end - old_start
+            cap = min(next_stage_start_map[job_id],
+                      machine_next_start)
+            new_end = cap
+            new_start = new_end - duration
+            new_seq_rev.append((job_id, new_start, new_end))
+            machine_next_start = new_start
+        self.__stage_2_mc_2_job_tuple_seq[stage_id][mc_id] = list(reversed(new_seq_rev))
+    self._rebuild_stage_time_caches(stage_id)
+</code></pre>
+
+<div class="invariants">
+  <h4>Invariants (test target)</h4>
+  <ul>
+    <li>every <code>C_j</code> (last-stage end) is unchanged across the call;</li>
+    <li>every per-machine sequence order is unchanged;</li>
+    <li>every duration <code>p[j,i] = end - start</code> is unchanged;</li>
+    <li><code>compute_weighted_earliness_tardiness</code> returns the same value before and after (<b>objective-preserving</b>, not just non-increasing — the last-stage pass already guarantees per-job ET non-increasing, and earlier-stage passes don't touch any <code>C_j</code>);</li>
+    <li><code>validate_schedule(sched, instance.stage_2_job_2_p_map)</code> passes (no overlap, all precedences satisfied).</li>
+  </ul>
+</div>
+
+<h2 id="pfprec">Profile-fix precedence range</h2>
+
+<p><code>PwCpModelBuilder</code> builds <code>profile_fixed_schedule = rj_schedule.deepcopy().remove_operations(non_profile_fixed_ops)</code> and passes it to the existing <code>BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule</code> with <code>decode_pf_method(option.pf_method)</code>.</p>
+
+<p><b>Effect:</b> precedence arcs are added only inside LPF and inside RPF — the unfixed window stays free. LTF/RTF are absent from the schedule (removed) so the helper never touches them.</p>
+
+<h2 id="steplog">Step-log artifact</h2>
+
+<p>After <code>_register</code>, the controller method serialises <code>record.result.metrics["step_log"]</code> (a tuple of <code>PwCpStepEntry</code> dataclasses) as YAML at the path returned by <code>self.try_get_file_path_for_subroutine("_step_log.yaml")</code>.</p>
+
+<p>Same shape / location convention as <code>neh_cp</code> so the existing <code>reporting._write_analysis_sheets</code> aggregator and any downstream CSV analysis pick it up unchanged.</p>
+
+<h2 id="gantt">Per-step Gantt</h2>
+
+<p><code>pw_cp</code> accepts a per-call <code>draw_gantt: bool = False</code> kwarg. When True, the controller appends two snapshots to the existing <code>mcf_lb_phase_schedules</code> list (the mechanism is generic despite the name):</p>
+
+<pre><code>(self._mcf_lb_phase_name("pw_cp_before"), incumbent.schedule.deepcopy())
+(self._mcf_lb_phase_name("pw_cp_after"),  result.schedule.deepcopy())
+</code></pre>
+
+<p>The post-run reporter renders these into PNGs alongside MCF-LB phase PNGs.</p>
+
+<div class="override-banner" style="background: #fbf3eb; border-color: #e7d5c5;">
+  <b>TODO.</b> Naming is deliberately misleading (<code>mcf_lb_phase_schedules</code> predates this feature); a TODO entry should track renaming the container to a generic <code>phase_schedules</code>.
+</div>
+
+<h2 id="boundaries">CP model — boundary constants from <code>rj_schedule</code></h2>
+
+<p>Every CP construction step reads start/end constants from</p>
+
+<pre><code>rj_schedule = incumbent.deepcopy()
+rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(instance.job_2_dw_ub_map)
+</code></pre>
+
+<p>— <b>never</b> from the raw incumbent. <b>This is the load-bearing reason the new schedule method is required.</b></p>
+
+<table>
+  <thead><tr><th>Bar</th><th>Interval</th><th>Source</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>Right dummy</b></td>
+      <td><code>[right_boundary[i,k], horizon]</code></td>
+      <td>Fixed endpoints (<b>no <code>common_spacing</code> IntVar</b>). Right boundary = min start of RTF ops on <code>(i,k)</code> in <code>rj_schedule</code>.</td>
+    </tr>
+    <tr>
+      <td><b>Left dummy</b></td>
+      <td><code>[0, left_boundary[i,k]]</code></td>
+      <td>Fixed endpoints. Left boundary = max end of LTF ops on <code>(i,k)</code> in <code>rj_schedule</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Bars with zero length are skipped. All boundaries are sourced from <code>rj_schedule</code>, which <b>maximises the slack available to the unfixed window</b>.</p>
+
+<h2 id="obj">Objective (partial weighted E/T)</h2>
+
+<p>For each <code>j ∈ sub_jobs</code> whose <b>last-stage</b> op is non-time-fixed (<code>(j, k_last) ∈ partition[last_i].non_time_fixed</code>):</p>
+<ul>
+  <li>create <code>E_j</code> and <code>T_j</code> via <code>add_max_equality</code> (matches <code>BaseModelBuilder._define_objective</code>);</li>
+  <li>contribute <code>w_e[j] * E_j + w_t[j] * T_j</code> to the CP objective.</li>
+</ul>
+
+<p>Jobs with last-stage op time-fixed contribute a constant <code>et_offset</code> (logged for diagnostic purposes; not added to the CP objective since constants don't affect <code>argmin</code>).</p>
+
+<p>If <b>no job</b> in <code>sub_jobs</code> has a non-time-fixed last-stage op, the batch is skipped (no CP variables to optimise — falls under the <code>"if not sub_jobs: continue"</code> early exit).</p>
+
+<h2 id="tests">Test scope</h2>
+
+<p>Plan-mandated 5 unit-test files plus the schedule-method test:</p>
+
+<ol class="tests">
+  <li>tests/algorithm/pw_cp/test_option.py</li>
+  <li>tests/algorithm/pw_cp/test_partition.py</li>
+  <li>tests/algorithm/pw_cp/test_cp_model.py</li>
+  <li>tests/algorithm/pw_cp/test_dispatcher.py</li>
+  <li>tests/algorithm/pw_cp/test_dispatcher_stop.py</li>
+  <li>tests/algorithm/pw_cp/test_dispatcher_no_ref_solution.py</li>
+  <li>tests/solution/test_ffc_schedule_delay_all_stages.py</li>
+  <li>Register <code>pw_cp</code> in tests/algorithm/test_algorithm_contracts.py so the shared AlgRecord shape-checks run.</li>
+</ol>
+
+<h2 id="outofscope">Out of scope <span class="badge muted">deferred</span></h2>
+
+<div class="decisions">
+  <div class="decision deferred">
+    <div class="key">Option knobs</div>
+    <div class="val"><code>tighten_ranges</code>, <code>use_lns_only</code>, <code>non_time_fixed_op_time_limit_multiplier</code></div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">Lex 2-phase</div>
+    <div class="val"><code>minimize_makespan_lex</code> — E/T then makespan as a second pass per batch</div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">common_spacing</div>
+    <div class="val">Proxy objective alternative to direct (a)안</div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">make_semi_active toggle</div>
+    <div class="val"><code>make_semi_active_after_cp</code> — PW-CP recomputes objective from the merged full-schedule which is already semi-active'd</div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">Container rename</div>
+    <div class="val">Renaming <code>mcf_lb_phase_schedules</code> → <code>phase_schedules</code></div>
+  </div>
+</div>
+
+<hr>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/pw_cp_port_plan_detail.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
+
+</main>
+</div>
+</body>
+</html>

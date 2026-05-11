@@ -1496,6 +1496,73 @@ class FFcSchedule:
 
         self._rebuild_stage_time_caches(last_stage_id)
 
+    def delay_job_latest_leq_obj_contrib_all_stages(
+        self,
+        job_2_dw_ub_map: Mapping[JobIdType, int],
+    ) -> None:
+        """Right-justify every operation to its latest objective-preserving
+        position across every stage.
+
+        Pass 1 (last stage): delegate to
+        :meth:`delay_job_latest_leq_obj_contrib`. This freezes every
+        ``C_j`` at an objective-non-increasing position (early jobs may
+        slide into the due window, on-time jobs may slide right inside
+        it, tardy jobs are pinned).
+
+        Pass 2 (stages ``c-1, c-2, …, 1``): call
+        :meth:`_make_stage_right_justified` for each stage in reverse
+        order, using the rebuilt next-stage start times as upper bounds.
+
+        Args:
+            job_2_dw_ub_map: ``job_id -> d_plus[j]`` mapping (typically
+                ``FFcDDWParameters.job_2_dw_ub_map``). Forwarded to the
+                last-stage helper.
+        """
+        if not self.stages:
+            return
+
+        self.delay_job_latest_leq_obj_contrib(job_2_dw_ub_map)
+
+        for stage_idx in range(len(self.stages) - 2, -1, -1):
+            stage_id = self.stages[stage_idx]
+            next_stage_id = self.stages[stage_idx + 1]
+            next_stage_start_map = self.__stage_2_job_2_start_time[next_stage_id]
+
+            self._make_stage_right_justified(stage_id, next_stage_start_map)
+
+    def _make_stage_right_justified(
+        self,
+        stage_id: StageIdType,
+        next_stage_job_2_start_time: Mapping[JobIdType, int],
+    ) -> None:
+        """Right-justify every operation on one stage against the next stage.
+
+        For each machine, scan the sequence latest-to-earliest and rewrite
+        each operation's end to ``min(next_stage_start_of_same_job,
+        machine_next_start)``, pushing it as late as possible while
+        preserving machine order and every duration.
+        """
+        for mc_id in self.machines_per_stage[stage_id]:
+            seq = self.__stage_2_mc_2_job_tuple_seq[stage_id][mc_id]
+            if not seq:
+                continue
+
+            machine_next_start: int | None = None
+            new_seq_rev: list[tuple[JobIdType, int, int]] = []
+            for job_id, old_start, old_end in reversed(seq):
+                duration = old_end - old_start
+                cap = next_stage_job_2_start_time[job_id]
+                if machine_next_start is not None:
+                    cap = min(cap, machine_next_start)
+                new_seq_rev.append((job_id, cap - duration, cap))
+                machine_next_start = cap - duration
+
+            self.__stage_2_mc_2_job_tuple_seq[stage_id][mc_id] = list(
+                reversed(new_seq_rev)
+            )
+
+        self._rebuild_stage_time_caches(stage_id)
+
     def insert_idle_time(
         self,
         due_window_map: Mapping[JobIdType, tuple[int, int]],
