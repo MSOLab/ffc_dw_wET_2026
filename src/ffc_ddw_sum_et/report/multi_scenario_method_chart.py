@@ -7,8 +7,6 @@ chart accepts a list of ``{label, endpoint_df, raw_progression_df}`` —
 each ``endpoint_df`` already carries ``rpd_f`` (filled by the writer).
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from pathlib import Path
@@ -18,12 +16,11 @@ from typing import Any
 import pandas as pd
 
 from ._chart_constants import series_colors_json, symbol_map_json
-from .rpdf_scatter_chart import (
-    _build_best_so_far_progression_points,
-    _build_step_path,
-    _extract_progression_times,
-    _keep_strict_global_improvements_or_endpoints,
-    _lookup_rpdf_at_or_before_indexed,
+from .np_utils import progression_points_to_arrays, step_function_mean_over_union
+from .step_path import build_step_path
+from .trajectory_utils import (
+    build_best_so_far_progression_points,
+    keep_strict_global_improvements_or_endpoints,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,7 +123,7 @@ def _build_scenario_progression_models(
         # points and the HTML balloons past 100MB. Mirrors what
         # rpdf_scatter_chart applies per scenario.
         progression_by_instance = {
-            str(ins): _keep_strict_global_improvements_or_endpoints(
+            str(ins): keep_strict_global_improvements_or_endpoints(
                 grp.sort_values(sort_cols)
             )
             for ins, grp in raw_progression_df.groupby("instance_id", sort=True)
@@ -142,7 +139,7 @@ def _build_scenario_progression_models(
         models.append(
             {
                 "instance_id": str(ins),
-                "progression_points": _build_best_so_far_progression_points(source_grp),
+                "progression_points": build_best_so_far_progression_points(source_grp),
             }
         )
     return models
@@ -200,49 +197,12 @@ def _build_scenario_mean_series(
     if not models:
         return None
 
-    first_times = [m["progression_points"][0].time for m in models]
-    last_times = [m["progression_points"][-1].time for m in models]
-    start_time = max(first_times)
-    end_time = max(last_times)
-    union_times = sorted(
-        {
-            p.time
-            for m in models
-            for p in m["progression_points"]
-            if start_time <= p.time <= end_time
-        }
-    )
-    if not union_times:
-        union_times = [start_time]
-        if end_time > start_time:
-            union_times.append(end_time)
-    elif union_times[-1] < end_time:
-        union_times.append(end_time)
-
-    mean_x: list[float] = []
-    mean_y: list[float] = []
-    # Precompute (times, points) per model so the inner union_times loop
-    # bisects against an already-built haystack instead of re-walking
-    # progression_points for every query_time.
-    model_haystacks = [
-        (_extract_progression_times(m["progression_points"]), m["progression_points"])
-        for m in models
+    model_arrays = [
+        progression_points_to_arrays(m["progression_points"]) for m in models
     ]
-    for t in union_times:
-        values = [
-            v
-            for times, pts in model_haystacks
-            if (v := _lookup_rpdf_at_or_before_indexed(times, pts, t)) is not None
-        ]
-        if len(values) != len(models):
-            continue
-        mean_x.append(t)
-        mean_y.append(sum(values) / len(values))
+    mean_x, mean_y = step_function_mean_over_union(model_arrays)
 
-    if not mean_x:
-        return None
-
-    step_x, step_y = _build_step_path(mean_x, mean_y)
+    step_x, step_y = build_step_path(mean_x, mean_y)
     guide_df = (
         endpoint_df.sort_values(["subroutine_order", "subroutine_name", "norm_time"])
         .groupby("subroutine_name", as_index=False, sort=False)

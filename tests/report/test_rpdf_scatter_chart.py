@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ffc_ddw_sum_et.report.rpdf_scatter_chart import (
-    _build_html_payload,
-    _keep_strict_global_improvements_or_endpoints,
+from ffc_ddw_sum_et.report.rpdf_scatter_chart import _build_html_payload
+from ffc_ddw_sum_et.report.trajectory_utils import (
+    keep_strict_global_improvements_or_endpoints,
 )
 
 
@@ -26,7 +26,7 @@ def test_filter_drops_intra_call_plateau_keeps_endpoint() -> None:
             {"call_index": 1, "norm_time": 0.4, "rpd_f": 0.08, "tag": "d"},
         ]
     )
-    out = _keep_strict_global_improvements_or_endpoints(df)
+    out = keep_strict_global_improvements_or_endpoints(df)
     assert out["tag"].tolist() == ["a", "d"]
 
 
@@ -42,7 +42,7 @@ def test_filter_keeps_endpoint_even_when_call_does_not_improve_global() -> None:
             {"call_index": 2, "norm_time": 0.4, "rpd_f": 0.18, "tag": "2c"},
         ]
     )
-    out = _keep_strict_global_improvements_or_endpoints(df)
+    out = keep_strict_global_improvements_or_endpoints(df)
     assert out["tag"].tolist() == ["1a", "2c"]
 
 
@@ -58,7 +58,7 @@ def test_filter_keeps_strict_global_improvements_across_calls() -> None:
             {"call_index": 2, "norm_time": 0.5, "rpd_f": 0.20, "tag": "2c"},
         ]
     )
-    out = _keep_strict_global_improvements_or_endpoints(df)
+    out = keep_strict_global_improvements_or_endpoints(df)
     assert out["tag"].tolist() == ["1a", "1b", "2a", "2b", "2c"]
 
 

@@ -203,6 +203,42 @@ uv run python scripts/build_subroutine_flow_charts.py <run_dir> [-v]
 벤치마크 CSV는 기본값 `benchmarks/PRA2017/`. 다른 family면
 `--bks-csv` / `--hybrid-match-csv` / `--instance-table-csv`로 override.
 
+### build_cross_run_flow_chart.py
+
+여러 run 디렉터리의 시나리오를 한 차트에서 비교할 때 사용. 단일 run에
+한정된 `build_subroutine_flow_charts.py`와 달리, 임의의 시나리오 디렉터리
+N개를 직접 받아 하나의 multi-scenario flow comparison HTML만 그린다
+(per-scenario scatter는 만들지 않으므로 원본 run 디렉터리에는 아무것도
+쓰지 않는다).
+
+**입력**: 시나리오 디렉터리 N개 (positional). 각각
+`<run_dir>/<scenario_name>/` 형태이며, 그 안의 인스턴스 서브폴더에 있는
+`<instance>_obj_log.json` + `<instance>_instance_result.yaml` 를 직접 읽는다.
+
+**출력**: 단일 HTML. 기본 경로는
+`analysis/<YYYYMMDDTHHMMSS_uuuuuu>/cross_run_flow.html` (실행 시점 timestamp
+가 자동 생성됨). `--output` 으로 override 가능.
+
+**라벨**: 기본값은 `<run_id>/<scenario_name>` (= `<scenario_dir.parent.name>/<scenario_dir.name>`)
+이라 동일 시나리오 이름이 여러 run에 있어도 자동으로 구분된다. 필요하면
+`--labels` 로 positional 개수만큼 커스텀 라벨을 넘길 수 있다.
+
+```bash
+# 기본 (출력은 analysis/<timestamp>/cross_run_flow.html)
+uv run python scripts/build_cross_run_flow_chart.py \
+    output/20260507/20260507T191425_860284/mcf_lb_best_neh_cp_best_base_cpsat \
+    output/20260507/20260507T192835_679926/mcf_lb_best_neh_cp_best_base_cpsat
+
+# 출력 경로 override + 커스텀 라벨
+uv run python scripts/build_cross_run_flow_chart.py \
+    --output analysis/my_cross_run_flow.html \
+    --labels run-A run-B \
+    output/.../scenarioA output/.../scenarioB
+```
+
+벤치마크 CSV 기본값과 override 플래그(`--bks-csv` / `--hybrid-match-csv`
+/ `--instance-table-csv`)는 `build_subroutine_flow_charts.py`와 동일.
+
 ## 4. 기타 분석 유틸
 
 ### analyze_bestobj_randomness.py
