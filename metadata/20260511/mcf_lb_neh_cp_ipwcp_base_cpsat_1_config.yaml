@@ -20,7 +20,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [0, 1439]
+# ins_index: [0, 1439]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260511
@@ -60,7 +60,7 @@ scenarios:
         batch_size: "m"
         step_size: 1
         unfixed_batch_count_min: 2
-        unfixed_batch_count_max: 8
+        unfixed_batch_count_max: 6
         increment_unfixed_batch_count_flag: "always"
         left_profile_fixed_batch_count: 2
         right_profile_fixed_batch_count: 2
@@ -100,7 +100,7 @@ scenarios:
         batch_size: "2m"
         step_size: 1
         unfixed_batch_count_min: 2
-        unfixed_batch_count_max: 8
+        unfixed_batch_count_max: 6
         increment_unfixed_batch_count_flag: "always"
         left_profile_fixed_batch_count: 2
         right_profile_fixed_batch_count: 2
