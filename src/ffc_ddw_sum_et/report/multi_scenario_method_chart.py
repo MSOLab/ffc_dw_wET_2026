@@ -154,11 +154,47 @@ def _build_guide_marker_customdata(
     return [[scenario_label, str(name)] for name in guide_marker_text]
 
 
+def _fill_missing_subroutine_endpoints(endpoint_df: pd.DataFrame) -> pd.DataFrame:
+    """For each instance, add a synthetic endpoint row for every scenario-level
+    subroutine the instance never reached. The synthetic row copies the
+    instance's last actual endpoint (norm_time, obj_value, rpd_f, ...) —
+    i.e. the step is treated as having run for 0 seconds at the controller's
+    stop time. Without this, the guide-marker average for a step that only
+    a subset of instances reached would sit at that subset's mean, which
+    misleads when most instances never got there.
+    """
+    if endpoint_df.empty:
+        return endpoint_df
+    all_subroutines = list(pd.unique(endpoint_df["subroutine_name"]))
+    order_by_name = (
+        endpoint_df[["subroutine_name", "subroutine_order"]]
+        .drop_duplicates()
+        .set_index("subroutine_name")["subroutine_order"]
+        .to_dict()
+    )
+    synth_rows: list[dict[str, Any]] = []
+    for _ins, grp in endpoint_df.groupby("instance_id", sort=False):
+        present = set(grp["subroutine_name"])
+        missing = [s for s in all_subroutines if s not in present]
+        if not missing:
+            continue
+        last = grp.sort_values("norm_time").iloc[-1].to_dict()
+        for s in missing:
+            row = dict(last)
+            row["subroutine_name"] = s
+            row["subroutine_order"] = order_by_name[s]
+            synth_rows.append(row)
+    if not synth_rows:
+        return endpoint_df
+    return pd.concat([endpoint_df, pd.DataFrame(synth_rows)], ignore_index=True)
+
+
 def _build_scenario_mean_series(
     scenario_label: str,
     endpoint_df: pd.DataFrame,
     raw_progression_df: pd.DataFrame | None,
 ) -> dict[str, Any] | None:
+    endpoint_df = _fill_missing_subroutine_endpoints(endpoint_df)
     models = _build_scenario_progression_models(endpoint_df, raw_progression_df)
     models = [m for m in models if m["progression_points"]]
     if not models:
