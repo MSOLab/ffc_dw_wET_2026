@@ -2121,7 +2121,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def pw_cp(
         self,
         solver_thread_cnt: int = 1,
-        batch_size: int = 1,
+        batch_size: int | float | str = "m",
         step_size: int = 1,
         unfixed_batch_count: int = 1,
         left_profile_fixed_batch_count: int = 0,
@@ -2178,6 +2178,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             if total_timelimit is not None
             else None
         )
+        batch_size_resolved = max(
+            1, int(math.ceil(resolve_value_expr(batch_size, n, c, m)))
+        )
+        self.logger.info(
+            "pw_cp: batch_size=%r -> %d (n=%d, c=%d, m=%d)",
+            batch_size,
+            batch_size_resolved,
+            n,
+            c,
+            m,
+        )
 
         remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
         wall_clock_deadline_sec = time.monotonic() + remaining_sec
@@ -2187,7 +2198,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         option = PwCpOption(
             solver_thread_cnt=solver_thread_cnt,
-            batch_size=batch_size,
+            batch_size=batch_size_resolved,
             step_size=step_size,
             unfixed_batch_count=unfixed_batch_count,
             left_profile_fixed_batch_count=left_profile_fixed_batch_count,
@@ -2256,7 +2267,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def incremental_pw_cp(
         self,
         solver_thread_cnt: int = 1,
-        batch_size: int = 1,
+        batch_size: int | float | str = "m",
         step_size: int = 1,
         unfixed_batch_count_min: int = 1,
         unfixed_batch_count_max: int = 1,
@@ -2319,9 +2330,30 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "calc_mcf_lb_and_derive_full_sch."
             )
 
+        instance = self.instance
+        batch_size_resolved = max(
+            1,
+            int(
+                math.ceil(
+                    resolve_value_expr(
+                        batch_size,
+                        instance.job_count,
+                        instance.stage_count,
+                        instance.last_stage_mc_count,
+                    )
+                )
+            ),
+        )
+        self.logger.info(
+            "incremental_pw_cp: batch_size=%r -> %d (m=%d)",
+            batch_size,
+            batch_size_resolved,
+            instance.last_stage_mc_count,
+        )
+
         base_kwargs = dict(
             solver_thread_cnt=solver_thread_cnt,
-            batch_size=batch_size,
+            batch_size=batch_size_resolved,
             step_size=step_size,
             left_profile_fixed_batch_count=left_profile_fixed_batch_count,
             right_profile_fixed_batch_count=right_profile_fixed_batch_count,
