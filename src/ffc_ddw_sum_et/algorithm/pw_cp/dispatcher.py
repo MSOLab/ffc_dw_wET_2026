@@ -202,12 +202,20 @@ class PwCpDispatcher:
                         logger.info("[cp_sat step %d] %s", step, line)
             if value_recorder.entries:
                 offset_sec = value_recorder.time_started - start_elapsed
+                # CP objective only covers `objective_jobs`; the rest of the
+                # instance contributes a constant E+T from rj_schedule. Add
+                # that full constant so progress_log values are comparable to
+                # the manifest's final obj_value. `et_offset_partial` only
+                # covers jobs that *appear* in the sub-instance — jobs
+                # time-fixed in every stage are missing from it.
+                full_offset = self._compute_full_progress_offset(
+                    instance, rj_schedule, build_result.objective_jobs
+                )
                 for t_rec, vb in value_recorder.entries:
                     progress_entries.append(
                         ProgressLogEntry(
                             elapsed_sec=t_rec + offset_sec,
-                            obj_value=float(vb.value)
-                            + float(build_result.et_offset_partial),
+                            obj_value=float(vb.value) + full_offset,
                             obj_bound=None,
                         )
                     )
@@ -358,6 +366,32 @@ class PwCpDispatcher:
     def _full_obj(schedule: FFcSchedule, instance: FFcDDWParameters) -> float:
         sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
         return float(sum_e + sum_t)
+
+    @staticmethod
+    def _compute_full_progress_offset(
+        instance: FFcDDWParameters,
+        rj_schedule: FFcSchedule,
+        objective_jobs: tuple[str, ...],
+    ) -> float:
+        """Constant to add to a CP-objective callback value to recover the
+        candidate's full weighted E+T.
+
+        CP objective = Σ_{j ∈ objective_jobs} (w_e·E_j + w_t·T_j). Every
+        other job's last-stage end-time is fixed for the whole batch, so
+        their E+T is a constant equal to ``full_obj(rj_schedule)`` minus
+        ``rj_schedule``'s contribution from ``objective_jobs``.
+        """
+        full = PwCpDispatcher._full_obj(rj_schedule, instance)
+        last_i = instance.stage_id_list[-1]
+        dw = instance.job_2_due_window_map
+        ewt = instance.job_2_ewt_map
+        twt = instance.job_2_twt_map
+        cp_side = 0.0
+        for j in objective_jobs:
+            c_j = rj_schedule.get_job_end_time(last_i, j)
+            d_lower, d_upper = dw[j]
+            cp_side += ewt[j] * max(0, d_lower - c_j) + twt[j] * max(0, c_j - d_upper)
+        return float(full - cp_side)
 
     @staticmethod
     def _apply_tl_and_deadline(
