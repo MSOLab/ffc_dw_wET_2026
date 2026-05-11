@@ -22,6 +22,7 @@ from .rpdf_scatter_chart import (
     _build_best_so_far_progression_points,
     _build_step_path,
     _extract_progression_times,
+    _keep_strict_global_improvements_or_endpoints,
     _lookup_rpdf_at_or_before_indexed,
 )
 
@@ -119,8 +120,15 @@ def _build_scenario_progression_models(
             for c in ["norm_time", "global_sec", "call_index"]
             if c in raw_progression_df.columns
         ]
+        # Strip CP-callback points that don't strictly improve the
+        # per-instance global running min (keeping each call's endpoint).
+        # Without this, the union across instances explodes to 10^5–10^6
+        # points and the HTML balloons past 100MB. Mirrors what
+        # rpdf_scatter_chart applies per scenario.
         progression_by_instance = {
-            str(ins): grp.sort_values(sort_cols)
+            str(ins): _keep_strict_global_improvements_or_endpoints(
+                grp.sort_values(sort_cols)
+            )
             for ins, grp in raw_progression_df.groupby("instance_id", sort=True)
         }
 
@@ -210,7 +218,10 @@ def _build_scenario_mean_series(
         "scenario": scenario_label,
         "step_x": step_x,
         "step_y": step_y,
-        "step_customdata": [[scenario_label, len(models)] for _ in step_x],
+        # Per-trace constant — referenced via Plotly's `%{meta[i]}`. Was
+        # `step_customdata` (one identical 2-element array per step point);
+        # at 10^5+ points that array alone dominated the HTML.
+        "meta": [scenario_label, len(models)],
         "vertical_guides": [
             {"subroutine_name": name, "x": x}
             for name, x in zip(guide_text, guide_x, strict=True)
@@ -308,11 +319,11 @@ _HTML_TEMPLATE = Template("""<!doctype html>
         { type: "scatter", mode: "lines",
           name: trace.scenario, legendgroup: trace.scenario,
           x: trace.step_x, y: trace.step_y,
-          customdata: trace.step_customdata,
+          meta: trace.meta,
           line: { width: 2, color: seriesColor },
           hovertemplate:
-            "scenario=%{customdata[0]}<br>" +
-            "instance_cnt=%{customdata[1]}<br>" +
+            "scenario=%{meta[0]}<br>" +
+            "instance_cnt=%{meta[1]}<br>" +
             "Time%=%{x:.4%}<br>" +
             "Mean RPDf=%{y:.4%}<extra></extra>",
           showlegend: true },
