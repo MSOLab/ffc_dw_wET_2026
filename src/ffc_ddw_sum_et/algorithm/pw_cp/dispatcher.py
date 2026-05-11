@@ -220,7 +220,6 @@ class PwCpDispatcher:
                     instance,
                     rj_schedule,
                     stage_2_partition,
-                    build_result.sub_params,
                     build_result.op_vars,
                     solver,
                 )

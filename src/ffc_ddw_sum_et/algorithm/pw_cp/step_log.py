@@ -39,11 +39,12 @@ class PwCpStepEntry:
     status: str
     wall_seconds: float
     cp_divergence_count: int = 0
-    """Number of non-time-fixed ops whose realised end-time differed from
-    the CP-provided end-time during merge. >0 means the cumulative model
-    found a solution the auto-assignment policy couldn't realise; the
-    schedule is still feasible, just potentially worse than the CP
-    promise."""
+    """Number of replayed ops (LPF + unfixed + RPF + RTF) whose realised
+    end-time differed from the CP-provided end-time during merge. >0
+    means the cumulative model found a solution the auto-assignment
+    policy couldn't realise; the schedule is still feasible, just
+    potentially worse than the CP promise. Includes RTF since the merge
+    treats RTF as time-fixed but machine-free."""
 
     def as_dict(self) -> dict:
         return asdict(self)
