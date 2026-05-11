@@ -353,8 +353,8 @@ class NehCpDispatcher:
                         semi_active_snapshot = cp_sch.deepcopy()
                     if (se_tidy + st_tidy) < (se_new + st_new):
                         logger.info(
-                            "neh_cp step %d: making CP solution semi-active reduced E/T "
-                            "from %d to %d; using semi-active solution.",
+                            "neh_cp step %d: MSA & ITI on CP solution reduced E/T "
+                            "from %d to %d; using solution after MSA & ITI.",
                             step,
                             se_new + st_new,
                             se_tidy + st_tidy,
