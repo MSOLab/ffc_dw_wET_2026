@@ -402,34 +402,37 @@ class PwCpModelBuilder:
         op_vars: OperationVars,
         solver,  # cp_model.CpSolver
     ) -> tuple[FFcSchedule, int]:
-        """Merge LTF baseline + CP-decoded non-time-fixed + RTF (replayed)
+        """Merge LTF baseline + CP-decoded non-time-fixed + RTF (matched)
         into a full :class:`FFcSchedule`.
 
         The CP model only fixes the **time** of right-time-fixed ops (via
         per-machine dummy bars); their incumbent machine assignment is
         *not* part of the contract — "right time fixed" not "right freeze".
-        To honour that, the baseline keeps only LTF ops on their incumbent
-        machines, and *every* other op (LPF + unfixed + RPF + RTF) is
+        Reconstruction runs in two phases on an LTF-only baseline:
+
+        Phase A (:meth:`_replay_non_time_fixed`): LPF + unfixed + RPF are
         replayed in ``cp_start`` ascending order via
         :meth:`FFcSchedule.add_operation_2_stage` (release_t = CP start,
-        which is ``solver.Value(op_start)`` for non-time-fixed and
-        ``rj_schedule``'s fixed start for RTF). This gives the greedy
-        machine selection maximal freedom — earlier non-time-fixed ops no
-        longer have to dodge RTF locked to its incumbent machine.
+        from ``solver.Value(op_start)``).
+
+        Phase B (:meth:`_replay_right_time_fixed`): RTF is grouped by
+        source (incumbent) machine, source machines are sorted by their
+        group's earliest start time, and each source group is matched 1:1
+        to the un-dispatched target machine with the smallest
+        latest-end-time. Ops within a group are placed on the target via
+        :meth:`FFcSchedule.add_ops_times_2_mc` (explicit time + machine,
+        no slide). This mirrors hybridflowshop's Phase 3 RTF matching.
 
         Cumulative-with-per-machine-dummy-bars proves SOME valid machine
-        assignment exists, but the greedy auto-select policy may not
-        always realise the exact CP times. Such divergence is harmless:
-        the resulting schedule is still feasible (no overlap, all
-        precedences respected), the dispatcher recomputes E/T from the
-        realised schedule, and the accept/reject logic compares against
-        the incumbent on that realised value.
-
-        Returns the merged schedule plus the number of replayed ops
-        whose realised end-time differed from the CP-provided end-time
-        (diagnostic only — large counts indicate the cumulative model is
-        habitually finding solutions the auto-assignment policy can't
-        realise).
+        assignment exists, but neither phase's heuristic is exhaustive.
+        Phase A's greedy may slide an op past ``cp_start``; Phase B's
+        matching may pick a target whose existing occupants collide with
+        the RTF interval, in which case we fall back to
+        :meth:`FFcSchedule.add_operation_2_stage` for that op. Any
+        replayed op whose realised end-time differs from the CP-provided
+        end-time bumps the divergence counter (diagnostic only — the
+        schedule is still feasible, the dispatcher recomputes E/T from
+        the realised positions).
         """
         result = rj_schedule.deepcopy()
 
@@ -443,34 +446,106 @@ class PwCpModelBuilder:
         if ops_to_remove:
             result.remove_operations(ops_to_remove)
 
-        start_map = rj_schedule.get_jik_2_start_time_map()
-        end_map = rj_schedule.get_jik_2_end_time_map()
+        divergence = PwCpModelBuilder._replay_non_time_fixed(
+            result, full_instance, stage_2_partition, op_vars, solver
+        )
+        divergence += PwCpModelBuilder._replay_right_time_fixed(
+            result, full_instance, stage_2_partition, rj_schedule
+        )
+        return result, divergence
 
-        cp_divergence_count = 0
+    @staticmethod
+    def _replay_non_time_fixed(
+        result: FFcSchedule,
+        full_instance: FFcDDWParameters,
+        stage_2_partition: dict[StageIdType, OperationPartition],
+        op_vars: OperationVars,
+        solver,  # cp_model.CpSolver
+    ) -> int:
+        """Phase A: replay LPF + unfixed + RPF in cp_start order via greedy
+        machine selection. Returns the count of ops whose realised end-time
+        differed from the CP-provided end-time."""
+        divergence = 0
         for i in full_instance.stage_id_list:
             partition = stage_2_partition.get(i)
-            if partition is None:
-                continue
-            if not partition.non_time_fixed and not partition.right_time_fixed:
+            if partition is None or not partition.non_time_fixed:
                 continue
             cp_ops = []
             for j, _ in partition.non_time_fixed:
                 cp_start = int(solver.Value(op_vars.op_start[j, i]))
                 cp_end = int(solver.Value(op_vars.op_end[j, i]))
                 cp_ops.append((cp_start, -cp_end, j, cp_end))
-            for j, k in partition.right_time_fixed:
-                cp_start = int(start_map[(j, i, k)])
-                cp_end = int(end_map[(j, i, k)])
-                cp_ops.append((cp_start, -cp_end, j, cp_end))
             cp_ops.sort()
             for cp_start, _neg_end, j, cp_end in cp_ops:
-                duration = cp_end - cp_start
                 result.add_operation_2_stage(
                     stage_id=i,
                     job_id=j,
-                    duration=duration,
+                    duration=cp_end - cp_start,
                     release_t=cp_start,
                 )
                 if result.get_job_end_time(i, j) != cp_end:
-                    cp_divergence_count += 1
-        return result, cp_divergence_count
+                    divergence += 1
+        return divergence
+
+    @staticmethod
+    def _replay_right_time_fixed(
+        result: FFcSchedule,
+        full_instance: FFcDDWParameters,
+        stage_2_partition: dict[StageIdType, OperationPartition],
+        rj_schedule: FFcSchedule,
+    ) -> int:
+        """Phase B: place each RTF source-machine group on an un-dispatched
+        target machine via explicit ``add_ops_times_2_mc``. Source machines
+        are ordered by their group's earliest start time (hybridflowshop's
+        ``right_bar_init_start`` equivalent); targets are chosen by
+        minimum ``get_machine_latest_end_time`` among un-dispatched
+        candidates. On overlap (``ValueError``) or when no target remains,
+        fall back to ``add_operation_2_stage(release_t=cp_start)`` per op
+        and count any realised end-time mismatch as divergence."""
+        start_map = rj_schedule.get_jik_2_start_time_map()
+        end_map = rj_schedule.get_jik_2_end_time_map()
+        divergence = 0
+        for i in full_instance.stage_id_list:
+            partition = stage_2_partition.get(i)
+            if partition is None or not partition.right_time_fixed:
+                continue
+            src_groups: dict[str, list[tuple[int, int, str]]] = {}
+            for j, k in partition.right_time_fixed:
+                s = int(start_map[(j, i, k)])
+                e = int(end_map[(j, i, k)])
+                src_groups.setdefault(k, []).append((s, e, j))
+            for k in src_groups:
+                src_groups[k].sort()
+            src_order = sorted(src_groups, key=lambda k: src_groups[k][0][0])
+            dispatched: set[str] = set()
+            for src_k in src_order:
+                candidates = [
+                    m for m in result.machines_per_stage[i] if m not in dispatched
+                ]
+                target = (
+                    min(
+                        candidates,
+                        key=lambda m: result.get_machine_latest_end_time(i, m),
+                    )
+                    if candidates
+                    else None
+                )
+                if target is None:
+                    for s, e, j in src_groups[src_k]:
+                        result.add_operation_2_stage(
+                            stage_id=i, job_id=j, duration=e - s, release_t=s
+                        )
+                        if result.get_job_end_time(i, j) != e:
+                            divergence += 1
+                    continue
+                for s, e, j in src_groups[src_k]:
+                    try:
+                        result.add_ops_times_2_mc(i, target, j, s, e)
+                    except ValueError:
+                        result.add_operation_2_stage(
+                            stage_id=i, job_id=j, duration=e - s, release_t=s
+                        )
+                        if result.get_job_end_time(i, j) != e:
+                            divergence += 1
+                dispatched.add(target)
+        return divergence

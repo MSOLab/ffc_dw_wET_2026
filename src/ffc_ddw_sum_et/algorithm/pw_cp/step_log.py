@@ -43,8 +43,11 @@ class PwCpStepEntry:
     end-time differed from the CP-provided end-time during merge. >0
     means the cumulative model found a solution the auto-assignment
     policy couldn't realise; the schedule is still feasible, just
-    potentially worse than the CP promise. Includes RTF since the merge
-    treats RTF as time-fixed but machine-free."""
+    potentially worse than the CP promise. RTF is placed via explicit
+    source-to-target machine matching with ``add_ops_times_2_mc`` (no
+    slide possible); it only contributes to this counter when the
+    matched target overlaps and the merge falls back to greedy
+    ``add_operation_2_stage``."""
 
     def as_dict(self) -> dict:
         return asdict(self)
