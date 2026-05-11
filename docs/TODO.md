@@ -187,6 +187,33 @@ when it is not needed, inflating file size and making logs harder to scan.
 **When to act:** When log file size or noise becomes a real problem, or when routix API
 is being tidied up and the change can be bundled in.
 
+## routix MultiInstanceRunner progress logging
+
+`MultiInstanceConcurrentRunner` runs instances concurrently but the
+`MultiInstanceRunner.log` only records scenario start and finish — no
+intermediate progress. Checking status requires manually scanning
+hundreds of instance directories.
+
+**Improvement directions:**
+
+1. **Background monitoring thread** (preferred) — Run a periodic thread
+   inside `MultiInstanceConcurrentRunner` that logs completed count,
+   mean elapsed time, and error count. Can hook into the
+   `ProcessPoolExecutor` completion iterator or a shared counter with
+   negligible overhead.
+2. **Summary log on completion** — Add a summary line at the
+   `Finished Scenario` log location with completed count, mean obj,
+   mean timelimit utilization, etc.
+3. **Atomic progress file** — Each instance subprocess atomically
+   increments a shared `progress_count` file in the scenario directory
+   on completion; the main process reads it periodically and logs.
+
+**Why:** With 1440 instances × 2 scenarios, checking mid-run progress
+requires manual file system scans because the log carries no signal.
+
+**When to act:** When bundling routix changes (log level, dump_json),
+or when progress monitoring becomes a recurring pain point.
+
 ## `routix.io.dump_json` accept formatting kwargs
 
 `routix.io.dump_json` ([routix/io/json.py:22](../../routix/src/routix/io/json.py#L22)) is
