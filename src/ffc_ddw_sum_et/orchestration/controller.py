@@ -48,6 +48,8 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.lb_last_stage_pmtn import (
     apply_lb_by_mcf as algo_apply_lb_by_mcf,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
+    DispatchPairLike,
+    DispatchSweepTrial,
     calc_mcf_lb_and_derive_full_sch as algo_calc_mcf_lb_and_derive_full_sch,
 )
 from ffc_ddw_sum_et.algorithm.neh_cp import (
@@ -95,6 +97,63 @@ _BUILD_FULL_SCH_LABEL_TO_INDEX: dict[str, int] = {
     "fullS_after_unflip": 8,
     "fullS_after_sa_iti": 9,
 }
+
+
+_ALL_JOB_PLACEMENT_PRIORITIES: tuple[PmPrmpSortKey, ...] = (
+    "1_rj_prmp_rel_dev",
+    "1_rj_prmp_abs_dev",
+    "start_time",
+    "end_time",
+    "start_time_maxw",
+    "end_time_maxw",
+)
+_ALL_LAST_STAGE_PLACEMENT_CRITERIA: tuple[Literal["contrib", "dist"], ...] = (
+    "contrib",
+    "dist",
+)
+
+
+def _trials_to_dicts(
+    trials: Sequence[DispatchSweepTrial],
+    chosen_idx: int | None,
+) -> list[dict]:
+    return [
+        {
+            "job_priority": t.job_priority,
+            "placement_criteria": t.placement_priority,
+            "obj_value": float(t.obj_value),
+            "makespan": int(t.makespan),
+            "chosen": (chosen_idx is not None and i == chosen_idx),
+        }
+        for i, t in enumerate(trials)
+    ]
+
+
+def _resolve_dispatch_axis(
+    arg: object,
+    vocab: tuple[str, ...],
+    axis_name: str,
+) -> tuple[str, ...]:
+    """Resolve a YAML knob into a non-empty tuple of axis values.
+
+    Accepts ``None`` (sweep the whole ``vocab``), a single string
+    (fix the axis to that value), or a non-empty sequence of strings
+    (sweep the listed subset). Validates every element against
+    ``vocab``.
+    """
+    if arg is None:
+        return vocab
+    if isinstance(arg, str):
+        if arg not in vocab:
+            raise ValueError(f"Unknown {axis_name}: {arg!r}; expected one of {vocab}.")
+        return (arg,)
+    items = tuple(arg)
+    if not items:
+        raise ValueError(f"{axis_name} list must be non-empty.")
+    for x in items:
+        if not isinstance(x, str) or x not in vocab:
+            raise ValueError(f"Unknown {axis_name}: {x!r}; expected one of {vocab}.")
+    return items
 
 
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
@@ -907,6 +966,66 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             for r, label, _, ms_cell in rows:
                 writer.writerow([r, label, ms_cell])
 
+    def _emit_calc_mcf_lb_trials_csv(
+        self, result: CalcMcfLbAndDeriveFullSchResult
+    ) -> None:
+        """Per-instance CSV of every dispatch-sweep trial across r1/r2.
+
+        Six columns: ``round`` (``"r1"`` | ``"r2"``), ``job_priority``,
+        ``placement_criteria``, ``obj_value`` (last-stage-only weighted
+        ET — the selection metric), ``makespan``, ``chosen`` (``"yes"``
+        on the winner of that round, blank otherwise). No-ops when no
+        artifact layout is bound.
+        """
+        layout = self._artifact_layout
+        scenario = self._artifact_scenario_name
+        instance = self._artifact_instance_name
+        if layout is None or scenario is None or instance is None:
+            return
+        if not result.r1_trials and not result.r2_trials:
+            return
+
+        out_path = layout.artifact_path(
+            "mcf_lb_trials_csv",
+            scenario_name=scenario,
+            instance_name=instance,
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _rows(
+            round_key: str,
+            trials: Sequence[DispatchSweepTrial],
+            chosen_idx: int | None,
+        ) -> list[list[str]]:
+            return [
+                [
+                    round_key,
+                    t.job_priority,
+                    t.placement_priority,
+                    f"{t.obj_value:.6f}",
+                    str(int(t.makespan)),
+                    "yes" if chosen_idx is not None and i == chosen_idx else "",
+                ]
+                for i, t in enumerate(trials)
+            ]
+
+        with out_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    "round",
+                    "job_priority",
+                    "placement_criteria",
+                    "obj_value",
+                    "makespan",
+                    "chosen",
+                ]
+            )
+            for row in _rows("r1", result.r1_trials, result.r1_chosen_idx):
+                writer.writerow(row)
+            for row in _rows("r2", result.r2_trials, result.r2_chosen_idx):
+                writer.writerow(row)
+
     def _emit_calc_mcf_lb_phase_schedule_jsons(
         self, result: CalcMcfLbAndDeriveFullSchResult
     ) -> None:
@@ -1040,6 +1159,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_increment_added = result.r2_p_increment if result.r2_ran else None
         r_increment_added = result.r2_r_increment if result.r2_ran else None
 
+        chosen_job_priority: str | None = None
+        chosen_placement_criteria: str | None = None
+        if result.r1_chosen_idx is not None and result.r1_trials:
+            chosen = result.r1_trials[result.r1_chosen_idx]
+            chosen_job_priority = chosen.job_priority
+            chosen_placement_criteria = chosen.placement_priority
+
         payload = {
             "mcfLbElapsedTime": mcf_lb_elapsed_time,
             "mcfLbObjValue": mcf_lb_obj_value,
@@ -1052,6 +1178,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             "makespanDelta": result.makespan_delta,
             "pIncrementAdded": p_increment_added,
             "rIncrementAdded": r_increment_added,
+            "chosenJobPriority": chosen_job_priority,
+            "chosenPlacementCriteria": chosen_placement_criteria,
+            "trialCount": len(result.r1_trials),
         }
         out_path = layout.artifact_path(
             "calc_mcf_lb_r1_summary_yaml",
@@ -1121,6 +1250,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             if t is not None
         )
 
+        chosen_job_priority: str | None = None
+        chosen_placement_criteria: str | None = None
+        if result.r2_chosen_idx is not None and result.r2_trials:
+            chosen = result.r2_trials[result.r2_chosen_idx]
+            chosen_job_priority = chosen.job_priority
+            chosen_placement_criteria = chosen.placement_priority
+
         payload = {
             "mcfLbElapsedTime": mcf_lb_elapsed_time,
             "mcfLbObjValue": mcf_lb_obj_value,
@@ -1130,6 +1266,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             "fullSchObjValue": full_sch_obj_value,
             "fullSchMakespan": full_sch_makespan,
             "totalTime": total_time,
+            "chosenJobPriority": chosen_job_priority,
+            "chosenPlacementCriteria": chosen_placement_criteria,
+            "trialCount": len(result.r2_trials),
         }
         out_path = layout.artifact_path(
             "calc_mcf_lb_r2_summary_yaml",
@@ -1143,8 +1282,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         draw_pmtn_sch_heatmap: bool = False,
         heatmap_sort: HeatmapSort = "end_time",
-        job_placement_priority: PmPrmpSortKey = "end_time",
-        last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+        job_placement_priority: (PmPrmpSortKey | Sequence[PmPrmpSortKey] | None) = None,
+        last_stage_only_placement_criteria: (
+            Literal["contrib", "dist"] | Sequence[Literal["contrib", "dist"]] | None
+        ) = None,
         makespan_delta_ref: Literal[
             "mcfLbMakespan", "lastStageOnlyMakespan"
         ] = "mcfLbMakespan",
@@ -1191,6 +1332,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ``calc_mcf_lb_r1_summary_yaml`` kind, plus a matching
             ``r2/r2_summary.yaml`` via ``calc_mcf_lb_r2_summary_yaml``
             when round 2 was attempted.
+          * One per-instance dispatch-sweep trial CSV via the
+            ``mcf_lb_trials_csv`` kind (one row per
+            ``(round, job_priority, placement_criteria)`` trial).
 
         When ``emit_phase_schedules=True``, also emits per-round JSON
         snapshots under
@@ -1204,10 +1348,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             draw_pmtn_sch_heatmap: When True, ``apply_lb_by_mcf`` dumps
                 the C-cost heatmap YAML for each round.
             heatmap_sort: Forwarded to ``apply_lb_by_mcf``.
-            job_placement_priority: Forwarded as ``job_priority`` to
-                the heuristic.
-            last_stage_only_placement_criteria: Forwarded as
-                ``placement_priority`` to the heuristic.
+            job_placement_priority: ``None`` (sweep all 6
+                ``PmPrmpSortKey`` values), a single value (fix the axis),
+                or a list of values (sweep the listed subset). Default
+                ``None``. The cartesian product with
+                ``last_stage_only_placement_criteria`` defines the
+                per-round dispatch sweep grid; the lowest
+                ``last_stage_only obj_value`` trial wins each round
+                (ties broken by grid order: ``job_placement_priority``
+                outer, ``last_stage_only_placement_criteria`` inner).
+            last_stage_only_placement_criteria: ``None`` (sweep both
+                ``"contrib"`` and ``"dist"``), a single value, or a
+                list. Default ``None``. See ``job_placement_priority``.
             makespan_delta_ref: Reference makespan in
                 ``makespan_delta = r1_full_sch_makespan - ref_makespan``.
                 ``"mcfLbMakespan"`` (default) uses the r1 MCF preemptive
@@ -1245,6 +1397,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """
         start_elapsed = time.monotonic()
 
+        job_priorities = _resolve_dispatch_axis(
+            job_placement_priority,
+            _ALL_JOB_PLACEMENT_PRIORITIES,
+            "job_placement_priority",
+        )
+        placement_criteria = _resolve_dispatch_axis(
+            last_stage_only_placement_criteria,
+            _ALL_LAST_STAGE_PLACEMENT_CRITERIA,
+            "last_stage_only_placement_criteria",
+        )
+        grid: tuple[DispatchPairLike, ...] = tuple(
+            (jp, pc) for jp in job_priorities for pc in placement_criteria
+        )
+
         c_diag = CalcMcfLbAndDeriveFullSchDiagnostic()
         self.calc_mcf_lb_and_derive_full_sch_diagnostic = c_diag
 
@@ -1263,8 +1429,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self.instance,
             draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
             heatmap_sort=heatmap_sort,
-            job_placement_priority=job_placement_priority,
-            last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+            grid=grid,
             makespan_delta_ref=makespan_delta_ref,
             adjust_p=adjust_p,
             adjust_r=adjust_r,
@@ -1324,6 +1489,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         c_diag.r2_p_increment_added = result.r2_p_increment if result.r2_ran else None
         c_diag.r2_r_increment_added = result.r2_r_increment if result.r2_ran else None
 
+        # ---- Trial records (one dict per evaluated trial). ----
+        c_diag.r1_trials = _trials_to_dicts(result.r1_trials, result.r1_chosen_idx)
+        c_diag.r2_trials = _trials_to_dicts(result.r2_trials, result.r2_chosen_idx)
+        if result.r1_chosen_idx is not None and result.r1_trials:
+            chosen_r1 = result.r1_trials[result.r1_chosen_idx]
+            c_diag.r1_chosen_job_priority = chosen_r1.job_priority
+            c_diag.r1_chosen_placement_criteria = chosen_r1.placement_priority
+        if result.r2_chosen_idx is not None and result.r2_trials:
+            chosen_r2 = result.r2_trials[result.r2_chosen_idx]
+            c_diag.r2_chosen_job_priority = chosen_r2.job_priority
+            c_diag.r2_chosen_placement_criteria = chosen_r2.placement_priority
+
         # ---- Maintain backward-compat state slots so subsequent steps that
         # read these attributes (e.g. a follow-on
         # ``build_full_sch_from_last_stage_only_sch``) keep working. ----
@@ -1352,6 +1529,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self._emit_calc_mcf_lb_r1_summary_yaml(result)
         self._emit_calc_mcf_lb_r2_summary_yaml(result)
         self._emit_calc_mcf_lb_phase_metrics_csv(result)
+        self._emit_calc_mcf_lb_trials_csv(result)
 
         # ---- Build best solution + register exactly once. ----
         best_sol: FFcDDWSolution | None = None

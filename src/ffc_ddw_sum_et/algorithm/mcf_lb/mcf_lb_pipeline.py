@@ -27,9 +27,9 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Literal, Sequence
 
 from ...io.parallel_mc_cost_heatmap import HeatmapSort
 from ...parameters.ffc_ddw_params import FFcDDWParameters
@@ -50,6 +50,8 @@ from .lb_last_stage_pmtn import (
     apply_lb_by_mcf,
 )
 
+DispatchPairLike = tuple[PmPrmpSortKey, Literal["contrib", "dist"]]
+
 # Phase schedule type alias mirrors ``controller_core.MCFLBPhaseSchedule``.
 MCFLBPhaseSchedule = FFcSchedule | MCFPreemptiveSchedule
 
@@ -57,10 +59,29 @@ __all__ = [
     "CalcMcfLbAndDeriveFullSchResult",
     "CalcMcfLbR1Result",
     "CalcMcfLbR2Result",
+    "DispatchSweepTrial",
     "calc_mcf_lb_and_derive_full_sch",
     "calc_mcf_lb_r1_and_derive_full_sch",
     "calc_mcf_lb_r2_and_derive_full_sch",
 ]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DispatchSweepTrial:
+    """One ``(job_priority, placement_priority)`` trial inside a round.
+
+    Holds the heuristic result so the winner can be promoted to the
+    round's ``heuristic`` slot and fed into ``build_full_sch_from_last_stage_only_sch``
+    without recomputation. ``obj_value`` is the heuristic's last-stage-only
+    weighted-ET (the selection metric); ``makespan`` is the heuristic
+    schedule's makespan.
+    """
+
+    job_priority: PmPrmpSortKey
+    placement_priority: Literal["contrib", "dist"]
+    obj_value: float
+    makespan: int
+    heuristic: HeuristicLastStageOnlyResult
 
 
 # Round-1 build_full_sch labels in record order. ``lastS_only_before_rs``
@@ -103,9 +124,16 @@ class CalcMcfLbR1Result:
     - ``build_full is not None``: round 1 finished (``build_full.schedule``
       may still be ``None`` when reverse-dispatch produced nothing).
 
+    ``heuristic`` carries the **winning** trial's heuristic result
+    (lowest ``obj_value``, ties broken by grid order). ``trials`` lists
+    every trial evaluated; ``chosen_idx`` indexes the winner. When the
+    sweep was empty (LP not reached), ``trials`` is empty and
+    ``chosen_idx`` is ``None``.
+
     ``phase_schedules`` is pre-numbered (``"<n>_<label>"``) — up to 8
     entries (1..8) when the round runs to completion, fewer when stop
-    fired earlier.
+    fired earlier. Phase snapshots are recorded for the winning trial
+    only.
     """
 
     apply: ApplyLbByMcfResult | None
@@ -114,6 +142,8 @@ class CalcMcfLbR1Result:
     phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
     elapsed_sec: float
     stop_reason: Literal["stop_guard"] | None
+    trials: list[DispatchSweepTrial] = field(default_factory=list)
+    chosen_idx: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -135,6 +165,8 @@ class CalcMcfLbR2Result:
     p_increment: int
     r_increment: int
     stop_reason: Literal["stop_guard"] | None
+    trials: list[DispatchSweepTrial] = field(default_factory=list)
+    chosen_idx: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -186,26 +218,104 @@ class CalcMcfLbAndDeriveFullSchResult:
     r1_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
     r2_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
 
+    # Per-round dispatch-sweep trial records (in grid order). Empty
+    # when the round was halted before the heuristic stage.
+    r1_trials: list[DispatchSweepTrial] = field(default_factory=list)
+    r2_trials: list[DispatchSweepTrial] = field(default_factory=list)
+    # Winner indices into ``r1_trials`` / ``r2_trials``. ``None`` when
+    # the corresponding round produced no completed trial.
+    r1_chosen_idx: int | None = None
+    r2_chosen_idx: int | None = None
+
+
+def _run_dispatch_sweep(
+    instance: FFcDDWParameters,
+    mcf_preemptive_schedule: MCFPreemptiveSchedule,
+    *,
+    grid: Sequence[DispatchPairLike],
+    p_increment: int = 0,
+    r_multiplier: float = 1.0,
+    r_increment: int = 0,
+    stop_predicate: Callable[[], bool] | None = None,
+    logger: logging.Logger | None = None,
+) -> tuple[list[DispatchSweepTrial], int | None]:
+    """Run the last-stage heuristic for every grid combination, pick the
+    winner by lowest ``(obj_value, grid_index)``.
+
+    Returns ``(trials, chosen_idx)``. When the stop predicate fires
+    between trials, the partial trial list is returned with the best
+    completed trial selected (or ``chosen_idx=None`` if zero trials
+    completed).
+    """
+    if not grid:
+        raise ValueError("_run_dispatch_sweep requires a non-empty grid.")
+
+    trials: list[DispatchSweepTrial] = []
+    for job_priority, placement_priority in grid:
+        if stop_predicate is not None and stop_predicate():
+            break
+        heuristic = heuristic_last_stage_only_from_mcf_lb(
+            instance,
+            mcf_preemptive_schedule,
+            logger=logger,
+            job_priority=job_priority,
+            placement_priority=placement_priority,
+            p_increment=p_increment,
+            r_multiplier=r_multiplier,
+            r_increment=r_increment,
+        )
+        trials.append(
+            DispatchSweepTrial(
+                job_priority=job_priority,
+                placement_priority=placement_priority,
+                obj_value=float(heuristic.obj_value),
+                makespan=int(heuristic.schedule.makespan),
+                heuristic=heuristic,
+            )
+        )
+
+    if not trials:
+        return trials, None
+
+    chosen_idx = min(
+        range(len(trials)),
+        key=lambda i: (trials[i].obj_value, i),
+    )
+    if logger is not None and len(trials) > 1:
+        logger.info(
+            "mcf_lb dispatch sweep: %d trials, winner=(%s, %s) obj=%.4g",
+            len(trials),
+            trials[chosen_idx].job_priority,
+            trials[chosen_idx].placement_priority,
+            trials[chosen_idx].obj_value,
+        )
+    return trials, chosen_idx
+
 
 def calc_mcf_lb_r1_and_derive_full_sch(
     instance: FFcDDWParameters,
     *,
     draw_pmtn_sch_heatmap: bool = False,
     heatmap_sort: HeatmapSort = "end_time",
-    job_placement_priority: PmPrmpSortKey = "end_time",
-    last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    grid: Sequence[DispatchPairLike],
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     heatmap_yaml_path: Path | None = None,
 ) -> CalcMcfLbR1Result:
     """Run round 1 (no augmentation) of the MCF-LB → full-schedule pipeline.
 
-    Pipeline: ``apply_lb_by_mcf`` → ``heuristic_last_stage_only_from_mcf_lb``
-    → ``build_full_sch_from_last_stage_only_sch`` (with
-    ``rebuild_last_stage_with_original_p=False``). Stop checks fire
-    between every substep; ``MCFLBStopRequested`` from the LP layer is
-    treated as a clean stop too.
+    Pipeline: ``apply_lb_by_mcf`` → dispatch-sweep
+    ``heuristic_last_stage_only_from_mcf_lb`` across ``grid`` (pick the
+    lowest-``obj_value`` trial) → ``build_full_sch_from_last_stage_only_sch``
+    (with ``rebuild_last_stage_with_original_p=False``) on the winning
+    trial only. Stop checks fire between every substep and between
+    sweep trials; ``MCFLBStopRequested`` from the LP layer is treated
+    as a clean stop too. Phase snapshots reflect the winning trial.
     """
+    if not grid:
+        raise ValueError(
+            "calc_mcf_lb_r1_and_derive_full_sch requires a non-empty grid."
+        )
     start_elapsed = time.monotonic()
     phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
 
@@ -218,6 +328,8 @@ def calc_mcf_lb_r1_and_derive_full_sch(
         apply: ApplyLbByMcfResult | None = None,
         heuristic: HeuristicLastStageOnlyResult | None = None,
         build_full: BuildFullSchResult | None = None,
+        trials: list[DispatchSweepTrial] | None = None,
+        chosen_idx: int | None = None,
     ) -> CalcMcfLbR1Result:
         return CalcMcfLbR1Result(
             apply=apply,
@@ -226,6 +338,8 @@ def calc_mcf_lb_r1_and_derive_full_sch(
             phase_schedules=phase_schedules,
             elapsed_sec=time.monotonic() - start_elapsed,
             stop_reason=stop_reason,
+            trials=trials if trials is not None else [],
+            chosen_idx=chosen_idx,
         )
 
     if _stop_check():
@@ -248,13 +362,16 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     if _stop_check():
         return _build(stop_reason="stop_guard", apply=apply)
 
-    heuristic = heuristic_last_stage_only_from_mcf_lb(
+    trials, chosen_idx = _run_dispatch_sweep(
         instance,
         apply.mcf_preemptive_schedule,
+        grid=grid,
+        stop_predicate=stop_predicate,
         logger=logger,
-        job_priority=job_placement_priority,
-        placement_priority=last_stage_only_placement_criteria,
     )
+    if chosen_idx is None:
+        return _build(stop_reason="stop_guard", apply=apply, trials=trials)
+    heuristic = trials[chosen_idx].heuristic
     for label, sched in heuristic.intermediate_schedules:
         phase_schedules.append((f"2_{label}", sched))
     phase_schedules.append(
@@ -262,7 +379,13 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     )
 
     if _stop_check():
-        return _build(stop_reason="stop_guard", apply=apply, heuristic=heuristic)
+        return _build(
+            stop_reason="stop_guard",
+            apply=apply,
+            heuristic=heuristic,
+            trials=trials,
+            chosen_idx=chosen_idx,
+        )
 
     build_full = build_full_sch_from_last_stage_only_sch(
         instance,
@@ -287,7 +410,12 @@ def calc_mcf_lb_r1_and_derive_full_sch(
             phase_schedules.append((f"{4 + offset}_{label}", sched))
 
     return _build(
-        stop_reason=None, apply=apply, heuristic=heuristic, build_full=build_full
+        stop_reason=None,
+        apply=apply,
+        heuristic=heuristic,
+        build_full=build_full,
+        trials=trials,
+        chosen_idx=chosen_idx,
     )
 
 
@@ -301,8 +429,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     r_adjust_coeff: float = 0.5,
     draw_pmtn_sch_heatmap: bool = False,
     heatmap_sort: HeatmapSort = "end_time",
-    job_placement_priority: PmPrmpSortKey = "end_time",
-    last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    grid: Sequence[DispatchPairLike],
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     heatmap_yaml_path: Path | None = None,
@@ -327,7 +454,15 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     ``r_adjust_coeff`` (default ``0.5``) scales the ``adjust_r`` formula:
     ``r_increment = ceil(delta_for_inc * r_adjust_coeff)``. The default
     matches the historical hard-coded ``ceil(delta_for_inc / 2)`` factor.
+
+    ``grid`` is the dispatch sweep — for each entry the heuristic runs
+    on the augmented LP solution and the lowest-``obj_value`` trial wins;
+    ``build_full`` runs only on that winner.
     """
+    if not grid:
+        raise ValueError(
+            "calc_mcf_lb_r2_and_derive_full_sch requires a non-empty grid."
+        )
     start_elapsed = time.monotonic()
     phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
 
@@ -348,6 +483,8 @@ def calc_mcf_lb_r2_and_derive_full_sch(
         apply: ApplyLbByMcfResult | None = None,
         heuristic: HeuristicLastStageOnlyResult | None = None,
         build_full: BuildFullSchResult | None = None,
+        trials: list[DispatchSweepTrial] | None = None,
+        chosen_idx: int | None = None,
     ) -> CalcMcfLbR2Result:
         return CalcMcfLbR2Result(
             apply=apply,
@@ -358,6 +495,8 @@ def calc_mcf_lb_r2_and_derive_full_sch(
             p_increment=p_increment,
             r_increment=r_increment,
             stop_reason=stop_reason,
+            trials=trials if trials is not None else [],
+            chosen_idx=chosen_idx,
         )
 
     try:
@@ -379,15 +518,18 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     if _stop_check():
         return _build(stop_reason="stop_guard", apply=apply)
 
-    heuristic = heuristic_last_stage_only_from_mcf_lb(
+    trials, chosen_idx = _run_dispatch_sweep(
         instance,
         apply.mcf_preemptive_schedule,
-        logger=logger,
-        job_priority=job_placement_priority,
-        placement_priority=last_stage_only_placement_criteria,
+        grid=grid,
         p_increment=p_increment,
         r_increment=r_increment,
+        stop_predicate=stop_predicate,
+        logger=logger,
     )
+    if chosen_idx is None:
+        return _build(stop_reason="stop_guard", apply=apply, trials=trials)
+    heuristic = trials[chosen_idx].heuristic
     for label, sched in heuristic.intermediate_schedules:
         phase_schedules.append((f"2_{label}", sched))
     phase_schedules.append(
@@ -395,7 +537,13 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     )
 
     if _stop_check():
-        return _build(stop_reason="stop_guard", apply=apply, heuristic=heuristic)
+        return _build(
+            stop_reason="stop_guard",
+            apply=apply,
+            heuristic=heuristic,
+            trials=trials,
+            chosen_idx=chosen_idx,
+        )
 
     build_full = build_full_sch_from_last_stage_only_sch(
         instance,
@@ -419,7 +567,12 @@ def calc_mcf_lb_r2_and_derive_full_sch(
             phase_schedules.append((f"{4 + offset}_{label}", sched))
 
     return _build(
-        stop_reason=None, apply=apply, heuristic=heuristic, build_full=build_full
+        stop_reason=None,
+        apply=apply,
+        heuristic=heuristic,
+        build_full=build_full,
+        trials=trials,
+        chosen_idx=chosen_idx,
     )
 
 
@@ -428,8 +581,7 @@ def calc_mcf_lb_and_derive_full_sch(
     *,
     draw_pmtn_sch_heatmap: bool = False,
     heatmap_sort: HeatmapSort = "end_time",
-    job_placement_priority: PmPrmpSortKey = "end_time",
-    last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    grid: Sequence[DispatchPairLike],
     makespan_delta_ref: Literal[
         "mcfLbMakespan", "lastStageOnlyMakespan"
     ] = "mcfLbMakespan",
@@ -445,20 +597,18 @@ def calc_mcf_lb_and_derive_full_sch(
 ) -> CalcMcfLbAndDeriveFullSchResult:
     """Run the MCF-LB → full-schedule pipeline.
 
-    Defaults match the historical controller-side composite signature
-    (``heatmap_sort="end_time"``, ``job_placement_priority="end_time"``,
-    ``last_stage_only_placement_criteria="dist"``) so call sites that
-    relied on the controller defaults keep their behaviour.
-
     Args:
         instance: Original FFcDDW instance (no augmentation).
         draw_pmtn_sch_heatmap: When True, ``apply_lb_by_mcf`` dumps the
             C-cost heatmap YAML at the matching per-round path.
         heatmap_sort: Forwarded to ``apply_lb_by_mcf`` for both rounds.
-        job_placement_priority: Forwarded as ``job_priority`` to
-            ``heuristic_last_stage_only_from_mcf_lb`` for both rounds.
-        last_stage_only_placement_criteria: Forwarded as
-            ``placement_priority`` to the heuristic for both rounds.
+        grid: Dispatch sweep grid — list of
+            ``(job_priority, placement_priority)`` pairs. For each
+            round, the last-stage heuristic runs once per pair and the
+            lowest-``obj_value`` trial wins; ``build_full`` runs only
+            on that winner. Must be non-empty; the order also serves as
+            the tiebreak in case of equal ``obj_value``. Passing a
+            singleton grid reproduces the legacy single-trial behaviour.
         makespan_delta_ref: Reference makespan used as the LB-side term
             in ``makespan_delta = r1_full_sch_makespan - ref_makespan``.
             ``"mcfLbMakespan"`` (default) uses the r1 MCF preemptive LP
@@ -539,6 +689,10 @@ def calc_mcf_lb_and_derive_full_sch(
             r2_r_increment=r2.r_increment if r2 is not None else None,
             r1_phase_schedules=r1.phase_schedules,
             r2_phase_schedules=r2.phase_schedules if r2 is not None else [],
+            r1_trials=r1.trials,
+            r2_trials=r2.trials if r2 is not None else [],
+            r1_chosen_idx=r1.chosen_idx,
+            r2_chosen_idx=r2.chosen_idx if r2 is not None else None,
         )
 
     # ------------------- Round 1 -------------------
@@ -546,8 +700,7 @@ def calc_mcf_lb_and_derive_full_sch(
         instance,
         draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
         heatmap_sort=heatmap_sort,
-        job_placement_priority=job_placement_priority,
-        last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        grid=grid,
         stop_predicate=stop_predicate,
         logger=logger,
         heatmap_yaml_path=r1_heatmap_yaml_path,
@@ -655,8 +808,7 @@ def calc_mcf_lb_and_derive_full_sch(
         r_adjust_coeff=r_adjust_coeff,
         draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
         heatmap_sort=heatmap_sort,
-        job_placement_priority=job_placement_priority,
-        last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        grid=grid,
         stop_predicate=stop_predicate,
         logger=logger,
         heatmap_yaml_path=r2_heatmap_yaml_path,

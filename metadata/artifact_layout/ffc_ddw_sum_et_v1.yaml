@@ -55,6 +55,15 @@ artifacts:
     zone: progress
     kind: mcf_lb_phase_makespan_csv
     file_template: "{instance_name}_calc_mcf_lb_phase_makespan.csv"
+  # Per-instance dispatch-sweep trial CSV emitted by
+  # ``calc_mcf_lb_and_derive_full_sch``. One row per
+  # ``(round, job_priority, placement_criteria)`` trial in grid order;
+  # ``chosen`` column marks the winner of each round. Always emitted when
+  # the composite step ran (independent of ``emit_phase_schedules``).
+  - scope: instance
+    zone: progress
+    kind: mcf_lb_trials_csv
+    file_template: "{instance_name}_calc_mcf_lb_trials.csv"
   # ``calc_mcf_lb_and_derive_full_sch``-scoped per-round JSON snapshots.
   # Two-level nested layout under ``calc_mcf_lb_and_derive_full_sch/{r1|r2}/``;
   # filenames are pre-numbered (``{index}_{label}.json``). Same dual JSON

@@ -1,0 +1,50 @@
+# Pipeline: MCF-LB → NEH-CP → incremental PW-CP → base CPSAT
+#
+# Anchored on metadata/20260509/20260509_mcf_lb_best_neh_cp_best_base_cpsat.yaml.
+# Adds an incremental_pw_cp refinement stage between NEH-CP and base CPSAT,
+# spending ~1/5 of the scenario budget on PW-CP sliding-window sweeps.
+#
+# Two scenarios vary batch_size over the n/c/m vocabulary:
+#   - batch_size: "m"  → 1 × last-stage machine count
+#   - batch_size: "2m" → 2 × last-stage machine count
+# Resolved to int (ceil) by the controller; PwCpOption receives the int.
+#
+# incremental_pw_cp timelimit semantics:
+#   total_timelimit is per *inner* pw_cp invocation (split across that
+#   sweep's batches). With increment_unfixed_batch_count_flag="always" and
+#   unfixed_batch_count_min=2, max=8, pw_cp is invoked 7 times, so the
+#   PW-CP stage spends up to 7 × 0.018nc = 0.126nc in CP — capped in
+#   practice by the scenario-level 0.09nc wall-clock deadline.
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [0, 10, 20, 30, 40, 50, 60, 70, 80]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260512
+
+instance_worker_cnt: 96
+
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  - name: mcf_lb_3
+    timelimit: "0.09nc"
+    output_subdir: mcf_lb_3
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        # Omitting job_placement_priority / last_stage_only_placement_criteria
+        # triggers the full 6x2 dispatching sweep per round; the lowest
+        # last-stage-only obj_value trial wins (build_full runs on the
+        # winner only).
+        job_placement_priority: null
+        last_stage_only_placement_criteria: null
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true

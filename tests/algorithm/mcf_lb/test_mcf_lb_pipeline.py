@@ -22,6 +22,11 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
+# Legacy single-combo grid reproducing the pre-sweep behaviour
+# (``job_placement_priority="end_time"``,
+# ``last_stage_only_placement_criteria="dist"``).
+_LEGACY_GRID = [("end_time", "dist")]
+
 
 def _make_multi_stage_instance() -> FFcDDWParameters:
     return FFcDDWParameters(
@@ -61,7 +66,7 @@ def test_default_flow_skips_r2_with_no_adjust_reason() -> None:
     """
     instance = _make_multi_stage_instance()
 
-    result = calc_mcf_lb_and_derive_full_sch(instance)
+    result = calc_mcf_lb_and_derive_full_sch(instance, grid=_LEGACY_GRID)
 
     assert isinstance(result, CalcMcfLbAndDeriveFullSchResult)
     assert result.r1_apply is not None
@@ -103,7 +108,7 @@ def test_single_stage_short_circuits_through_r1_only() -> None:
     """
     instance = _make_single_stage_instance()
 
-    result = calc_mcf_lb_and_derive_full_sch(instance)
+    result = calc_mcf_lb_and_derive_full_sch(instance, grid=_LEGACY_GRID)
 
     assert result.r1_build_full is not None
     assert result.r1_build_full.schedule is not None
@@ -126,7 +131,9 @@ def test_adjust_runs_r2_or_records_signed_delta() -> None:
     """
     instance = _make_multi_stage_instance()
 
-    result = calc_mcf_lb_and_derive_full_sch(instance, adjust_p=True, adjust_r=True)
+    result = calc_mcf_lb_and_derive_full_sch(
+        instance, grid=_LEGACY_GRID, adjust_p=True, adjust_r=True
+    )
 
     assert result.r1_build_full is not None
     assert result.r1_build_full.schedule is not None
@@ -166,7 +173,7 @@ def test_adjust_p_only_zeroes_r_increment_when_r2_runs() -> None:
     """
     instance = _make_multi_stage_instance()
 
-    result = calc_mcf_lb_and_derive_full_sch(instance, adjust_p=True)
+    result = calc_mcf_lb_and_derive_full_sch(instance, grid=_LEGACY_GRID, adjust_p=True)
 
     if result.r2_ran:
         assert result.r2_p_increment is not None
@@ -189,6 +196,7 @@ def test_proceed_r2_when_nonpositive_cmax_forces_r2_with_clamped_delta() -> None
 
     result = calc_mcf_lb_and_derive_full_sch(
         instance,
+        grid=_LEGACY_GRID,
         adjust_p=True,
         adjust_r=True,
         proceed_r2_when_nonpositive_cmax=True,
@@ -248,11 +256,13 @@ def test_r_adjust_coeff_scales_r_increment() -> None:
 
     baseline = calc_mcf_lb_and_derive_full_sch(
         instance,
+        grid=_LEGACY_GRID,
         adjust_r=True,
         proceed_r2_when_nonpositive_cmax=True,
     )
     doubled = calc_mcf_lb_and_derive_full_sch(
         instance,
+        grid=_LEGACY_GRID,
         adjust_r=True,
         r_adjust_coeff=1.0,
         proceed_r2_when_nonpositive_cmax=True,
@@ -279,6 +289,7 @@ def test_makespan_delta_ref_last_stage_only_uses_heuristic_makespan() -> None:
 
     mcf_ref = calc_mcf_lb_and_derive_full_sch(
         instance,
+        grid=_LEGACY_GRID,
         makespan_delta_ref="mcfLbMakespan",
         adjust_p=True,
         adjust_r=True,
@@ -286,6 +297,7 @@ def test_makespan_delta_ref_last_stage_only_uses_heuristic_makespan() -> None:
     )
     ls_ref = calc_mcf_lb_and_derive_full_sch(
         instance,
+        grid=_LEGACY_GRID,
         makespan_delta_ref="lastStageOnlyMakespan",
         adjust_p=True,
         adjust_r=True,
@@ -315,6 +327,7 @@ def test_invalid_makespan_delta_ref_raises() -> None:
     with pytest.raises(ValueError, match="makespan_delta_ref"):
         calc_mcf_lb_and_derive_full_sch(
             instance,
+            grid=_LEGACY_GRID,
             makespan_delta_ref="foo",  # type: ignore[arg-type]
         )
 
@@ -327,7 +340,9 @@ def test_stop_predicate_at_entry_returns_empty_result() -> None:
     """
     instance = _make_multi_stage_instance()
 
-    result = calc_mcf_lb_and_derive_full_sch(instance, stop_predicate=lambda: True)
+    result = calc_mcf_lb_and_derive_full_sch(
+        instance, grid=_LEGACY_GRID, stop_predicate=lambda: True
+    )
 
     assert result.r1_apply is None
     assert result.r1_heuristic is None

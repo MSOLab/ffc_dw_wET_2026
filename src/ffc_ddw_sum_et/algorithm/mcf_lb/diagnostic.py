@@ -10,7 +10,7 @@ and the same data is never written from multiple steps.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 __all__ = [
     "MCFLBDiagnostic",
@@ -139,3 +139,12 @@ class CalcMcfLbAndDeriveFullSchDiagnostic:
     # serialized record is self-contained.
     final_obj_bound: float | None = None
     elapsed_sec: float | None = None
+    # Per-round dispatching sweep records. Each trial is a plain dict:
+    # ``{job_priority, placement_criteria, obj_value, makespan, chosen}``.
+    # Empty when the round did not produce any heuristic result.
+    r1_trials: list[dict] = field(default_factory=list)
+    r2_trials: list[dict] = field(default_factory=list)
+    r1_chosen_job_priority: str | None = None
+    r1_chosen_placement_criteria: str | None = None
+    r2_chosen_job_priority: str | None = None
+    r2_chosen_placement_criteria: str | None = None
