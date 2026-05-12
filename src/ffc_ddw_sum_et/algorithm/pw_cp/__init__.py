@@ -11,6 +11,7 @@ from .partition import (
     validate_and_get_batch_count,
 )
 from .step_log import PwCpStepEntry
+from .visual import REGION_COLORS, render_partition_gantt_svg
 
 __all__ = [
     "JobMcType",
@@ -20,7 +21,9 @@ __all__ = [
     "PwCpModelBuilder",
     "PwCpOption",
     "PwCpStepEntry",
+    "REGION_COLORS",
     "build_operation_partition",
     "build_stage_2_batch_list",
+    "render_partition_gantt_svg",
     "validate_and_get_batch_count",
 ]

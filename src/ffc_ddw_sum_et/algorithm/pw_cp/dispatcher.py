@@ -30,6 +30,7 @@ from .partition import (
     validate_and_get_batch_count,
 )
 from .step_log import PwCpStepEntry
+from .visual import render_partition_gantt_svg
 
 __all__ = ["PwCpDispatcher"]
 
@@ -156,6 +157,30 @@ class PwCpDispatcher:
             rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(
                 instance.job_2_dw_ub_map
             )
+
+            if (
+                option.debug_partition_gantt
+                and option.debug_partition_gantt_path_getter is not None
+            ):
+                max_gantt = option.debug_partition_gantt_max_steps
+                if max_gantt is None or step < max_gantt:
+                    svg = render_partition_gantt_svg(
+                        rj_schedule,
+                        stage_2_partition,
+                        stage_id_list=instance.stage_id_list,
+                        machines_per_stage=instance.stage_2_machines_map,
+                        horizon=horizon,
+                        step=step,
+                        unfixed_start=unfixed_start,
+                        unfixed_batch_count=option.unfixed_batch_count,
+                    )
+                    svg_path = option.debug_partition_gantt_path_getter(step)
+                    if svg_path is not None:
+                        svg_path.parent.mkdir(parents=True, exist_ok=True)
+                        svg_path.write_text(svg)
+                        logger.debug(
+                            "pw_cp step %d: partition gantt -> %s", step, svg_path
+                        )
 
             sub_instance = FFcDDWParameters.create_instance_of_job_subset(
                 instance, sub_jobs
