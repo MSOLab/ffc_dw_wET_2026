@@ -7,6 +7,8 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
+from ffc_ddw_sum_et._calc import rpd_f
+
 from ._chart_constants import series_colors_json, symbol_map_json
 from .obj_log_loader import InstanceProgression, build_endpoint_df
 
@@ -15,13 +17,6 @@ logger = logging.getLogger(__name__)
 _EMPTY_POSITIVE_AXIS_UPPER = 0.01
 _POSITIVE_AXIS_PADDING = 1.05
 _MIN_NORMALIZED_TIME_X_UPPER = 1.0
-
-
-def _rpd_f(obj: float, ref: float) -> float:
-    denom = obj + ref
-    if denom == 0:
-        return 0.0 if obj == ref else math.nan
-    return 2.0 * (obj - ref) / denom
 
 
 def _build_timelimit_map(
@@ -60,7 +55,7 @@ def load_method_mean_metrics(
             method_name = str(best_row["subroutine_name"]).split(".", 1)[0]
             time_pct = float(best_row["global_end_sec"]) / timelimit
             obj = float(best_row["obj_value"])
-            rp = _rpd_f(obj, ref)
+            rp = rpd_f(obj, ref)
             if math.isnan(rp):
                 continue
             methods.append((int(ci), method_name, time_pct, rp, obj))

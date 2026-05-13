@@ -34,6 +34,8 @@ from typing import Any
 import pandas as pd
 from routix.io import ArtifactLayout
 
+from ffc_ddw_sum_et._calc import rpd_f
+
 from .method_mean_scatter import (
     export_method_mean_scatter_html,
     load_method_mean_metrics,
@@ -62,18 +64,6 @@ def _build_baseline_map(baseline_df: pd.DataFrame) -> dict[str, float]:
         for ins, ref in zip(ins_ids, refs)
         if ref is not None and not (isinstance(ref, float) and math.isnan(ref))
     }
-
-
-def _rpdf(obj: float, ref: float) -> float:
-    """RPDf = (obj - ref) / ((obj + ref) / 2).
-
-    ``obj == ref == 0`` → 0.0 by definition (both solutions are equally zero).
-    ``obj + ref == 0`` but ``obj != ref`` → NaN (undefined; excluded by dropna).
-    """
-    denom = obj + ref
-    if denom == 0:
-        return 0.0 if obj == ref else math.nan
-    return 2 * (obj - ref) / denom
 
 
 def load_baseline_df(
@@ -145,7 +135,7 @@ def attach_rpdf_columns(
         )
         merged = merged.loc[~unmatched].copy()
     merged["rpd_f"] = [
-        _rpdf(float(o), float(r))
+        rpd_f(float(o), float(r))
         for o, r in zip(merged["obj_value"], merged["ref_obj"], strict=True)
     ]
     return merged.drop(columns=["ref_obj"])
