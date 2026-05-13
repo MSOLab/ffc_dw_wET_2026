@@ -131,6 +131,11 @@ artifacts:
   - scope: scenario
     kind: subroutine_rpdf_scatter_html
     file_template: "summary_method_rpdf_and_norm_time_scatter.html"
+  # Per-scenario method-mean (time%, RPDf) scatter chart. Aggregates per
+  # top-level method mean values from each instance's obj_log.
+  - scope: scenario
+    kind: method_mean_scatter_html
+    file_template: "summary_method_mean_rpdf_and_mean_norm_time_scatter.html"
 
   # ---- run ----
   - scope: run
@@ -180,3 +185,8 @@ artifacts:
   - scope: run
     kind: calc_mcf_lb_run_summary_csv
     file_template: "{run_id}_calc_mcf_lb_and_derive_full_sch_summary.csv"
+  # Run-level multi-scenario method-mean scatter chart. Aggregates per-scenario
+  # method points into one plot.
+  - scope: run
+    kind: multi_scenario_method_mean_scatter_html
+    file_template: "{run_id}_multi_scenario_method_mean_rpdf_and_mean_norm_time_scatter.html"
