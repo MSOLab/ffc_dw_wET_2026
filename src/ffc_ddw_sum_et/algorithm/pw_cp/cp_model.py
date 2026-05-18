@@ -40,7 +40,8 @@ class PwCpBuildResult:
     """Jobs whose last-stage op is non-time-fixed (E_j, T_j contribute to the CP objective)."""
     et_offset_partial: int
     """Constant E+T contribution from jobs whose last-stage op is time-fixed
-    (logged for diagnostics; not added to the CP objective)."""
+    within the sub-instance (not added to the CP objective; the dispatcher
+    recomputes the full progress offset from rj_schedule instead)."""
 
 
 class PwCpModelBuilder:
