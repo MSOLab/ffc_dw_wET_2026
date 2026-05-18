@@ -55,11 +55,11 @@ from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpJobPriority,
     NehCpOption,
 )
+from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
 from ffc_ddw_sum_et.algorithm.pw_cp import (
     PwCpDispatcher,
     PwCpOption,
 )
-from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
 from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
 from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
@@ -1328,7 +1328,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # read these attributes (e.g. a follow-on
         # ``build_full_sch_from_last_stage_only_sch``) keep working. ----
         last_apply = result.r2_apply or result.r1_apply
-        last_p_inc = result.r2_p_increment if result.r2_ran else 0
+
+        # Pair the p_increment with whichever apply was chosen: r2's apply
+        # carries the augmented increment even when r2 stopped early (so
+        # r2_ran is False), whereas r1's apply is always un-augmented.
+        if last_apply is result.r2_apply and result.r2_apply is not None:
+            last_p_inc = result.r2_p_increment or 0
+        else:
+            last_p_inc = 0
         if last_apply is not None:
             self.mcf_preemptive_schedule = last_apply.mcf_preemptive_schedule
             self.mcf_preemptive_sch_p_increment = last_p_inc
@@ -2426,9 +2433,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                                 f"{obj_before:.0f}"
                                 if obj_before is not None
                                 else "None",
-                                f"{obj_after:.0f}"
-                                if obj_after is not None
-                                else "None",
+                                f"{obj_after:.0f}" if obj_after is not None else "None",
                             )
                             break
                         self.logger.info(
@@ -2444,6 +2449,4 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         "incremental_pw_cp[count=%d]: single pass.",
                         unfixed_batch_count,
                     )
-                    self.pw_cp(
-                        unfixed_batch_count=unfixed_batch_count, **base_kwargs
-                    )
+                    self.pw_cp(unfixed_batch_count=unfixed_batch_count, **base_kwargs)
