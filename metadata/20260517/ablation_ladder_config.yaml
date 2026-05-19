@@ -18,7 +18,7 @@ bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260517
 
-instance_worker_cnt: 12
+instance_worker_cnt: 8
 
 draw_gantt: false
 painter_thread_cnt: 16
