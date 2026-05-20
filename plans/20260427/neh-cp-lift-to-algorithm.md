@@ -74,13 +74,16 @@ schedule.
 
 ```
 src/ffc_ddw_sum_et/algorithm/
+    step_tl_resolver.py             # resolve_per_step_tl + BatchTlMode
+                                    # (shared across subroutines)
+    utils.py                        # trunc4 (shared across subroutines)
     neh_cp/                         # NEW package
         __init__.py                 # re-export NehCpDispatcher, NehCpOption,
-                                    # NehCpJobPriority, NehCpBatchTlMode
+                                    # NehCpJobPriority, NehCpStepEntry,
+                                    # neh_cp_job_sequence
         option.py                   # NehCpOption(AlgOption)
         dispatcher.py               # NehCpDispatcher (Algorithm)
         sequence.py                 # _neh_cp_job_sequence + NehCpJobPriority
-        tl_schedule.py              # _resolve_per_step_tl + NehCpBatchTlMode
         step_log.py                 # NehCpStepEntry dataclass +
                                     # progress_log <-> step_log conversion
 src/ffc_ddw_sum_et/algorithm/__init__.py
@@ -155,7 +158,7 @@ class NehCpOption(AlgOption):
     cp_tl_seconds: float | None = None
     total_timelimit_seconds: float | None = None
     num_batches: int | None = None
-    batch_tl_mode: NehCpBatchTlMode = "constant"
+    batch_tl_mode: BatchTlMode = "constant"
     batch_tl_offset_seconds: float = 0.01
     apply_cumulative_tl: bool = False
     pf_method: PFMethod = "PF1"
@@ -308,9 +311,11 @@ Each step below should leave the test suite green before moving on.
    `orchestration/neh_cp.py` keeps `from .sequence import ...` shims for
    one commit. Move `tests/orchestration/test_neh_cp.py` to
    `tests/algorithm/neh_cp/test_sequence.py`. Run tests.
-3. **Move TL schedule.** Move `_resolve_per_step_tl` and
-   `NehCpBatchTlMode` into `algorithm/neh_cp/tl_schedule.py`. Add
-   `tests/algorithm/neh_cp/test_tl_schedule.py` covering: constant
+3. **Move TL schedule.** Move `resolve_per_step_tl` and
+   `BatchTlMode` into `algorithm/step_tl_resolver.py` (shared module
+   at the algorithm package level, not inside `neh_cp/`, since the same
+   per-step TL resolution is reusable across subroutines). Add
+   `tests/algorithm/test_step_tl_resolver.py` covering: constant
    mode, linear mode, the `B*offset > total_seconds` fallback, and the
    `total_seconds is None` short-circuit. (These cases are not
    currently unit-tested.) Run tests.

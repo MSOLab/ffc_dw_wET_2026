@@ -22,3 +22,10 @@ Reference: Pan, Ruiz, Alfaro-Fernández (2017). *Computers and Operations Resear
 - [`docs/io-principles.md`](docs/io-principles.md) — IO extraction and import rules
 - [`docs/algorithm-principles.md`](docs/algorithm-principles.md) — algorithm execution contract
 - [`docs/TODO.md`](docs/TODO.md) — deferred design notes
+
+## Results
+
+- output/20260509/20260510T033853_487093/mcf_lb_best_neh_cp_best_base_cpsat/
+  - MCF-LB -> NEH-CP -> base CP
+- output/20260509/20260510T222326_509362/mcf_lb_best_neh_cp_best_flip_makespan_cp_base_cpsat/
+  - MCF-LB -> NEH-CP -> flip makespan -> base CP

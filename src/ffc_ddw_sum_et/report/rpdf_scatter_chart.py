@@ -31,6 +31,13 @@ from typing import TypeVar
 import pandas as pd
 
 from ._chart_constants import series_colors_json, symbol_map_json
+from .np_utils import progression_points_to_arrays, step_function_mean_over_union
+from .step_path import build_step_path
+from .trajectory_utils import (
+    ProgressionPoint,
+    build_best_so_far_progression_points,
+    keep_strict_global_improvements_or_endpoints,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +46,6 @@ REQUIRED_COLUMNS: frozenset[str] = frozenset(
 )
 
 T = TypeVar("T")
-
-
-@dataclass(frozen=True)
-class _ProgressionPoint:
-    time: float
-    rpd_f: float
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,7 @@ class _RawInstanceProgression:
     instance_id: str
     t_factor: float
     r_factor: float
-    progression_points: list[_ProgressionPoint]
+    progression_points: list[ProgressionPoint]
     raw_marker_meta_by_time: dict[float, _MarkerMeta]
     endpoint_marker_meta_by_time: dict[float, _MarkerMeta]
 
@@ -84,99 +85,23 @@ def _validate_columns(df: pd.DataFrame, name: str) -> None:
         raise ValueError(f"Missing columns in {name}: {sorted(missing)}")
 
 
-def _compute_best_so_far_y_values(y_values: list[float]) -> list[float]:
-    best: list[float] = []
-    current: float | None = None
-    for y in y_values:
-        current = y if current is None else min(current, y)
-        best.append(current)
-    return best
-
-
-def _dedupe_progression_points(
-    points: list[_ProgressionPoint],
-) -> list[_ProgressionPoint]:
-    deduped_by_time: dict[float, _ProgressionPoint] = {}
-    for p in points:
-        deduped_by_time[p.time] = p
-    return [deduped_by_time[t] for t in sorted(deduped_by_time)]
-
-
-def _build_best_so_far_progression_points(grp: pd.DataFrame) -> list[_ProgressionPoint]:
-    if grp.empty:
-        return []
-    x_values = grp["norm_time"].tolist()
-    best_y = _compute_best_so_far_y_values(grp["rpd_f"].tolist())
-    points = [
-        _ProgressionPoint(time=float(x), rpd_f=float(y))
-        for x, y in zip(x_values, best_y)
-    ]
-    return _dedupe_progression_points(points)
-
-
 def _lookup_rpdf_at_or_before(
-    progression_points: list[_ProgressionPoint], query_time: float
+    progression_points: list[ProgressionPoint], query_time: float
 ) -> float | None:
     """Largest ``rpd_f`` whose ``time <= query_time``, or ``None`` when all
     points lie after ``query_time``.
 
-    ``progression_points`` is produced by ``_dedupe_progression_points`` and
-    is therefore sorted ascending by ``time`` with unique keys. Convenience
-    wrapper around :func:`_extract_progression_times` +
-    :func:`_lookup_rpdf_at_or_before_indexed` for one-off lookups; hot
-    paths (e.g. mean-series rendering across union times) should
-    precompute the times array once per model and call the indexed
-    helper directly.
+    ``progression_points`` must be sorted ascending by ``time`` with
+    unique keys (as produced by
+    :func:`build_best_so_far_progression_points`).
     """
     if not progression_points:
         return None
-    times = _extract_progression_times(progression_points)
-    return _lookup_rpdf_at_or_before_indexed(times, progression_points, query_time)
-
-
-def _extract_progression_times(
-    progression_points: list[_ProgressionPoint],
-) -> list[float]:
-    """Sorted-ascending times, suitable as the haystack for ``bisect``."""
-    return [p.time for p in progression_points]
-
-
-def _lookup_rpdf_at_or_before_indexed(
-    times: list[float],
-    progression_points: list[_ProgressionPoint],
-    query_time: float,
-) -> float | None:
-    """Bisect-based lookup that reuses a precomputed ``times`` array.
-
-    ``times[i]`` must equal ``progression_points[i].time``. Use this in
-    inner loops over multiple query times — one allocation of ``times``
-    per model, one O(log n) bisect per query.
-    """
-    if not progression_points:
-        return None
+    times = [p.time for p in progression_points]
     idx = bisect.bisect_right(times, query_time) - 1
     if idx < 0:
         return None
     return progression_points[idx].rpd_f
-
-
-def _build_step_path(
-    x_values: list[float], y_values: list[float]
-) -> tuple[list[float], list[float]]:
-    step_x: list[float] = []
-    step_y: list[float] = []
-    for idx, (x, y) in enumerate(zip(x_values, y_values)):
-        if idx == 0:
-            step_x.append(x)
-            step_y.append(y)
-            continue
-        prev_y = y_values[idx - 1]
-        step_x.append(x)
-        step_y.append(prev_y)
-        if y < prev_y:
-            step_x.append(x)
-            step_y.append(y)
-    return step_x, step_y
 
 
 def _build_step_aligned_values(base_values: list[T], y_values: list[float]) -> list[T]:
@@ -211,41 +136,6 @@ def _build_marker_meta_by_time(
     return meta_by_time
 
 
-def _keep_strict_global_improvements_or_endpoints(
-    progression_grp: pd.DataFrame,
-) -> pd.DataFrame:
-    """Keep rows whose ``rpd_f`` strictly improves the *global* running min
-    over the whole instance trajectory, plus each ``call_index`` group's
-    last row (endpoint, always kept regardless of improvement).
-
-    The marker y-value plotted by the chart is the global best-so-far at the
-    marker's time; filtering by per-call improvement leaves clusters of
-    markers all stacked at the same y when a call's per-point rpd_f never
-    beats the global best set by an earlier call. Filtering by global
-    improvement guarantees each non-endpoint marker sits at a distinct y.
-
-    Sort key is ``norm_time`` with ``global_sec`` as a tiebreaker when
-    present. Required columns: ``call_index``, ``rpd_f``, ``norm_time``.
-    """
-    if progression_grp.empty:
-        return progression_grp
-    sort_cols = [c for c in ["norm_time", "global_sec"] if c in progression_grp.columns]
-    ordered = progression_grp.sort_values(sort_cols)
-    endpoint_indices: set = set()
-    for _, sub_grp in ordered.groupby("call_index", sort=False):
-        endpoint_indices.add(sub_grp.index[-1])
-    keep_indices: list = []
-    running_min = float("inf")
-    for idx, rpdf in zip(ordered.index, ordered["rpd_f"].tolist()):
-        is_strict = rpdf < running_min
-        is_endpoint = idx in endpoint_indices
-        if is_strict or is_endpoint:
-            keep_indices.append(idx)
-        if is_strict:
-            running_min = rpdf
-    return progression_grp.loc[keep_indices].sort_values(sort_cols)
-
-
 def _build_raw_instance_progression(
     instance_id: object,
     endpoint_grp: pd.DataFrame,
@@ -260,9 +150,9 @@ def _build_raw_instance_progression(
     if progression_grp is None or progression_grp.empty:
         raw_source = endpoint_grp
     else:
-        raw_source = _keep_strict_global_improvements_or_endpoints(progression_grp)
+        raw_source = keep_strict_global_improvements_or_endpoints(progression_grp)
     raw_meta = _build_marker_meta_by_time(instance_id, raw_source, t_factor, r_factor)
-    points = _build_best_so_far_progression_points(raw_source)
+    points = build_best_so_far_progression_points(raw_source)
     return _RawInstanceProgression(
         series_id=series_id,
         instance_id=str(instance_id),
@@ -277,7 +167,7 @@ def _build_raw_instance_progression(
 def _build_raw_plotly_series(model: _RawInstanceProgression) -> dict:
     progression_x = [p.time for p in model.progression_points]
     progression_y = [p.rpd_f for p in model.progression_points]
-    step_x, step_y = _build_step_path(progression_x, progression_y)
+    step_x, step_y = build_step_path(progression_x, progression_y)
 
     marker_x = sorted(model.raw_marker_meta_by_time)
     marker_meta = [model.raw_marker_meta_by_time[t] for t in marker_x]
@@ -370,51 +260,15 @@ def _build_mean_series_payload(
 
     out: list[dict] = []
     for (t_factor, r_factor), models in sorted(by_group.items()):
-        first_times = [m.progression_points[0].time for m in models]
-        last_times = [m.progression_points[-1].time for m in models]
-        start_time = max(first_times)
-        end_time = max(last_times)
-        union_times = sorted(
-            {
-                p.time
-                for m in models
-                for p in m.progression_points
-                if start_time <= p.time <= end_time
-            }
-        )
-        if not union_times:
-            union_times = [start_time]
-            if end_time > start_time:
-                union_times.append(end_time)
-        elif union_times[-1] < end_time:
-            union_times.append(end_time)
-
-        mean_x: list[float] = []
-        mean_y: list[float] = []
-        # Precompute the (times, points) pair per model once; the inner
-        # loop below would otherwise rebuild the times array for every
-        # union_time × model pair.
-        model_haystacks = [
-            (_extract_progression_times(m.progression_points), m.progression_points)
-            for m in models
+        model_arrays = [
+            progression_points_to_arrays(m.progression_points) for m in models
         ]
-        for t in union_times:
-            values = [
-                v
-                for times, pts in model_haystacks
-                if (v := _lookup_rpdf_at_or_before_indexed(times, pts, t)) is not None
-            ]
-            if len(values) != len(models):
-                continue
-            mean_x.append(t)
-            mean_y.append(sum(values) / len(values))
+        mean_x, mean_y = step_function_mean_over_union(model_arrays)
 
-        if not mean_x:
-            continue
         t_str = _format_factor(t_factor)
         r_str = _format_factor(r_factor)
         series_id = f"mean(T={t_str},R={r_str})"
-        step_x, step_y = _build_step_path(mean_x, mean_y)
+        step_x, step_y = build_step_path(mean_x, mean_y)
         point_customdata = [[series_id, t_str, r_str, len(models)] for _ in mean_x]
         step_customdata = _build_step_aligned_values(point_customdata, mean_y)
         guides = _build_mean_vertical_guides(models)

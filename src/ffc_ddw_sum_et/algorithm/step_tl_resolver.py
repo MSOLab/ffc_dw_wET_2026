@@ -1,13 +1,13 @@
-"""Per-batch CP-SAT time-limit schedule for NEH-CP."""
+"""Per-batch CP-SAT time-limit schedule resolution."""
 
 from __future__ import annotations
 
 import logging
 from typing import Literal
 
-__all__ = ["NehCpBatchTlMode", "resolve_per_step_tl"]
+__all__ = ["BatchTlMode", "resolve_per_step_tl"]
 
-NehCpBatchTlMode = Literal["constant", "linear"]
+BatchTlMode = Literal["constant", "linear"]
 
 
 def resolve_per_step_tl(
@@ -16,7 +16,7 @@ def resolve_per_step_tl(
     total_seconds: float | None,
     num_batches: int | None,
     batch_count: int,
-    batch_tl_mode: NehCpBatchTlMode,
+    batch_tl_mode: BatchTlMode,
     batch_tl_offset_seconds: float,
     logger: logging.Logger,
 ) -> list[float] | None:
@@ -39,7 +39,7 @@ def resolve_per_step_tl(
 
     if cp_tl_from_arg is not None:
         logger.info(
-            "neh_cp: cp_tl=%s ignored because total_timelimit is set; "
+            "cp_tl=%s ignored because total_timelimit is set; "
             "per-batch limit governed by batch_tl_mode=%r.",
             cp_tl_from_arg,
             batch_tl_mode,
@@ -58,7 +58,7 @@ def resolve_per_step_tl(
         )
         if x <= 0:
             logger.warning(
-                "neh_cp: batch_tl_offset_seconds=%.4f * B=%d exceeds "
+                "batch_tl_offset_seconds=%.4f * B=%d exceeds "
                 "total_timelimit=%.2f; falling back to constant schedule.",
                 offset,
                 batch_count,

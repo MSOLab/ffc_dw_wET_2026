@@ -34,6 +34,12 @@ from typing import Any
 import pandas as pd
 from routix.io import ArtifactLayout
 
+from ffc_ddw_sum_et._calc import rpd_f
+
+from .method_mean_scatter import (
+    export_method_mean_scatter_html,
+    load_method_mean_metrics,
+)
 from .multi_scenario_method_chart import (
     export_multi_scenario_method_rpdf_comparison_html,
 )
@@ -48,16 +54,16 @@ from .rpdf_scatter_chart import export_method_rpdf_scatter_html
 logger = logging.getLogger(__name__)
 
 
-def _rpdf(obj: float, ref: float) -> float:
-    """RPDf = (obj - ref) / ((obj + ref) / 2).
-
-    ``obj == ref == 0`` → 0.0 by definition (both solutions are equally zero).
-    ``obj + ref == 0`` but ``obj != ref`` → NaN (undefined; excluded by dropna).
-    """
-    denom = obj + ref
-    if denom == 0:
-        return 0.0 if obj == ref else math.nan
-    return 2 * (obj - ref) / denom
+def _build_baseline_map(baseline_df: pd.DataFrame) -> dict[str, float]:
+    if baseline_df.empty:
+        return {}
+    ins_ids = baseline_df["instance_id"].astype(str).tolist()
+    refs = baseline_df["ref_obj"].tolist()
+    return {
+        ins: float(ref)
+        for ins, ref in zip(ins_ids, refs)
+        if ref is not None and not (isinstance(ref, float) and math.isnan(ref))
+    }
 
 
 def load_baseline_df(
@@ -129,7 +135,7 @@ def attach_rpdf_columns(
         )
         merged = merged.loc[~unmatched].copy()
     merged["rpd_f"] = [
-        _rpdf(float(o), float(r))
+        rpd_f(float(o), float(r))
         for o, r in zip(merged["obj_value"], merged["ref_obj"], strict=True)
     ]
     return merged.drop(columns=["ref_obj"])
@@ -199,6 +205,9 @@ def write_post_run_subroutine_chart_artifacts(
         return
 
     scenario_metrics: list[dict[str, Any]] = []
+    method_mean_scenarios: list[dict[str, Any]] = []
+    baseline_obj_map = _build_baseline_map(baseline_df)
+
     for scenario_name in scenarios:
         progressions = iter_scenario_instance_progressions(layout, scenario_name)
         if not progressions:
@@ -222,6 +231,32 @@ def write_post_run_subroutine_chart_artifacts(
                 scenario_name,
             )
 
+        method_points = load_method_mean_metrics(
+            progressions,
+            baseline_obj_by_instance=baseline_obj_map,
+        )
+        if method_points:
+            scenario_entry = {"label": scenario_name, "method_points": method_points}
+            per_scenario_path = layout.artifact_path(
+                "method_mean_scatter_html", scenario_name=scenario_name
+            )
+            ok = export_method_mean_scatter_html(
+                [scenario_entry],
+                per_scenario_path,
+                title=f"Method mean RPDf vs mean Time% — {scenario_name}",
+            )
+            if ok:
+                logger.info(
+                    "Per-scenario method-mean scatter HTML saved to %s",
+                    per_scenario_path,
+                )
+            method_mean_scenarios.append(scenario_entry)
+        else:
+            logger.info(
+                "No method-mean points for %s (no instances with both obj and BKS)",
+                scenario_name,
+            )
+
     if not scenario_metrics:
         logger.info("No scenario yielded usable chart data; skipping flow comparison")
         return
@@ -233,3 +268,15 @@ def write_post_run_subroutine_chart_artifacts(
     )
     if not ok:
         logger.info("Multi-scenario flow comparison HTML skipped (no traces)")
+
+    if method_mean_scenarios:
+        run_level_path = layout.artifact_path("multi_scenario_method_mean_scatter_html")
+        ok = export_method_mean_scatter_html(
+            method_mean_scenarios,
+            run_level_path,
+            title=f"Method mean RPDf vs mean Time% — {layout._run_id}",
+        )
+        if ok:
+            logger.info(
+                "Run-level method-mean scatter HTML saved to %s", run_level_path
+            )

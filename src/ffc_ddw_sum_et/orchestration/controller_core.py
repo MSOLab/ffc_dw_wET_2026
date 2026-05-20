@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 from routix.dynamic_data_object import DynamicDataObject
 from routix.report import SubroutineReport
@@ -14,7 +14,12 @@ from routix.stopping_criteria import StoppingCriteria
 from routix.subroutine_controller import SubroutineController
 
 from ..algorithm.base.alg_record import ProgressLogEntry, WorkStatus
-from ..algorithm.mcf_lb.diagnostic import MCFLBDiagnostic
+from ..algorithm.mcf_lb.diagnostic import (
+    BuildFullSchDiagnostic,
+    CalcMcfLbAndDeriveFullSchDiagnostic,
+    HeuristicLastStageOnlyDiagnostic,
+    MCFLBDiagnostic,
+)
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import (
     FFcSchedule,
@@ -76,17 +81,19 @@ class FFcDDWSubroutineControllerCore(
     def _define_states(self) -> None:
         """Define all state attributes used across subroutine phases."""
         self.mcf_preemptive_schedule: MCFPreemptiveSchedule | None = None
+        # Per-entry-point diagnostic slots. Each is populated only by
+        # the controller method whose name matches the slot — composite
+        # steps record their r1/r2 sub-results on their own diagnostic
+        # rather than nesting other diagnostics.
         self.mcf_lb_diagnostic: MCFLBDiagnostic | None = None
+        self.heuristic_last_stage_only_diagnostic: (
+            HeuristicLastStageOnlyDiagnostic | None
+        ) = None
+        self.build_full_sch_diagnostic: BuildFullSchDiagnostic | None = None
+        self.calc_mcf_lb_and_derive_full_sch_diagnostic: (
+            CalcMcfLbAndDeriveFullSchDiagnostic | None
+        ) = None
         self.last_stage_only_sol: FFcDDWSolution | None = None
-        # Composite-step hand-off slot for ``adjust_*_by_full_sch_*`` fallback.
-        # When a composite (e.g. ``calc_mcf_lb_and_derive_full_sch``) builds an
-        # intermediate full schedule it has not yet registered as incumbent,
-        # it stores it here so subsequent ``apply_lb_by_mcf`` /
-        # ``heuristic_last_stage_only_sch_from_mcf_lb`` calls invoked with
-        # ``adjust_*_by_full_sch_*`` flags can read the reference makespan
-        # without going through ``solution_manager.get_incumbent()``. The
-        # composite clears this back to ``None`` before returning.
-        self.adjust_ref_full_sol: FFcDDWSolution | None = None
         # `p_increment` value used by the producing step; ``None`` until the
         # step has run. When non-zero, the recorded MCF preemptive schedule
         # / last-stage-only solution belong to an *augmented* problem (last
@@ -270,6 +277,29 @@ class FFcDDWSubroutineControllerCore(
             )
             return zone_dir / filename
         return super().get_file_path_for_subroutine(filename_suffix)
+
+    def _record_mcf_lb_phase(self, item: tuple[str, MCFLBPhaseSchedule]) -> None:
+        """Append one ``(name, schedule)`` tuple to ``mcf_lb_phase_schedules``,
+        prefixing ``name`` with the current method's call_context so the
+        runner-side artifact filenames sort by subroutine-flow step on disk
+        and don't collide across step calls.
+        """
+        name, sched = item
+        self.mcf_lb_phase_schedules.append((self._mcf_lb_phase_name(name), sched))
+
+    def _record_mcf_lb_phases(
+        self, items: Iterable[tuple[str, MCFLBPhaseSchedule]]
+    ) -> None:
+        """Bulk variant of ``_record_mcf_lb_phase`` for sub-call results
+        (e.g. ``result.intermediate_schedules``).
+        """
+        prefix = self._get_call_context_of_current_method()
+        self.mcf_lb_phase_schedules.extend(
+            (f"{prefix}_{name}", sched) for name, sched in items
+        )
+
+    def _mcf_lb_phase_name(self, local_name: str) -> str:
+        return f"{self._get_call_context_of_current_method()}_{local_name}"
 
     def try_get_file_path_for_subroutine(self, suffix: str) -> Path | None:
         """Like ``get_file_path_for_subroutine`` but returns ``None`` instead

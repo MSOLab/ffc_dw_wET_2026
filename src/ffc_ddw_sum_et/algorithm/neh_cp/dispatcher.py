@@ -28,10 +28,11 @@ from ..base.alg_spec import AlgSpec
 from ..cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from ..cumulative import BaseModelBuilder, decode_pf_method
 from ..dispatcher import MixedDispatcher
+from ..step_tl_resolver import resolve_per_step_tl
+from ..utils import trunc4
 from .option import NehCpOption
 from .sequence import neh_cp_job_sequence
-from .step_log import NehCpStepEntry, trunc4
-from .tl_schedule import resolve_per_step_tl
+from .step_log import NehCpStepEntry
 
 __all__ = ["NehCpDispatcher"]
 
@@ -352,8 +353,8 @@ class NehCpDispatcher:
                         semi_active_snapshot = cp_sch.deepcopy()
                     if (se_tidy + st_tidy) < (se_new + st_new):
                         logger.info(
-                            "neh_cp step %d: making CP solution semi-active reduced E/T "
-                            "from %d to %d; using semi-active solution.",
+                            "neh_cp step %d: MSA & ITI on CP solution reduced E/T "
+                            "from %d to %d; using solution after MSA & ITI.",
                             step,
                             se_new + st_new,
                             se_tidy + st_tidy,

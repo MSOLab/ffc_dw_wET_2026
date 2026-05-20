@@ -1,7 +1,5 @@
 """Scenario runner and reporting for FAM experiment orchestration."""
 
-from __future__ import annotations
-
 import csv
 import json
 import logging
@@ -12,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from routix.io import ArtifactLayout
+from routix.io import ArtifactLayout, load_yaml
 from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
@@ -23,6 +21,7 @@ from ..io import schedule_keys as K
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
+from .mcf_lb_phase_labels import MCF_LB_R1_LABEL_ORDER, MCF_LB_R2_LABEL_ORDER
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
 
 logger = logging.getLogger(__name__)
@@ -67,8 +66,41 @@ def _compute_rpdf(obj: float | None, bks: float | None) -> float | None:
     return (obj - bks) / denom
 
 
+def _format_obj_for_title(value: Any) -> str:
+    """Render ``objValue``/``objBound`` for the chart title."""
+    if value is None:
+        return "N/A"
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{int(f)}" if f.is_integer() else f"{f:.2f}"
+
+
+def _build_gantt_title(
+    data: dict[str, Any],
+    png_path: Path,
+    *,
+    makespan: int,
+) -> str:
+    """3-line chart title: ``<instance>\\n<file_stem>\\nobj=<o>, makespan=<m>``.
+
+    ``instance`` falls back to the PNG stem if the source carries no
+    ``instanceName`` field (defensive). Line 2 uses the PNG's *stem*
+    (no ``.png`` suffix) so a reader can match chart -> file at a
+    glance without redundant extension noise.
+    """
+    instance = data.get(K.INSTANCE_NAME) or png_path.stem
+    obj = _format_obj_for_title(data.get(K.OBJ_VALUE))
+    return f"{instance}\n{png_path.stem}\nobj={obj}, makespan={makespan}"
+
+
 def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> None:
-    """Render the main Gantt PNG from `<ins>_solution.json`.
+    """Render a Gantt PNG from any ``dump_solution_json``-shaped file.
+
+    Used for the canonical ``<ins>_solution.json`` (final-zone incumbent)
+    and any phase JSON whose source schedule was a non-preemptive
+    :class:`FFcSchedule` (``operations[]`` shape).
 
     Module-level so it's picklable by ``ProcessPoolExecutor``. Imports
     matplotlib inside the worker to keep the algorithm process clean.
@@ -100,7 +132,11 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
         start_map[key] = int(op[K.OP_START])
         end_map[key] = int(op[K.OP_END])
 
+    makespan = max(end_map.values()) if end_map else 0
+    title = _build_gantt_title(data, png_path, makespan=makespan)
+
     try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
         GanttPlotter().export(
             png_path,
             start_map,
@@ -109,6 +145,7 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
             stage_list=data.get(K.STAGES),
             machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
             all_job_list=data.get(K.JOBS),
+            title=title,
         )
     except Exception:
         logger.exception("Failed to render Gantt for %s", solution_path)
@@ -146,35 +183,40 @@ def _render_heatmap_from_yaml(yaml_path: Path, html_path: Path) -> None:
         logger.exception("Failed to render heatmap for %s", yaml_path)
 
 
-def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
-    """Render a phase Gantt PNG from a phase schedule YAML.
+def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
+    """Render a phase Gantt PNG from a compact-JSON phase schedule.
 
-    Auto-detects regular vs preemptive content from the yaml top-level keys
-    and dispatches to the matching plotter.
+    Auto-detects regular vs preemptive content from the top-level keys
+    (``operations[]`` vs ``segments[]``) and dispatches to the matching
+    plotter. Embeds a 3-line chart title:
+
+    1. instance name (from ``instanceName``)
+    2. PNG filename
+    3. ``obj=<v>, makespan=<m>``
+
+    Module-level so it's picklable by ``ProcessPoolExecutor``.
     """
     try:
         import matplotlib
 
         matplotlib.use("Agg")
-        from ..io import load_preemptive_schedule_yaml, load_schedule_yaml
         from ..io.gantt import GanttPlotter, PreemptiveGanttPlotter
     except ImportError:
-        logger.warning("matplotlib not available, skipping %s", yaml_path)
+        logger.warning("matplotlib not available, skipping %s", json_path)
         return
 
     try:
-        from routix.io import load_yaml as _load_yaml
-
-        peek = _load_yaml(yaml_path) or {}
+        with open(json_path) as f:
+            data = json.load(f)
     except Exception:
-        logger.exception("Failed to peek yaml %s", yaml_path)
+        logger.exception("Failed to load phase json %s", json_path)
         return
 
-    is_preemptive = K.SEGMENTS in peek
+    is_preemptive = K.SEGMENTS in data
 
     try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
         if is_preemptive:
-            data = load_preemptive_schedule_yaml(yaml_path)
             segment_records = data.get(K.SEGMENTS) or []
             if not segment_records:
                 return
@@ -193,6 +235,8 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
             machines = machines_per_stage.get(stage_id, []) if stage_id else []
             jobs = data.get(K.JOBS)
             all_jobs = data.get(K.ALL_JOBS) or jobs
+            makespan = max(seg[4] for seg in segments)
+            title = _build_gantt_title(data, png_path, makespan=makespan)
             PreemptiveGanttPlotter().export(
                 png_path,
                 segments,
@@ -200,9 +244,9 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
                 machines=machines,
                 jobs=jobs,
                 all_jobs=all_jobs,
+                title=title,
             )
         else:
-            data = load_schedule_yaml(yaml_path)
             operations = data.get(K.OPERATIONS) or []
             if not operations:
                 return
@@ -212,6 +256,8 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
                 key = (op[K.OP_JOB], op[K.OP_STAGE], op[K.OP_MACHINE])
                 start_map[key] = int(op[K.OP_START])
                 end_map[key] = int(op[K.OP_END])
+            makespan = max(end_map.values()) if end_map else 0
+            title = _build_gantt_title(data, png_path, makespan=makespan)
             GanttPlotter().export(
                 png_path,
                 start_map,
@@ -220,9 +266,10 @@ def _render_phase_gantt_from_yaml(yaml_path: Path, png_path: Path) -> None:
                 stage_list=data.get(K.STAGES),
                 machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
                 all_job_list=data.get(K.JOBS),
+                title=title,
             )
     except Exception:
-        logger.exception("Failed to render Gantt for %s", yaml_path)
+        logger.exception("Failed to render Gantt for %s", json_path)
 
 
 @dataclass
@@ -516,9 +563,11 @@ class FFcDDWReporter:
 
         self._write_summary_csv()
         self._write_mcf_preemptive_obj_csv()
-        self._write_adjust_params_by_makespan_delta_csv()
         self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
+        self._write_calc_mcf_lb_phase_metric_summaries()
+        self._write_calc_mcf_lb_summary_csv()
+        self._write_calc_mcf_lb_run_summary_csv()
         self._write_mcf_lb_pivot_artifacts()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_pivot()
         self._write_mcf_lb_last_stage_only_obj_bks_wintie_table()
@@ -629,8 +678,17 @@ class FFcDDWReporter:
         logger.info("Summary CSV written to %s", path)
 
     def _build_mcf_lb_extras(self, ir: InstanceResult) -> dict[str, Any]:
-        """Flatten the controller's MCF-LB diagnostic + BKS into summary columns."""
-        diag = ir.mcf_lb_diagnostic or {}
+        """Flatten the controller's MCF-LB diagnostics + BKS into summary columns.
+
+        Reads from the per-entry-point diagnostic that was actually
+        populated for this run. Standalone ``apply_lb_by_mcf`` populates
+        ``mcf_lb_diagnostic``; the composite step populates
+        ``calc_mcf_lb_and_derive_full_sch_diagnostic`` with r1/r2
+        sub-results as flat fields.
+        """
+        mcf_diag = ir.mcf_lb_diagnostic or {}
+        calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic or {}
+        build_diag = ir.build_full_sch_diagnostic or {}
 
         ins_index = self._resolve_ins_index(ir.instance_name)
         bks = (
@@ -639,43 +697,21 @@ class FFcDDWReporter:
             else None
         )
 
-        # Mirrors controller.py: obj_bound_final = max(mcf_lb, pf_bound).
-        reported_obj_bound: float | None = None
-        if diag.get("mcf_lb") is not None:
-            reported_obj_bound = diag["mcf_lb"]
-            if diag.get("profile_fix_bound") is not None:
-                reported_obj_bound = max(reported_obj_bound, diag["profile_fix_bound"])
-
-        def _gap(a_key: str, b_key: str) -> float | None:
-            a, b = diag.get(a_key), diag.get(b_key)
-            return a - b if a is not None and b is not None else None
-
-        pf_vs_bks = (
-            diag["profile_fix_obj"] - bks
-            if diag.get("profile_fix_obj") is not None and bks is not None
-            else None
+        # Composite reports r1's MCF LB as the global LB (always valid);
+        # standalone apply_lb_by_mcf reports its own.
+        mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
+        mcf_solve_sec = mcf_diag.get("mcf_solve_sec") or calc_diag.get(
+            "r1_mcf_solve_sec"
         )
+        dispatched_obj = build_diag.get("dispatched_obj") or calc_diag.get("final_obj")
 
         return {
-            "mcfLb": diag.get("mcf_lb"),
-            "lastStageOnlyBound": diag.get("last_stage_only_bound"),
-            "lastStageOnlyObj": diag.get("last_stage_only_obj"),
+            "mcfLb": mcf_lb,
             "bks": bks,
-            "dispatchedObj": diag.get("dispatched_obj"),
-            "profileFixObj": diag.get("profile_fix_obj"),
-            "profileFixBound": diag.get("profile_fix_bound"),
-            "reportedObjBound": reported_obj_bound,
-            "lastStageBoundMinusMcfGap": _gap("last_stage_only_bound", "mcf_lb"),
-            "lastStagePrimalMinusBoundGap": _gap(
-                "last_stage_only_obj", "last_stage_only_bound"
-            ),
-            "dispatchedMinusProfileFixGap": _gap("dispatched_obj", "profile_fix_obj"),
-            "profileFixMinusBksGap": pf_vs_bks,
-            "mcfSolveSec": diag.get("mcf_solve_sec"),
-            "lastStageCpSatSec": diag.get("last_stage_cp_sat_sec"),
-            "dispatchSec": diag.get("dispatch_sec"),
-            "profileFixCpSatSec": diag.get("profile_fix_cp_sat_sec"),
-            "mcfLbReachedPhase": diag.get("reached_phase") or "",
+            "dispatchedObj": dispatched_obj,
+            "reportedObjBound": mcf_lb,
+            "mcfSolveSec": mcf_solve_sec,
+            "dispatchSec": build_diag.get("dispatch_sec"),
         }
 
     def _aggregate_scenario(self, sc: ScenarioResult) -> dict[str, Any]:
@@ -728,17 +764,320 @@ class FFcDDWReporter:
         "R",
         "W",
         "mcfLb",
-        "lastStageOnlyBound",
         "lastStageOnlyObj",
         "bks",
         "dispatchedObj",
-        "profileFixObj",
-        "profileFixBound",
         "mcfSolveSec",
-        "lastStageCpSatSec",
         "dispatchSec",
-        "profileFixCpSatSec",
     )
+
+    def _write_calc_mcf_lb_phase_metric_summaries(self) -> None:
+        """Per-scenario aggregated wide-format CSVs for
+        ``calc_mcf_lb_and_derive_full_sch`` snapshot metrics.
+
+        Reads each instance's ``mcf_lb_phase_obj_csv`` and
+        ``mcf_lb_phase_makespan_csv`` (under the per-instance ``progress``
+        zone) and collates them into one row per instance with one column
+        per ``(round, label)`` snapshot. Instances that did not run the
+        composite step (no per-instance CSV) are skipped. When no instance
+        in a scenario has either CSV, the summary file is not written.
+        Rows are sorted by ``insIndex`` to match other per-scenario tables.
+        """
+        column_pairs: list[tuple[str, str]] = [
+            ("r1", label) for label in MCF_LB_R1_LABEL_ORDER
+        ] + [("r2", label) for label in MCF_LB_R2_LABEL_ORDER]
+        # Metadata columns prepended on the scenario-aggregated wide CSV.
+        # Sourced from the reporter's ``_index_to_meta`` (loaded from
+        # the PRA2017 instance table) — distinct from any per-instance
+        # CSV (which intentionally carries no metadata to keep it terse).
+        meta_columns = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W"]
+        column_headers = (
+            meta_columns
+            + ["instanceName"]
+            + [f"{r}_{label}" for r, label in column_pairs]
+        )
+
+        for sc in self.scenario_results:
+            obj_rows: list[tuple[int | None, str, list[str], list[str]]] = []
+            ms_rows: list[tuple[int | None, str, list[str], list[str]]] = []
+            for ir in sc.instance_results:
+                obj_path = self.layout.artifact_path(
+                    "mcf_lb_phase_obj_csv",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                ms_path = self.layout.artifact_path(
+                    "mcf_lb_phase_makespan_csv",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                obj_cells = self._read_phase_metric_csv(obj_path, "obj_value")
+                ms_cells = self._read_phase_metric_csv(ms_path, "makespan")
+                ins_idx = self._resolve_ins_index(ir.instance_name)
+                meta = (
+                    self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
+                )
+                meta_cells = ["" if ins_idx is None else str(ins_idx)] + [
+                    "" if meta.get(col) is None else str(meta.get(col))
+                    for col in meta_columns[1:]
+                ]
+                if obj_cells is not None:
+                    obj_rows.append(
+                        (
+                            ins_idx,
+                            ir.instance_name,
+                            meta_cells,
+                            [obj_cells.get(p, "") for p in column_pairs],
+                        )
+                    )
+                if ms_cells is not None:
+                    ms_rows.append(
+                        (
+                            ins_idx,
+                            ir.instance_name,
+                            meta_cells,
+                            [ms_cells.get(p, "") for p in column_pairs],
+                        )
+                    )
+
+            for kind, rows in (
+                ("mcf_lb_phase_obj_summary_csv", obj_rows),
+                ("mcf_lb_phase_makespan_summary_csv", ms_rows),
+            ):
+                if not rows:
+                    continue
+                rows.sort(key=lambda r: (r[0] if r[0] is not None else -1, r[1]))
+                path = self.layout.artifact_path(kind, scenario_name=sc.name)
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(column_headers)
+                    for _, name, meta_cells, value_cells in rows:
+                        writer.writerow(meta_cells + [name] + value_cells)
+                logger.info("Phase metric summary CSV written to %s", path)
+
+    _CALC_MCF_LB_SUMMARY_R_FIELDS: tuple[str, ...] = (
+        "mcfLbObjValue",
+        "mcfLbMakespan",
+        "lastStageOnlyObjValue",
+        "lastStageOnlyMakespan",
+        "fullSchObjValue",
+        "fullSchMakespan",
+        "totalTime",
+    )
+
+    def _write_calc_mcf_lb_summary_csv(self) -> None:
+        """Per-scenario summary CSV aggregating per-instance r1/r2 sidecars.
+
+        Reads each instance's ``calc_mcf_lb_r1_summary_yaml`` and
+        ``calc_mcf_lb_r2_summary_yaml`` (under the per-instance
+        ``progress`` zone) and collates them into one row per instance.
+        Instances without an r1 sidecar (composite step did not run) are
+        skipped. When no instance in a scenario has an r1 sidecar, the
+        summary file is not written. Rows are sorted by ``insIndex``.
+
+        Columns: instance metadata, then r1_<field> for each of seven
+        stage metrics, then ``makespanDelta``, ``pIncrementAdded``,
+        ``rIncrementAdded``, then r2_<field> for the same seven metrics.
+        ``mcfLbElapsedTime`` is omitted (covered by ``totalTime``).
+        """
+        meta_columns = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W"]
+        r1_columns = [f"r1_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        r2_columns = [f"r2_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        delta_columns = ["makespanDelta", "pIncrementAdded", "rIncrementAdded"]
+        column_headers = (
+            meta_columns + ["instanceName"] + r1_columns + delta_columns + r2_columns
+        )
+
+        def _cell(value: Any) -> str:
+            return "" if value is None else str(value)
+
+        for sc in self.scenario_results:
+            rows: list[tuple[int | None, str, list[str]]] = []
+            for ir in sc.instance_results:
+                r1_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r1_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                if not r1_path.exists():
+                    continue
+                r1_data: dict[str, Any] = load_yaml(r1_path) or {}
+                r2_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r2_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                r2_data: dict[str, Any] = (
+                    load_yaml(r2_path) if r2_path.exists() else {}
+                ) or {}
+
+                ins_idx = self._resolve_ins_index(ir.instance_name)
+                meta = (
+                    self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
+                )
+                meta_cells = ["" if ins_idx is None else str(ins_idx)] + [
+                    _cell(meta.get(col)) for col in meta_columns[1:]
+                ]
+                r1_cells = [
+                    _cell(r1_data.get(f)) for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                ]
+                delta_cells = [_cell(r1_data.get(c)) for c in delta_columns]
+                r2_cells = [
+                    _cell(r2_data.get(f)) for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                ]
+                rows.append(
+                    (
+                        ins_idx,
+                        ir.instance_name,
+                        meta_cells
+                        + [ir.instance_name]
+                        + r1_cells
+                        + delta_cells
+                        + r2_cells,
+                    )
+                )
+
+            if not rows:
+                continue
+            rows.sort(key=lambda r: (r[0] if r[0] is not None else -1, r[1]))
+            path = self.layout.artifact_path(
+                "calc_mcf_lb_summary_csv", scenario_name=sc.name
+            )
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(column_headers)
+                for _, _, cells in rows:
+                    writer.writerow(cells)
+            logger.info("calc_mcf_lb summary CSV written to %s", path)
+
+    def _write_calc_mcf_lb_run_summary_csv(self) -> None:
+        """Run-level CSV aggregating every per-scenario summary into one
+        table with ``scenarioName`` as the leading column.
+
+        Reads the same per-instance r1/r2 sidecars that
+        ``_write_calc_mcf_lb_summary_csv`` uses, so the run-level table
+        cannot drift from the per-scenario tables.
+
+        For rows where the r2 sidecar is absent (e.g., the composite
+        step's ``no_adjust`` or ``stop_guard`` skip path), six r2
+        obj/makespan cells are filled with the matching r1 values, and
+        ``pIncrementAdded`` / ``rIncrementAdded`` / ``r2_totalTime``
+        are written as ``0``. ``makespanDelta`` is left blank in that
+        case (i.e., whatever the r1 sidecar carries — typically
+        ``None`` when r2 was skipped via ``no_adjust``).
+
+        Rows are ordered by scenario (the order ``self.scenario_results``
+        was given to the reporter), then by ``insIndex``.
+        """
+        meta_columns = ["insIndex", "n", "c", "totalMcCount", "T", "R", "W", "BKS"]
+        r1_columns = [f"r1_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        r2_columns = [f"r2_{f}" for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS]
+        delta_columns = ["makespanDelta", "pIncrementAdded", "rIncrementAdded"]
+        column_headers = (
+            ["scenarioName"]
+            + meta_columns
+            + ["instanceName"]
+            + r1_columns
+            + delta_columns
+            + r2_columns
+        )
+
+        def _cell(value: Any) -> str:
+            return "" if value is None else str(value)
+
+        rows: list[tuple[int, int | None, str, list[str]]] = []
+        for sc_idx, sc in enumerate(self.scenario_results):
+            for ir in sc.instance_results:
+                r1_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r1_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                if not r1_path.exists():
+                    continue
+                r1_data: dict[str, Any] = load_yaml(r1_path) or {}
+                r2_path = self.layout.artifact_path(
+                    "calc_mcf_lb_r2_summary_yaml",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                r2_present = r2_path.exists()
+                r2_data: dict[str, Any] = (load_yaml(r2_path) or {}) if r2_present else {}
+
+                ins_idx = self._resolve_ins_index(ir.instance_name)
+                meta = (
+                    self._index_to_meta.get(ins_idx, {}) if ins_idx is not None else {}
+                )
+                meta_cells = ["" if ins_idx is None else str(ins_idx)] + [
+                    _cell(meta.get(col)) for col in meta_columns[1:]
+                ]
+                r1_cells = [
+                    _cell(r1_data.get(f)) for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                ]
+                if r2_present:
+                    delta_cells = [_cell(r1_data.get(c)) for c in delta_columns]
+                    r2_cells = [
+                        _cell(r2_data.get(f))
+                        for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                    ]
+                else:
+                    # Synthesize r2 cells from r1: 6 obj/makespan fields
+                    # mirror r1; totalTime is forced to 0.
+                    delta_cells = [
+                        _cell(r1_data.get("makespanDelta")),
+                        "0",
+                        "0",
+                    ]
+                    r2_cells = [
+                        "0" if f == "totalTime" else _cell(r1_data.get(f))
+                        for f in self._CALC_MCF_LB_SUMMARY_R_FIELDS
+                    ]
+                rows.append(
+                    (
+                        sc_idx,
+                        ins_idx,
+                        ir.instance_name,
+                        [sc.name]
+                        + meta_cells
+                        + [ir.instance_name]
+                        + r1_cells
+                        + delta_cells
+                        + r2_cells,
+                    )
+                )
+
+        if not rows:
+            return
+        rows.sort(
+            key=lambda r: (r[0], r[1] if r[1] is not None else -1, r[2])
+        )
+        path = self.layout.artifact_path("calc_mcf_lb_run_summary_csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(column_headers)
+            for _, _, _, cells in rows:
+                writer.writerow(cells)
+        logger.info("calc_mcf_lb run summary CSV written to %s", path)
+
+    @staticmethod
+    def _read_phase_metric_csv(
+        path: Path, value_column: str
+    ) -> dict[tuple[str, str], str] | None:
+        """Return a ``{(round, label): cell_value}`` map from a per-instance
+        phase-metric CSV. Returns ``None`` if the file does not exist.
+        """
+        if not path.exists():
+            return None
+        out: dict[tuple[str, str], str] = {}
+        with open(path, encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                round_key = row.get("round", "")
+                label = row.get("label", "")
+                if not round_key or not label:
+                    continue
+                out[(round_key, label)] = row.get(value_column, "")
+        return out
 
     def _write_mcf_lb_analysis_csv(self) -> None:
         """Per-instance lower-bound analysis table.
@@ -749,7 +1088,12 @@ class FFcDDWReporter:
         """
         for sc in self.scenario_results:
             rows = [
-                ir for ir in sc.instance_results if ir.mcf_lb_diagnostic is not None
+                ir
+                for ir in sc.instance_results
+                if (
+                    ir.mcf_lb_diagnostic is not None
+                    or ir.calc_mcf_lb_and_derive_full_sch_diagnostic is not None
+                )
             ]
             if not rows:
                 continue
@@ -774,9 +1118,9 @@ class FFcDDWReporter:
         """Run-scoped long-format CSV of MCF-preemptive objective values.
 
         Columns: ``scenarioName, insIndex, objValue``. One row per
-        ``(scenario, instance)`` pair where ``mcf_lb_diagnostic.mcf_lb`` is
-        non-null. Rows are sorted by ``(scenarioName, insIndex)``. Skipped
-        entirely if no scenario produced an MCF LB.
+        ``(scenario, instance)`` pair where an MCF LB was produced
+        (either by a top-level ``apply_lb_by_mcf`` step or by the
+        composite ``calc_mcf_lb_and_derive_full_sch``'s round 1).
 
         Note: ``MCFPreemptiveSchedule`` does not carry a weighted-E+T
         objective (it is preemptive and stage-disaggregated), so we use the
@@ -785,10 +1129,9 @@ class FFcDDWReporter:
         rows: list[tuple[str, int | None, float]] = []
         for sc in self.scenario_results:
             for ir in sc.instance_results:
-                diag = ir.mcf_lb_diagnostic
-                if diag is None:
-                    continue
-                mcf_lb = diag.get("mcf_lb")
+                mcf_diag = ir.mcf_lb_diagnostic or {}
+                calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic or {}
+                mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
                 if mcf_lb is None:
                     continue
                 rows.append(
@@ -815,126 +1158,15 @@ class FFcDDWReporter:
                 )
         logger.info("MCF preemptive obj CSV written to %s", path)
 
-    def _write_adjust_params_by_makespan_delta_csv(self) -> None:
-        """Run-scoped long-format CSV of makespan-delta-driven param adjusts.
-
-        Unifies the per-instance diagnostic produced by the
-        ``adjust_(p|r)_by_full_sch_and_last_stage_(only_pmtn|only)_sch``
-        knobs. One row per ``(scenario, instance)`` pair where any knob
-        fired (i.e. ``adjust_params_makespan_delta`` is non-null on the
-        diagnostic).
-
-        Columns: ``scenarioName, insIndex, instanceName,
-        lastStageOnlyPmtnMakespan, lastStageOnlyMakespan,
-        incumbentMakespan, makespanDelta, pIncrementAdded,
-        rIncrementAdded``. Exactly one of ``lastStageOnlyPmtnMakespan`` /
-        ``lastStageOnlyMakespan`` is populated per row (the two
-        reference-schedule sources are mutually exclusive within a
-        single call). ``pIncrementAdded`` is ``ceil(delta * m_last / n)``;
-        ``rIncrementAdded`` is the delta itself (the adjust-r knob adds
-        ``makespan_delta`` straight to ``r_increment``). The empty
-        string is written for whichever knob did not fire.
-        """
-        rows: list[
-            tuple[
-                str,
-                int | None,
-                str,
-                int | None,
-                int | None,
-                int,
-                int,
-                int | None,
-                int | None,
-            ]
-        ] = []
-        for sc in self.scenario_results:
-            for ir in sc.instance_results:
-                diag = ir.mcf_lb_diagnostic
-                if diag is None:
-                    continue
-                makespan_delta = diag.get("adjust_params_makespan_delta")
-                if makespan_delta is None:
-                    continue
-                ls_only_pmtn_makespan = diag.get(
-                    "adjust_params_last_stage_only_pmtn_makespan"
-                )
-                ls_only_makespan = diag.get("adjust_params_last_stage_only_makespan")
-                incumbent_makespan = diag.get("adjust_params_incumbent_makespan")
-                p_inc_raw = diag.get("adjust_p_increment_added")
-                r_inc_raw = diag.get("adjust_r_increment_added")
-                p_inc_added = int(p_inc_raw) if p_inc_raw is not None else None
-                r_inc_added = int(r_inc_raw) if r_inc_raw is not None else None
-                rows.append(
-                    (
-                        sc.name,
-                        self._resolve_ins_index(ir.instance_name),
-                        ir.instance_name,
-                        int(ls_only_pmtn_makespan)
-                        if ls_only_pmtn_makespan is not None
-                        else None,
-                        int(ls_only_makespan) if ls_only_makespan is not None else None,
-                        int(incumbent_makespan),
-                        int(makespan_delta),
-                        p_inc_added,
-                        r_inc_added,
-                    )
-                )
-        if not rows:
-            return
-        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1))
-        path = self.layout.artifact_path("adjust_params_by_makespan_delta_csv")
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                (
-                    "scenarioName",
-                    "insIndex",
-                    "instanceName",
-                    "lastStageOnlyPmtnMakespan",
-                    "lastStageOnlyMakespan",
-                    "incumbentMakespan",
-                    "makespanDelta",
-                    "pIncrementAdded",
-                    "rIncrementAdded",
-                )
-            )
-            for (
-                scenario_name,
-                ins_index,
-                instance_name,
-                ls_only_pmtn_makespan,
-                ls_only_makespan,
-                incumbent_makespan,
-                delta,
-                p_inc_added,
-                r_inc_added,
-            ) in rows:
-                writer.writerow(
-                    (
-                        scenario_name,
-                        "" if ins_index is None else ins_index,
-                        instance_name,
-                        "" if ls_only_pmtn_makespan is None else ls_only_pmtn_makespan,
-                        "" if ls_only_makespan is None else ls_only_makespan,
-                        incumbent_makespan,
-                        delta,
-                        "" if p_inc_added is None else p_inc_added,
-                        "" if r_inc_added is None else r_inc_added,
-                    )
-                )
-        logger.info("adjust_params_by_makespan_delta CSV written to %s", path)
-
     def _write_last_stage_only_obj_csv(self) -> None:
         """Run-scoped long-format CSV of ``last_stage_only_sol`` objs.
 
         Columns: ``scenarioName, insIndex, objValue``. One row per
         ``(scenario, instance)`` pair where the controller produced a
-        last-stage-only schedule (``run_mcf_lb_4`` /
-        ``run_last_stage_cp_sat_lb`` /
-        ``neh_cp_last_stage_only_sch_from_mcf_lb`` /
-        ``single_pass_last_stage_only_sch_from_mcf_lb``). Skipped
-        entirely if no scenario produced one.
+        last-stage-only schedule (``heuristic_last_stage_only_sch_from_mcf_lb``
+        directly, or via the equivalent sub-call inside
+        ``calc_mcf_lb_and_derive_full_sch``). Skipped entirely if no
+        scenario produced one.
         """
         rows: list[tuple[str, int | None, float]] = []
         for sc in self.scenario_results:
@@ -982,16 +1214,14 @@ class FFcDDWReporter:
         per_instance: dict[int, dict[str, float]] = {}
         for sc in self.scenario_results:
             for ir in sc.instance_results:
-                diag = ir.mcf_lb_diagnostic
-                if diag is None:
-                    continue
-                val = diag.get("last_stage_only_obj")
-                if val is None:
+                if ir.last_stage_only_obj is None:
                     continue
                 ins_index = self._resolve_ins_index(ir.instance_name)
                 if ins_index is None:
                     continue
-                per_instance.setdefault(ins_index, {})[sc.name] = float(val)
+                per_instance.setdefault(ins_index, {})[sc.name] = float(
+                    ir.last_stage_only_obj
+                )
 
         if not per_instance:
             return
@@ -1051,18 +1281,10 @@ class FFcDDWReporter:
                 writer.writerow([name, best_counts[name], lt_bks_counts[name]])
         logger.info("Last-stage-only-obj count CSV written to %s", count_path)
 
-    _MCF_LB_REF_OBJ_COLUMNS: tuple[str, ...] = (
-        "lastStageOnlyBound",
-        "lastStageOnlyObj",
-        "dispatchedObj",
-        "profileFixObj",
-        "profileFixBound",
-    )
+    _MCF_LB_REF_OBJ_COLUMNS: tuple[str, ...] = ("dispatchedObj",)
     _MCF_LB_STEP_SEC_COLUMNS: tuple[str, ...] = (
         "mcfSolveSec",
-        "lastStageCpSatSec",
         "dispatchSec",
-        "profileFixCpSatSec",
     )
     _MCF_LB_REF_BLANK_COLUMNS: tuple[str, ...] = (
         *_MCF_LB_STEP_SEC_COLUMNS,
@@ -1280,12 +1502,20 @@ class FFcDDWReporter:
         logger.info("MCF-LB lastStageOnlyObj vs BKS win/tie table written to %s", path)
 
     def _mcf_lb_analysis_row(self, ir: InstanceResult) -> list[str]:
-        diag = ir.mcf_lb_diagnostic or {}
+        mcf_diag = ir.mcf_lb_diagnostic or {}
+        calc_diag = ir.calc_mcf_lb_and_derive_full_sch_diagnostic or {}
+        build_diag = ir.build_full_sch_diagnostic or {}
         ins_index = self._resolve_ins_index(ir.instance_name)
         meta = self._index_to_meta.get(ins_index, {}) if ins_index is not None else {}
 
         def _s(v: Any) -> str:
             return "" if v is None else str(v)
+
+        mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
+        mcf_solve_sec = mcf_diag.get("mcf_solve_sec") or calc_diag.get(
+            "r1_mcf_solve_sec"
+        )
+        dispatched_obj = build_diag.get("dispatched_obj") or calc_diag.get("final_obj")
 
         values: dict[str, Any] = {
             "insIndex": ins_index,
@@ -1296,17 +1526,12 @@ class FFcDDWReporter:
             "T": meta.get("T"),
             "R": meta.get("R"),
             "W": meta.get("W"),
-            "mcfLb": diag.get("mcf_lb"),
-            "lastStageOnlyBound": diag.get("last_stage_only_bound"),
-            "lastStageOnlyObj": diag.get("last_stage_only_obj"),
+            "mcfLb": mcf_lb,
+            "lastStageOnlyObj": ir.last_stage_only_obj,
             "bks": meta.get("BKS"),
-            "dispatchedObj": diag.get("dispatched_obj"),
-            "profileFixObj": diag.get("profile_fix_obj"),
-            "mcfSolveSec": diag.get("mcf_solve_sec"),
-            "lastStageCpSatSec": diag.get("last_stage_cp_sat_sec"),
-            "dispatchSec": diag.get("dispatch_sec"),
-            "profileFixCpSatSec": diag.get("profile_fix_cp_sat_sec"),
-            "profileFixBound": diag.get("profile_fix_bound"),
+            "dispatchedObj": dispatched_obj,
+            "mcfSolveSec": mcf_solve_sec,
+            "dispatchSec": build_diag.get("dispatch_sec"),
         }
         return [_s(values[col]) for col in self._MCF_LB_ANALYSIS_COLUMNS]
 
@@ -1363,18 +1588,56 @@ class FFcDDWReporter:
                             self.layout.artifact_path("gantt_png", **scope),
                         )
                     )
-                for phase_yaml in self.layout.find_artifacts(
+                for phase_kind in (
                     "mcf_lb_phase_schedule",
+                    "flip_makespan_cp_phase_schedule",
+                ):
+                    for phase_json in self.layout.find_artifacts(
+                        phase_kind,
+                        scenario_name=sc.name,
+                        instance_name=ins,
+                    ):
+                        # phase_name == file stem (template is "{phase_name}.json")
+                        phase_name = phase_json.stem
+                        jobs.append(
+                            (
+                                _render_phase_gantt_from_json,
+                                phase_json,
+                                self.layout.artifact_path(
+                                    "phase_gantt_png",
+                                    phase_name=phase_name,
+                                    **scope,
+                                ),
+                            )
+                        )
+                # Round-nested ``calc_mcf_lb_phase_schedule`` JSONs live under
+                # ``progress/<inst>/calc_mcf_lb_and_derive_full_sch/<round>/<n>_<label>.json``.
+                # ``find_artifacts`` substitutes ``*`` for the unspecified
+                # ``{round}`` / ``{index}`` / ``{label}`` placeholders so the
+                # 2-level glob ``calc_mcf_lb_and_derive_full_sch/*/*_*.json``
+                # picks them up. Re-derive ``round`` / ``index`` / ``label``
+                # from the path so the paired PNG path resolves.
+                for phase_json in self.layout.find_artifacts(
+                    "calc_mcf_lb_phase_schedule",
                     scenario_name=sc.name,
                     instance_name=ins,
                 ):
-                    phase_name = phase_yaml.stem.removeprefix(f"{ins}_")
+                    round_part = phase_json.parent.name
+                    stem = phase_json.stem
+                    sep = stem.find("_")
+                    if sep <= 0:
+                        continue
+                    index_str, label = stem[:sep], stem[sep + 1 :]
                     jobs.append(
                         (
-                            _render_phase_gantt_from_yaml,
-                            phase_yaml,
+                            _render_phase_gantt_from_json,
+                            phase_json,
                             self.layout.artifact_path(
-                                "phase_gantt_png", phase_name=phase_name, **scope
+                                "calc_mcf_lb_phase_gantt_png",
+                                round=round_part,
+                                index=index_str,
+                                label=label,
+                                **scope,
                             ),
                         )
                     )

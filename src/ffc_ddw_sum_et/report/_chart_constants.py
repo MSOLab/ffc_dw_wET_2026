@@ -31,12 +31,9 @@ SERIES_COLORS: tuple[str, ...] = (
 SUBROUTINE_SYMBOL_MAP: dict[str, str] = {
     "calc_mcf_lb_and_derive_full_sch": "diamond",
     "solve_base_model_cpsat": "circle",
-    "neh_cp_full_sch_from_mcf_lb": "square",
-    "single_pass_full_sch_from_mcf_lb": "triangle-up",
-    "neh_cp_last_stage_only_sch_from_mcf_lb": "square-open",
-    "single_pass_last_stage_only_sch_from_mcf_lb": "triangle-down",
-    "run_last_stage_cp_sat_lb": "x",
-    "run_mcf_lb_4": "star",
+    "apply_lb_by_mcf": "square",
+    "heuristic_last_stage_only_sch_from_mcf_lb": "triangle-up",
+    "build_full_sch_from_last_stage_only_sch": "triangle-down",
 }
 
 

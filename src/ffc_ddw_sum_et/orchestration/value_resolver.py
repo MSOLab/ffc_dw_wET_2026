@@ -1,6 +1,23 @@
 from __future__ import annotations
 
 
+def _parse_factor(prefix: str, original: str, suffix: str) -> float:
+    """Parse the numeric prefix of a value expression.
+
+    Empty prefix is treated as ``1.0`` so bare ``"m"`` / ``"n"`` / ``"c"`` /
+    ``"nc"`` resolve to ``1 × (symbol)``.
+    """
+    if prefix == "":
+        return 1.0
+    try:
+        return float(prefix)
+    except ValueError:
+        raise ValueError(
+            f"value expression '{original}' ends with '{suffix}' but the prefix "
+            f"'{prefix}' is not a valid number"
+        )
+
+
 def resolve_value_expr(
     value_expr: float | str | None,
     job_count: int,
@@ -14,45 +31,13 @@ def resolve_value_expr(
     # str branch
     s = value_expr.strip()
     if s.endswith("nc"):
-        prefix = s[:-2]
-        try:
-            factor = float(prefix)
-        except ValueError:
-            raise ValueError(
-                f"value expression '{value_expr}' ends with 'nc' but the prefix "
-                f"'{prefix}' is not a valid number"
-            )
-        return factor * job_count * stage_count
+        return _parse_factor(s[:-2], value_expr, "nc") * job_count * stage_count
     elif s.endswith("n"):
-        prefix = s[:-1]
-        try:
-            factor = float(prefix)
-        except ValueError:
-            raise ValueError(
-                f"value expression '{value_expr}' ends with 'n' but the prefix "
-                f"'{prefix}' is not a valid number"
-            )
-        return factor * job_count
+        return _parse_factor(s[:-1], value_expr, "n") * job_count
     elif s.endswith("c"):
-        prefix = s[:-1]
-        try:
-            factor = float(prefix)
-        except ValueError:
-            raise ValueError(
-                f"value expression '{value_expr}' ends with 'c' but the prefix "
-                f"'{prefix}' is not a valid number"
-            )
-        return factor * stage_count
+        return _parse_factor(s[:-1], value_expr, "c") * stage_count
     elif s.endswith("m"):
-        prefix = s[:-1]
-        try:
-            factor = float(prefix)
-        except ValueError:
-            raise ValueError(
-                f"value expression '{value_expr}' ends with 'm' but the prefix "
-                f"'{prefix}' is not a valid number"
-            )
-        return factor * last_stage_mc_count
+        return _parse_factor(s[:-1], value_expr, "m") * last_stage_mc_count
     try:
         return float(s)
     except ValueError:

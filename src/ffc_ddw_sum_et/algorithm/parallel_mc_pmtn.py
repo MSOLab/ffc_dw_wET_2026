@@ -6,6 +6,8 @@ from ortools.graph.python.min_cost_flow import SimpleMinCostFlow
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
+from .horizon import compute_parallel_mc_horizon
+
 __all__ = ["ParallelMachinePreemptionMcf"]
 
 
@@ -131,10 +133,10 @@ class ParallelMachinePreemptionMcf:
         self.mc_count = instance.machine_count_per_stage[-1]
 
         # T = max_j(max(r_j, d^-_j - p_j)) + ceil(sum(p_j) / mc_count)
-        max_release = max(self.r[j] for j in self.calJ)
-        max_dminus_minus_p = max(ddw[j][0] - self.p[j] for j in self.calJ)
-        p_sum = sum(self.p[j] for j in self.calJ)
-        t_max = max(max_release, max_dminus_minus_p) + math.ceil(p_sum / self.mc_count)
+        d_lower = {j: ddw[j][0] for j in self.calJ}
+        t_max = compute_parallel_mc_horizon(
+            self.p, self.r, self.mc_count, d_lower=d_lower
+        )
         self.calT = list(range(1, t_max + 1))
         if not self.calT:
             raise ValueError("calT cannot be empty; check instance parameters")

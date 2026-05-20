@@ -44,7 +44,8 @@ can pick up the same architectural intent.
   types from their owning submodules: `algorithm.base.alg_spec`,
   `algorithm.base.alg_record`, `algorithm.base.alg_option`,
   `algorithm.base.algorithm`, `algorithm.options.*`, `algorithm.fam`,
-  `algorithm.dispatcher.*`, `algorithm.mcf_lb.*`, `algorithm.neh_cp.*`.
+  `algorithm.dispatcher.*`, `algorithm.mcf_lb.*`, `algorithm.neh_cp.*`,
+  `algorithm.flip_makespan_cp.*`, `algorithm.pw_cp.*`.
 
 ### Subroutine step contract (controller.py)
 
@@ -57,9 +58,9 @@ using `start_time = self.timer.elapsed_sec - report.elapsed_time`.
 1. **At most one register per step call.** A step body either calls
    `self._register(report, sol, ...)` exactly once before returning, or
    returns a stop-report from `_make_stop_report` without registering.
-   Composite steps (e.g. `calc_mcf_lb_and_derive_full_sch`) suppress
-   inner-step registration via `_register_report=False` and emit a single
-   synthesized final report. Multiple registers per call would make
+Composite steps (e.g. `calc_mcf_lb_and_derive_full_sch`) delegate to
+    a pure algorithm pipeline function and call `self._register` exactly
+    once with the synthesized final report. Multiple registers per call would make
    `solution_manager.history` ambiguous about which trajectory belongs to
    which step.
 

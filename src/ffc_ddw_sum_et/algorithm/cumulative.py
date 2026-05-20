@@ -111,7 +111,8 @@ class BaseModelBuilder:
         obj_lb: float | None = None,
         minimize_makespan_lex: bool = False,
         et_ub: float | None = None,
-    ) -> tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]:
+        objective: Literal["et", "makespan"] = "et",
+    ) -> tuple[CpModel, Params, OperationVars, EarlinessTardinessVars | None]:
         """Build a CP-SAT model for the FFc DDW sum E/T problem with cumulative constraints.
 
         Args:
@@ -125,19 +126,35 @@ class BaseModelBuilder:
                 to their release times at the first stage. If last_stage_only is True,
                 the release times are applied to the last stage. Defaults to None.
             obj_lb (float | None, optional): The lower bound for the weighted E/T
-                objective. Ignored when ``minimize_makespan_lex=True``. Defaults to None.
+                objective. Ignored when ``minimize_makespan_lex=True`` or
+                ``objective="makespan"``. Defaults to None.
             minimize_makespan_lex (bool, optional): Lexicographic secondary-stage
                 mode. When True, the weighted E/T sum is constrained to
                 ``<= floor(et_ub)`` and the model minimizes makespan instead.
-                Defaults to False.
+                Mutually exclusive with ``objective="makespan"``. Defaults to False.
             et_ub (float | None, optional): Upper bound on the weighted E/T sum
                 for the secondary stage. Required when
                 ``minimize_makespan_lex=True``. Defaults to None.
+            objective (Literal["et", "makespan"], optional): Top-level objective
+                mode. ``"et"`` (default) keeps the weighted E/T objective (and
+                supports ``minimize_makespan_lex`` for the secondary-stage
+                lexicographic case). ``"makespan"`` skips E/T variable creation
+                entirely and minimises makespan; ``obj_lb``, ``et_ub``, and
+                ``minimize_makespan_lex`` must take their default values.
 
         Returns:
-            tuple[CpModel, Params, OperationVars, EarlinessTardinessVars]: The built
-                CP-SAT model and associated variables.
+            tuple[CpModel, Params, OperationVars, EarlinessTardinessVars | None]:
+                The built CP-SAT model and associated variables. The trailing
+                ``EarlinessTardinessVars`` slot is ``None`` when
+                ``objective="makespan"``.
         """
+        if objective == "makespan":
+            if obj_lb is not None or et_ub is not None or minimize_makespan_lex:
+                raise ValueError(
+                    "objective='makespan' is incompatible with obj_lb, et_ub, "
+                    "or minimize_makespan_lex; pass them at their defaults."
+                )
+
         mdl = CpModel()
         params: Params = self.make_params(instance, last_stage_only=last_stage_only)
         ops_vars: OperationVars = self._make_vars(
@@ -147,6 +164,10 @@ class BaseModelBuilder:
             job_2_release=job_2_release,
         )
         self._add_structural_constraints(mdl, params, ops_vars)
+        if objective == "makespan":
+            self._define_makespan_objective(mdl, params, ops_vars, horizon=horizon)
+            return mdl, params, ops_vars, None
+
         obj_vars = self._define_objective(
             mdl,
             params,
@@ -286,6 +307,26 @@ class BaseModelBuilder:
         """Add precedence and default stage-capacity constraints."""
         BaseModelBuilder._add_precedence_constraints(mdl, params, variables)
         BaseModelBuilder._add_capacity_constraints(mdl, params, variables)
+
+    @staticmethod
+    def _define_makespan_objective(
+        mdl: CpModel,
+        params: Params,
+        variables: OperationVars,
+        horizon: int,
+    ) -> None:
+        """Add a pure makespan objective: minimize ``max_j C_j``.
+
+        No earliness/tardiness variables are created. Used by callers that
+        only need a feasibility-shaped CP model (e.g. the flip-makespan
+        warm-start dispatcher operating on a stage-reversed instance).
+        """
+        last_i = params.i_list[-1]
+        makespan_var = mdl.new_int_var(0, horizon, "makespan")
+        mdl.add_max_equality(
+            makespan_var, [variables.op_end[j, last_i] for j in params.j_list]
+        )
+        mdl.minimize(makespan_var)
 
     @staticmethod
     def _define_objective(

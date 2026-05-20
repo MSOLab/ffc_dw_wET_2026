@@ -7,8 +7,6 @@ chart accepts a list of ``{label, endpoint_df, raw_progression_df}`` —
 each ``endpoint_df`` already carries ``rpd_f`` (filled by the writer).
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from pathlib import Path
@@ -18,11 +16,11 @@ from typing import Any
 import pandas as pd
 
 from ._chart_constants import series_colors_json, symbol_map_json
-from .rpdf_scatter_chart import (
-    _build_best_so_far_progression_points,
-    _build_step_path,
-    _extract_progression_times,
-    _lookup_rpdf_at_or_before_indexed,
+from .np_utils import progression_points_to_arrays, step_function_mean_over_union
+from .step_path import build_step_path
+from .trajectory_utils import (
+    build_best_so_far_progression_points,
+    keep_strict_global_improvements_or_endpoints,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,8 +117,15 @@ def _build_scenario_progression_models(
             for c in ["norm_time", "global_sec", "call_index"]
             if c in raw_progression_df.columns
         ]
+        # Strip CP-callback points that don't strictly improve the
+        # per-instance global running min (keeping each call's endpoint).
+        # Without this, the union across instances explodes to 10^5–10^6
+        # points and the HTML balloons past 100MB. Mirrors what
+        # rpdf_scatter_chart applies per scenario.
         progression_by_instance = {
-            str(ins): grp.sort_values(sort_cols)
+            str(ins): keep_strict_global_improvements_or_endpoints(
+                grp.sort_values(sort_cols)
+            )
             for ins, grp in raw_progression_df.groupby("instance_id", sort=True)
         }
 
@@ -134,7 +139,7 @@ def _build_scenario_progression_models(
         models.append(
             {
                 "instance_id": str(ins),
-                "progression_points": _build_best_so_far_progression_points(source_grp),
+                "progression_points": build_best_so_far_progression_points(source_grp),
             }
         )
     return models
@@ -146,59 +151,58 @@ def _build_guide_marker_customdata(
     return [[scenario_label, str(name)] for name in guide_marker_text]
 
 
+def _fill_missing_subroutine_endpoints(endpoint_df: pd.DataFrame) -> pd.DataFrame:
+    """For each instance, add a synthetic endpoint row for every scenario-level
+    subroutine the instance never reached. The synthetic row copies the
+    instance's last actual endpoint (norm_time, obj_value, rpd_f, ...) —
+    i.e. the step is treated as having run for 0 seconds at the controller's
+    stop time. Without this, the guide-marker average for a step that only
+    a subset of instances reached would sit at that subset's mean, which
+    misleads when most instances never got there.
+    """
+    if endpoint_df.empty:
+        return endpoint_df
+    all_subroutines = list(pd.unique(endpoint_df["subroutine_name"]))
+    order_by_name = (
+        endpoint_df[["subroutine_name", "subroutine_order"]]
+        .drop_duplicates()
+        .set_index("subroutine_name")["subroutine_order"]
+        .to_dict()
+    )
+    synth_rows: list[dict[str, Any]] = []
+    for _ins, grp in endpoint_df.groupby("instance_id", sort=False):
+        present = set(grp["subroutine_name"])
+        missing = [s for s in all_subroutines if s not in present]
+        if not missing:
+            continue
+        last = grp.sort_values("norm_time").iloc[-1].to_dict()
+        for s in missing:
+            row = dict(last)
+            row["subroutine_name"] = s
+            row["subroutine_order"] = order_by_name[s]
+            synth_rows.append(row)
+    if not synth_rows:
+        return endpoint_df
+    return pd.concat([endpoint_df, pd.DataFrame(synth_rows)], ignore_index=True)
+
+
 def _build_scenario_mean_series(
     scenario_label: str,
     endpoint_df: pd.DataFrame,
     raw_progression_df: pd.DataFrame | None,
 ) -> dict[str, Any] | None:
+    endpoint_df = _fill_missing_subroutine_endpoints(endpoint_df)
     models = _build_scenario_progression_models(endpoint_df, raw_progression_df)
     models = [m for m in models if m["progression_points"]]
     if not models:
         return None
 
-    first_times = [m["progression_points"][0].time for m in models]
-    last_times = [m["progression_points"][-1].time for m in models]
-    start_time = max(first_times)
-    end_time = max(last_times)
-    union_times = sorted(
-        {
-            p.time
-            for m in models
-            for p in m["progression_points"]
-            if start_time <= p.time <= end_time
-        }
-    )
-    if not union_times:
-        union_times = [start_time]
-        if end_time > start_time:
-            union_times.append(end_time)
-    elif union_times[-1] < end_time:
-        union_times.append(end_time)
-
-    mean_x: list[float] = []
-    mean_y: list[float] = []
-    # Precompute (times, points) per model so the inner union_times loop
-    # bisects against an already-built haystack instead of re-walking
-    # progression_points for every query_time.
-    model_haystacks = [
-        (_extract_progression_times(m["progression_points"]), m["progression_points"])
-        for m in models
+    model_arrays = [
+        progression_points_to_arrays(m["progression_points"]) for m in models
     ]
-    for t in union_times:
-        values = [
-            v
-            for times, pts in model_haystacks
-            if (v := _lookup_rpdf_at_or_before_indexed(times, pts, t)) is not None
-        ]
-        if len(values) != len(models):
-            continue
-        mean_x.append(t)
-        mean_y.append(sum(values) / len(values))
+    mean_x, mean_y = step_function_mean_over_union(model_arrays)
 
-    if not mean_x:
-        return None
-
-    step_x, step_y = _build_step_path(mean_x, mean_y)
+    step_x, step_y = build_step_path(mean_x, mean_y)
     guide_df = (
         endpoint_df.sort_values(["subroutine_order", "subroutine_name", "norm_time"])
         .groupby("subroutine_name", as_index=False, sort=False)
@@ -210,7 +214,10 @@ def _build_scenario_mean_series(
         "scenario": scenario_label,
         "step_x": step_x,
         "step_y": step_y,
-        "step_customdata": [[scenario_label, len(models)] for _ in step_x],
+        # Per-trace constant — referenced via Plotly's `%{meta[i]}`. Was
+        # `step_customdata` (one identical 2-element array per step point);
+        # at 10^5+ points that array alone dominated the HTML.
+        "meta": [scenario_label, len(models)],
         "vertical_guides": [
             {"subroutine_name": name, "x": x}
             for name, x in zip(guide_text, guide_x, strict=True)
@@ -308,11 +315,11 @@ _HTML_TEMPLATE = Template("""<!doctype html>
         { type: "scatter", mode: "lines",
           name: trace.scenario, legendgroup: trace.scenario,
           x: trace.step_x, y: trace.step_y,
-          customdata: trace.step_customdata,
+          meta: trace.meta,
           line: { width: 2, color: seriesColor },
           hovertemplate:
-            "scenario=%{customdata[0]}<br>" +
-            "instance_cnt=%{customdata[1]}<br>" +
+            "scenario=%{meta[0]}<br>" +
+            "instance_cnt=%{meta[1]}<br>" +
             "Time%=%{x:.4%}<br>" +
             "Mean RPDf=%{y:.4%}<extra></extra>",
           showlegend: true },

@@ -35,6 +35,13 @@ def test_m_suffix() -> None:
     assert resolve_value_expr("2m", N, C, M) == 2 * M
 
 
+def test_bare_suffix_is_unit_factor() -> None:
+    assert resolve_value_expr("m", N, C, M) == M
+    assert resolve_value_expr("n", N, C, M) == N
+    assert resolve_value_expr("c", N, C, M) == C
+    assert resolve_value_expr("nc", N, C, M) == N * C
+
+
 def test_float_string() -> None:
     assert resolve_value_expr("1.5nc", N, C, M) == 1.5 * N * C
 

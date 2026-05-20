@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from os import PathLike
 from pathlib import Path
+from typing import Sequence
 
 from ..solution.ffc_schedule import FFcSchedule
 from . import schedule_keys as K
@@ -44,13 +46,19 @@ def _extract_operations(schedule: FFcSchedule) -> list[dict]:
 
 def dump_solution_json(
     schedule: FFcSchedule,
-    path: Path | str,
+    path: Path | PathLike[str] | str,
     *,
     instance_name: str,
     obj_value: float | None = None,
     obj_bound: float | None = None,
+    compact: bool = False,
 ) -> None:
-    """Write a solution schedule as JSON."""
+    """Write a solution schedule as JSON.
+
+    ``compact=True`` writes a single-line file with tight separators (suitable
+    for high-volume per-phase emissions); the default keeps the human-readable
+    indented form used for the canonical solution artifact.
+    """
     operations = _extract_operations(schedule)
     data = {
         K.INSTANCE_NAME: instance_name,
@@ -66,10 +74,73 @@ def dump_solution_json(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
-        json.dump(data, f, indent=2, default=_json_default)
+        if compact:
+            json.dump(data, f, separators=(",", ":"), default=_json_default)
+        else:
+            json.dump(data, f, indent=2, default=_json_default)
     logger.info(
-        "Solution JSON written: %s (jobs=%d, ops=%d)",
+        "Solution JSON written: %s (jobs=%d, ops=%d, compact=%s)",
         path,
         len(data[K.JOBS]),
         len(operations),
+        compact,
+    )
+
+
+def dump_preemptive_schedule_json(
+    path: Path | PathLike[str] | str,
+    *,
+    instance_name: str,
+    stage_id: str,
+    machines: Sequence[str],
+    jobs: Sequence[str],
+    segments: Sequence[tuple[str, str, str, int, int]],
+    all_jobs: Sequence[str] | None = None,
+    obj_value: float | None = None,
+    obj_bound: float | None = None,
+    compact: bool = False,
+) -> None:
+    """Write a preemptive schedule as JSON (mirror of dump_preemptive_schedule_yaml).
+
+    ``segments`` is a flat list of ``(job, stage, machine, start, end)``
+    tuples; a single ``(job, stage, machine)`` triple may appear in
+    multiple segments (preemption). ``compact=True`` writes a single-line
+    file with tight separators.
+    """
+    segment_records: list[dict] = []
+    for job_id, stage_i, mc_id, start_time, end_time in sorted(
+        segments, key=lambda seg: (seg[1], seg[2], seg[3], seg[0])
+    ):
+        segment_records.append(
+            {
+                K.OP_JOB: job_id,
+                K.OP_STAGE: stage_i,
+                K.OP_MACHINE: mc_id,
+                K.OP_START: int(start_time),
+                K.OP_END: int(end_time),
+            }
+        )
+    data = {
+        K.INSTANCE_NAME: instance_name,
+        K.OBJ_VALUE: None if obj_value is None else float(obj_value),
+        K.OBJ_BOUND: None if obj_bound is None else float(obj_bound),
+        K.STAGE_ID: stage_id,
+        K.JOBS: list(jobs),
+        K.ALL_JOBS: list(all_jobs) if all_jobs is not None else list(jobs),
+        K.MACHINES_PER_STAGE: {stage_id: list(machines)},
+        K.SEGMENTS: segment_records,
+    }
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        if compact:
+            json.dump(data, f, separators=(",", ":"), default=_json_default)
+        else:
+            json.dump(data, f, indent=2, default=_json_default)
+    logger.info(
+        "Preemptive schedule JSON written: %s (stage=%s, segments=%d, compact=%s)",
+        path,
+        stage_id,
+        len(segment_records),
+        compact,
     )

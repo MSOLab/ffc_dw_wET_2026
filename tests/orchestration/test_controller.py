@@ -84,39 +84,6 @@ def test_numpy_float_conversion() -> None:
     assert type(incumbent.obj_value) is float
 
 
-def test_run_mcf_lb_registers_dispatch_incumbent() -> None:
-    """run_mcf_lb now seeds a feasible incumbent via MixedDispatcher and
-    reports its ET as obj_value while keeping the MCF cost as obj_bound.
-    """
-    controller = _make_controller(_make_instance())
-
-    report = controller.run_mcf_lb_4()
-
-    assert report.obj_value is not None
-    assert report.obj_bound is not None
-    assert report.obj_bound >= 0
-    assert report.elapsed_time >= 0
-    # Feasible obj must dominate the LB.
-    assert report.obj_value >= report.obj_bound
-    incumbent = controller.solution_manager.get_incumbent()
-    assert incumbent is not None
-    assert incumbent.schedule is not None
-    assert incumbent.obj_value == report.obj_value
-    assert incumbent.obj_bound == report.obj_bound
-
-
-def test_run_mcf_lb_not_greater_than_fam() -> None:
-    """LB from MCF should be ≤ feasible FAM objective for the same instance."""
-    controller = _make_controller(_make_instance())
-
-    lb_report = controller.run_mcf_lb_4()
-    fam_report = controller.run_fam()
-
-    assert lb_report.obj_bound is not None
-    assert fam_report.obj_value is not None
-    assert lb_report.obj_bound <= fam_report.obj_value
-
-
 def test_neh_cp_registers_full_schedule() -> None:
     instance = _make_instance()
     controller = _make_controller(instance)
@@ -147,7 +114,7 @@ def test_build_full_sch_from_last_stage_only_sch() -> None:
     controller = _make_controller(instance)
 
     controller.apply_lb_by_mcf()
-    controller.single_pass_last_stage_only_sch_from_mcf_lb(total_tl=1.0)
+    controller.heuristic_last_stage_only_sch_from_mcf_lb()
     assert controller.last_stage_only_sol is not None
 
     report = controller.build_full_sch_from_last_stage_only_sch()
@@ -170,13 +137,19 @@ def test_build_full_sch_from_last_stage_only_sch() -> None:
     sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
     assert float(sum_e + sum_t) == report.obj_value
 
-    # Phase schedule entries appended for post-run Gantt rendering.
+    # Phase schedule entries appended for post-run Gantt rendering. Names
+    # are call_context-prefixed (e.g.
+    # "1-calc_mcf_lb_..._9_fullS_after_sa_iti") so the runner-side
+    # filenames sort by subroutine-flow step on disk; assert via suffix
+    # match against the local phase label.
     phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
-    assert "6_full_sch_from_ls_only_sch" in phase_names
+    assert any(name.endswith("_9_fullS_after_sa_iti") for name in phase_names)
     if instance.stage_count > 1:
-        assert "3_ls_only_sch_delayed" in phase_names
-        assert "4_ls_only_sch_flipped" in phase_names
-        assert "5_full_sch_before_unflip" in phase_names
+        assert any(name.endswith("_4_lastS_only_before_rs") for name in phase_names)
+        assert any(name.endswith("_5_lastS_only_after_rs") for name in phase_names)
+        assert any(name.endswith("_6_lastS_only_flipped") for name in phase_names)
+        assert any(name.endswith("_7_fullS_before_unflip") for name in phase_names)
+        assert any(name.endswith("_8_fullS_after_unflip") for name in phase_names)
 
 
 def test_heuristic_last_stage_only_sch_from_mcf_lb_sets_solution() -> None:
@@ -200,7 +173,12 @@ def test_heuristic_last_stage_only_sch_from_mcf_lb_sets_solution() -> None:
     assert controller.last_stage_only_sol_p_increment == 0
 
     phase_names = [name for name, _ in controller.mcf_lb_phase_schedules]
-    assert "2_ls_only_sch_from_mcf_lb_heur" in phase_names
+    assert any(
+        name.endswith("_2_lastS_only_from_mcf_lb_before_sa_iti") for name in phase_names
+    )
+    assert any(
+        name.endswith("_3_lastS_only_from_mcf_lb_after_sa_iti") for name in phase_names
+    )
 
 
 def test_heuristic_last_stage_only_sch_then_build_full() -> None:
@@ -229,53 +207,6 @@ def test_heuristic_last_stage_only_sch_then_build_full() -> None:
 
     sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
     assert float(sum_e + sum_t) == report.obj_value
-
-
-def test_run_mcf_lb_then_neh_cp_registers_incumbent() -> None:
-    instance = _make_instance()
-    controller = _make_controller(instance)
-
-    report = controller.run_mcf_lb_then_neh_cp(cp_tl=1.0)
-
-    assert report.obj_value is not None
-    assert report.obj_bound is not None
-    assert report.obj_bound >= 0
-    assert report.obj_value >= report.obj_bound  # weighted ET dominates MCF LB
-
-    incumbent = controller.solution_manager.get_incumbent()
-    assert incumbent is not None
-    assert incumbent.schedule is not None
-    assert incumbent.obj_value == report.obj_value
-    assert incumbent.obj_bound == report.obj_bound
-
-    for stage_id in instance.stage_id_list:
-        for job_id in instance.job_id_list:
-            incumbent.schedule.get_job_end_time(stage_id, job_id)
-
-    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
-    assert float(sum_e + sum_t) == report.obj_value
-
-    # MCF preemptive schedule must be retained for the post-run Gantt pipeline.
-    assert controller.mcf_preemptive_schedule is not None
-    assert any(
-        name == "1_mcf_preemptive_sch" for name, _ in controller.mcf_lb_phase_schedules
-    )
-
-
-def test_run_mcf_lb_then_neh_cp_uses_window_width_sequence() -> None:
-    """Sanity check: the controller-derived sequence is a valid permutation
-    of the instance jobs (the dispatcher's own validation would otherwise
-    raise ValueError)."""
-    from ffc_ddw_sum_et.algorithm.parallel_mc_pmtn import ParallelMachinePreemptionMcf
-
-    instance = _make_instance()
-    controller = _make_controller(instance)
-    mcf = ParallelMachinePreemptionMcf.from_instance(instance)
-    mcf.solve()
-
-    sequence = controller._mcf_window_width_job_sequence(mcf, instance)
-
-    assert sorted(sequence) == sorted(instance.job_id_list)
 
 
 def test_r_increment_negative_raises() -> None:

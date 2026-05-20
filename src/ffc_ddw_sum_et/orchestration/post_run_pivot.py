@@ -19,6 +19,8 @@ from pathlib import Path
 import pandas as pd
 from routix.io import ArtifactLayout
 
+from ffc_ddw_sum_et._calc import rpd_f
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,11 +49,6 @@ _INSTANCE_META_COLUMNS: tuple[str, ...] = (
     "R",
     "W",
 )
-
-
-def _rpdf(best_obj: float, bks: float) -> float:
-    denom = best_obj + bks
-    return 0.0 if denom == 0 else 2 * (best_obj - bks) / denom
 
 
 def build_rpdf_comparison_df(
@@ -84,7 +81,7 @@ def build_rpdf_comparison_df(
         bks, on="insIndex", how="inner"
     )
     merged["RPDf_BKS_data"] = [
-        _rpdf(b, k) for b, k in zip(merged["bestObj"], merged["BKS_data"], strict=True)
+        rpd_f(b, k) for b, k in zip(merged["bestObj"], merged["BKS_data"], strict=True)
     ]
     merged["timelimit"] = merged["n"] * merged["c"] * timelimit_factor
     merged["time%"] = merged["elapsedTime"] / merged["timelimit"]

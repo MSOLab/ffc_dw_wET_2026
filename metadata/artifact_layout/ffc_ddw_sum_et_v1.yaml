@@ -25,23 +25,82 @@ artifacts:
     zone: progress
     kind: mcf_lb_diagnostic
     file_template: "{instance_name}_mcf_lb_diagnostic.yaml"
+  # MCF LB intermediate schedules. Compact JSON, two shapes share the kind:
+  # FFcSchedule -> dump_solution_json (operations[]); MCFPreemptiveSchedule
+  # -> dump_preemptive_schedule_json (segments[]). `phase_name` already
+  # carries the controller call_context prefix
+  # (e.g. "1-calc_mcf_lb_and_derive_full_sch_1_mcf_preemptive_sch") so files
+  # sort by subroutine-flow step on disk and don't collide across steps.
   - scope: instance
     zone: progress
     kind: mcf_lb_phase_schedule
-    file_template: "{instance_name}_{phase_name}.yaml"
+    file_template: "{phase_name}.json"
+  # Compact-JSON phase snapshots from FlipMakespanCpDispatcher. Same shape as
+  # `solution_json` (operations[]), so the reporter reuses
+  # `_render_gantt_from_solution_json` to produce a `phase_gantt_png` per file.
+  # `phase_name` carries the controller call_context prefix.
+  - scope: instance
+    zone: progress
+    kind: flip_makespan_cp_phase_schedule
+    file_template: "{phase_name}.json"
+  # Per-instance phase-metric CSVs emitted by ``calc_mcf_lb_and_derive_full_sch``.
+  # One row per (round, label) snapshot in the user-spec order; r2 rows carry
+  # blank cells when round 2 did not run. Always emitted (independent of
+  # ``emit_phase_schedules``).
+  - scope: instance
+    zone: progress
+    kind: mcf_lb_phase_obj_csv
+    file_template: "{instance_name}_calc_mcf_lb_phase_obj.csv"
+  - scope: instance
+    zone: progress
+    kind: mcf_lb_phase_makespan_csv
+    file_template: "{instance_name}_calc_mcf_lb_phase_makespan.csv"
+  # ``calc_mcf_lb_and_derive_full_sch``-scoped per-round JSON snapshots.
+  # Two-level nested layout under ``calc_mcf_lb_and_derive_full_sch/{r1|r2}/``;
+  # filenames are pre-numbered (``{index}_{label}.json``). Same dual JSON
+  # shapes as ``mcf_lb_phase_schedule`` (operations[] vs segments[]).
+  # Emitted only when ``emit_phase_schedules=True`` on the composite step.
+  - scope: instance
+    zone: progress
+    kind: calc_mcf_lb_phase_schedule
+    file_template: "calc_mcf_lb_and_derive_full_sch/{round}/{index}_{label}.json"
+  # Sidecar YAML written under r1/ summarising round-1 timings, objectives,
+  # makespans, the makespan delta, and the increments fed into round 2 (or
+  # null when round 2 did not run). Always emitted (independent of
+  # ``emit_phase_schedules``) so downstream auditors can see the Rep3-style
+  # negative-delta cases without round-2 JSONs.
+  - scope: instance
+    zone: progress
+    kind: calc_mcf_lb_r1_summary_yaml
+    file_template: "calc_mcf_lb_and_derive_full_sch/r1/r1_summary.yaml"
+  # Sidecar YAML written under r2/ summarising round-2 timings, objectives,
+  # and makespans. Emitted only when round 2 was attempted (``r2_apply``
+  # populated); skipped otherwise.
+  - scope: instance
+    zone: progress
+    kind: calc_mcf_lb_r2_summary_yaml
+    file_template: "calc_mcf_lb_and_derive_full_sch/r2/r2_summary.yaml"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
-  # the renderer is picked from the source yaml's content type, so a single
-  # kind suffices.
+  # the renderer is picked from the source content shape (operations[] vs
+  # segments[]), so a single kind suffices.
+  # Filenames omit instance_name (the per-instance folder already identifies
+  # it); the instance name is rendered into the chart title instead.
   - scope: instance
     zone: report
     kind: gantt_png
-    file_template: "{instance_name}_gantt.png"
+    file_template: "solution_gantt.png"
   - scope: instance
     zone: report
     kind: phase_gantt_png
-    file_template: "{instance_name}_{phase_name}_gantt.png"
+    file_template: "{phase_name}_gantt.png"
+  # Paired Gantt PNG for ``calc_mcf_lb_phase_schedule``. Two-level nested
+  # layout mirrors the source JSON tree.
+  - scope: instance
+    zone: report
+    kind: calc_mcf_lb_phase_gantt_png
+    file_template: "calc_mcf_lb_and_derive_full_sch/{round}/{index}_{label}_gantt.png"
 
   # ---- scenario ----
   - scope: scenario
@@ -50,11 +109,33 @@ artifacts:
   - scope: scenario
     kind: mcf_lb_analysis
     file_template: "{scenario_name}_mcf_lb_analysis.csv"
+  # Per-scenario aggregated phase-metric summaries — wide-format CSVs with one
+  # row per instance and one column per (round, label). Built by the reporter
+  # by reading every instance's ``mcf_lb_phase_obj_csv`` /
+  # ``mcf_lb_phase_makespan_csv`` under the scenario.
+  - scope: scenario
+    kind: mcf_lb_phase_obj_summary_csv
+    file_template: "{scenario_name}_calc_mcf_lb_phase_obj.csv"
+  - scope: scenario
+    kind: mcf_lb_phase_makespan_summary_csv
+    file_template: "{scenario_name}_calc_mcf_lb_phase_makespan.csv"
+  # Per-scenario summary CSV aggregating per-instance r1_summary.yaml and
+  # r2_summary.yaml sidecars: one row per instance with metadata, r1/r2
+  # objectives + makespans + total stage time, and the round-1 makespan
+  # delta + adjust increments.
+  - scope: scenario
+    kind: calc_mcf_lb_summary_csv
+    file_template: "{scenario_name}_calc_mcf_lb_and_derive_full_sch_summary.csv"
   # Per-scenario interactive RPDf vs Time% chart, fed by per-instance
   # obj_log_json + manifest. Used by report/rpdf_scatter_chart.
   - scope: scenario
     kind: subroutine_rpdf_scatter_html
     file_template: "summary_method_rpdf_and_norm_time_scatter.html"
+  # Per-scenario method-mean (time%, RPDf) scatter chart. Aggregates per
+  # top-level method mean values from each instance's obj_log.
+  - scope: scenario
+    kind: method_mean_scatter_html
+    file_template: "summary_method_mean_rpdf_and_mean_norm_time_scatter.html"
 
   # ---- run ----
   - scope: run
@@ -66,9 +147,6 @@ artifacts:
   - scope: run
     kind: mcf_preemptive_obj_csv
     file_template: "{run_id}_mcf_preemptive_obj.csv"
-  - scope: run
-    kind: adjust_params_by_makespan_delta_csv
-    file_template: "{run_id}_adjust_params_by_makespan_delta.csv"
   - scope: run
     kind: last_stage_only_obj_csv
     file_template: "{run_id}_last_stage_only_obj.csv"
@@ -101,3 +179,14 @@ artifacts:
   - scope: run
     kind: multi_scenario_subroutine_flow_comparison_html
     file_template: "{run_id}_multi_scenario_subroutine_flow_comparison.html"
+  # Run-level table aggregating every per-scenario
+  # calc_mcf_lb_and_derive_full_sch summary into one CSV with
+  # `scenarioName` as the leading column.
+  - scope: run
+    kind: calc_mcf_lb_run_summary_csv
+    file_template: "{run_id}_calc_mcf_lb_and_derive_full_sch_summary.csv"
+  # Run-level multi-scenario method-mean scatter chart. Aggregates per-scenario
+  # method points into one plot.
+  - scope: run
+    kind: multi_scenario_method_mean_scatter_html
+    file_template: "{run_id}_multi_scenario_method_mean_rpdf_and_mean_norm_time_scatter.html"

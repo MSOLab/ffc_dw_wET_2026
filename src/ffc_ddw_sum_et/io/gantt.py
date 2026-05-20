@@ -202,6 +202,7 @@ class GanttPlotter(PlotterBase):
         highlight_op_set: set[tuple[str, str]] | None = None,
         force_start: int | None = None,
         force_end: int | None = None,
+        title: str | None = None,
     ) -> None:
         self._ensure_figure()
         assert self.ax is not None
@@ -218,6 +219,7 @@ class GanttPlotter(PlotterBase):
                 highlight_op_set=highlight_op_set,
                 force_start=force_start,
                 force_end=force_end,
+                title=title,
             )
             self.fig.savefig(file_path, bbox_inches="tight", dpi=300)
             logger.info("Gantt chart saved to %s", file_path)
@@ -235,6 +237,7 @@ class GanttPlotter(PlotterBase):
         highlight_op_set: set[tuple[str, str]] | None = None,
         force_start: int | None = None,
         force_end: int | None = None,
+        title: str | None = None,
     ) -> None:
         self._ensure_figure()
         assert self.ax is not None
@@ -283,7 +286,7 @@ class GanttPlotter(PlotterBase):
             highlight_op_set=highlight_op_set,
         )
 
-        self._finalize_axes(machine_labels)
+        self._finalize_axes(machine_labels, title=title)
 
     @staticmethod
     def compute_horizon(
@@ -371,6 +374,7 @@ class PreemptiveGanttPlotter(PlotterBase):
         highlight_op_set: set[tuple[str, str]] | None = None,
         force_start: int | None = None,
         force_end: int | None = None,
+        title: str | None = None,
     ) -> None:
         self._ensure_figure()
         assert self.ax is not None
@@ -386,6 +390,7 @@ class PreemptiveGanttPlotter(PlotterBase):
                 highlight_op_set=highlight_op_set,
                 force_start=force_start,
                 force_end=force_end,
+                title=title,
             )
             self.fig.savefig(file_path, bbox_inches="tight", dpi=300)
             logger.info("Preemptive Gantt chart saved to %s", file_path)
@@ -403,6 +408,7 @@ class PreemptiveGanttPlotter(PlotterBase):
         highlight_op_set: set[tuple[str, str]] | None = None,
         force_start: int | None = None,
         force_end: int | None = None,
+        title: str | None = None,
     ) -> None:
         self._ensure_figure()
         assert self.ax is not None
@@ -441,7 +447,7 @@ class PreemptiveGanttPlotter(PlotterBase):
             highlight_op_set=highlight_op_set,
         )
 
-        self._finalize_axes(machine_labels)
+        self._finalize_axes(machine_labels, title=title)
 
     @staticmethod
     def compute_horizon(
