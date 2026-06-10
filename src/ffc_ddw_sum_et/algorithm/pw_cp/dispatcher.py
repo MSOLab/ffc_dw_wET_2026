@@ -435,13 +435,10 @@ class PwCpDispatcher:
         """
         applied: float | None = None
         if per_step_tl is not None:
-            if option.apply_cumulative_tl:
-                # mirror neh_cp's cumulative-tl branch (rare)
-                solver.parameters.max_time_in_seconds = per_step_tl
-                applied = per_step_tl
-            else:
-                solver.parameters.max_time_in_seconds = per_step_tl
-                applied = per_step_tl
+            # ``apply_cumulative_tl`` is currently a no-op placeholder for
+            # pw_cp (unlike neh_cp, where it selects a cumulative schedule).
+            solver.parameters.max_time_in_seconds = per_step_tl
+            applied = per_step_tl
         if option.wall_clock_deadline_sec is not None:
             remaining = option.wall_clock_deadline_sec - time.monotonic()
             if remaining <= 0:

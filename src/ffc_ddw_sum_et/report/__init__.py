@@ -3,10 +3,12 @@
 Reads the on-disk ``<instance>_obj_log.json`` + sibling
 ``<instance>_instance_result.yaml`` produced by
 ``FFcDDWSingleInstanceRunner._save_obj_log`` / manifest writer, and renders
-two interactive HTML charts adapted from the hybridflowshop project:
+interactive HTML charts adapted from the hybridflowshop project:
 
 * per-scenario ``summary_method_rpdf_and_norm_time_scatter.html``
 * run-level   ``<run_id>_multi_scenario_subroutine_flow_comparison.html``
+* per-scenario ``summary_method_mean_rpdf_and_mean_norm_time_scatter.html``
+* run-level   ``<run_id>_multi_scenario_method_mean_rpdf_and_mean_norm_time_scatter.html``
 
 Public entry points for callers (reporting pipeline + offline scripts):
 
@@ -15,11 +17,17 @@ Public entry points for callers (reporting pipeline + offline scripts):
 * :func:`load_baseline_df`
 * :func:`export_method_rpdf_scatter_html`
 * :func:`export_multi_scenario_method_rpdf_comparison_html`
+* :func:`load_method_mean_metrics`
+* :func:`export_method_mean_scatter_html`
 * :func:`write_post_run_subroutine_chart_artifacts`
 """
 
 from __future__ import annotations
 
+from .method_mean_scatter import (
+    export_method_mean_scatter_html,
+    load_method_mean_metrics,
+)
 from .multi_scenario_method_chart import (
     export_multi_scenario_method_rpdf_comparison_html,
 )
@@ -44,10 +52,12 @@ __all__ = [
     "ProgPoint",
     "build_endpoint_df",
     "build_raw_progression_df",
+    "export_method_mean_scatter_html",
     "export_method_rpdf_scatter_html",
     "export_multi_scenario_method_rpdf_comparison_html",
     "iter_scenario_instance_progressions",
     "load_baseline_df",
     "load_instance_progression",
+    "load_method_mean_metrics",
     "write_post_run_subroutine_chart_artifacts",
 ]

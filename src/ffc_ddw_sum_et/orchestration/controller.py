@@ -1328,7 +1328,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # read these attributes (e.g. a follow-on
         # ``build_full_sch_from_last_stage_only_sch``) keep working. ----
         last_apply = result.r2_apply or result.r1_apply
-        last_p_inc = result.r2_p_increment if result.r2_ran else 0
+
+        # Pair the p_increment with whichever apply was chosen: r2's apply
+        # carries the augmented increment even when r2 stopped early (so
+        # r2_ran is False), whereas r1's apply is always un-augmented.
+        if last_apply is result.r2_apply and result.r2_apply is not None:
+            last_p_inc = result.r2_p_increment or 0
+        else:
+            last_p_inc = 0
         if last_apply is not None:
             self.mcf_preemptive_schedule = last_apply.mcf_preemptive_schedule
             self.mcf_preemptive_sch_p_increment = last_p_inc
