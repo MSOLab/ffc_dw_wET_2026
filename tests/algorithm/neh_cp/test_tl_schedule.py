@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 
-from ffc_ddw_sum_et.algorithm.neh_cp.tl_schedule import resolve_per_step_tl
+from ffc_ddw_sum_et.algorithm.step_tl_resolver import resolve_per_step_tl
 
 
 def _logger() -> logging.Logger:
