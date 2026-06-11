@@ -14,6 +14,7 @@ dependencies = [
     "statsmodels>=0.14.6",
     "seaborn>=0.13.2",
     "routix>=0.0.17",
+    "kaleido>=1.3.0",
 ]
 
 [build-system]
