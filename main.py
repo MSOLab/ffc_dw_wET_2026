@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260615/20260615_c5_036nc.yaml")
+CONFIG_PATH = Path("metadata/20260617/20260617_c5_036nc.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
