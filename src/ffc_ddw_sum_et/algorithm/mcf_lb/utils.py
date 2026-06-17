@@ -21,6 +21,7 @@ from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ..pm_pmtn_sorter import PmPrmpSortKey, pm_pmtn_sort_job_sequence_from_window_map
 
 __all__ = [
+    "build_simple_stage_seed",
     "insert_jobs_at_desired_starts",
     "pm_pmtn_sort_job_sequence_with_log",
     "window_map_from_preemptive_schedule",
@@ -45,6 +46,50 @@ def window_map_from_preemptive_schedule(
         else:
             window_map[job_id] = (min(cur[0], start), max(cur[1], end))
     return window_map
+
+
+def build_simple_stage_seed(
+    instance: FFcDDWParameters,
+    window_map: Mapping[str, tuple[int, int] | None],
+    *,
+    stage_id: str,
+    duration_map: Mapping[str, int],
+    job_2_release: Mapping[str, int],
+) -> FFcSchedule:
+    """Build a stage-``stage_id``-only seed by left-packing window-ordered jobs.
+
+    This is the generalized form of the original staged anchor builder: order
+    jobs by ``(window t_max, native index)`` and greedily dispatch them onto
+    stage ``stage_id`` via :meth:`FFcSchedule.dispatch_stage_by_jobs`. The
+    ``duration_map`` and ``job_2_release`` maps are passed explicitly so that
+    both intermediate and last-stage callers can supply the right processing
+    times and release offsets without re-deriving them.
+
+    Jobs whose ``window_map[j]`` is ``None`` sort to the front (``t_max`` key
+    of ``0``), broken by native index. Only ``stage_id`` is populated in the
+    returned schedule.
+    """
+    job_2_pos = {j: i for i, j in enumerate(instance.job_id_list)}
+    sequence = sorted(
+        instance.job_id_list,
+        key=lambda j: (
+            window_map[j][1] if window_map[j] is not None else 0,
+            job_2_pos[j],
+        ),
+    )
+
+    new_sch = FFcSchedule(
+        jobs=instance.job_id_list,
+        stages=instance.stage_id_list,
+        machines_per_stage=instance.stage_2_machines_map,
+    )
+    new_sch.dispatch_stage_by_jobs(
+        stage_id,
+        sequence,
+        duration_map,
+        job_2_release=job_2_release,
+    )
+    return new_sch
 
 
 def pm_pmtn_sort_job_sequence_with_log(

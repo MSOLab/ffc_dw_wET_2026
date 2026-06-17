@@ -1,16 +1,23 @@
 """Intermediate-stage seed schedule construction from an MCF preemptive LB.
 
 Pure algorithm module — no controller / orchestration dependency. Given a
-tardiness-only MCF preemptive schedule on an intermediate stage, build a
-stage anchor and derive two full-schedule candidates from it, then keep the
-lower-wET one.
+tardiness-only MCF preemptive schedule on an intermediate stage, build two
+stage anchors and derive two full-schedule candidates from each, then keep
+the global lower-wET one.
 
 Single algorithm entry point:
 
   - :func:`build_stage_seed_full_sch`: from the stage-``stage_id`` MCF
-    preemptive window, build a fresh anchor schedule (each job placed at the
-    midpoint of its MCF window via :func:`insert_jobs_at_desired_starts`,
-    mirroring the last-stage builder), then derive two full schedules:
+    preemptive window, build two fresh anchor schedules —
+
+    * **midpoint** — each job placed at the midpoint of its MCF window via
+      :func:`insert_jobs_at_desired_starts` (mirroring the last-stage
+      builder);
+    * **simple** — jobs left-packed in ``t_max`` order via
+      :func:`build_simple_stage_seed` —
+
+    and from each anchor (see :func:`_candidates_from_anchor`) derive two
+    full schedules:
 
     * **two_way** — extend the anchor across all stages via
       :meth:`BN2DDispatcher.get_full_schedule_from_anchor`;
@@ -19,7 +26,8 @@ Single algorithm entry point:
       (:meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`) and
       reversed (reverse-instance + IIT pipeline), keeping the lower-wET.
 
-    Return the global min-wET schedule across both candidates.
+    Return the global min-wET schedule across both anchors' candidates;
+    ties favour the ``midpoint`` anchor.
 """
 
 import logging
@@ -32,6 +40,7 @@ from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ...solution.objectives import compute_weighted_earliness_tardiness
 from ..dispatcher import BN2DDispatcher, MixedDispatcher
 from .utils import (
+    build_simple_stage_seed,
     insert_jobs_at_desired_starts,
     pm_pmtn_sort_job_sequence_with_log,
     window_map_from_preemptive_schedule,
@@ -54,26 +63,94 @@ class StageSeedResult:
 
     best_candidate: Literal["two_way", "seq_both_ways"]
 
+    anchor_method: Literal["simple", "midpoint"]
+
 
 def build_stage_seed_full_sch(
     instance: FFcDDWParameters,
     mcf_preemptive_schedule: MCFPreemptiveSchedule,
     stage_id: str,
     *,
+    seed_compare: bool = False,
     logger: logging.Logger | None = None,
 ) -> StageSeedResult:
     """Build a full schedule seed anchored on intermediate stage ``stage_id``.
 
     From the MCF preemptive window on stage ``stage_id`` (a tardiness-only
-    lower-bound relaxation), build a fresh anchor schedule and derive two
-    full-schedule candidates, returning the lower-wET one.
+    lower-bound relaxation), build the ``midpoint`` anchor (each job at its
+    MCF-window midpoint) and derive two full-schedule candidates (``two_way``
+    and ``seq_both_ways``), returning the lower-wET one.
+
+    When ``seed_compare`` is ``True`` a second ``simple`` anchor (jobs
+    left-packed in ``t_max`` order) is also built and the global min-wET
+    schedule across both anchors is returned; ties favour the ``midpoint``
+    anchor so a tie keeps the historical (midpoint-only) output. When
+    ``seed_compare`` is ``False`` (default policy) only the midpoint anchor is
+    built — byte-identical to the historical single-anchor output, no extra
+    build cost.
     """
     log = logger or logging.getLogger(__name__)
 
-    anchor_sch = _build_anchor_schedule(
+    midpoint_anchor = _build_anchor_schedule(
         instance, mcf_preemptive_schedule, stage_id, log
     )
+    midpoint_sch, midpoint_obj, midpoint_candidate = _candidates_from_anchor(
+        instance, midpoint_anchor, stage_id, log
+    )
 
+    if not seed_compare:
+        # Comparison disabled: midpoint-only anchor, byte-identical to the
+        # historical single-anchor output (no simple anchor built).
+        return StageSeedResult(
+            schedule=midpoint_sch,
+            obj_value=midpoint_obj,
+            best_candidate=midpoint_candidate,
+            anchor_method="midpoint",
+        )
+
+    window_map = window_map_from_preemptive_schedule(
+        mcf_preemptive_schedule, instance.job_id_list
+    )
+    simple_anchor = build_simple_stage_seed(
+        instance,
+        window_map,
+        stage_id=stage_id,
+        duration_map=instance.get_job_2_p_map_for_stage(stage_id),
+        job_2_release=instance.get_job_2_p_sum_before_stage(stage_id),
+    )
+    simple_sch, simple_obj, simple_candidate = _candidates_from_anchor(
+        instance, simple_anchor, stage_id, log
+    )
+
+    # Ties favour the midpoint anchor (strict `<` keeps today's output).
+    if simple_obj < midpoint_obj:
+        return StageSeedResult(
+            schedule=simple_sch,
+            obj_value=simple_obj,
+            best_candidate=simple_candidate,
+            anchor_method="simple",
+        )
+    return StageSeedResult(
+        schedule=midpoint_sch,
+        obj_value=midpoint_obj,
+        best_candidate=midpoint_candidate,
+        anchor_method="midpoint",
+    )
+
+
+def _candidates_from_anchor(
+    instance: FFcDDWParameters,
+    anchor_sch: FFcSchedule,
+    stage_id: str,
+    log: logging.Logger,
+) -> tuple[FFcSchedule, float, Literal["two_way", "seq_both_ways"]]:
+    """Derive this anchor's own best full schedule across both candidates.
+
+    From ``anchor_sch`` build ``two_way``
+    (:meth:`BN2DDispatcher.get_full_schedule_from_anchor`) and
+    ``seq_both_ways`` (forward + reverse-IIT), returning the lower-wET one.
+    Ties favour ``two_way`` (preserves the historical per-anchor choice).
+    """
     two_way_sch = BN2DDispatcher().get_full_schedule_from_anchor(
         instance, anchor_sch, stage_id, logger=log
     )
@@ -82,16 +159,8 @@ def build_stage_seed_full_sch(
     seq_both_sch, seq_both_obj = _seq_both_ways(instance, anchor_sch, stage_id, log)
 
     if two_way_obj <= seq_both_obj:
-        return StageSeedResult(
-            schedule=two_way_sch,
-            obj_value=two_way_obj,
-            best_candidate="two_way",
-        )
-    return StageSeedResult(
-        schedule=seq_both_sch,
-        obj_value=seq_both_obj,
-        best_candidate="seq_both_ways",
-    )
+        return two_way_sch, two_way_obj, "two_way"
+    return seq_both_sch, seq_both_obj, "seq_both_ways"
 
 
 def _build_anchor_schedule(

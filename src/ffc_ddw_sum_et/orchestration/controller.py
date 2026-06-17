@@ -1156,6 +1156,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         p_adjust_coeff: float = 1.0,
         r_adjust_coeff: float = 0.5,
         proceed_r2_when_nonpositive_cmax: bool = False,
+        seed_compare: bool = False,
         emit_phase_schedules: bool = False,
         lb_stage_scope: Literal["last_stage", "all_stages"] = "last_stage",
     ) -> SubroutineReport:
@@ -1236,6 +1237,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 is skipped whenever the signed delta is ``<= 0``. When
                 True, round 2 runs anyway with the delta clamped to
                 ``>=1`` for increment math.
+            seed_compare: When False (default), each stage seed is built
+                the historical (``midpoint``) way only — byte-identical
+                to the single-seed pipeline with no extra build cost.
+                When True, a second ``simple`` seed is also built at the
+                last stage and every intermediate stage, and the
+                lower-wET full schedule is kept (ties favour
+                ``midpoint``, so the chosen schedule is never worse than
+                the midpoint-only output). The winning method and the
+                loser's wET are recorded on the diagnostic
+                (``seed_method`` / ``last_stage_alt_obj``).
             emit_phase_schedules: Gates the per-round JSON / paired
                 Gantt-PNG output. Default ``False``.
             lb_stage_scope: ``"last_stage"`` (default) runs the existing
@@ -1288,6 +1299,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 p_adjust_coeff=p_adjust_coeff,
                 r_adjust_coeff=r_adjust_coeff,
                 proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
+                seed_compare=seed_compare,
                 stop_predicate=self.is_stopping_condition,
                 logger=self.logger,
                 r1_heatmap_yaml_path=r1_heatmap_yaml_path,
@@ -1311,6 +1323,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 p_adjust_coeff=p_adjust_coeff,
                 r_adjust_coeff=r_adjust_coeff,
                 proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
+                seed_compare=seed_compare,
                 stop_predicate=self.is_stopping_condition,
                 logger=self.logger,
                 r1_heatmap_yaml_path=r1_heatmap_yaml_path,
@@ -1363,6 +1376,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         c_diag.r2_p_increment_added = result.r2_p_increment if result.r2_ran else None
         c_diag.r2_r_increment_added = result.r2_r_increment if result.r2_ran else None
+        # Last-stage dual-seed choice (same on both branches: the all_stages
+        # ``result`` is ``all_result.last_stage_result``).
+        c_diag.last_stage_seed_method = result.last_stage_seed_method
+        c_diag.last_stage_alt_obj = result.last_stage_alt_obj
 
         # ---- Maintain backward-compat state slots so subsequent steps that
         # read these attributes (e.g. a follow-on

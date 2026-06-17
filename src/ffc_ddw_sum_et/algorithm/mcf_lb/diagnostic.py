@@ -116,6 +116,9 @@ class StageLbRecord:
     slot_count: int | None = None
     load_index: float | None = None
     max_release: int | None = None
+    # Seed-construction method that won the per-stage candidate compare:
+    # "simple" | "midpoint" for built stages; None if the stage was unbuilt.
+    seed_method: str | None = None
 
 
 @dataclass(slots=True)
@@ -178,3 +181,7 @@ class CalcMcfLbAndDeriveFullSchDiagnostic:
     best_sched_source: str | None = None  # stage_id, or "last_stage_pipeline"
     total_mcf_solve_sec: float | None = None
     mcf_solve_count: int | None = None
+    # Last-stage dual-seed compare outcome (winner method + loser's full wET).
+    # "simple" | "midpoint"; None when not applicable.
+    last_stage_seed_method: str | None = None
+    last_stage_alt_obj: float | None = None

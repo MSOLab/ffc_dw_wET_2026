@@ -44,6 +44,7 @@ from .full_sch_builder import (
 from .last_stage_sch_builder import (
     HeuristicLastStageOnlyResult,
     heuristic_last_stage_only_from_mcf_lb,
+    simple_last_stage_only_from_mcf_lb,
 )
 from .lb_last_stage_pmtn import (
     ApplyLbByMcfResult,
@@ -60,6 +61,7 @@ __all__ = [
     "CalcMcfLbAndDeriveFullSchResult",
     "CalcMcfLbR1Result",
     "CalcMcfLbR2Result",
+    "LastStageSeedChoice",
     "calc_mcf_lb_all_stages_and_derive_full_sch",
     "calc_mcf_lb_and_derive_full_sch",
     "calc_mcf_lb_r1_and_derive_full_sch",
@@ -94,6 +96,127 @@ _R2_BUILD_FULL_SCH_LABELS: tuple[str, ...] = (
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class LastStageSeedChoice:
+    """The winning last-stage seed and full schedule across both methods.
+
+    Built by :func:`_build_best_full_from_last_stage_seeds`, which constructs
+    both the ``midpoint`` (today's path) and ``simple`` last-stage-only seeds,
+    derives a full schedule from each, and keeps the one with the lower
+    ``build_full.dispatched_obj``. Ties favour ``midpoint`` so the chosen
+    schedule is always ``<=`` today's wET (the comparison only adds a
+    candidate; it never removes the existing one).
+    """
+
+    heuristic: HeuristicLastStageOnlyResult
+    """Winning seed's last-stage-only heuristic result."""
+
+    build_full: BuildFullSchResult
+    """Winning seed's full-schedule build result."""
+
+    seed_method: Literal["simple", "midpoint"]
+    """Which method produced the winner."""
+
+    alt_dispatched_obj: float | None
+    """Loser's full-schedule wET; ``None`` when the loser's build failed."""
+
+
+def _build_best_full_from_last_stage_seeds(
+    instance: FFcDDWParameters,
+    apply: ApplyLbByMcfResult,
+    *,
+    job_placement_priority: PmPrmpSortKey,
+    last_stage_only_placement_criteria: Literal["contrib", "dist"],
+    p_increment: int,
+    r_multiplier: float,
+    r_increment: int,
+    rebuild_last_stage_with_original_p: bool,
+    seed_compare: bool,
+    logger: logging.Logger | None,
+) -> LastStageSeedChoice:
+    """Build the last-stage seed(s) and keep the lower-wET full schedule.
+
+    The ``midpoint`` branch reproduces today's path verbatim (placement +
+    heuristic refinement on the MCF window, with any r2 augmentation). When
+    ``seed_compare`` is ``False`` (default policy) only the midpoint branch
+    runs and its full schedule is returned unchanged — byte-identical to the
+    historical single-seed pipeline, and no extra build cost. When
+    ``seed_compare`` is ``True`` the ``simple`` branch (decision D1) also
+    builds an original-``p`` left-packed seed with no augmentation; each seed
+    is turned into a full schedule via
+    ``build_full_sch_from_last_stage_only_sch`` and the winner is the lower
+    ``dispatched_obj``. A ``None``-schedule build loses; ties favour
+    ``midpoint``. If midpoint's build produced no schedule but simple's did,
+    simple wins (strict improvement on availability).
+    """
+    # ---- midpoint branch (today's path) ----
+    midpoint_heuristic = heuristic_last_stage_only_from_mcf_lb(
+        instance,
+        apply.mcf_preemptive_schedule,
+        logger=logger,
+        job_priority=job_placement_priority,
+        placement_priority=last_stage_only_placement_criteria,
+        p_increment=p_increment,
+        r_multiplier=r_multiplier,
+        r_increment=r_increment,
+    )
+    midpoint_build_full = build_full_sch_from_last_stage_only_sch(
+        instance,
+        midpoint_heuristic.schedule,
+        rebuild_last_stage_with_original_p=rebuild_last_stage_with_original_p,
+        logger=logger,
+    )
+
+    if not seed_compare:
+        # Comparison disabled: midpoint-only path, byte-identical to the
+        # historical single-seed pipeline (no simple seed built).
+        return LastStageSeedChoice(
+            heuristic=midpoint_heuristic,
+            build_full=midpoint_build_full,
+            seed_method="midpoint",
+            alt_dispatched_obj=None,
+        )
+
+    # ---- simple branch (D1: original p, no augmentation) ----
+    simple_heuristic = simple_last_stage_only_from_mcf_lb(
+        instance,
+        apply.mcf_preemptive_schedule,
+        logger=logger,
+    )
+    simple_build_full = build_full_sch_from_last_stage_only_sch(
+        instance,
+        simple_heuristic.schedule,
+        rebuild_last_stage_with_original_p=False,
+        logger=logger,
+    )
+
+    midpoint_obj = midpoint_build_full.dispatched_obj
+    simple_obj = simple_build_full.dispatched_obj
+    midpoint_ok = midpoint_build_full.schedule is not None
+    simple_ok = simple_build_full.schedule is not None
+
+    # Simple wins only when it produced a schedule AND it strictly beats
+    # midpoint (or midpoint produced none). Ties favour midpoint so the
+    # chosen schedule is never worse than today's.
+    simple_wins = simple_ok and (
+        not midpoint_ok or simple_obj < midpoint_obj  # type: ignore[operator]
+    )
+
+    if simple_wins:
+        return LastStageSeedChoice(
+            heuristic=simple_heuristic,
+            build_full=simple_build_full,
+            seed_method="simple",
+            alt_dispatched_obj=midpoint_obj if midpoint_ok else None,
+        )
+    return LastStageSeedChoice(
+        heuristic=midpoint_heuristic,
+        build_full=midpoint_build_full,
+        seed_method="midpoint",
+        alt_dispatched_obj=simple_obj if simple_ok else None,
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CalcMcfLbR1Result:
     """Result of one ``calc_mcf_lb_r1_and_derive_full_sch`` call.
 
@@ -118,6 +241,8 @@ class CalcMcfLbR1Result:
     phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
     elapsed_sec: float
     stop_reason: Literal["stop_guard"] | None
+    seed_method: Literal["simple", "midpoint"] | None = None
+    alt_dispatched_obj: float | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -139,6 +264,8 @@ class CalcMcfLbR2Result:
     p_increment: int
     r_increment: int
     stop_reason: Literal["stop_guard"] | None
+    seed_method: Literal["simple", "midpoint"] | None = None
+    alt_dispatched_obj: float | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -190,6 +317,9 @@ class CalcMcfLbAndDeriveFullSchResult:
     r1_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
     r2_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
 
+    last_stage_seed_method: str | None = None
+    last_stage_alt_obj: float | None = None
+
 
 def calc_mcf_lb_r1_and_derive_full_sch(
     instance: FFcDDWParameters,
@@ -198,6 +328,7 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     heatmap_sort: HeatmapSort = "end_time",
     job_placement_priority: PmPrmpSortKey = "end_time",
     last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    seed_compare: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     heatmap_yaml_path: Path | None = None,
@@ -222,6 +353,8 @@ def calc_mcf_lb_r1_and_derive_full_sch(
         apply: ApplyLbByMcfResult | None = None,
         heuristic: HeuristicLastStageOnlyResult | None = None,
         build_full: BuildFullSchResult | None = None,
+        seed_method: Literal["simple", "midpoint"] | None = None,
+        alt_dispatched_obj: float | None = None,
     ) -> CalcMcfLbR1Result:
         return CalcMcfLbR1Result(
             apply=apply,
@@ -230,6 +363,8 @@ def calc_mcf_lb_r1_and_derive_full_sch(
             phase_schedules=phase_schedules,
             elapsed_sec=time.monotonic() - start_elapsed,
             stop_reason=stop_reason,
+            seed_method=seed_method,
+            alt_dispatched_obj=alt_dispatched_obj,
         )
 
     if _stop_check():
@@ -252,13 +387,23 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     if _stop_check():
         return _build(stop_reason="stop_guard", apply=apply)
 
-    heuristic = heuristic_last_stage_only_from_mcf_lb(
+    # Build both last-stage seeds (midpoint = today's path, simple = D1
+    # original-p) and keep the lower-wET full schedule; ties favour
+    # midpoint so the chosen schedule is never worse than today's.
+    choice = _build_best_full_from_last_stage_seeds(
         instance,
-        apply.mcf_preemptive_schedule,
+        apply,
+        job_placement_priority=job_placement_priority,
+        last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        p_increment=0,
+        r_multiplier=1.0,
+        r_increment=0,
+        rebuild_last_stage_with_original_p=False,
+        seed_compare=seed_compare,
         logger=logger,
-        job_priority=job_placement_priority,
-        placement_priority=last_stage_only_placement_criteria,
     )
+    heuristic = choice.heuristic
+    build_full = choice.build_full
     for label, sched in heuristic.intermediate_schedules:
         phase_schedules.append((f"2_{label}", sched))
     phase_schedules.append(
@@ -266,14 +411,14 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     )
 
     if _stop_check():
-        return _build(stop_reason="stop_guard", apply=apply, heuristic=heuristic)
+        return _build(
+            stop_reason="stop_guard",
+            apply=apply,
+            heuristic=heuristic,
+            seed_method=choice.seed_method,
+            alt_dispatched_obj=choice.alt_dispatched_obj,
+        )
 
-    build_full = build_full_sch_from_last_stage_only_sch(
-        instance,
-        heuristic.schedule,
-        rebuild_last_stage_with_original_p=False,
-        logger=logger,
-    )
     # Drop ``lastS_only_before_rs`` from r1: r1 runs without p-adjustment,
     # so the rebuilt last-stage schedule is identical to label 3
     # (``lastS_only_from_mcf_lb_after_sa_iti``). Recording it separately
@@ -291,7 +436,12 @@ def calc_mcf_lb_r1_and_derive_full_sch(
             phase_schedules.append((f"{4 + offset}_{label}", sched))
 
     return _build(
-        stop_reason=None, apply=apply, heuristic=heuristic, build_full=build_full
+        stop_reason=None,
+        apply=apply,
+        heuristic=heuristic,
+        build_full=build_full,
+        seed_method=choice.seed_method,
+        alt_dispatched_obj=choice.alt_dispatched_obj,
     )
 
 
@@ -307,6 +457,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     heatmap_sort: HeatmapSort = "end_time",
     job_placement_priority: PmPrmpSortKey = "end_time",
     last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    seed_compare: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     heatmap_yaml_path: Path | None = None,
@@ -352,6 +503,8 @@ def calc_mcf_lb_r2_and_derive_full_sch(
         apply: ApplyLbByMcfResult | None = None,
         heuristic: HeuristicLastStageOnlyResult | None = None,
         build_full: BuildFullSchResult | None = None,
+        seed_method: Literal["simple", "midpoint"] | None = None,
+        alt_dispatched_obj: float | None = None,
     ) -> CalcMcfLbR2Result:
         return CalcMcfLbR2Result(
             apply=apply,
@@ -362,6 +515,8 @@ def calc_mcf_lb_r2_and_derive_full_sch(
             p_increment=p_increment,
             r_increment=r_increment,
             stop_reason=stop_reason,
+            seed_method=seed_method,
+            alt_dispatched_obj=alt_dispatched_obj,
         )
 
     try:
@@ -383,15 +538,23 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     if _stop_check():
         return _build(stop_reason="stop_guard", apply=apply)
 
-    heuristic = heuristic_last_stage_only_from_mcf_lb(
+    # Build both last-stage seeds (midpoint = today's augmented path,
+    # simple = D1 original-p) and keep the lower-wET full schedule; ties
+    # favour midpoint so the chosen schedule is never worse than today's.
+    choice = _build_best_full_from_last_stage_seeds(
         instance,
-        apply.mcf_preemptive_schedule,
-        logger=logger,
-        job_priority=job_placement_priority,
-        placement_priority=last_stage_only_placement_criteria,
+        apply,
+        job_placement_priority=job_placement_priority,
+        last_stage_only_placement_criteria=last_stage_only_placement_criteria,
         p_increment=p_increment,
+        r_multiplier=1.0,
         r_increment=r_increment,
+        rebuild_last_stage_with_original_p=(p_increment != 0),
+        seed_compare=seed_compare,
+        logger=logger,
     )
+    heuristic = choice.heuristic
+    build_full = choice.build_full
     for label, sched in heuristic.intermediate_schedules:
         phase_schedules.append((f"2_{label}", sched))
     phase_schedules.append(
@@ -399,14 +562,14 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     )
 
     if _stop_check():
-        return _build(stop_reason="stop_guard", apply=apply, heuristic=heuristic)
+        return _build(
+            stop_reason="stop_guard",
+            apply=apply,
+            heuristic=heuristic,
+            seed_method=choice.seed_method,
+            alt_dispatched_obj=choice.alt_dispatched_obj,
+        )
 
-    build_full = build_full_sch_from_last_stage_only_sch(
-        instance,
-        heuristic.schedule,
-        rebuild_last_stage_with_original_p=(p_increment != 0),
-        logger=logger,
-    )
     r2_kept = dict(build_full.intermediate_schedules)
     # Drop ``lastS_only_before_rs`` when ``p_increment == 0``: the
     # rebuild step uses the same ``p`` as the heuristic input, so the
@@ -423,7 +586,12 @@ def calc_mcf_lb_r2_and_derive_full_sch(
             phase_schedules.append((f"{4 + offset}_{label}", sched))
 
     return _build(
-        stop_reason=None, apply=apply, heuristic=heuristic, build_full=build_full
+        stop_reason=None,
+        apply=apply,
+        heuristic=heuristic,
+        build_full=build_full,
+        seed_method=choice.seed_method,
+        alt_dispatched_obj=choice.alt_dispatched_obj,
     )
 
 
@@ -442,6 +610,7 @@ def calc_mcf_lb_and_derive_full_sch(
     p_adjust_coeff: float = 1.0,
     r_adjust_coeff: float = 0.5,
     proceed_r2_when_nonpositive_cmax: bool = False,
+    seed_compare: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     r1_heatmap_yaml_path: Path | None = None,
@@ -543,6 +712,8 @@ def calc_mcf_lb_and_derive_full_sch(
             r2_r_increment=r2.r_increment if r2 is not None else None,
             r1_phase_schedules=r1.phase_schedules,
             r2_phase_schedules=r2.phase_schedules if r2 is not None else [],
+            last_stage_seed_method=r1.seed_method,
+            last_stage_alt_obj=r1.alt_dispatched_obj,
         )
 
     # ------------------- Round 1 -------------------
@@ -552,6 +723,7 @@ def calc_mcf_lb_and_derive_full_sch(
         heatmap_sort=heatmap_sort,
         job_placement_priority=job_placement_priority,
         last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        seed_compare=seed_compare,
         stop_predicate=stop_predicate,
         logger=logger,
         heatmap_yaml_path=r1_heatmap_yaml_path,
@@ -661,6 +833,7 @@ def calc_mcf_lb_and_derive_full_sch(
         heatmap_sort=heatmap_sort,
         job_placement_priority=job_placement_priority,
         last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        seed_compare=seed_compare,
         stop_predicate=stop_predicate,
         logger=logger,
         heatmap_yaml_path=r2_heatmap_yaml_path,
@@ -751,6 +924,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
     p_adjust_coeff: float = 1.0,
     r_adjust_coeff: float = 0.5,
     proceed_r2_when_nonpositive_cmax: bool = False,
+    seed_compare: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     r1_heatmap_yaml_path: Path | None = None,
@@ -791,6 +965,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
         p_adjust_coeff=p_adjust_coeff,
         r_adjust_coeff=r_adjust_coeff,
         proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
+        seed_compare=seed_compare,
         stop_predicate=stop_predicate,
         logger=logger,
         r1_heatmap_yaml_path=r1_heatmap_yaml_path,
@@ -841,6 +1016,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
         slot_count=None if r1_apply is None else len(r1_apply.mcf.calT),
         load_index=None,
         max_release=None,
+        seed_method=last_stage_result.last_stage_seed_method,
     )
 
     # Records accumulated last → first while iterating; reordered to ascending
@@ -868,6 +1044,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
             instance,
             apply.mcf_preemptive_schedule,
             q,
+            seed_compare=seed_compare,
             logger=logger,
         )
 
@@ -896,6 +1073,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
                 slot_count=len(apply.mcf.calT),
                 load_index=load_index,
                 max_release=max_release,
+                seed_method=seed.anchor_method,
             )
         )
 

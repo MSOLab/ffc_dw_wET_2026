@@ -26,6 +26,7 @@ from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ...solution.objectives import compute_weighted_earliness_tardiness
 from ..pm_pmtn_sorter import PmPrmpSortKey
 from .utils import (
+    build_simple_stage_seed,
     insert_jobs_at_desired_starts,
     pm_pmtn_sort_job_sequence_with_log,
     window_map_from_preemptive_schedule,
@@ -34,6 +35,7 @@ from .utils import (
 __all__ = [
     "HeuristicLastStageOnlyResult",
     "heuristic_last_stage_only_from_mcf_lb",
+    "simple_last_stage_only_from_mcf_lb",
 ]
 
 
@@ -173,5 +175,54 @@ def heuristic_last_stage_only_from_mcf_lb(
         status="HEURISTIC",
         intermediate_schedules=[
             ("lastS_only_from_mcf_lb_before_sa_iti", before_sa_iti),
+        ],
+    )
+
+
+def simple_last_stage_only_from_mcf_lb(
+    instance: FFcDDWParameters,
+    mcf_preemptive_schedule: MCFPreemptiveSchedule,
+    *,
+    logger: logging.Logger | None = None,
+) -> HeuristicLastStageOnlyResult:
+    """Build a last-stage-only seed with the ``simple`` method (D1).
+
+    Sort jobs by their MCF window ``t_max`` (native index tie-break) and
+    greedily left-pack them on the last stage with the original processing
+    times and the upstream processing-time sums as releases. No
+    augmentation is applied (original ``p``); the only round-dependence is
+    the ordering taken from the MCF window. The returned schedule is
+    last-stage-only and original-feasible; the caller extends it to a full
+    schedule via the reverse-dispatch pipeline.
+    """
+    _ = logger  # no logging in the simple seed path
+    start = time.monotonic()
+
+    window_map = window_map_from_preemptive_schedule(
+        mcf_preemptive_schedule, instance.job_id_list
+    )
+    last_stage_id = instance.stage_id_list[-1]
+    duration_map = instance.get_job_2_p_map_for_stage(last_stage_id)
+    job_2_release = instance.get_job_2_p_sum_except_last_stage()
+
+    schedule = build_simple_stage_seed(
+        instance,
+        window_map,
+        stage_id=last_stage_id,
+        duration_map=duration_map,
+        job_2_release=job_2_release,
+    )
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+    obj_value = float(sum_e + sum_t)
+
+    elapsed = time.monotonic() - start
+    return HeuristicLastStageOnlyResult(
+        schedule=schedule,
+        obj_value=obj_value,
+        elapsed_time=elapsed,
+        status="HEURISTIC_SIMPLE",
+        intermediate_schedules=[
+            ("lastS_only_simple_seed", schedule),
         ],
     )

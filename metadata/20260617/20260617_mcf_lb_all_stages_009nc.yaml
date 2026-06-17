@@ -27,3 +27,20 @@ scenarios:
         adjust_p: true
         adjust_r: true
         proceed_r2_when_nonpositive_cmax: true
+  - name: mcf_lb_last_stage_seedcmp
+    output_subdir: mcf_lb_last_stage_seedcmp
+    timelimit: "0.09nc"
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        lb_stage_scope: last_stage
+        seed_compare: true
+  - name: mcf_lb_all_stages_seedcmp
+    output_subdir: mcf_lb_all_stages_seedcmp
+    timelimit: "0.09nc"
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        lb_stage_scope: all_stages
+        adjust_p: true
+        adjust_r: true
+        proceed_r2_when_nonpositive_cmax: true
+        seed_compare: true
