@@ -1159,6 +1159,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         seed_compare: bool = False,
         emit_phase_schedules: bool = False,
         lb_stage_scope: Literal["last_stage", "all_stages"] = "last_stage",
+        intermediate_stage_cost: Literal[
+            "tardiness_only", "full_et_approx"
+        ] = "tardiness_only",
     ) -> SubroutineReport:
         """Composite step: MCF-LB → full schedule, then a conditional
         second round with p/r adjustments.
@@ -1260,6 +1263,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 per-stage records and combined-LB summary are recorded on
                 the diagnostic's ``per_stage_records`` /
                 ``lb_stage_scope_used`` / ``combined_lb`` fields.
+            intermediate_stage_cost: Intermediate-stage MCF cost under
+                ``lb_stage_scope="all_stages"`` (inert under ``last_stage``,
+                where no intermediate stage is solved).
+                ``"tardiness_only"`` (default) uses the weighted-tardiness-only
+                projection — a valid LB on OPT, so each intermediate bound is
+                eligible for ``combined_lb``; the behaviour is byte-identical
+                to the historical ``all_stages`` path. ``"full_et_approx"``
+                uses the full earliness+tardiness projected cost, which
+                over-counts earliness (vault/bounds_A_C_P3.tex) and is **not** a
+                valid LB: the intermediate MCF objective becomes an approximate
+                objective used only to seed a schedule and is excluded from
+                ``combined_lb`` (which is then the last-stage full-ET bound
+                alone). The mode used is recorded on the diagnostic's
+                ``intermediate_stage_cost_used`` field.
 
         Returns:
             The single registered ``SubroutineReport`` whose
@@ -1300,6 +1317,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 r_adjust_coeff=r_adjust_coeff,
                 proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
                 seed_compare=seed_compare,
+                intermediate_stage_cost=intermediate_stage_cost,
                 stop_predicate=self.is_stopping_condition,
                 logger=self.logger,
                 r1_heatmap_yaml_path=r1_heatmap_yaml_path,
@@ -1426,6 +1444,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             reg_obj = all_result.best_obj
             reg_bound = all_result.combined_lb
             c_diag.lb_stage_scope_used = "all_stages"
+            c_diag.intermediate_stage_cost_used = intermediate_stage_cost
             c_diag.per_stage_records = all_result.stage_records
             c_diag.combined_lb = all_result.combined_lb
             c_diag.argmax_stage_id = all_result.argmax_stage_id

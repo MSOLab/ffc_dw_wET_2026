@@ -1,9 +1,10 @@
 """Intermediate-stage seed schedule construction from an MCF preemptive LB.
 
-Pure algorithm module — no controller / orchestration dependency. Given a
-tardiness-only MCF preemptive schedule on an intermediate stage, build two
-stage anchors and derive two full-schedule candidates from each, then keep
-the global lower-wET one.
+Pure algorithm module — no controller / orchestration dependency. Given an
+intermediate-stage MCF preemptive schedule (tardiness-only or full-ET
+approximate — the builder only reads the preemptive window, so it is
+agnostic to which cost produced it), build two stage anchors and derive two
+full-schedule candidates from each, then keep the global lower-wET one.
 
 Single algorithm entry point:
 
@@ -76,10 +77,11 @@ def build_stage_seed_full_sch(
 ) -> StageSeedResult:
     """Build a full schedule seed anchored on intermediate stage ``stage_id``.
 
-    From the MCF preemptive window on stage ``stage_id`` (a tardiness-only
-    lower-bound relaxation), build the ``midpoint`` anchor (each job at its
-    MCF-window midpoint) and derive two full-schedule candidates (``two_way``
-    and ``seq_both_ways``), returning the lower-wET one.
+    From the MCF preemptive window on stage ``stage_id`` (either a
+    tardiness-only lower-bound relaxation or a full-ET approximate cost — the
+    builder only reads the preemptive window), build the ``midpoint`` anchor
+    (each job at its MCF-window midpoint) and derive two full-schedule
+    candidates (``two_way`` and ``seq_both_ways``), returning the lower-wET one.
 
     When ``seed_compare`` is ``True`` a second ``simple`` anchor (jobs
     left-packed in ``t_max`` order) is also built and the global min-wET

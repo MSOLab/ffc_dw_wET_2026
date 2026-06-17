@@ -214,7 +214,11 @@ def apply_lb_by_mcf(
             earliness is dropped. The bound stays a valid LB on OPT, so it
             does **not** invalidate ``obj_bound_is_valid``. Forwarded to
             :func:`solve_mcf_lb`. ``False`` (default) uses the full
-            earliness+tardiness cost.
+            earliness+tardiness cost — valid at the last stage, but at an
+            intermediate ``stage_id`` the projected earliness arm is
+            over-counted, so the objective is **not** a valid LB and
+            ``obj_bound_is_valid`` is ``False`` (the result is then an
+            approximate objective usable only for seeding a schedule).
         draw_heatmap: When ``True`` and ``heatmap_yaml_path`` is provided,
             build the parallel-machine signed C-cost matrix and dump it
             to that YAML path. The heatmap is never drawn when
@@ -281,7 +285,14 @@ def apply_lb_by_mcf(
                 len(heatmap_data.x_cells),
             )
 
-    obj_bound_is_valid = p_increment == 0 and r_multiplier <= 1.0 and r_increment == 0
+    last_stage_id = instance.stage_id_list[-1]
+    is_last_stage = stage_id is None or stage_id == last_stage_id
+    no_augment = p_increment == 0 and r_multiplier <= 1.0 and r_increment == 0
+    # The non-augmented MCF objective is a valid LB on OPT only for the two
+    # valid relaxations: last-stage full-ET, or any-stage tardiness-only. The
+    # intermediate full-ET cost over-counts earliness (vault/bounds_A_C_P3.tex)
+    # and is therefore NOT a valid bound.
+    obj_bound_is_valid = no_augment and (tardiness_only or is_last_stage)
 
     return ApplyLbByMcfResult(
         mcf_lb=mcf_result.mcf_lb,

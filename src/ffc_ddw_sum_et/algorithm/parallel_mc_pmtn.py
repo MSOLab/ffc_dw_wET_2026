@@ -50,10 +50,19 @@ class ParallelMachinePreemptionMcf:
     optionally scaled/shifted by ``r_multiplier`` / ``r_increment``.
 
     Costs (``tardiness_only=False``, full earliness+tardiness):
+        The due window is projected by the downstream tail
+        ``tau_j = sum_{h>q} p_{hj}`` to ``dbar^-_j = d^-_j - tau_j`` and
+        ``dbar^+_j = d^+_j - tau_j`` (vault/bounds_A_C_P3.tex):
         C_{jt} =
-            w^-_j * ceil((d^-_j - p_j - t + 1) / p_j)  if t <= d^-_j - p_j
-            0                                          if d^-_j - p_j < t <= d^+_j
-            w^+_j * ceil((t - d^+_j) / p_j)            if t > d^+_j
+            w^-_j * ceil((dbar^-_j - p_j - t + 1) / p_j)  if t <= dbar^-_j - p_j
+            0                                             if dbar^-_j - p_j < t <= dbar^+_j
+            w^+_j * ceil((t - dbar^+_j) / p_j)            if t > dbar^+_j
+        At the last stage ``tau_j == 0`` so the projected window equals the
+        raw window and this cost (and the horizon) are byte-identical to the
+        un-projected last-stage bound. For an intermediate stage ``q < c`` the
+        earliness arm makes this an *approximate* objective and **not** a valid
+        LB (earliness is over-counted by the upstream projection); callers must
+        treat it accordingly.
 
     Costs (``tardiness_only=True``, weighted-tardiness-only projection):
         The earliness arm is dropped (earliness is non-regular and would
@@ -188,10 +197,21 @@ class ParallelMachinePreemptionMcf:
 
         w_minus = _resolve_weight_map(instance.job_2_ewt_map, self.calJ, "ewt")
 
-        # T = max_j(max(r_j, d^-_j - p_j)) + ceil(sum(p_j) / mc_count)
-        d_lower = {j: ddw[j][0] for j in self.calJ}
+        # Full earliness+tardiness cost with the due window projected by the
+        # downstream tail tau_j = sum_{h>q} p_{hj} (vault/bounds_A_C_P3.tex):
+        # dbar^-_j = d^-_j - tau_j, dbar^+_j = d^+_j - tau_j. At the last stage
+        # tau_j == 0, so the projected window equals the raw window and the cost
+        # (and horizon) are byte-identical to the un-projected last-stage bound.
+        # For an intermediate stage q < c the earliness arm makes this an
+        # *approximate* objective, NOT a valid LB (earliness is over-counted by
+        # the upstream projection).
+        tau = instance.get_job_2_p_sum_after_stage(target_stage)
+        d_minus_bar = {j: ddw[j][0] - tau[j] for j in self.calJ}
+        d_plus_bar = {j: ddw[j][1] - tau[j] for j in self.calJ}
+
+        # T = max_j(max(r_j, dbar^-_j - p_j)) + ceil(sum(p_j) / mc_count)
         t_max = compute_parallel_mc_horizon(
-            self.p, self.r, self.mc_count, d_lower=d_lower
+            self.p, self.r, self.mc_count, d_lower=d_minus_bar
         )
         self.calT = list(range(1, t_max + 1))
         if not self.calT:
@@ -199,7 +219,8 @@ class ParallelMachinePreemptionMcf:
 
         self.C = {}
         for j in self.calJ:
-            d_minus, d_plus = ddw[j]
+            d_minus = d_minus_bar[j]
+            d_plus = d_plus_bar[j]
             self.C[j] = {}
             for t in self.calT:
                 if t <= d_minus - self.p[j]:

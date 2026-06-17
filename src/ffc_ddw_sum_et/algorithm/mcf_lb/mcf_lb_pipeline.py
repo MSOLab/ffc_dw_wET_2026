@@ -875,17 +875,22 @@ class CalcMcfLbAllStagesResult:
     The last stage is solved by reusing the existing
     ``calc_mcf_lb_and_derive_full_sch`` pipeline (full earliness+tardiness
     MCF + reverse-dispatch schedule, incl. round 2). Each intermediate
-    stage ``q = c-1 … 1`` adds a weighted-tardiness-only MCF lower bound
-    and a stage-anchored seed schedule (round-1 only, no drift correction).
+    stage ``q = c-1 … 1`` adds one MCF and a stage-anchored seed schedule
+    (round-1 only, no drift correction). The intermediate MCF cost is
+    selected by ``intermediate_stage_cost``: ``"tardiness_only"`` (a valid
+    LB) or ``"full_et_approx"`` (an approximate, non-LB objective used only
+    for seeding).
 
     - ``last_stage_result``: the existing pipeline result, kept so the
       controller can reuse the existing diagnostic/artifact-emission code.
     - ``best_schedule`` / ``best_obj``: global argmin-wET across the
       last-stage pipeline result and every intermediate seed.
-    - ``combined_lb``: ``max`` over the valid lower bounds (full-ET at the
-      last stage + tardiness-only at each intermediate stage). Each
-      intermediate LB is a valid LB on OPT (round-1 only), so they are all
-      eligible for the max.
+    - ``combined_lb``: ``max`` over the **valid** lower bounds only. In
+      ``intermediate_stage_cost="tardiness_only"`` mode this is the full-ET
+      last-stage bound plus the tardiness-only intermediate bounds (all valid
+      on OPT). In ``"full_et_approx"`` mode the intermediate MCF objectives are
+      not valid LBs and are excluded, so ``combined_lb`` is the last-stage
+      full-ET bound alone.
     - ``argmax_stage_id``: stage whose LB attains ``combined_lb``.
     - ``best_sched_source``: ``"last_stage_pipeline"`` or the stage id of
       the intermediate seed that produced ``best_schedule``.
@@ -925,6 +930,9 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
     r_adjust_coeff: float = 0.5,
     proceed_r2_when_nonpositive_cmax: bool = False,
     seed_compare: bool = False,
+    intermediate_stage_cost: Literal[
+        "tardiness_only", "full_et_approx"
+    ] = "tardiness_only",
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     r1_heatmap_yaml_path: Path | None = None,
@@ -935,15 +943,27 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
     The last stage reuses :func:`calc_mcf_lb_and_derive_full_sch` verbatim
     (same kwargs) so the last-stage LB / schedule / round-2 / artifacts are
     identical to the ``last_stage`` scope. Each intermediate stage
-    ``q = c-1 … 1`` then adds a weighted-tardiness-only MCF lower bound
-    (``apply_lb_by_mcf(..., tardiness_only=True)``) and a stage-anchored
-    seed schedule (``build_stage_seed_full_sch``); round-1 only, no
+    ``q = c-1 … 1`` then solves one MCF and builds a stage-anchored seed
+    schedule (``build_stage_seed_full_sch``); round-1 only, no
     drift-correction (decision D1).
 
-    The reported bound is
-    ``combined_lb = max{ LB^ET_c , max_{q<c} LB_T^(q) }`` and the registered
-    schedule is the global min-wET across the last-stage pipeline result and
-    every intermediate seed.
+    ``intermediate_stage_cost`` selects the intermediate-stage MCF cost:
+
+    - ``"tardiness_only"`` (default): the weighted-tardiness-only projection
+      (``apply_lb_by_mcf(..., tardiness_only=True)``), a valid LB on OPT, so
+      each ``LB_T^(q)`` is eligible for the ``combined_lb`` max.
+    - ``"full_et_approx"``: the full earliness+tardiness projected cost
+      (``apply_lb_by_mcf(..., tardiness_only=False)``). The earliness arm is
+      over-counted by the upstream projection (vault/bounds_A_C_P3.tex), so it
+      is **not** a valid LB; the MCF objective is treated as an approximate
+      objective used only to seed a schedule and is **excluded** from
+      ``combined_lb``.
+
+    The reported bound is ``combined_lb``, the max over the **valid** LBs only:
+    ``max{ LB^ET_c , max_{q<c} LB_T^(q) }`` in ``"tardiness_only"`` mode, and
+    just ``LB^ET_c`` (the last-stage full-ET bound) in ``"full_et_approx"``
+    mode. The registered schedule is the global min-wET across the last-stage
+    pipeline result and every intermediate seed in both modes.
 
     ``stop_predicate`` is probed at each intermediate stage boundary; on stop
     the function returns with the stages solved so far (the last stage is
@@ -1023,6 +1043,11 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
     # stage order before returning (see below).
     intermediate_records: list[StageLbRecord] = []
 
+    # Intermediate-stage cost mode: tardiness-only is a valid LB (eligible for
+    # the combined_lb max); full_et_approx is an approximate objective used
+    # only for seeding and excluded from the bound (see docstring / WO-3).
+    tardiness_only = intermediate_stage_cost == "tardiness_only"
+
     # Intermediate stages q = c-1 … 1.
     for q in reversed(stage_id_list[:-1]):
         # Stop check at the stage boundary: return with stages solved so far.
@@ -1032,7 +1057,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
         apply = apply_lb_by_mcf(
             instance,
             stage_id=q,
-            tardiness_only=True,
+            tardiness_only=tardiness_only,
             draw_heatmap=False,
             stop_predicate=stop_predicate,
             logger=logger,
@@ -1062,9 +1087,9 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
             StageLbRecord(
                 stage_id=q,
                 is_last_stage=False,
-                bound_kind="tardiness_only",
+                bound_kind="tardiness_only" if tardiness_only else "full_et_approx",
                 mcf_lb=apply.mcf_lb,
-                mcf_lb_valid=True,
+                mcf_lb_valid=apply.obj_bound_is_valid,
                 init_sched_obj=seed.obj_value,
                 delta=seed.obj_value - apply.mcf_lb,
                 best_candidate=seed.best_candidate,
@@ -1077,8 +1102,13 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
             )
         )
 
-        # Update combined LB (max over valid LBs) and best schedule (min wET).
-        if combined_lb is None or apply.mcf_lb > combined_lb:
+        # Update combined LB only when this stage's bound is a valid LB
+        # (always so in tardiness_only mode; never in full_et_approx mode,
+        # where the MCF objective is approximate). Best schedule (min wET) is
+        # updated unconditionally in both modes.
+        if apply.obj_bound_is_valid and (
+            combined_lb is None or apply.mcf_lb > combined_lb
+        ):
             combined_lb = apply.mcf_lb
             argmax_stage_id = q
         if best_obj is None or seed.obj_value < best_obj:

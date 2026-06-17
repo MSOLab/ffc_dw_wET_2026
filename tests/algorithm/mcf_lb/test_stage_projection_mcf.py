@@ -404,3 +404,144 @@ def test_upstream_bottleneck_intermediate_lb_beats_last_stage_et() -> None:
     feasible_ub = 24
     assert lb_t_i0 <= feasible_ub
     assert lb_et_c <= feasible_ub
+
+
+# --- Intermediate full-ET (earliness-included) projected approximate cost ---
+
+
+def test_last_stage_full_et_cost_uses_raw_window() -> None:
+    """At the last stage ``tau == 0``, so the full-ET cost uses the raw window
+    ``[d^-, d^+]`` — projecting by a zero tail is the no-op that keeps the
+    last-stage bound byte-identical to before the intermediate-stage change.
+    """
+    instance = _make_instance(
+        name="last_full_et",
+        jobs=["j0", "j1"],
+        stages=["i0", "i1"],
+        machines={"i0": ["i0_0"], "i1": ["i1_0"]},
+        processing=[[2, 3], [3, 2]],
+        due_window={"j0": (4, 6), "j1": (3, 5)},
+        ewt={"j0": 2, "j1": 1},
+        twt={"j0": 3, "j1": 4},
+    )
+    last_stage_id = instance.stage_id_list[-1]
+    tau = instance.get_job_2_p_sum_after_stage(last_stage_id)
+    assert all(v == 0 for v in tau.values())
+
+    # stage_id=None -> last stage, tardiness_only=False -> full-ET.
+    mcf = ParallelMachinePreemptionMcf.from_instance(instance)
+    ddw = instance.job_2_due_window_map
+    ewt = instance.job_2_ewt_map
+    twt = instance.job_2_twt_map
+    for j in instance.job_id_list:
+        p = int(mcf.p[j])
+        d_minus, d_plus = ddw[j]
+        for t in mcf.calT:
+            if t <= d_minus - p:
+                expected = ewt[j] * math.ceil((d_minus - p - t + 1) / p)
+            elif t <= d_plus:
+                expected = 0
+            else:
+                expected = twt[j] * math.ceil((t - d_plus) / p)
+            assert mcf.C[j][t] == expected, (j, t)
+
+
+def test_intermediate_full_et_projected_window_shape() -> None:
+    """Intermediate full-ET cost is the V-shape on the tail-projected window
+    ``[d^- - tau, d^+ - tau]`` with the stage-``i`` processing time
+    (``vault/bounds_A_C_P3.tex`` slot cost with ``d^- -> d^- - tau``,
+    ``d^+ -> d^+ - tau``).
+    """
+    instance = _make_instance(
+        name="inter_full_et",
+        jobs=["j0", "j1"],
+        stages=["i0", "i1", "i2"],
+        machines={"i0": ["i0_0"], "i1": ["i1_0"], "i2": ["i2_0"]},
+        processing=[[1, 2, 2], [2, 1, 1]],
+        due_window={"j0": (8, 10), "j1": (6, 9)},
+        ewt={"j0": 2, "j1": 1},
+        twt={"j0": 3, "j1": 4},
+    )
+    ddw = instance.job_2_due_window_map
+    ewt = instance.job_2_ewt_map
+    twt = instance.job_2_twt_map
+    for stage_id in ["i0", "i1"]:
+        mcf = ParallelMachinePreemptionMcf.from_instance(
+            instance, stage_id=stage_id, tardiness_only=False
+        )
+        tau = instance.get_job_2_p_sum_after_stage(stage_id)
+        for j in instance.job_id_list:
+            p = int(mcf.p[j])
+            d_minus = ddw[j][0] - tau[j]
+            d_plus = ddw[j][1] - tau[j]
+            for t in mcf.calT:
+                if t <= d_minus - p:
+                    expected = ewt[j] * math.ceil((d_minus - p - t + 1) / p)
+                elif t <= d_plus:
+                    expected = 0
+                else:
+                    expected = twt[j] * math.ceil((t - d_plus) / p)
+                assert mcf.C[j][t] == expected, (j, stage_id, t)
+
+
+def test_intermediate_full_et_exceeds_opt_not_valid_lb() -> None:
+    """The point of the change: the intermediate full-ET MCF over-counts
+    earliness and can **exceed** OPT, so it is not a valid lower bound.
+
+    Two jobs, ``p_i0=1`` on a single first-stage machine, ``p_i1=3`` on two
+    second-stage machines, point due date 5 (``tau=3`` => projected window
+    ``[2, 2]``). A real schedule lets each job wait between stages and complete
+    exactly at 5 (cost 0), so OPT = 0. But the stage-``i0`` full-ET MCF is
+    forced (single machine, only one in-window slot) to place one job at
+    completion 1, charging a phantom earliness of 1 => ``mcf_lb = 1 > 0``.
+    """
+    instance = _make_instance(
+        name="et_overcount",
+        jobs=["j0", "j1"],
+        stages=["i0", "i1"],
+        machines={"i0": ["i0_0"], "i1": ["i1_0", "i1_1"]},
+        processing=[[1, 3], [1, 3]],
+        due_window={"j0": (5, 5), "j1": (5, 5)},
+        ewt={"j0": 1, "j1": 1},
+        twt={"j0": 1, "j1": 1},
+    )
+    # Witness OPT == 0: i0 j0 [0,1), j1 [1,2); i1 (2 machines) both [2,5)=>C=5.
+    opt = _brute_force_opt(instance, horizon=8)
+    assert opt == 0
+
+    apply_result = apply_lb_by_mcf(instance, stage_id="i0", tardiness_only=False)
+    assert apply_result.obj_bound_is_valid is False  # NOT a valid LB
+    assert apply_result.mcf_lb == 1
+    assert apply_result.mcf_lb > opt
+
+
+def test_obj_bound_validity_matrix() -> None:
+    """``obj_bound_is_valid`` is ``True`` exactly for the two valid relaxations
+    (last-stage full-ET, any-stage tardiness-only) and ``False`` for the
+    intermediate full-ET (earliness-included) cost.
+    """
+    instance = _make_instance(
+        name="validity_matrix",
+        jobs=["j0", "j1"],
+        stages=["i0", "i1", "i2"],
+        machines={"i0": ["i0_0"], "i1": ["i1_0"], "i2": ["i2_0"]},
+        processing=[[1, 2, 2], [2, 1, 1]],
+        due_window={"j0": (4, 6), "j1": (3, 5)},
+        ewt={"j0": 2, "j1": 1},
+        twt={"j0": 3, "j1": 4},
+    )
+    last_stage_id = instance.stage_id_list[-1]
+
+    last_none = apply_lb_by_mcf(instance)
+    assert last_none.obj_bound_is_valid is True
+
+    last_explicit = apply_lb_by_mcf(
+        instance, stage_id=last_stage_id, tardiness_only=False
+    )
+    assert last_explicit.obj_bound_is_valid is True
+
+    inter_tard = apply_lb_by_mcf(instance, stage_id="i0", tardiness_only=True)
+    assert inter_tard.obj_bound_is_valid is True
+
+    inter_full = apply_lb_by_mcf(instance, stage_id="i0", tardiness_only=False)
+    assert inter_full.obj_bound_is_valid is False

@@ -97,13 +97,15 @@ class StageLbRecord:
 
     One record per stage in the all-stages projection. The last stage uses
     the full-ET bound (``bound_kind="full_ET"``,
-    ``best_candidate="last_stage_pipeline"``); intermediate stages use the
-    tardiness-only bound (``bound_kind="tardiness_only"``).
+    ``best_candidate="last_stage_pipeline"``); intermediate stages use either
+    the tardiness-only bound (``bound_kind="tardiness_only"``, a valid LB) or
+    the earliness-included projected cost (``bound_kind="full_et_approx"``, an
+    approximate objective with ``mcf_lb_valid=False``).
     """
 
     stage_id: str
     is_last_stage: bool
-    bound_kind: str  # "full_ET" | "tardiness_only"
+    bound_kind: str  # "full_ET" | "tardiness_only" | "full_et_approx"
     mcf_lb: float | None = None
     mcf_lb_valid: bool = False
     init_sched_obj: float | None = None
@@ -174,6 +176,9 @@ class CalcMcfLbAndDeriveFullSchDiagnostic:
     # keep the ``last_stage`` serialization byte-identical: empty record list,
     # None summaries.
     lb_stage_scope_used: str = "last_stage"
+    # Intermediate-stage cost mode used under ``all_stages``:
+    # "tardiness_only" (valid LB) | "full_et_approx" (approximate, non-LB seed).
+    intermediate_stage_cost_used: str = "tardiness_only"
     per_stage_records: list[StageLbRecord] = field(default_factory=list)
     combined_lb: float | None = None
     argmax_stage_id: str | None = None

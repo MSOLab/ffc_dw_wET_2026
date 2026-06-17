@@ -255,6 +255,125 @@ def test_controller_all_stages_branch_registers_combined_lb() -> None:
     assert report.obj_value <= last_stage_report.obj_value
 
 
+def test_full_et_approx_excludes_intermediate_from_combined_lb() -> None:
+    """``intermediate_stage_cost="full_et_approx"``: the intermediate MCF is an
+    approximate (non-LB) objective, so it is excluded from ``combined_lb`` —
+    which equals the last-stage full-ET LB alone — and the intermediate records
+    carry ``bound_kind="full_et_approx"`` with ``mcf_lb_valid=False``. The
+    intermediate seeds still compete for the incumbent.
+    """
+    instance = _make_three_stage_instance()
+
+    result = calc_mcf_lb_all_stages_and_derive_full_sch(
+        instance, intermediate_stage_cost="full_et_approx"
+    )
+
+    last_stage_lb = result.last_stage_result.final_obj_bound
+    assert last_stage_lb is not None
+    # combined_lb is the last-stage full-ET bound alone (intermediates dropped).
+    assert result.combined_lb == last_stage_lb
+    assert result.argmax_stage_id == instance.stage_id_list[-1]
+
+    # Last stage: still a valid full-ET LB.
+    last_record = result.stage_records[-1]
+    assert last_record.is_last_stage is True
+    assert last_record.bound_kind == "full_ET"
+    assert last_record.mcf_lb_valid is True
+
+    # Intermediate stages: approximate, non-LB objective used only for seeding.
+    for record in result.stage_records[:-1]:
+        assert record.is_last_stage is False
+        assert record.bound_kind == "full_et_approx"
+        assert record.mcf_lb_valid is False
+        assert record.mcf_lb is not None  # the approximate objective is recorded
+        assert record.init_sched_obj is not None
+        assert record.best_candidate in ("two_way", "seq_both_ways")
+
+    # The incumbent (min-wET over last stage + intermediate seeds) is still no
+    # worse than the last-stage-only seed.
+    assert result.best_obj is not None
+    assert result.last_stage_result.best_obj is not None
+    assert result.best_obj <= result.last_stage_result.best_obj
+
+
+def test_full_et_approx_matches_tardonly_last_stage_lb() -> None:
+    """The last-stage LB is identical across both intermediate modes (the last
+    stage is untouched): ``full_et_approx``'s ``combined_lb`` equals the
+    ``tardiness_only`` run's last-stage bound.
+    """
+    instance = _make_three_stage_instance()
+
+    tardonly = calc_mcf_lb_all_stages_and_derive_full_sch(
+        instance, intermediate_stage_cost="tardiness_only"
+    )
+    etapprox = calc_mcf_lb_all_stages_and_derive_full_sch(
+        instance, intermediate_stage_cost="full_et_approx"
+    )
+
+    assert tardonly.last_stage_result.final_obj_bound is not None
+    assert (
+        etapprox.combined_lb
+        == etapprox.last_stage_result.final_obj_bound
+        == tardonly.last_stage_result.final_obj_bound
+    )
+
+
+def test_controller_full_et_approx_registers_last_stage_lb() -> None:
+    """The controller ``all_stages`` + ``full_et_approx`` branch registers a
+    schedule whose ``obj_bound`` is the last-stage full-ET LB (intermediate
+    stages excluded), and records the mode on the diagnostic.
+    """
+    instance = _make_three_stage_instance()
+
+    controller = _make_controller(instance)
+    report = controller.calc_mcf_lb_and_derive_full_sch(
+        lb_stage_scope="all_stages", intermediate_stage_cost="full_et_approx"
+    )
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert len(controller.solution_manager.history) == 1
+
+    c_diag = controller.calc_mcf_lb_and_derive_full_sch_diagnostic
+    assert c_diag.lb_stage_scope_used == "all_stages"
+    assert c_diag.intermediate_stage_cost_used == "full_et_approx"
+    assert c_diag.combined_lb is not None
+
+    # Registered bound is the combined LB, which equals the last-stage LB alone.
+    assert report.obj_bound == c_diag.combined_lb
+    assert incumbent.obj_bound == c_diag.combined_lb
+
+    last_stage_only = _make_controller(instance)
+    last_stage_report = last_stage_only.calc_mcf_lb_and_derive_full_sch(
+        lb_stage_scope="last_stage"
+    )
+    assert last_stage_report.obj_bound is not None
+    assert c_diag.combined_lb == last_stage_report.obj_bound
+
+    # Every intermediate record is the approximate, non-valid kind.
+    for record in c_diag.per_stage_records[:-1]:
+        assert record.bound_kind == "full_et_approx"
+        assert record.mcf_lb_valid is False
+
+
+def test_controller_default_intermediate_cost_is_tardiness_only() -> None:
+    """REGRESSION: the default ``all_stages`` path records
+    ``intermediate_stage_cost_used == "tardiness_only"`` and keeps the
+    intermediate bounds valid (byte-identical to the historical behaviour).
+    """
+    instance = _make_three_stage_instance()
+
+    controller = _make_controller(instance)
+    controller.calc_mcf_lb_and_derive_full_sch(lb_stage_scope="all_stages")
+
+    c_diag = controller.calc_mcf_lb_and_derive_full_sch_diagnostic
+    assert c_diag.intermediate_stage_cost_used == "tardiness_only"
+    for record in c_diag.per_stage_records[:-1]:
+        assert record.bound_kind == "tardiness_only"
+        assert record.mcf_lb_valid is True
+
+
 def test_per_stage_records_are_yaml_serializable() -> None:
     """REGRESSION: per-stage diagnostic scalars must be plain Python types.
 
