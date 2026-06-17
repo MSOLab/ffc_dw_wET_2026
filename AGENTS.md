@@ -10,6 +10,24 @@ can pick up the same architectural intent.
 - Run `uv run ruff check` after code changes.
 - Run `uv run ruff format` when formatting is needed.
 
+## Planning conventions
+
+- Save implementation plans under `plans/<YYYYMMDD>/<slug>.md`.
+- Structure a plan so it can be dispatched as **one subagent per file to modify**
+  (the user opens a new conversation and says "이 markdown 참조해서, 수정 파일
+  하나당 subagent 하나씩 시켜 수정하게 만들어"). Concretely:
+  - A top "How to dispatch" note: one subagent per work order; each reads the
+    background + shared contracts + its own work order only, edits only its one
+    file, and keeps the default/unchanged path byte-identical.
+  - A **Shared Contracts** section that pins every cross-file interface exactly
+    (new option names/defaults, function signatures, dataclass field lists, types
+    crossing file boundaries) — the single source of truth that keeps independent
+    edits compatible (contract-first).
+  - **One Work Order per file** (including new files and test files): file path,
+    depends-on, precise changes, reference code as `path:line`, invariants,
+    acceptance check.
+  - A dependency graph / dispatch-order section.
+
 ## Architecture Docs
 
 - **Problem definition** (parameters, variables, constraints, objective):
