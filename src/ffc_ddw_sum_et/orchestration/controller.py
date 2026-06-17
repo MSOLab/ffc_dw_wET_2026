@@ -59,6 +59,8 @@ from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
 from ffc_ddw_sum_et.algorithm.pw_cp import (
     PwCpDispatcher,
     PwCpOption,
+    build_stage_2_batch_list,
+    validate_and_get_batch_count,
 )
 from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
 from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
@@ -2358,6 +2360,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             instance.last_stage_mc_count,
         )
 
+        all_batch_count = validate_and_get_batch_count(
+            build_stage_2_batch_list(incumbent.schedule, batch_size_resolved)
+        )
+        _unfixed_batch_count_max = min(unfixed_batch_count_max, all_batch_count - 1)
+        if _unfixed_batch_count_max < unfixed_batch_count_max:
+            self.logger.info(
+                "incremental_pw_cp: capping unfixed_batch_count_max %d -> %d "
+                "(all_batch_count=%d)",
+                unfixed_batch_count_max,
+                _unfixed_batch_count_max,
+                all_batch_count,
+            )
+
         base_kwargs = dict(
             solver_thread_cnt=solver_thread_cnt,
             batch_size=batch_size_resolved,
@@ -2383,11 +2398,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             "incremental_pw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
             increment_unfixed_batch_count_flag,
             unfixed_batch_count_min,
-            unfixed_batch_count_max,
+            _unfixed_batch_count_max,
         )
 
         for unfixed_batch_count in range(
-            unfixed_batch_count_min, unfixed_batch_count_max + 1
+            unfixed_batch_count_min, _unfixed_batch_count_max + 1
         ):
             if self.is_stopping_condition():
                 self.logger.info(

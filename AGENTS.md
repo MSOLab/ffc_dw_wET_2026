@@ -101,6 +101,27 @@ Composite steps (e.g. `calc_mcf_lb_and_derive_full_sch`) delegate to
    the trajectory, do it after `_register` (the controller has already
    captured the trajectory at that point).
 
+### `incremental_pw_cp` unfixed-batch-count cap (controller.py)
+
+`incremental_pw_cp` clamps its sweep upper bound to the actual incumbent
+batch count before iterating. It computes
+`all_batch_count = validate_and_get_batch_count(build_stage_2_batch_list(incumbent.schedule, batch_size_resolved))`
+and derives an internal `_unfixed_batch_count_max =
+min(unfixed_batch_count_max, all_batch_count - 1)`, then uses that for
+both the policy log line and the `range(...)` loop.
+
+- The `- 1` is intentional: PW-CP only has meaning when some batches stay
+  fixed while the rest are optimized. Leaving every batch unfixed has no
+  fixed band, so the largest useful window is `all_batch_count - 1`.
+- Capping (not erroring) means an over-large `unfixed_batch_count_max` in a
+  run config is silently bounded; a one-line `info` log is emitted only
+  when the cap actually lowers the user value. When `all_batch_count == 1`
+  the loop is empty (nothing to fix), which is the intended no-op.
+- Batch count is timing-independent (depends only on op count and
+  `batch_size`), so computing it from `incumbent.schedule` matches the
+  `max_batch_cnt` the `pw_cp` dispatcher sees after its
+  `make_semi_active`/`insert_idle_time` transforms.
+
 ## Deferred Design Notes
 
 - `docs/TODO.md` collects refactor ideas that are deliberately deferred
