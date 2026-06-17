@@ -35,19 +35,35 @@ class ParallelMachinePreemptionMcf:
     """
     Pm | r_j, pmtn | sum{C_jt x_jt} as a min cost flow problem.
 
+    The MCF is built for a target stage ``q`` (``stage_id``; the last
+    stage when ``stage_id is None``).
+
     Nodes:
         source -> job(j) -> time(t) -> sink
 
     Capacities:
-        source -> job : P_cj (processing time of job j in the last stage)
+        source -> job : p_{qj} (processing time of job j at stage q)
         job -> time   : 1 if t > r_j, 0 otherwise
-        time -> sink  : m_c (number of machines in the last stage)
+        time -> sink  : m_q (number of machines at stage q)
 
-    Costs:
+    where ``r_j = sum_{h<q} p_{hj}`` (release of job j at stage q),
+    optionally scaled/shifted by ``r_multiplier`` / ``r_increment``.
+
+    Costs (``tardiness_only=False``, full earliness+tardiness):
         C_{jt} =
             w^-_j * ceil((d^-_j - p_j - t + 1) / p_j)  if t <= d^-_j - p_j
             0                                          if d^-_j - p_j < t <= d^+_j
             w^+_j * ceil((t - d^+_j) / p_j)            if t > d^+_j
+
+    Costs (``tardiness_only=True``, weighted-tardiness-only projection):
+        The earliness arm is dropped (earliness is non-regular and would
+        be over-counted by the upstream projection) and the upper-due is
+        shifted by the downstream tail ``tau_j = sum_{h>q} p_{hj}`` to
+        ``dbar_j = d^+_j - tau_j``:
+        C_{jt} =
+            0                                if t <= dbar_j
+            w^+_j * ceil((t - dbar_j) / p_j) if t > dbar_j
+        The horizon then drops the ``d^-_j`` term (no lower-due pressure).
     """
 
     name: str
@@ -96,6 +112,8 @@ class ParallelMachinePreemptionMcf:
         *,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
+        stage_id: str | None = None,
+        tardiness_only: bool = False,
     ) -> ParallelMachinePreemptionMcf:
         if r_multiplier < 0:
             raise ValueError(f"r_multiplier must be >= 0; got {r_multiplier}.")
@@ -106,7 +124,11 @@ class ParallelMachinePreemptionMcf:
         obj = cls()
         obj.name = f"{cls.__name__}_{instance.name}"
         obj._define_parameters(
-            instance, r_multiplier=r_multiplier, r_increment=r_increment
+            instance,
+            r_multiplier=r_multiplier,
+            r_increment=r_increment,
+            stage_id=stage_id,
+            tardiness_only=tardiness_only,
         )
         obj._build_mcf()
         return obj
@@ -119,18 +141,52 @@ class ParallelMachinePreemptionMcf:
         *,
         r_multiplier: float = 1.0,
         r_increment: int = 0,
+        stage_id: str | None = None,
+        tardiness_only: bool = False,
     ) -> None:
         self.calJ = instance.job_id_list
-        self.p = instance.get_job_2_p_map_for_stage(instance.stage_id_list[-1])
-        self.r = instance.get_job_2_p_sum_except_last_stage()
+        if stage_id is None:
+            target_stage = instance.stage_id_list[-1]
+            self.p = instance.get_job_2_p_map_for_stage(target_stage)
+            self.r = instance.get_job_2_p_sum_except_last_stage()
+            self.mc_count = instance.machine_count_per_stage[-1]
+        else:
+            target_stage = stage_id
+            self.p = instance.get_job_2_p_map_for_stage(target_stage)
+            self.r = instance.get_job_2_p_sum_before_stage(target_stage)
+            self.mc_count = len(instance.stage_2_machines_map[target_stage])
         if r_multiplier != 1.0:
             self.r = {j: math.ceil(v * r_multiplier) for j, v in self.r.items()}
         if r_increment != 0:
             self.r = {j: v + r_increment for j, v in self.r.items()}
         ddw = instance.job_2_due_window_map
-        w_minus = _resolve_weight_map(instance.job_2_ewt_map, self.calJ, "ewt")
         w_plus = _resolve_weight_map(instance.job_2_twt_map, self.calJ, "twt")
-        self.mc_count = instance.machine_count_per_stage[-1]
+
+        if tardiness_only:
+            # Weighted-tardiness-only projection (vault/bounds_wT_P3.tex):
+            # earliness arm dropped, upper-due shifted by downstream tail.
+            tau = instance.get_job_2_p_sum_after_stage(target_stage)
+            d_bar = {j: ddw[j][1] - tau[j] for j in self.calJ}
+
+            # No lower-due pressure -> drop the d^-_j term from the horizon.
+            t_max = compute_parallel_mc_horizon(
+                self.p, self.r, self.mc_count, d_lower=None
+            )
+            self.calT = list(range(1, t_max + 1))
+            if not self.calT:
+                raise ValueError("calT cannot be empty; check instance parameters")
+
+            self.C = {}
+            for j in self.calJ:
+                self.C[j] = {}
+                for t in self.calT:
+                    if t <= d_bar[j]:
+                        self.C[j][t] = 0
+                    else:
+                        self.C[j][t] = w_plus[j] * math.ceil((t - d_bar[j]) / self.p[j])
+            return
+
+        w_minus = _resolve_weight_map(instance.job_2_ewt_map, self.calJ, "ewt")
 
         # T = max_j(max(r_j, d^-_j - p_j)) + ceil(sum(p_j) / mc_count)
         d_lower = {j: ddw[j][0] for j in self.calJ}

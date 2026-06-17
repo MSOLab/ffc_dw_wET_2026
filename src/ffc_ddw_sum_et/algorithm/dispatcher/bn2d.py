@@ -126,6 +126,50 @@ class BN2DDispatcher:
             termination_reason=TerminationReason.COMPLETED,
         )
 
+    # ---- anchored full-schedule entry point ----
+
+    def get_full_schedule_from_anchor(
+        self,
+        instance: FFcDDWParameters,
+        anchor_schedule: FFcSchedule,
+        anchor_stage_id: str,
+        *,
+        option: BN2DOption | None = None,
+        logger: logging.Logger | None = None,
+    ) -> FFcSchedule:
+        """Build a full schedule from a fixed stage-``anchor_stage_id`` schedule.
+
+        ``anchor_schedule`` is treated as the fixed schedule on
+        ``anchor_stage_id``; ``anchor_cmax`` is the maximum end time of
+        ``anchor_schedule`` on that stage. Later stages are dispatched forward
+        and former stages on a reversed sub-instance (right-shifted to fit) using
+        exactly the same two-way extension as the bottleneck path.
+        """
+        if option is None:
+            option = BN2DOption()
+        base = BaseDispatcher(instance, logger=logger)
+        mixed = MixedDispatcher(instance, logger=logger)
+        spec = AlgSpec(instance=instance, logger=logger)
+
+        anchor_end_time_map = self._get_job_2_end_time_map(
+            anchor_schedule, anchor_stage_id
+        )
+        if not anchor_end_time_map:
+            raise ValueError(
+                f"anchor_schedule has no operations on stage {anchor_stage_id!r}."
+            )
+        anchor_cmax = max(anchor_end_time_map.values())
+
+        return self._extend_full_schedule_from_anchor(
+            base,
+            mixed,
+            anchor_stage_id,
+            anchor_schedule,
+            anchor_cmax,
+            option,
+            spec,
+        )
+
     # ---- spec validation ----
 
     def _validate_instance(self, spec: AlgSpec) -> FFcDDWParameters:
@@ -193,12 +237,42 @@ class BN2DDispatcher:
             base, bottleneck_stage_id, option, rng, spec
         )
 
-        bottleneck_stage_index = base.stage_id_list.index(bottleneck_stage_id)
-        later_stage_list = base.stage_id_list[bottleneck_stage_index + 1 :]
+        return self._extend_full_schedule_from_anchor(
+            base,
+            mixed,
+            bottleneck_stage_id,
+            bottleneck_schedule,
+            bcmax,
+            option,
+            spec,
+        )
+
+    def _extend_full_schedule_from_anchor(
+        self,
+        base: BaseDispatcher,
+        mixed: MixedDispatcher,
+        anchor_stage_id: str,
+        anchor_schedule: FFcSchedule,
+        anchor_cmax: int,
+        option: BN2DOption,
+        spec: AlgSpec,
+    ) -> FFcSchedule:
+        """Extend a stage-anchored schedule into a full schedule.
+
+        Treats ``anchor_schedule`` as the fixed schedule on ``anchor_stage_id``
+        (with ``anchor_cmax`` its completion time on that stage). Later stages
+        are dispatched forward from the anchor end times; former stages are
+        dispatched on a reversed sub-instance and right-shifted to fit. This is
+        the two-way extension formerly inlined in
+        ``_get_schedule_from_bottleneck_stage`` and is therefore byte-identical
+        for the bottleneck path.
+        """
+        anchor_stage_index = base.stage_id_list.index(anchor_stage_id)
+        later_stage_list = base.stage_id_list[anchor_stage_index + 1 :]
         if later_stage_list:
             self._debug(spec, "Later stages: %s", later_stage_list)
             job_2_bottleneck_end_time = self._get_job_2_end_time_map(
-                bottleneck_schedule, bottleneck_stage_id
+                anchor_schedule, anchor_stage_id
             )
             sorted_j_list = sorted(
                 base.job_id_list,
@@ -211,7 +285,7 @@ class BN2DDispatcher:
             if option.mixed_schedule_for_later_stages:
                 schedule = mixed.get_best_mixed_schedule_by_sequence(
                     sorted_j_list,
-                    schedule=bottleneck_schedule.deepcopy(),
+                    schedule=anchor_schedule.deepcopy(),
                     from_stage=later_stage_list[0],
                     job_2_release_t=job_2_bottleneck_end_time,
                     machine_then_job=option.machine_then_job,
@@ -220,7 +294,7 @@ class BN2DDispatcher:
                 if schedule is None:
                     raise ValueError("Failed to get mixed schedule for later stages.")
             else:
-                later_ds_schedule = bottleneck_schedule.deepcopy()
+                later_ds_schedule = anchor_schedule.deepcopy()
                 for stage_id in later_stage_list:
                     later_ds_schedule.dispatch_stage_by_jobs(
                         stage_id,
@@ -228,7 +302,7 @@ class BN2DDispatcher:
                         base.stage_2_job_2_p[stage_id],
                     )
 
-                later_dj_schedule = bottleneck_schedule.deepcopy()
+                later_dj_schedule = anchor_schedule.deepcopy()
                 for job_id in sorted_j_list:
                     later_dj_schedule.dispatch_job_by_stages(
                         job_id,
@@ -241,17 +315,17 @@ class BN2DDispatcher:
                 else:
                     schedule = later_dj_schedule
         else:
-            schedule = bottleneck_schedule.deepcopy()
+            schedule = anchor_schedule.deepcopy()
 
-        before_stage_list = base.stage_id_list[:bottleneck_stage_index]
+        before_stage_list = base.stage_id_list[:anchor_stage_index]
         if before_stage_list:
             self._debug(spec, "Before stages: %s", before_stage_list)
             job_2_bottleneck_start_time = self._get_job_2_start_time_map(
-                bottleneck_schedule, bottleneck_stage_id
+                anchor_schedule, anchor_stage_id
             )
             instance_for_former_stages, job_2_release_t = (
                 self._create_reversed_instance_for_former_stages(
-                    base, before_stage_list, job_2_bottleneck_start_time, bcmax
+                    base, before_stage_list, job_2_bottleneck_start_time, anchor_cmax
                 )
             )
             former_schedule = self._dispatch_former_stages(
@@ -263,7 +337,7 @@ class BN2DDispatcher:
             )
 
             former_schedule_makespan = former_schedule.makespan
-            discrepancy = former_schedule_makespan - bcmax
+            discrepancy = former_schedule_makespan - anchor_cmax
             self._debug(
                 spec,
                 "Former stages makespan: %s, discrepancy with bottleneck: %s",

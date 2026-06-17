@@ -10,12 +10,13 @@ and the same data is never written from multiple steps.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 __all__ = [
     "MCFLBDiagnostic",
     "HeuristicLastStageOnlyDiagnostic",
     "BuildFullSchDiagnostic",
+    "StageLbRecord",
     "CalcMcfLbAndDeriveFullSchDiagnostic",
 ]
 
@@ -91,6 +92,33 @@ class BuildFullSchDiagnostic:
 
 
 @dataclass(slots=True)
+class StageLbRecord:
+    """Per-stage MCF lower-bound record for the ``all_stages`` scope.
+
+    One record per stage in the all-stages projection. The last stage uses
+    the full-ET bound (``bound_kind="full_ET"``,
+    ``best_candidate="last_stage_pipeline"``); intermediate stages use the
+    tardiness-only bound (``bound_kind="tardiness_only"``).
+    """
+
+    stage_id: str
+    is_last_stage: bool
+    bound_kind: str  # "full_ET" | "tardiness_only"
+    mcf_lb: float | None = None
+    mcf_lb_valid: bool = False
+    init_sched_obj: float | None = None
+    delta: float | None = None  # init_sched_obj - mcf_lb
+    best_candidate: str | None = (
+        None  # "two_way" | "seq_both_ways" | "last_stage_pipeline"
+    )
+    mcf_solve_sec: float | None = None
+    horizon: int | None = None
+    slot_count: int | None = None
+    load_index: float | None = None
+    max_release: int | None = None
+
+
+@dataclass(slots=True)
 class CalcMcfLbAndDeriveFullSchDiagnostic:
     """Diagnostic for ``calc_mcf_lb_and_derive_full_sch``.
 
@@ -139,3 +167,14 @@ class CalcMcfLbAndDeriveFullSchDiagnostic:
     # serialized record is self-contained.
     final_obj_bound: float | None = None
     elapsed_sec: float | None = None
+    # All-stages projection scope (``lb_stage_scope="all_stages"``). Defaults
+    # keep the ``last_stage`` serialization byte-identical: empty record list,
+    # None summaries.
+    lb_stage_scope_used: str = "last_stage"
+    per_stage_records: list[StageLbRecord] = field(default_factory=list)
+    combined_lb: float | None = None
+    argmax_stage_id: str | None = None
+    best_init_sched_obj: float | None = None
+    best_sched_source: str | None = None  # stage_id, or "last_stage_pipeline"
+    total_mcf_solve_sec: float | None = None
+    mcf_solve_count: int | None = None

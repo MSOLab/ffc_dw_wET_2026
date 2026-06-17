@@ -36,6 +36,7 @@ from ...parameters.ffc_ddw_params import FFcDDWParameters
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ..pm_pmtn_sorter import PmPrmpSortKey
+from .diagnostic import StageLbRecord
 from .full_sch_builder import (
     BuildFullSchResult,
     build_full_sch_from_last_stage_only_sch,
@@ -49,14 +50,17 @@ from .lb_last_stage_pmtn import (
     MCFLBStopRequested,
     apply_lb_by_mcf,
 )
+from .stage_sch_builder import build_stage_seed_full_sch
 
 # Phase schedule type alias mirrors ``controller_core.MCFLBPhaseSchedule``.
 MCFLBPhaseSchedule = FFcSchedule | MCFPreemptiveSchedule
 
 __all__ = [
+    "CalcMcfLbAllStagesResult",
     "CalcMcfLbAndDeriveFullSchResult",
     "CalcMcfLbR1Result",
     "CalcMcfLbR2Result",
+    "calc_mcf_lb_all_stages_and_derive_full_sch",
     "calc_mcf_lb_and_derive_full_sch",
     "calc_mcf_lb_r1_and_derive_full_sch",
     "calc_mcf_lb_r2_and_derive_full_sch",
@@ -688,4 +692,236 @@ def calc_mcf_lb_and_derive_full_sch(
         makespan_delta=makespan_delta,
         r2_ran=True,
         r2_skip_reason=None,
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CalcMcfLbAllStagesResult:
+    """Aggregate result of one ``calc_mcf_lb_all_stages_and_derive_full_sch``.
+
+    The last stage is solved by reusing the existing
+    ``calc_mcf_lb_and_derive_full_sch`` pipeline (full earliness+tardiness
+    MCF + reverse-dispatch schedule, incl. round 2). Each intermediate
+    stage ``q = c-1 … 1`` adds a weighted-tardiness-only MCF lower bound
+    and a stage-anchored seed schedule (round-1 only, no drift correction).
+
+    - ``last_stage_result``: the existing pipeline result, kept so the
+      controller can reuse the existing diagnostic/artifact-emission code.
+    - ``best_schedule`` / ``best_obj``: global argmin-wET across the
+      last-stage pipeline result and every intermediate seed.
+    - ``combined_lb``: ``max`` over the valid lower bounds (full-ET at the
+      last stage + tardiness-only at each intermediate stage). Each
+      intermediate LB is a valid LB on OPT (round-1 only), so they are all
+      eligible for the max.
+    - ``argmax_stage_id``: stage whose LB attains ``combined_lb``.
+    - ``best_sched_source``: ``"last_stage_pipeline"`` or the stage id of
+      the intermediate seed that produced ``best_schedule``.
+    - ``stage_records``: one :class:`StageLbRecord` per stage, ordered in
+      **ascending stage order** (stage 1 … c) for readability.
+    - ``total_mcf_solve_sec`` / ``mcf_solve_count``: accumulated MCF solve
+      time / count (last-stage r1 + last-stage r2 if it ran + one per
+      intermediate stage solved).
+    - ``elapsed_sec``: wall time of the whole call.
+    """
+
+    last_stage_result: CalcMcfLbAndDeriveFullSchResult
+    best_schedule: FFcSchedule | None
+    best_obj: float | None
+    combined_lb: float | None
+    argmax_stage_id: str | None
+    best_sched_source: str | None
+    stage_records: list[StageLbRecord]
+    total_mcf_solve_sec: float
+    mcf_solve_count: int
+    elapsed_sec: float
+
+
+def calc_mcf_lb_all_stages_and_derive_full_sch(
+    instance: FFcDDWParameters,
+    *,
+    draw_pmtn_sch_heatmap: bool = False,
+    heatmap_sort: HeatmapSort = "end_time",
+    job_placement_priority: PmPrmpSortKey = "end_time",
+    last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    makespan_delta_ref: Literal[
+        "mcfLbMakespan", "lastStageOnlyMakespan"
+    ] = "mcfLbMakespan",
+    adjust_p: bool = False,
+    adjust_r: bool = False,
+    p_adjust_coeff: float = 1.0,
+    r_adjust_coeff: float = 0.5,
+    proceed_r2_when_nonpositive_cmax: bool = False,
+    stop_predicate: Callable[[], bool] | None = None,
+    logger: logging.Logger | None = None,
+    r1_heatmap_yaml_path: Path | None = None,
+    r2_heatmap_yaml_path: Path | None = None,
+) -> CalcMcfLbAllStagesResult:
+    """Run the all-stages MCF-LB projection (``lb_stage_scope="all_stages"``).
+
+    The last stage reuses :func:`calc_mcf_lb_and_derive_full_sch` verbatim
+    (same kwargs) so the last-stage LB / schedule / round-2 / artifacts are
+    identical to the ``last_stage`` scope. Each intermediate stage
+    ``q = c-1 … 1`` then adds a weighted-tardiness-only MCF lower bound
+    (``apply_lb_by_mcf(..., tardiness_only=True)``) and a stage-anchored
+    seed schedule (``build_stage_seed_full_sch``); round-1 only, no
+    drift-correction (decision D1).
+
+    The reported bound is
+    ``combined_lb = max{ LB^ET_c , max_{q<c} LB_T^(q) }`` and the registered
+    schedule is the global min-wET across the last-stage pipeline result and
+    every intermediate seed.
+
+    ``stop_predicate`` is probed at each intermediate stage boundary; on stop
+    the function returns with the stages solved so far (the last stage is
+    always attempted first via the reused pipeline).
+    """
+    start_elapsed = time.monotonic()
+
+    # Last stage: reuse the existing pipeline verbatim so its LB / schedule /
+    # round-2 / artifacts are byte-identical to the ``last_stage`` scope.
+    last_stage_result = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
+        heatmap_sort=heatmap_sort,
+        job_placement_priority=job_placement_priority,
+        last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        makespan_delta_ref=makespan_delta_ref,
+        adjust_p=adjust_p,
+        adjust_r=adjust_r,
+        p_adjust_coeff=p_adjust_coeff,
+        r_adjust_coeff=r_adjust_coeff,
+        proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
+        stop_predicate=stop_predicate,
+        logger=logger,
+        r1_heatmap_yaml_path=r1_heatmap_yaml_path,
+        r2_heatmap_yaml_path=r2_heatmap_yaml_path,
+    )
+
+    stage_id_list = instance.stage_id_list
+    last_stage_id = stage_id_list[-1]
+
+    # Seed the running summaries with the last-stage pipeline result.
+    combined_lb: float | None = last_stage_result.final_obj_bound
+    argmax_stage_id: str | None = last_stage_id
+    best_schedule: FFcSchedule | None = last_stage_result.best_schedule
+    best_obj: float | None = last_stage_result.best_obj
+    best_sched_source: str | None = "last_stage_pipeline"
+
+    # Accumulators: last-stage r1 always counts; last-stage r2 counts only
+    # when it actually ran.
+    total_mcf_solve_sec = 0.0
+    mcf_solve_count = 0
+    if last_stage_result.r1_apply is not None:
+        total_mcf_solve_sec += last_stage_result.r1_apply.mcf_solve_sec
+        mcf_solve_count += 1
+    if last_stage_result.r2_ran and last_stage_result.r2_apply is not None:
+        total_mcf_solve_sec += last_stage_result.r2_apply.mcf_solve_sec
+        mcf_solve_count += 1
+
+    # Build the last-stage record (full-ET bound). The bound is valid on the
+    # original instance; fields are populated from the r1 apply result where
+    # available (r1 may be ``None`` only if a stop fired before the LP solve).
+    r1_apply = last_stage_result.r1_apply
+    last_record = StageLbRecord(
+        stage_id=last_stage_id,
+        is_last_stage=True,
+        bound_kind="full_ET",
+        mcf_lb=last_stage_result.final_obj_bound,
+        mcf_lb_valid=True,
+        init_sched_obj=last_stage_result.best_obj,
+        delta=(
+            None
+            if last_stage_result.best_obj is None
+            or last_stage_result.final_obj_bound is None
+            else last_stage_result.best_obj - last_stage_result.final_obj_bound
+        ),
+        best_candidate="last_stage_pipeline",
+        mcf_solve_sec=None if r1_apply is None else r1_apply.mcf_solve_sec,
+        horizon=None if r1_apply is None else r1_apply.mcf.calT[-1],
+        slot_count=None if r1_apply is None else len(r1_apply.mcf.calT),
+        load_index=None,
+        max_release=None,
+    )
+
+    # Records accumulated last → first while iterating; reordered to ascending
+    # stage order before returning (see below).
+    intermediate_records: list[StageLbRecord] = []
+
+    # Intermediate stages q = c-1 … 1.
+    for q in reversed(stage_id_list[:-1]):
+        # Stop check at the stage boundary: return with stages solved so far.
+        if stop_predicate is not None and stop_predicate():
+            break
+
+        apply = apply_lb_by_mcf(
+            instance,
+            stage_id=q,
+            tardiness_only=True,
+            draw_heatmap=False,
+            stop_predicate=stop_predicate,
+            logger=logger,
+        )
+        total_mcf_solve_sec += apply.mcf_solve_sec
+        mcf_solve_count += 1
+
+        seed = build_stage_seed_full_sch(
+            instance,
+            apply.mcf_preemptive_schedule,
+            q,
+            logger=logger,
+        )
+
+        # Stage load index Σ p_q / |M_q| and max upstream release before q.
+        # Coerce to plain Python float/int at this diagnostic boundary: the
+        # benchmark loader yields numpy-typed processing times, and numpy
+        # scalars are not YAML-serializable in the instance_result manifest.
+        p_q = instance.get_job_2_p_map_for_stage(q)
+        m_q_count = len(instance.stage_2_machines_map[q])
+        load_index = float(sum(p_q[j] for j in instance.job_id_list) / m_q_count)
+        release_before_q = instance.get_job_2_p_sum_before_stage(q)
+        max_release = int(max(release_before_q[j] for j in instance.job_id_list))
+
+        intermediate_records.append(
+            StageLbRecord(
+                stage_id=q,
+                is_last_stage=False,
+                bound_kind="tardiness_only",
+                mcf_lb=apply.mcf_lb,
+                mcf_lb_valid=True,
+                init_sched_obj=seed.obj_value,
+                delta=seed.obj_value - apply.mcf_lb,
+                best_candidate=seed.best_candidate,
+                mcf_solve_sec=apply.mcf_solve_sec,
+                horizon=apply.mcf.calT[-1],
+                slot_count=len(apply.mcf.calT),
+                load_index=load_index,
+                max_release=max_release,
+            )
+        )
+
+        # Update combined LB (max over valid LBs) and best schedule (min wET).
+        if combined_lb is None or apply.mcf_lb > combined_lb:
+            combined_lb = apply.mcf_lb
+            argmax_stage_id = q
+        if best_obj is None or seed.obj_value < best_obj:
+            best_schedule = seed.schedule
+            best_obj = seed.obj_value
+            best_sched_source = q
+
+    # Order records ascending (stage 1 … c) for readability: intermediate
+    # stages were appended last → first, so reverse them, then the last stage.
+    stage_records: list[StageLbRecord] = list(reversed(intermediate_records))
+    stage_records.append(last_record)
+
+    return CalcMcfLbAllStagesResult(
+        last_stage_result=last_stage_result,
+        best_schedule=best_schedule,
+        best_obj=best_obj,
+        combined_lb=combined_lb,
+        argmax_stage_id=argmax_stage_id,
+        best_sched_source=best_sched_source,
+        stage_records=stage_records,
+        total_mcf_solve_sec=total_mcf_solve_sec,
+        mcf_solve_count=mcf_solve_count,
+        elapsed_sec=time.monotonic() - start_elapsed,
     )

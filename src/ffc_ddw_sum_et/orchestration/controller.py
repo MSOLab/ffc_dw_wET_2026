@@ -48,6 +48,9 @@ from ffc_ddw_sum_et.algorithm.mcf_lb.lb_last_stage_pmtn import (
     apply_lb_by_mcf as algo_apply_lb_by_mcf,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
+    calc_mcf_lb_all_stages_and_derive_full_sch as algo_calc_mcf_lb_all_stages_and_derive_full_sch,
+)
+from ffc_ddw_sum_et.algorithm.mcf_lb.mcf_lb_pipeline import (
     calc_mcf_lb_and_derive_full_sch as algo_calc_mcf_lb_and_derive_full_sch,
 )
 from ffc_ddw_sum_et.algorithm.neh_cp import (
@@ -1154,6 +1157,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         r_adjust_coeff: float = 0.5,
         proceed_r2_when_nonpositive_cmax: bool = False,
         emit_phase_schedules: bool = False,
+        lb_stage_scope: Literal["last_stage", "all_stages"] = "last_stage",
     ) -> SubroutineReport:
         """Composite step: MCF-LB → full schedule, then a conditional
         second round with p/r adjustments.
@@ -1234,6 +1238,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 ``>=1`` for increment math.
             emit_phase_schedules: Gates the per-round JSON / paired
                 Gantt-PNG output. Default ``False``.
+            lb_stage_scope: ``"last_stage"`` (default) runs the existing
+                last-stage-only pipeline unchanged. ``"all_stages"``
+                additionally solves a tardiness-only MCF LB on each
+                intermediate stage, builds per-stage seed schedules, and
+                registers the global min-wET schedule with
+                ``obj_bound = combined_lb`` (the max over the last-stage
+                full-ET LB and the intermediate tardiness-only LBs). The
+                last-stage artifacts/diagnostics are still produced. The
+                per-stage records and combined-LB summary are recorded on
+                the diagnostic's ``per_stage_records`` /
+                ``lb_stage_scope_used`` / ``combined_lb`` fields.
 
         Returns:
             The single registered ``SubroutineReport`` whose
@@ -1259,23 +1274,48 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             else None
         )
 
-        result = algo_calc_mcf_lb_and_derive_full_sch(
-            self.instance,
-            draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
-            heatmap_sort=heatmap_sort,
-            job_placement_priority=job_placement_priority,
-            last_stage_only_placement_criteria=last_stage_only_placement_criteria,
-            makespan_delta_ref=makespan_delta_ref,
-            adjust_p=adjust_p,
-            adjust_r=adjust_r,
-            p_adjust_coeff=p_adjust_coeff,
-            r_adjust_coeff=r_adjust_coeff,
-            proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
-            stop_predicate=self.is_stopping_condition,
-            logger=self.logger,
-            r1_heatmap_yaml_path=r1_heatmap_yaml_path,
-            r2_heatmap_yaml_path=r2_heatmap_yaml_path,
-        )
+        all_result = None
+        if lb_stage_scope == "all_stages":
+            all_result = algo_calc_mcf_lb_all_stages_and_derive_full_sch(
+                self.instance,
+                draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
+                heatmap_sort=heatmap_sort,
+                job_placement_priority=job_placement_priority,
+                last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+                makespan_delta_ref=makespan_delta_ref,
+                adjust_p=adjust_p,
+                adjust_r=adjust_r,
+                p_adjust_coeff=p_adjust_coeff,
+                r_adjust_coeff=r_adjust_coeff,
+                proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
+                stop_predicate=self.is_stopping_condition,
+                logger=self.logger,
+                r1_heatmap_yaml_path=r1_heatmap_yaml_path,
+                r2_heatmap_yaml_path=r2_heatmap_yaml_path,
+            )
+            # Reuse the last-stage diagnostic-population, artifact-emission, and
+            # backward-compat-state code below by pointing ``result`` at the
+            # last-stage sub-result. The all-stages summary fields and the final
+            # register use ``all_result`` directly.
+            result = all_result.last_stage_result
+        else:
+            result = algo_calc_mcf_lb_and_derive_full_sch(
+                self.instance,
+                draw_pmtn_sch_heatmap=draw_pmtn_sch_heatmap,
+                heatmap_sort=heatmap_sort,
+                job_placement_priority=job_placement_priority,
+                last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+                makespan_delta_ref=makespan_delta_ref,
+                adjust_p=adjust_p,
+                adjust_r=adjust_r,
+                p_adjust_coeff=p_adjust_coeff,
+                r_adjust_coeff=r_adjust_coeff,
+                proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
+                stop_predicate=self.is_stopping_condition,
+                logger=self.logger,
+                r1_heatmap_yaml_path=r1_heatmap_yaml_path,
+                r2_heatmap_yaml_path=r2_heatmap_yaml_path,
+            )
 
         # ---- Populate diagnostic from result (mostly straight-through). ----
         if result.r1_apply is not None:
@@ -1360,22 +1400,43 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self._emit_calc_mcf_lb_r2_summary_yaml(result)
         self._emit_calc_mcf_lb_phase_metrics_csv(result)
 
+        # ---- Choose the register source. For ``all_stages`` the best
+        # schedule/obj is the global min-wET across the last stage + every
+        # intermediate seed, and the bound is the combined LB. The new
+        # all-stages summary diagnostic fields are also populated here. ----
+        if all_result is not None:
+            reg_schedule = all_result.best_schedule
+            reg_obj = all_result.best_obj
+            reg_bound = all_result.combined_lb
+            c_diag.lb_stage_scope_used = "all_stages"
+            c_diag.per_stage_records = all_result.stage_records
+            c_diag.combined_lb = all_result.combined_lb
+            c_diag.argmax_stage_id = all_result.argmax_stage_id
+            c_diag.best_init_sched_obj = all_result.best_obj
+            c_diag.best_sched_source = all_result.best_sched_source
+            c_diag.total_mcf_solve_sec = all_result.total_mcf_solve_sec
+            c_diag.mcf_solve_count = all_result.mcf_solve_count
+        else:
+            reg_schedule = result.best_schedule
+            reg_obj = result.best_obj
+            reg_bound = result.final_obj_bound
+
         # ---- Build best solution + register exactly once. ----
         best_sol: FFcDDWSolution | None = None
-        if result.best_schedule is not None:
+        if reg_schedule is not None:
             best_sol = FFcDDWSolution(
-                schedule=result.best_schedule,
-                obj_value=result.best_obj,
-                obj_bound=result.final_obj_bound,
+                schedule=reg_schedule,
+                obj_value=reg_obj,
+                obj_bound=reg_bound,
             )
+        c_diag.final_obj = reg_obj
+        c_diag.final_obj_bound = reg_bound
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed,
-            obj_value=result.best_obj,
-            obj_bound=result.final_obj_bound,
+            obj_value=reg_obj,
+            obj_bound=reg_bound,
         )
-        c_diag.final_obj = result.best_obj
-        c_diag.final_obj_bound = result.final_obj_bound
         c_diag.elapsed_sec = elapsed
         self._register(report, best_sol)
         return report

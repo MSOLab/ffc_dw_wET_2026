@@ -60,6 +60,8 @@ def solve_mcf_lb(
     *,
     r_multiplier: float = 1.0,
     r_increment: int = 0,
+    stage_id: str | None = None,
+    tardiness_only: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
 ) -> McfLbResult:
@@ -78,6 +80,15 @@ def solve_mcf_lb(
             preserves the current behaviour. Any positive value pushes
             releases later than the original instance and therefore
             makes the resulting MCF objective no longer a global LB.
+        stage_id: Target stage on which to build the MCF relaxation and
+            preemptive schedule. ``None`` (default) selects the last stage,
+            preserving the current behaviour. For an intermediate stage,
+            releases use the upstream processing-time sums of that stage.
+        tardiness_only: When ``True``, the MCF uses a weighted-tardiness-only
+            cost with the upper due date projected by the downstream tail
+            (``d_plus_j - sum p over stages after stage_id``); earliness is
+            dropped. The resulting objective is still a valid LB on OPT.
+            ``False`` (default) uses the full earliness+tardiness cost.
         stop_predicate: Optional caller-side termination probe. Checked
             once before ``mcf.solve()``; raises ``MCFLBStopRequested`` if
             it returns True. The MCF LP itself is not interruptible mid-
@@ -96,11 +107,15 @@ def solve_mcf_lb(
             )
         raise MCFLBStopRequested
 
-    last_stage_id = instance.stage_id_list[-1]
+    target_stage_id = stage_id or instance.stage_id_list[-1]
 
     t_mcf = time.monotonic()
     mcf = ParallelMachinePreemptionMcf.from_instance(
-        instance, r_multiplier=r_multiplier, r_increment=r_increment
+        instance,
+        r_multiplier=r_multiplier,
+        r_increment=r_increment,
+        stage_id=stage_id,
+        tardiness_only=tardiness_only,
     )
     mcf.solve()
     if not mcf.is_optimal():
@@ -110,17 +125,19 @@ def solve_mcf_lb(
     if logger is not None:
         logger.info(
             "solve_mcf_lb: solved in %.3fs, mcf_lb=%.2f "
-            "(r_multiplier=%.4g, r_increment=%d)",
+            "(stage_id=%s, tardiness_only=%s, r_multiplier=%.4g, r_increment=%d)",
             mcf_solve_sec,
             mcf_lb,
+            target_stage_id,
+            tardiness_only,
             r_multiplier,
             r_increment,
         )
 
     mcf_preemptive_schedule = MCFPreemptiveSchedule.from_flow_dict(
         mcf.get_variable_value_dict(),
-        stage_id=last_stage_id,
-        machines=instance.stage_2_machines_map[last_stage_id],
+        stage_id=target_stage_id,
+        machines=instance.stage_2_machines_map[target_stage_id],
     )
     return McfLbResult(
         mcf_lb=mcf_lb,
@@ -157,6 +174,8 @@ def apply_lb_by_mcf(
     p_increment: int = 0,
     r_multiplier: float = 1.0,
     r_increment: int = 0,
+    stage_id: str | None = None,
+    tardiness_only: bool = False,
     draw_heatmap: bool = False,
     heatmap_sort: HeatmapSort = "due2-weight-pos",
     heatmap_yaml_path: Path | None = None,
@@ -186,9 +205,20 @@ def apply_lb_by_mcf(
         r_increment: Integer ``>= 0`` added to every release date *after*
             the ``r_multiplier`` scaling. Any positive value invalidates
             the global LB.
+        stage_id: Target stage for the MCF relaxation and preemptive
+            schedule. ``None`` (default) selects the last stage,
+            preserving the current behaviour. Forwarded to
+            :func:`solve_mcf_lb`.
+        tardiness_only: When ``True``, the MCF uses a weighted-tardiness-only
+            cost with the upper due date projected by the downstream tail;
+            earliness is dropped. The bound stays a valid LB on OPT, so it
+            does **not** invalidate ``obj_bound_is_valid``. Forwarded to
+            :func:`solve_mcf_lb`. ``False`` (default) uses the full
+            earliness+tardiness cost.
         draw_heatmap: When ``True`` and ``heatmap_yaml_path`` is provided,
             build the parallel-machine signed C-cost matrix and dump it
-            to that YAML path.
+            to that YAML path. The heatmap is never drawn when
+            ``tardiness_only`` is ``True`` (intermediate stages).
         heatmap_sort: Row ordering for the heatmap (one of the
             ``HeatmapSort`` literals; see ``io.parallel_mc_cost_heatmap``).
             Ignored when ``draw_heatmap`` is ``False``.
@@ -222,11 +252,13 @@ def apply_lb_by_mcf(
         instance_for_mcf,
         r_multiplier=r_multiplier,
         r_increment=r_increment,
+        stage_id=stage_id,
+        tardiness_only=tardiness_only,
         stop_predicate=stop_predicate,
         logger=logger,
     )
 
-    if draw_heatmap and heatmap_yaml_path is not None:
+    if draw_heatmap and not tardiness_only and heatmap_yaml_path is not None:
         from ...io import build_signed_cost_matrix, dump_signed_cost_heatmap_yaml
 
         heatmap_data = build_signed_cost_matrix(

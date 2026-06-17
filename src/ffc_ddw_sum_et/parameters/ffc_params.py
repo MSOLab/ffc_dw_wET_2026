@@ -190,6 +190,28 @@ class FFcParameters:
                 job_2_p_sum[job_id] += self.stage_2_job_2_p_map[stage_id][job_id]
         return job_2_p_sum
 
+    def get_job_2_p_sum_before_stage(self, stage_id: str) -> dict[str, int]:
+        """Get a mapping from job IDs to the sum of processing times across all stages strictly before the given stage."""
+        if stage_id not in self.stage_id_list:
+            raise ValueError(f"Invalid stage_id: {stage_id}")
+        stage_idx = self.stage_id_list.index(stage_id)
+        job_2_p_sum = {job_id: 0 for job_id in self.job_id_list}
+        for before_stage_id in self.stage_id_list[:stage_idx]:  # Stages before
+            for job_id in self.job_id_list:
+                job_2_p_sum[job_id] += self.stage_2_job_2_p_map[before_stage_id][job_id]
+        return job_2_p_sum
+
+    def get_job_2_p_sum_after_stage(self, stage_id: str) -> dict[str, int]:
+        """Get a mapping from job IDs to the sum of processing times across all stages strictly after the given stage."""
+        if stage_id not in self.stage_id_list:
+            raise ValueError(f"Invalid stage_id: {stage_id}")
+        stage_idx = self.stage_id_list.index(stage_id)
+        job_2_p_sum = {job_id: 0 for job_id in self.job_id_list}
+        for after_stage_id in self.stage_id_list[stage_idx + 1 :]:  # Stages after
+            for job_id in self.job_id_list:
+                job_2_p_sum[job_id] += self.stage_2_job_2_p_map[after_stage_id][job_id]
+        return job_2_p_sum
+
     @classmethod
     def reverse_stages(cls, instance: FFcParameters) -> Self:
         """Create a new instance of FFcParameters with the order of stages reversed.
