@@ -111,7 +111,7 @@ class StageLbRecord:
     init_sched_obj: float | None = None
     delta: float | None = None  # init_sched_obj - mcf_lb
     best_candidate: str | None = (
-        None  # "two_way" | "seq_both_ways" | "last_stage_pipeline"
+        None  # "bn2d" | "mixed_fw" | "mixed_rv" | "last_stage_pipeline"
     )
     mcf_solve_sec: float | None = None
     horizon: int | None = None
@@ -121,6 +121,12 @@ class StageLbRecord:
     # Seed-construction method that won the per-stage candidate compare:
     # "simple" | "midpoint" for built stages; None if the stage was unbuilt.
     seed_method: str | None = None
+    # Per-candidate full-schedule objectives for this stage, keyed by
+    # construction path. Non-last stage keys: "{anchor}_{bn2d|mixed_fw|mixed_rv}"
+    # (3 keys; 6 when seed_compare=True). Last stage keys:
+    # "{r1|r2}_{midpoint|simple}" (r1_* always; r2_* only when r2 ran;
+    # *_simple only when seed_compare=True). None when no candidate was built.
+    candidate_objs: dict[str, float] | None = None
 
 
 @dataclass(slots=True)

@@ -118,7 +118,7 @@ def _midpoint_only_best_obj(
     midpoint_anchor = _build_anchor_schedule(
         instance, mcf_preemptive_schedule, stage_id, log
     )
-    _, midpoint_obj, _ = _candidates_from_anchor(
+    _, midpoint_obj, _, _ = _candidates_from_anchor(
         instance, midpoint_anchor, stage_id, log
     )
     return midpoint_obj
@@ -157,7 +157,37 @@ def test_dual_anchor_method_and_candidate_literals() -> None:
     )
 
     assert result.anchor_method in ("simple", "midpoint")
-    assert result.best_candidate in ("two_way", "seq_both_ways")
+    assert result.best_candidate in ("bn2d", "mixed_fw", "mixed_rv")
+
+
+def test_dual_anchor_candidate_objs_keys() -> None:
+    """``candidate_objs`` carries 3 midpoint keys (seed_compare=False) or 6
+    keys (seed_compare=True), and its min equals the reported ``obj_value``.
+    """
+    instance = _make_three_stage_instance()
+    stage_id = _intermediate_stage_id(instance)
+    apply = apply_lb_by_mcf(
+        instance, stage_id=stage_id, tardiness_only=True, draw_heatmap=False
+    )
+
+    types = {"bn2d", "mixed_fw", "mixed_rv"}
+
+    single = build_stage_seed_full_sch(
+        instance, apply.mcf_preemptive_schedule, stage_id, seed_compare=False
+    )
+    assert set(single.candidate_objs) == {f"midpoint_{t}" for t in types}
+    assert min(single.candidate_objs.values()) == single.obj_value
+
+    both = build_stage_seed_full_sch(
+        instance, apply.mcf_preemptive_schedule, stage_id, seed_compare=True
+    )
+    assert set(both.candidate_objs) == {
+        f"{a}_{t}" for a in ("midpoint", "simple") for t in types
+    }
+    assert min(both.candidate_objs.values()) == both.obj_value
+    assert both.candidate_objs[f"{both.anchor_method}_{both.best_candidate}"] == (
+        both.obj_value
+    )
 
 
 def test_dual_anchor_schedule_is_feasible_full_schedule() -> None:
@@ -208,6 +238,6 @@ def test_simple_anchor_strictly_wins() -> None:
 
     assert result.obj_value < midpoint_only_obj
     assert result.anchor_method == "simple"
-    assert result.best_candidate in ("two_way", "seq_both_ways")
+    assert result.best_candidate in ("bn2d", "mixed_fw", "mixed_rv")
     # The strictly-winning schedule is still a feasible full schedule.
     validate_schedule(result.schedule, instance.stage_2_job_2_p_map)

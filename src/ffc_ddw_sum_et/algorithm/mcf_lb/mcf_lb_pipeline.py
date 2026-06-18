@@ -317,8 +317,14 @@ class CalcMcfLbAndDeriveFullSchResult:
     r1_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
     r2_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]]
 
+    # Last-stage dual-seed compare outcome, per round. The r1 pair carries the
+    # historical fields; the r2 pair is added so the last-stage candidate_objs
+    # can record both rounds ("{r1|r2}_{midpoint|simple}"). r2 fields stay None
+    # when r2 did not run / produced no seed compare.
     last_stage_seed_method: str | None = None
     last_stage_alt_obj: float | None = None
+    last_stage_r2_seed_method: str | None = None
+    last_stage_r2_alt_obj: float | None = None
 
 
 def calc_mcf_lb_r1_and_derive_full_sch(
@@ -714,6 +720,8 @@ def calc_mcf_lb_and_derive_full_sch(
             r2_phase_schedules=r2.phase_schedules if r2 is not None else [],
             last_stage_seed_method=r1.seed_method,
             last_stage_alt_obj=r1.alt_dispatched_obj,
+            last_stage_r2_seed_method=r2.seed_method if r2 is not None else None,
+            last_stage_r2_alt_obj=r2.alt_dispatched_obj if r2 is not None else None,
         )
 
     # ------------------- Round 1 -------------------
@@ -914,6 +922,29 @@ class CalcMcfLbAllStagesResult:
     elapsed_sec: float
 
 
+def _last_stage_round_keys(
+    prefix: str,
+    seed_method: str | None,
+    winner_obj: float | None,
+    alt_obj: float | None,
+) -> dict[str, float]:
+    """Build ``{prefix}_{midpoint|simple}`` keys for one last-stage round.
+
+    ``seed_method`` is the *winning* anchor ("midpoint"/"simple"), so
+    ``winner_obj`` (the round's dispatched wET) is keyed under it and the
+    loser's ``alt_obj`` under the other anchor — keying ``winner_obj`` to a
+    fixed anchor would silently swap the two whenever ``simple`` wins.
+    Returns ``{}`` when the round produced no seed compare.
+    """
+    out: dict[str, float] = {}
+    if seed_method is not None and winner_obj is not None:
+        out[f"{prefix}_{seed_method}"] = winner_obj
+        if alt_obj is not None:
+            loser = "simple" if seed_method == "midpoint" else "midpoint"
+            out[f"{prefix}_{loser}"] = alt_obj
+    return out
+
+
 def calc_mcf_lb_all_stages_and_derive_full_sch(
     instance: FFcDDWParameters,
     *,
@@ -1017,6 +1048,25 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
     # original instance; fields are populated from the r1 apply result where
     # available (r1 may be ``None`` only if a stop fired before the LP solve).
     r1_apply = last_stage_result.r1_apply
+    # Last-stage candidate_objs records both rounds, round-prefixed. The r1/r2
+    # winner objs are the dispatched wET of each round's build_full; the winner
+    # anchor + loser obj come from the per-round seed-compare outcome.
+    r1_bf = last_stage_result.r1_build_full
+    r2_bf = last_stage_result.r2_build_full
+    last_stage_candidate_objs: dict[str, float] | None = {
+        **_last_stage_round_keys(
+            "r1",
+            last_stage_result.last_stage_seed_method,
+            r1_bf.dispatched_obj if r1_bf is not None else None,
+            last_stage_result.last_stage_alt_obj,
+        ),
+        **_last_stage_round_keys(
+            "r2",
+            last_stage_result.last_stage_r2_seed_method,
+            r2_bf.dispatched_obj if r2_bf is not None else None,
+            last_stage_result.last_stage_r2_alt_obj,
+        ),
+    } or None
     last_record = StageLbRecord(
         stage_id=last_stage_id,
         is_last_stage=True,
@@ -1037,6 +1087,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
         load_index=None,
         max_release=None,
         seed_method=last_stage_result.last_stage_seed_method,
+        candidate_objs=last_stage_candidate_objs,
     )
 
     # Records accumulated last → first while iterating; reordered to ascending
@@ -1099,6 +1150,7 @@ def calc_mcf_lb_all_stages_and_derive_full_sch(
                 load_index=load_index,
                 max_release=max_release,
                 seed_method=seed.anchor_method,
+                candidate_objs=seed.candidate_objs,
             )
         )
 

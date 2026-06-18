@@ -150,12 +150,24 @@ def test_per_stage_records_well_formed() -> None:
     assert last_record.is_last_stage is True
     assert last_record.bound_kind == "full_ET"
     assert last_record.best_candidate == "last_stage_pipeline"
+    # Default run: seed_compare off, no adjust ⇒ r2 does not run ⇒ the
+    # last-stage candidate_objs records r1's midpoint only.
+    assert last_record.candidate_objs == {"r1_midpoint": last_record.init_sched_obj}
 
     for record in result.stage_records[:-1]:
         assert record.is_last_stage is False
         assert record.bound_kind == "tardiness_only"
-        # Intermediate seeds win via one of the two stage-seed candidates.
-        assert record.best_candidate in ("two_way", "seq_both_ways")
+        # Intermediate seeds win via one of the three stage-seed candidates.
+        assert record.best_candidate in ("bn2d", "mixed_fw", "mixed_rv")
+        # seed_compare off ⇒ 3 midpoint candidate objectives; the min is the
+        # seed's realized wET.
+        assert record.candidate_objs is not None
+        assert set(record.candidate_objs) == {
+            "midpoint_bn2d",
+            "midpoint_mixed_fw",
+            "midpoint_mixed_rv",
+        }
+        assert min(record.candidate_objs.values()) == record.init_sched_obj
         # Round-1-only tardiness LB is a valid bound on OPT.
         assert record.mcf_lb_valid is True
         assert record.mcf_lb is not None
@@ -287,7 +299,7 @@ def test_full_et_approx_excludes_intermediate_from_combined_lb() -> None:
         assert record.mcf_lb_valid is False
         assert record.mcf_lb is not None  # the approximate objective is recorded
         assert record.init_sched_obj is not None
-        assert record.best_candidate in ("two_way", "seq_both_ways")
+        assert record.best_candidate in ("bn2d", "mixed_fw", "mixed_rv")
 
     # The incumbent (min-wET over last stage + intermediate seeds) is still no
     # worse than the last-stage-only seed.
@@ -398,3 +410,54 @@ def test_per_stage_records_are_yaml_serializable() -> None:
 
     # Exactly the operation the manifest writer performs on the diagnostic.
     yaml.safe_dump([dataclasses.asdict(record) for record in result.stage_records])
+
+
+def test_last_stage_candidate_objs_records_both_rounds() -> None:
+    """The last-stage ``candidate_objs`` is round-prefixed (``r1_*``/``r2_*``)
+    and keys the winner's obj under its own anchor — never swapped.
+
+    Run with ``adjust_*`` + ``proceed_r2_when_nonpositive_cmax`` so r2 runs, and
+    ``seed_compare`` so both anchors are built and the alt obj is recorded.
+    """
+    instance = _make_three_stage_instance()
+
+    result = calc_mcf_lb_all_stages_and_derive_full_sch(
+        instance,
+        adjust_p=True,
+        adjust_r=True,
+        proceed_r2_when_nonpositive_cmax=True,
+        seed_compare=True,
+    )
+
+    ls = result.last_stage_result
+    last_record = result.stage_records[-1]
+    assert last_record.candidate_objs is not None
+    assert set(last_record.candidate_objs) <= {
+        "r1_midpoint",
+        "r1_simple",
+        "r2_midpoint",
+        "r2_simple",
+    }
+
+    # r1 always runs: the winner's obj is keyed under its own anchor (no swap),
+    # and the loser's alt obj under the other anchor.
+    assert ls.last_stage_seed_method is not None
+    assert ls.r1_build_full is not None
+    assert ls.r1_build_full.dispatched_obj is not None
+    assert (
+        last_record.candidate_objs[f"r1_{ls.last_stage_seed_method}"]
+        == ls.r1_build_full.dispatched_obj
+    )
+    if ls.last_stage_alt_obj is not None:
+        r1_loser = "simple" if ls.last_stage_seed_method == "midpoint" else "midpoint"
+        assert last_record.candidate_objs[f"r1_{r1_loser}"] == ls.last_stage_alt_obj
+
+    # r2 ran here ⇒ at least its winner key is present, also keyed by method.
+    assert ls.r2_ran is True
+    assert ls.last_stage_r2_seed_method is not None
+    assert ls.r2_build_full is not None
+    assert ls.r2_build_full.dispatched_obj is not None
+    assert (
+        last_record.candidate_objs[f"r2_{ls.last_stage_r2_seed_method}"]
+        == ls.r2_build_full.dispatched_obj
+    )

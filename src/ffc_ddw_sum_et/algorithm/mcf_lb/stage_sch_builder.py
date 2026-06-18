@@ -17,15 +17,16 @@ Single algorithm entry point:
     * **simple** — jobs left-packed in ``t_max`` order via
       :func:`build_simple_stage_seed` —
 
-    and from each anchor (see :func:`_candidates_from_anchor`) derive two
+    and from each anchor (see :func:`_candidates_from_anchor`) derive three
     full schedules:
 
-    * **two_way** — extend the anchor across all stages via
+    * **bn2d** — extend the anchor across all stages via
       :meth:`BN2DDispatcher.get_full_schedule_from_anchor`;
-    * **seq_both_ways** — order the anchor jobs by their stage-``stage_id``
-      end time, then dispatch that sequence forward
-      (:meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`) and
-      reversed (reverse-instance + IIT pipeline), keeping the lower-wET.
+    * **mixed_fw** — order the anchor jobs by their stage-``stage_id`` end
+      time and dispatch that sequence forward
+      (:meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`);
+    * **mixed_rv** — dispatch the same sequence reversed (reverse-instance +
+      IIT pipeline).
 
     Return the global min-wET schedule across both anchors' candidates;
     ties favour the ``midpoint`` anchor.
@@ -62,9 +63,16 @@ class StageSeedResult:
     obj_value: float
     """Weighted earliness + tardiness of :attr:`schedule`."""
 
-    best_candidate: Literal["two_way", "seq_both_ways"]
+    best_candidate: Literal["bn2d", "mixed_fw", "mixed_rv"]
 
     anchor_method: Literal["simple", "midpoint"]
+
+    candidate_objs: dict[str, float]
+    """Per-candidate wET keyed ``{anchor}_{bn2d|mixed_fw|mixed_rv}``.
+
+    Always carries the three ``midpoint_*`` keys; the three ``simple_*`` keys
+    are present only when ``seed_compare=True`` (the simple anchor was built).
+    """
 
 
 def build_stage_seed_full_sch(
@@ -96,9 +104,12 @@ def build_stage_seed_full_sch(
     midpoint_anchor = _build_anchor_schedule(
         instance, mcf_preemptive_schedule, stage_id, log
     )
-    midpoint_sch, midpoint_obj, midpoint_candidate = _candidates_from_anchor(
-        instance, midpoint_anchor, stage_id, log
+    midpoint_sch, midpoint_obj, midpoint_candidate, midpoint_objs = (
+        _candidates_from_anchor(instance, midpoint_anchor, stage_id, log)
     )
+    candidate_objs: dict[str, float] = {
+        f"midpoint_{k}": v for k, v in midpoint_objs.items()
+    }
 
     if not seed_compare:
         # Comparison disabled: midpoint-only anchor, byte-identical to the
@@ -108,6 +119,7 @@ def build_stage_seed_full_sch(
             obj_value=midpoint_obj,
             best_candidate=midpoint_candidate,
             anchor_method="midpoint",
+            candidate_objs=candidate_objs,
         )
 
     window_map = window_map_from_preemptive_schedule(
@@ -120,9 +132,10 @@ def build_stage_seed_full_sch(
         duration_map=instance.get_job_2_p_map_for_stage(stage_id),
         job_2_release=instance.get_job_2_p_sum_before_stage(stage_id),
     )
-    simple_sch, simple_obj, simple_candidate = _candidates_from_anchor(
+    simple_sch, simple_obj, simple_candidate, simple_objs = _candidates_from_anchor(
         instance, simple_anchor, stage_id, log
     )
+    candidate_objs.update({f"simple_{k}": v for k, v in simple_objs.items()})
 
     # Ties favour the midpoint anchor (strict `<` keeps today's output).
     if simple_obj < midpoint_obj:
@@ -131,12 +144,14 @@ def build_stage_seed_full_sch(
             obj_value=simple_obj,
             best_candidate=simple_candidate,
             anchor_method="simple",
+            candidate_objs=candidate_objs,
         )
     return StageSeedResult(
         schedule=midpoint_sch,
         obj_value=midpoint_obj,
         best_candidate=midpoint_candidate,
         anchor_method="midpoint",
+        candidate_objs=candidate_objs,
     )
 
 
@@ -145,24 +160,46 @@ def _candidates_from_anchor(
     anchor_sch: FFcSchedule,
     stage_id: str,
     log: logging.Logger,
-) -> tuple[FFcSchedule, float, Literal["two_way", "seq_both_ways"]]:
-    """Derive this anchor's own best full schedule across both candidates.
+) -> tuple[
+    FFcSchedule,
+    float,
+    Literal["bn2d", "mixed_fw", "mixed_rv"],
+    dict[str, float],
+]:
+    """Derive this anchor's own best full schedule across three candidates.
 
-    From ``anchor_sch`` build ``two_way``
-    (:meth:`BN2DDispatcher.get_full_schedule_from_anchor`) and
-    ``seq_both_ways`` (forward + reverse-IIT), returning the lower-wET one.
-    Ties favour ``two_way`` (preserves the historical per-anchor choice).
+    From ``anchor_sch`` build ``bn2d``
+    (:meth:`BN2DDispatcher.get_full_schedule_from_anchor`), ``mixed_fw``
+    (forward :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`), and
+    ``mixed_rv`` (reverse-instance + IIT pipeline). Return the lower-wET one
+    plus a dict of all three objectives.
+
+    Tie precedence is ``bn2d > mixed_fw > mixed_rv``: ``min`` returns the first
+    minimiser, and the candidates are ranked in that order, so the chosen
+    schedule is byte-identical to the historical selection (``bn2d`` beat
+    ``seq_both_ways`` on ties; the forward arm beat the reverse arm on ties).
     """
-    two_way_sch = BN2DDispatcher().get_full_schedule_from_anchor(
+    bn2d_sch = BN2DDispatcher().get_full_schedule_from_anchor(
         instance, anchor_sch, stage_id, logger=log
     )
-    two_way_obj = _weighted_et(two_way_sch, instance)
+    bn2d_obj = _weighted_et(bn2d_sch, instance)
 
-    seq_both_sch, seq_both_obj = _seq_both_ways(instance, anchor_sch, stage_id, log)
+    mixed_fw_sch, mixed_fw_obj, mixed_rv_sch, mixed_rv_obj = _seq_both_ways(
+        instance, anchor_sch, stage_id, log
+    )
 
-    if two_way_obj <= seq_both_obj:
-        return two_way_sch, two_way_obj, "two_way"
-    return seq_both_sch, seq_both_obj, "seq_both_ways"
+    objs: dict[str, float] = {
+        "bn2d": bn2d_obj,
+        "mixed_fw": mixed_fw_obj,
+        "mixed_rv": mixed_rv_obj,
+    }
+    ranked: list[tuple[Literal["bn2d", "mixed_fw", "mixed_rv"], float, FFcSchedule]] = [
+        ("bn2d", bn2d_obj, bn2d_sch),
+        ("mixed_fw", mixed_fw_obj, mixed_fw_sch),
+        ("mixed_rv", mixed_rv_obj, mixed_rv_sch),
+    ]
+    best_candidate, best_obj, best_sch = min(ranked, key=lambda c: c[1])
+    return best_sch, best_obj, best_candidate, objs
 
 
 def _build_anchor_schedule(
@@ -208,12 +245,16 @@ def _seq_both_ways(
     anchor_sch: FFcSchedule,
     stage_id: str,
     logger: logging.Logger,
-) -> tuple[FFcSchedule, float]:
-    """Forward + reversed dispatch of the anchor end-time order; min wET.
+) -> tuple[FFcSchedule, float, FFcSchedule, float]:
+    """Forward + reversed dispatch of the anchor end-time order, kept separate.
 
     Sequence = anchor jobs sorted by stage-``stage_id`` end time ascending.
-    Forward uses :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`;
-    reversed uses the reverse-instance + IIT pipeline.
+    The forward arm (``mixed_fw``) uses
+    :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`; the reverse
+    arm (``mixed_rv``) uses the reverse-instance + IIT pipeline. Both are
+    returned (no ``min`` here); the caller ranks them against ``bn2d``.
+
+    Returns ``(mixed_fw_sch, mixed_fw_obj, mixed_rv_sch, mixed_rv_obj)``.
     """
     job_2_pos = {j: i for i, j in enumerate(instance.job_id_list)}
     sequence = sorted(
@@ -235,9 +276,7 @@ def _seq_both_ways(
         instance, sequence, logger
     )
 
-    if forward_obj <= reversed_obj:
-        return forward_sch, forward_obj
-    return reversed_sch, reversed_obj
+    return forward_sch, forward_obj, reversed_sch, reversed_obj
 
 
 def _dispatch_by_reversed_sequence_with_iit(

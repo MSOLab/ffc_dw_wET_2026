@@ -24,9 +24,10 @@ class InstanceParams:
 
 
 # Matches: Instance_{n}_{c}_{m}_{beta1}_{beta2}_{cv}_Rep{rep}.txt
-# beta1/beta2 use comma as decimal separator (e.g. "0,2" → 0.2)
+# beta1/beta2 use comma as decimal separator (e.g. "0,2" → 0.2); whole-number
+# factors omit the comma (e.g. "1" → 1.0), so the fractional part is optional.
 _INSTANCE_NAME_RE = re.compile(
-    r"^Instance_(\d+)_(\d+)_(\d+)_(\d+,\d+)_(\d+,\d+)_(\d+)_Rep(\d+)\.txt$"
+    r"^Instance_(\d+)_(\d+)_(\d+)_(\d+(?:,\d+)?)_(\d+(?:,\d+)?)_(\d+)_Rep(\d+)\.txt$"
 )
 
 

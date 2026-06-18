@@ -61,6 +61,32 @@ def test_from_pra_2017_data_parses_large_instance() -> None:
     assert gp.rep == 0
 
 
+@pytest.mark.parametrize(
+    "name, t_factor, r_factor",
+    [
+        ("Instance_50_5_3_0,2_0,2_10_Rep0.txt", 0.2, 0.2),
+        ("Instance_50_5_3_0,2_1_10_Rep0.txt", 0.2, 1.0),  # whole-number R
+        ("Instance_50_5_3_1_0,2_10_Rep0.txt", 1.0, 0.2),  # whole-number T
+        ("Instance_50_5_3_1_1_10_Rep0.txt", 1.0, 1.0),  # both whole-number
+    ],
+)
+def test_parse_instance_name_accepts_whole_number_factors(
+    name: str, t_factor: float, r_factor: float
+) -> None:
+    """The T/R factors may be written without a decimal comma (e.g. ``_1_``);
+    such whole-number factors must still parse to float generation params.
+    """
+    gp = FFcDDWParameters._parse_instance_name(name)
+    assert gp is not None
+    assert gp.n == 50
+    assert gp.c == 5
+    assert gp.m == 3
+    assert gp.T_factor == t_factor
+    assert gp.R_factor == r_factor
+    assert gp.W_factor == 10
+    assert gp.rep == 0
+
+
 def test_from_pra_2017_data_parses_large_calibration_instance() -> None:
     instance_path = (
         REPO_ROOT
