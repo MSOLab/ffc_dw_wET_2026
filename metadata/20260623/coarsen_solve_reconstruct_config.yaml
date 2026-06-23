@@ -16,7 +16,7 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
+# ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260623
@@ -33,6 +33,7 @@ scenarios:
     subroutine_flow:
       - method: coarsen_solve_reconstruct
         factor: 50
+        timelimit: "0.03nc"
         solver_thread_cnt: 8
         emit_phase_schedules: true
         draw_cp_trajectory: true
@@ -43,6 +44,7 @@ scenarios:
     subroutine_flow:
       - method: coarsen_solve_reconstruct
         factor: 25
+        timelimit: "0.03nc"
         solver_thread_cnt: 8
         emit_phase_schedules: true
         draw_cp_trajectory: true
