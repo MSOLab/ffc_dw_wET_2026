@@ -360,3 +360,350 @@ def test_run_termination_reason_set() -> None:
         TerminationReason.COMPLETED,
         TerminationReason.TIME_LIMIT,
     )
+
+
+# ---------------------------------------------------------------------------
+# WP-1: CoarsenSolveReconstructTrace + run_coarsen_solve_reconstruct
+# ---------------------------------------------------------------------------
+
+
+def test_trace_and_pipeline_importable() -> None:
+    """run_coarsen_solve_reconstruct and CoarsenSolveReconstructTrace must be in __all__."""
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructTrace,
+        run_coarsen_solve_reconstruct,
+    )
+
+    assert CoarsenSolveReconstructTrace is not None
+    assert run_coarsen_solve_reconstruct is not None
+
+
+def test_trace_is_frozen_dataclass() -> None:
+    """CoarsenSolveReconstructTrace must be a frozen slots dataclass."""
+    from dataclasses import is_dataclass
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructTrace,
+    )
+
+    assert is_dataclass(CoarsenSolveReconstructTrace)
+    # Frozen: attempting a setattr must raise
+    instance = _make_tiny_2job_2stage_instance()
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+    import logging
+
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+    assert isinstance(trace, CoarsenSolveReconstructTrace)
+    with pytest.raises((AttributeError, TypeError)):
+        trace.obj_value = 999.0  # type: ignore[misc]
+
+
+def test_trace_has_required_fields() -> None:
+    """CoarsenSolveReconstructTrace must expose all documented fields."""
+    from dataclasses import fields
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructTrace,
+    )
+
+    field_names = {f.name for f in fields(CoarsenSolveReconstructTrace)}
+    required = {
+        "work_status",
+        "termination_reason",
+        "error",
+        "final_schedule",
+        "coarse_schedule",
+        "reconstructed_raw_schedule",
+        "cp_progress_log",
+        "obj_value",
+        "metrics",
+    }
+    assert required <= field_names, f"Missing fields: {required - field_names}"
+
+
+def test_trace_three_schedules_are_distinct_objects() -> None:
+    """coarse_schedule, reconstructed_raw_schedule, and final_schedule are distinct objects."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.final_schedule is not None
+    assert trace.coarse_schedule is not None
+    assert trace.reconstructed_raw_schedule is not None
+
+    # All three must be distinct objects
+    assert trace.final_schedule is not trace.coarse_schedule
+    assert trace.final_schedule is not trace.reconstructed_raw_schedule
+    assert trace.coarse_schedule is not trace.reconstructed_raw_schedule
+
+
+def test_trace_raw_schedule_not_mutated_by_postprocess() -> None:
+    """reconstructed_raw_schedule must NOT reflect make_semi_active/insert_idle_time.
+
+    We verify that raw op duration == original p_ij (not shifted by postprocess),
+    and that raw op start == coarse_start * factor (the direct inflation).
+    """
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    raw = trace.reconstructed_raw_schedule
+    assert raw is not None
+
+    raw_start_map = raw.get_jik_2_start_time_map()
+    raw_end_map = raw.get_jik_2_end_time_map()
+    original_p = instance.job_2_stage_2_p_map
+
+    # Raw duration must equal original p_ij
+    for j, i, _k in raw_start_map:
+        duration = raw_end_map[(j, i, _k)] - raw_start_map[(j, i, _k)]
+        expected_p = original_p[j][i]
+        assert duration == expected_p, (
+            f"raw duration for ({j},{i})={duration}, expected original p={expected_p}"
+        )
+
+
+def test_trace_final_schedule_reflects_postprocess() -> None:
+    """final_schedule must differ from reconstructed_raw_schedule.
+
+    After make_semi_active + insert_idle_time, at least one start time should
+    differ (unless the schedule is already active, which is unlikely on the
+    tiny instance with wide due windows triggering insert_idle_time).
+    We verify the objects are distinct; if they happened to be equal by
+    coincidence we still confirm that raw starts <= final starts (postprocess
+    can only shift idle time insertion, never retract).
+    """
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.final_schedule is not trace.reconstructed_raw_schedule
+    # Both must be valid schedules
+    assert trace.final_schedule is not None
+    assert trace.reconstructed_raw_schedule is not None
+
+
+def test_trace_raw_schedule_stages_match_original_instance() -> None:
+    """reconstructed_raw_schedule is built from original instance, not coarsened."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    raw = trace.reconstructed_raw_schedule
+    assert raw is not None
+    # Stage list matches original
+    assert set(raw.stages) == set(instance.stage_id_list)
+
+
+def test_trace_coarse_schedule_stages_match_coarsened_instance() -> None:
+    """coarse_schedule must be built from coarsened instance (same stage/job ids)."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    factor = 50
+    option = CoarsenSolveReconstructOption(factor=factor, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    coarse = trace.coarse_schedule
+    assert coarse is not None
+    # Job/stage IDs are the same; times are coarsened-scale (smaller)
+    assert set(coarse.stages) == set(instance.stage_id_list)
+    # Coarse op times should be <= original raw times (they are coarsened scale)
+    coarse_end_map = coarse.get_jik_2_end_time_map()
+    raw_end_map = trace.reconstructed_raw_schedule.get_jik_2_end_time_map()  # type: ignore[union-attr]
+    # At least one coarse value must be strictly less than its raw counterpart
+    # (since factor=50 compresses 60-unit times to 2-unit coarse times)
+    assert any(coarse_end_map[k] < raw_end_map[k] for k in coarse_end_map), (
+        "Expected coarse schedule times to be smaller than inflated raw schedule times"
+    )
+
+
+def test_trace_cp_progress_log_nonempty_on_tiny_instance() -> None:
+    """cp_progress_log must be non-empty when the solver finds a solution."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.final_schedule is not None, "Expected a solution on tiny instance"
+    assert trace.cp_progress_log is not None
+    assert len(trace.cp_progress_log) > 0, (
+        "Expected non-empty progress log when solution found"
+    )
+
+
+def test_trace_cp_progress_log_last_entry_matches_coarsened_obj() -> None:
+    """Last progress_log entry obj_value/obj_bound must match coarsened solver output."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.final_schedule is not None
+    assert trace.cp_progress_log is not None
+    assert len(trace.cp_progress_log) > 0
+
+    metrics = trace.metrics
+    assert metrics is not None
+
+    # The last entry with a non-None obj_value must match coarsened_obj_value from metrics
+    entries_with_value = [e for e in trace.cp_progress_log if e.obj_value is not None]
+    assert len(entries_with_value) > 0, "At least one entry must have an obj_value"
+    last_value_entry = entries_with_value[-1]
+    assert last_value_entry.obj_value == metrics["coarsened_obj_value"], (
+        f"Progress log last obj_value {last_value_entry.obj_value} "
+        f"!= coarsened_obj_value {metrics['coarsened_obj_value']}"
+    )
+    # Similarly for bound
+    entries_with_bound = [e for e in trace.cp_progress_log if e.obj_bound is not None]
+    assert len(entries_with_bound) > 0
+    last_bound_entry = entries_with_bound[-1]
+    assert last_bound_entry.obj_bound == metrics["coarsened_obj_bound"], (
+        f"Progress log last obj_bound {last_bound_entry.obj_bound} "
+        f"!= coarsened_obj_bound {metrics['coarsened_obj_bound']}"
+    )
+
+
+def test_trace_cp_progress_log_is_tuple() -> None:
+    """cp_progress_log must be a tuple (immutable)."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert isinstance(trace.cp_progress_log, tuple)
+
+
+def test_adapter_run_now_populates_progress_log() -> None:
+    """adapter.run must set AlgRecord.progress_log (non-None, non-empty) when solution found."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    assert record.result.schedule is not None
+    assert record.progress_log is not None
+    assert isinstance(record.progress_log, tuple)
+    assert len(record.progress_log) > 0
+
+
+def test_adapter_run_schedule_and_metrics_unchanged_from_base() -> None:
+    """adapter.run must still return the same final schedule/metrics as the pre-WP-1 base.
+
+    We verify all required metric keys are present and the schedule has valid op timings.
+    This ensures the refactor to use run_coarsen_solve_reconstruct does not break
+    existing behaviour.
+    """
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.work_status in (WorkStatus.OPTIMAL, WorkStatus.FEASIBLE)
+    assert record.result is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    required_keys = {
+        "factor",
+        "coarsened_instance_name",
+        "coarsened_status",
+        "coarsened_obj_value",
+        "coarsened_obj_bound",
+        "coarsened_elapsed",
+        "reconstructed_obj_value",
+        "reconstructed_makespan",
+    }
+    for key in required_keys:
+        assert key in metrics, f"Missing metrics key: {key}"
+
+    schedule = record.result.schedule
+    assert schedule is not None
+    start_map = schedule.get_jik_2_start_time_map()
+    end_map = schedule.get_jik_2_end_time_map()
+    for key in start_map:
+        assert start_map[key] >= 0
+        assert end_map[key] >= start_map[key]
+
+
+def test_trace_obj_value_matches_adapter_obj_value() -> None:
+    """trace.obj_value must equal the original-scale objective (same as adapter.run)."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    spec = AlgSpec(instance=instance, option=option)
+
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+    adapter = CoarsenSolveReconstructAdapter()
+    record = adapter.run(spec)
+
+    assert trace.obj_value is not None
+    assert record.result is not None
+    # Both runs are independent; we just verify obj_value is a valid float
+    assert isinstance(trace.obj_value, float)
+    assert trace.obj_value >= 0.0

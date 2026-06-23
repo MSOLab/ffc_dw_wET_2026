@@ -13,8 +13,8 @@ from routix.report import SubroutineReport
 from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
-    CoarsenSolveReconstructAdapter,
     CoarsenSolveReconstructOption,
+    run_coarsen_solve_reconstruct,
 )
 from ffc_ddw_sum_et.algorithm.cpsat_adapter import CpsatAdapter, CpsatOption
 from ffc_ddw_sum_et.algorithm.cumulative import (
@@ -2495,13 +2495,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         log_search_progress: bool = False,
         error_if_infeasible: bool = False,
         draw_gantt: bool = False,
+        emit_phase_schedules: bool = False,
+        draw_cp_trajectory: bool = False,
     ) -> SubroutineReport:
         """Step method: coarsen the instance, solve the base CP, and
         reconstruct to the original scale.
 
         Coarsens all processing times and due-window bounds by ``factor``
-        via ``ceil(value / factor)``, solves the coarsened model with
-        :class:`CoarsenSolveReconstructAdapter`, then inflates the raw
+        via ``ceil(value / factor)``, solves the coarsened model via
+        :func:`run_coarsen_solve_reconstruct`, then inflates the raw
         coarse start times back to original scale and restores original
         processing times. Post-processing (``make_semi_active`` →
         ``insert_idle_time``) and objective evaluation are done against
@@ -2514,9 +2516,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``timelimit=None`` means "no per-call cap" — only the global time
         limit is enforced.
 
-        Note: ``draw_gantt`` is accepted for API consistency but the adapter
-        does not render a Gantt chart; any post-work would be placed after
-        ``_register``. Currently a no-op beyond the stop-guard.
+        ``draw_gantt`` is accepted for API consistency but does not
+        currently render a Gantt chart; any post-work would be placed after
+        ``_register``.
+
+        ``emit_phase_schedules``: when ``True`` and the solve finds a
+        solution, records three schedule snapshots onto
+        ``self.csr_phase_schedules`` (1_coarse_solver_result,
+        2_reconstructed_raw, 3_final) via ``_record_csr_phase``.
+
+        ``draw_cp_trajectory``: when ``True`` and the solve finds a
+        solution, captures the coarsened-scale CP-SAT UB/LB trajectory
+        into ``self.csr_cp_trajectory``. The trajectory is NOT inserted
+        into the report's ``progress_log`` (kept as a dedicated artifact
+        only, separate from the shared obj_log).
+
+        The two flags are independent — any combination is valid.
 
         Per CLAUDE.md subroutine step contract: a single ``_register`` per
         call, ``elapsed_time`` measured immediately before report
@@ -2556,47 +2571,39 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             log_search_progress=log_search_progress,
             error_if_infeasible=error_if_infeasible,
         )
-        spec = AlgSpec(
-            instance=instance,
-            option=option,
-            logger=self.logger,
-            stop_predicate=self.is_stopping_condition,
-        )
-        record = CoarsenSolveReconstructAdapter().run(spec)
+        trace = run_coarsen_solve_reconstruct(instance, option, self.logger)
 
         elapsed = time.monotonic() - start_elapsed
-        result = record.result
-        obj_value = (
-            float(result.obj_value)
-            if result is not None and result.obj_value is not None
-            else None
-        )
-        obj_bound = (
-            float(result.obj_bound)
-            if result is not None and result.obj_bound is not None
-            else None
-        )
-        schedule = result.schedule if result is not None else None
+        obj_value = float(trace.obj_value) if trace.obj_value is not None else None
+        obj_bound = None  # CSR does not produce a valid global lower bound
 
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=obj_value,
             obj_bound=obj_bound,
         )
-        progress_log = record.progress_log or ()
-        if schedule is not None:
+        if trace.final_schedule is not None:
             self._register(
                 report,
                 FFcDDWSolution(
-                    schedule=schedule, obj_value=obj_value, obj_bound=obj_bound
+                    schedule=trace.final_schedule,
+                    obj_value=obj_value,
+                    obj_bound=obj_bound,
                 ),
-                progress_log=progress_log,
             )
         else:
-            self._register(report, None, progress_log=progress_log)
+            self._register(report, None)
 
         # Post-register artifact work (per contract: after _register, not before).
-        # draw_gantt is accepted for API parity but the CSR adapter does not
-        # render a Gantt chart; add post-register emission here when needed.
+        # The two flags are evaluated independently so either can be used alone.
+        if trace.final_schedule is not None:
+            if emit_phase_schedules:
+                self._record_csr_phase("1_coarse_solver_result", trace.coarse_schedule)
+                self._record_csr_phase(
+                    "2_reconstructed_raw", trace.reconstructed_raw_schedule
+                )
+                self._record_csr_phase("3_final", trace.final_schedule)
+            if draw_cp_trajectory:
+                self.csr_cp_trajectory = trace.cp_progress_log
 
         return report

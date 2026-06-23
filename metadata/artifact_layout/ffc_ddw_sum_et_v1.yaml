@@ -81,6 +81,37 @@ artifacts:
     kind: calc_mcf_lb_r2_summary_yaml
     file_template: "calc_mcf_lb_and_derive_full_sch/r2/r2_summary.yaml"
 
+  # ---- CSR (coarsen_solve_reconstruct) progress artifacts ----
+  # Three intermediate schedule snapshots from the CSR step:
+  #   1_coarse_solver_result — solver output on the coarsened instance (coarsened time-scale).
+  #   2_reconstructed_raw   — inflated starts + original p_ij, before make_semi_active/insert_idle_time.
+  #   3_final               — fully postprocessed schedule (original time-scale).
+  # Compact JSON, operations[] shape — same as mcf_lb_phase_schedule.
+  # Nested under a ``coarsen_solve_reconstruct/`` subdir so the reporter's
+  # greedy ``mcf_lb_phase_schedule`` discovery (which globs ``progress/*.json``
+  # non-recursively) does NOT pick these up and re-render them on the MCF
+  # shared horizon — the CSR Gantts need their own per-snapshot horizons.
+  # The `phase_name` carries the step call_context + 1_/2_/3_ sort key.
+  # Rendered to PNG by the reporter via `phase_gantt_png` (reused — that kind
+  # is already keyed by {phase_name} and shared with mcf_lb/flip_makespan_cp).
+  - scope: instance
+    zone: progress
+    kind: csr_phase_schedule
+    file_template: "coarsen_solve_reconstruct/{phase_name}.json"
+  # CP-SAT objective trajectory captured during the coarsened solve.
+  # Coarsened-scale obj_value/obj_bound — NOT mixed into the shared obj_log
+  # (which is original-scale and used for cross-step RPD/optimality-gap).
+  - scope: instance
+    zone: progress
+    kind: csr_cp_trajectory_json
+    file_template: "{instance_name}_csr_cp_trajectory.json"
+  # UB/LB-vs-time line graph rendered from csr_cp_trajectory_json.
+  # x-axis = solve elapsed seconds; two lines: UB (obj_value) and LB (obj_bound).
+  - scope: instance
+    zone: progress
+    kind: csr_cp_trajectory_png
+    file_template: "{instance_name}_csr_cp_trajectory.png"
+
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
   # the renderer is picked from the source content shape (operations[] vs

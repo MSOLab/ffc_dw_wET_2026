@@ -304,6 +304,83 @@ def _phase_makespan_from_json(json_path: Path) -> int | None:
     return max(ends) if ends else None
 
 
+def _render_csr_cp_trajectory_line(json_path: Path, png_path: Path) -> None:
+    """Render a UB/LB-vs-time line graph from a CSR CP trajectory JSON.
+
+    Loads ``{"elapsed_sec":[...], "obj_value":[...], "obj_bound":[...]}``
+    (parallel arrays; ``None`` entries are skipped per-series) and plots
+    two step-style lines: UB from ``obj_value`` and LB from ``obj_bound``.
+
+    y-axis represents the **coarsened-scale** objective (the solve was run
+    on a coarsened instance, so these values are NOT directly comparable to
+    the original-scale objectives in ``_obj_log.json``).
+
+    Module-level so it's picklable by ``ProcessPoolExecutor``.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not available, skipping %s", json_path)
+        return
+
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("Failed to load CSR trajectory json %s", json_path)
+        return
+
+    elapsed = data.get("elapsed_sec") or []
+    ub_raw = data.get("obj_value") or []
+    lb_raw = data.get("obj_bound") or []
+
+    # Filter each series to pairs where the value is not None.
+    ub_points = [
+        (t, v)
+        for t, v in zip(elapsed, ub_raw)
+        if v is not None
+    ]
+    lb_points = [
+        (t, v)
+        for t, v in zip(elapsed, lb_raw)
+        if v is not None
+    ]
+
+    if not ub_points and not lb_points:
+        # Nothing to plot; skip file creation.
+        return
+
+    # Derive instance label from filename for the title.
+    stem = png_path.stem  # e.g. "MyInstance_csr_cp_trajectory"
+    instance_label = stem.replace("_csr_cp_trajectory", "")
+
+    try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots()
+
+        if ub_points:
+            t_ub, v_ub = zip(*ub_points)
+            ax.step(t_ub, v_ub, where="post", label="UB (obj_value)")
+
+        if lb_points:
+            t_lb, v_lb = zip(*lb_points)
+            ax.step(t_lb, v_lb, where="post", label="LB (obj_bound)", linestyle="--")
+
+        ax.set_xlabel("solve elapsed (s)")
+        ax.set_ylabel("coarsened objective")
+        ax.set_title(f"{instance_label}\ncoarsened-scale UB/LB trajectory")
+        ax.legend()
+
+        fig.tight_layout()
+        fig.savefig(str(png_path))
+        plt.close(fig)
+    except Exception:
+        logger.exception("Failed to render CSR trajectory for %s", json_path)
+
+
 @dataclass
 class ScenarioResult:
     """Aggregated result for one scenario."""
@@ -1712,7 +1789,107 @@ class FFcDDWReporter:
             for src, dst in entries:
                 jobs.append((render_fn, src, dst))
 
+        # CSR phase Gantts: up to 3 snapshots per instance, discovered via
+        # ``find_artifacts`` because the on-disk ``phase_name`` carries the
+        # step's call_context prefix (e.g.
+        # ``1-coarsen_solve_reconstruct_2_reconstructed_raw``); we classify each
+        # file by its name suffix. ``2_reconstructed_raw`` and ``3_final`` share
+        # a common original-scale x-axis (0..max of their two makespans) so they
+        # are directly comparable. ``1_coarse_solver_result`` is on a coarsened
+        # time axis, pinned to ``0 .. its own makespan``.
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {
+                    "scenario_name": sc.name,
+                    "instance_name": ins,
+                }
+                coarse_json: Path | None = None
+                raw_json: Path | None = None
+                final_json: Path | None = None
+                for pj in self.layout.find_artifacts(
+                    "csr_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
+                ):
+                    if pj.stem.endswith("1_coarse_solver_result"):
+                        coarse_json = pj
+                    elif pj.stem.endswith("2_reconstructed_raw"):
+                        raw_json = pj
+                    elif pj.stem.endswith("3_final"):
+                        final_json = pj
+                # Shared original-scale horizon for raw + final.
+                shared_horizon: int | None = None
+                for phase_json in (raw_json, final_json):
+                    if phase_json is not None:
+                        ms = _phase_makespan_from_json(phase_json)
+                        if ms is not None:
+                            shared_horizon = (
+                                ms
+                                if shared_horizon is None
+                                else max(shared_horizon, ms)
+                            )
+                shared_render_fn = (
+                    partial(
+                        _render_phase_gantt_from_json,
+                        force_start=0,
+                        force_end=shared_horizon,
+                    )
+                    if shared_horizon is not None
+                    else _render_phase_gantt_from_json
+                )
+                # ``1_coarse_solver_result`` pinned to 0 .. its own makespan.
+                coarse_makespan = (
+                    _phase_makespan_from_json(coarse_json)
+                    if coarse_json is not None
+                    else None
+                )
+                coarse_render_fn = (
+                    partial(
+                        _render_phase_gantt_from_json,
+                        force_start=0,
+                        force_end=coarse_makespan,
+                    )
+                    if coarse_makespan is not None
+                    else _render_phase_gantt_from_json
+                )
+                for phase_json, render_fn in (
+                    (raw_json, shared_render_fn),
+                    (final_json, shared_render_fn),
+                    (coarse_json, coarse_render_fn),
+                ):
+                    if phase_json is not None:
+                        jobs.append(
+                            (
+                                render_fn,
+                                phase_json,
+                                self.layout.artifact_path(
+                                    "phase_gantt_png",
+                                    phase_name=phase_json.stem,
+                                    **scope,
+                                ),
+                            )
+                        )
+
         gantt_count = len(jobs)
+        # CSR CP trajectory line graphs (coarsened UB/LB vs time).
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {"scenario_name": sc.name, "instance_name": ins}
+                traj_json = self.layout.artifact_path(
+                    "csr_cp_trajectory_json", **scope
+                )
+                if traj_json.exists():
+                    jobs.append(
+                        (
+                            _render_csr_cp_trajectory_line,
+                            traj_json,
+                            self.layout.artifact_path(
+                                "csr_cp_trajectory_png", **scope
+                            ),
+                        )
+                    )
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the
         # progress zone per (scenario, instance) and route the HTML output
         # into the same instance's report zone.

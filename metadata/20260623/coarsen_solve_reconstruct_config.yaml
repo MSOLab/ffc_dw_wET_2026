@@ -1,14 +1,16 @@
-# Pilot experiment: extreme coarsen + base CP solve + reconstruct (CSR).
+# coarsen_solve_reconstruct pilot experiment config.
 #
-# RQ1: Does coarsening processing times and due windows by factor=50 let base
-#      CP-SAT prove optimality (or reach a good bound) quickly?
-# RQ2: How does the reconstructed original-scale schedule compare to NEH-CP
-#      and LB-init (calc_mcf_lb_and_derive_full_sch) baselines?
+# Scenarios:
+#   csr50_only        — coarsen factor 50, pure reconstruct (no refinement).
+#   csr25_only        — coarsen factor 25, pure reconstruct (no refinement).
+#   neh_cp_baseline   — NEH-CP baseline for RQ2 comparison.
+#   lb_init_baseline  — MCF-LB init baseline for RQ2 comparison.
 #
-# Three scenarios — CP-SAT solution pool (csr50_pool) excluded in v1;
-# add after single-solution RQ2 results justify pool overhead.
+# draw_gantt / emit_phase_schedules / draw_cp_trajectory are enabled so each
+# CSR run emits the 3-Gantt artifact and the CP UB/LB trajectory line graph.
 #
-# See plans/20260623/coarsen_solve_reconstruct.md for full design.
+# See plans/20260623/coarsen_solve_reconstruct.md and
+#     plans/20260623/coarsen_solve_reconstruct_figures.md.
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
@@ -22,7 +24,7 @@ output_dir: output/20260623
 instance_worker_cnt: 12
 
 draw_gantt: true
-painter_thread_cnt: 96
+painter_thread_cnt: 16
 
 scenarios:
   - name: csr50_only
@@ -32,12 +34,34 @@ scenarios:
       - method: coarsen_solve_reconstruct
         factor: 50
         solver_thread_cnt: 8
-        timelimit: "0.09nc"
-  # - name: csr25_only
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr25_only
+    timelimit: "0.09nc"
+    output_subdir: csr25_only
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        factor: 25
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  # - name: neh_cp_baseline
   #   timelimit: "0.09nc"
-  #   output_subdir: csr25_only
+  #   output_subdir: neh_cp_baseline
   #   subroutine_flow:
-  #     - method: coarsen_solve_reconstruct
-  #       factor: 25
+  #     - method: neh_cp
   #       solver_thread_cnt: 8
-  #       timelimit: "0.09nc"
+
+  # - name: lb_init_baseline
+  #   timelimit: "0.09nc"
+  #   output_subdir: lb_init_baseline
+  #   subroutine_flow:
+  #     - method: calc_mcf_lb_and_derive_full_sch
+  #       job_placement_priority: "end_time"
+  #       last_stage_only_placement_criteria: "dist"
+  #       makespan_delta_ref: "lastStageOnlyMakespan"
+  #       adjust_p: true
+  #       adjust_r: true
+  #       r_adjust_coeff: 0.5
