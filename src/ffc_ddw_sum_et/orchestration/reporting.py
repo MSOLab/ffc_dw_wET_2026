@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from collections import defaultdict
+from functools import partial
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -183,7 +184,12 @@ def _render_heatmap_from_yaml(yaml_path: Path, html_path: Path) -> None:
         logger.exception("Failed to render heatmap for %s", yaml_path)
 
 
-def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
+def _render_phase_gantt_from_json(
+    json_path: Path,
+    png_path: Path,
+    force_start: int | None = None,
+    force_end: int | None = None,
+) -> None:
     """Render a phase Gantt PNG from a compact-JSON phase schedule.
 
     Auto-detects regular vs preemptive content from the top-level keys
@@ -193,6 +199,11 @@ def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
     1. instance name (from ``instanceName``)
     2. PNG filename
     3. ``obj=<v>, makespan=<m>``
+
+    ``force_start`` / ``force_end`` pin the x-axis horizon (passed through
+    to the plotter). Callers use this to render a family of phase Gantts on
+    a shared ``0..max_makespan`` time axis so phases are visually
+    comparable; the title still reports each phase's own makespan.
 
     Module-level so it's picklable by ``ProcessPoolExecutor``.
     """
@@ -244,6 +255,8 @@ def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
                 machines=machines,
                 jobs=jobs,
                 all_jobs=all_jobs,
+                force_start=force_start,
+                force_end=force_end,
                 title=title,
             )
         else:
@@ -266,10 +279,29 @@ def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
                 stage_list=data.get(K.STAGES),
                 machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
                 all_job_list=data.get(K.JOBS),
+                force_start=force_start,
+                force_end=force_end,
                 title=title,
             )
     except Exception:
         logger.exception("Failed to render Gantt for %s", json_path)
+
+
+def _phase_makespan_from_json(json_path: Path) -> int | None:
+    """Return a phase schedule's makespan (max end time) from its compact
+    JSON, or ``None`` if unreadable/empty. Used to size a shared
+    ``0..max_makespan`` x-axis horizon across a family of phase Gantts."""
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("Failed to load phase json %s for horizon", json_path)
+        return None
+    if K.SEGMENTS in data:
+        ends = [int(seg[K.OP_END]) for seg in (data.get(K.SEGMENTS) or [])]
+    else:
+        ends = [int(op[K.OP_END]) for op in (data.get(K.OPERATIONS) or [])]
+    return max(ends) if ends else None
 
 
 @dataclass
@@ -1002,7 +1034,9 @@ class FFcDDWReporter:
                     instance_name=ir.instance_name,
                 )
                 r2_present = r2_path.exists()
-                r2_data: dict[str, Any] = (load_yaml(r2_path) or {}) if r2_present else {}
+                r2_data: dict[str, Any] = (
+                    (load_yaml(r2_path) or {}) if r2_present else {}
+                )
 
                 ins_idx = self._resolve_ins_index(ir.instance_name)
                 meta = (
@@ -1048,9 +1082,7 @@ class FFcDDWReporter:
 
         if not rows:
             return
-        rows.sort(
-            key=lambda r: (r[0], r[1] if r[1] is not None else -1, r[2])
-        )
+        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1, r[2]))
         path = self.layout.artifact_path("calc_mcf_lb_run_summary_csv")
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
@@ -1572,6 +1604,24 @@ class FFcDDWReporter:
             return
 
         jobs: list[tuple[Any, Path, Path]] = []
+        # MCF-LB phase Gantts (flat ``mcf_lb_phase_schedule`` + round-nested
+        # ``calc_mcf_lb_phase_schedule``) share a single ``0..max_makespan``
+        # x-axis per instance so every phase / round / scenario chart for that
+        # instance is drawn on the same time scale and is directly comparable.
+        # Collected here keyed by instance name; the shared horizon is the max
+        # makespan across all of that instance's MCF-LB phase schedules.
+        mcf_phase_entries: dict[str, list[tuple[Path, Path]]] = defaultdict(list)
+        mcf_phase_horizon: dict[str, int] = {}
+
+        def _add_mcf_phase(ins_name: str, src: Path, dst: Path) -> None:
+            mcf_phase_entries[ins_name].append((src, dst))
+            makespan = _phase_makespan_from_json(src)
+            if makespan is not None:
+                prev = mcf_phase_horizon.get(ins_name)
+                mcf_phase_horizon[ins_name] = (
+                    makespan if prev is None else max(prev, makespan)
+                )
+
         for sc in self.scenario_results:
             for ir in sc.instance_results:
                 ins = ir.instance_name
@@ -1588,28 +1638,38 @@ class FFcDDWReporter:
                             self.layout.artifact_path("gantt_png", **scope),
                         )
                     )
-                for phase_kind in (
+                # Flat MCF-LB phase schedules (run_mcf_lb): unified horizon.
+                for phase_json in self.layout.find_artifacts(
                     "mcf_lb_phase_schedule",
-                    "flip_makespan_cp_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
                 ):
-                    for phase_json in self.layout.find_artifacts(
-                        phase_kind,
-                        scenario_name=sc.name,
-                        instance_name=ins,
-                    ):
-                        # phase_name == file stem (template is "{phase_name}.json")
-                        phase_name = phase_json.stem
-                        jobs.append(
-                            (
-                                _render_phase_gantt_from_json,
-                                phase_json,
-                                self.layout.artifact_path(
-                                    "phase_gantt_png",
-                                    phase_name=phase_name,
-                                    **scope,
-                                ),
-                            )
+                    # phase_name == file stem (template is "{phase_name}.json")
+                    phase_name = phase_json.stem
+                    _add_mcf_phase(
+                        ins,
+                        phase_json,
+                        self.layout.artifact_path(
+                            "phase_gantt_png", phase_name=phase_name, **scope
+                        ),
+                    )
+                # ``flip_makespan_cp`` phase schedules are not MCF-LB charts;
+                # keep their own per-chart auto horizon.
+                for phase_json in self.layout.find_artifacts(
+                    "flip_makespan_cp_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
+                ):
+                    phase_name = phase_json.stem
+                    jobs.append(
+                        (
+                            _render_phase_gantt_from_json,
+                            phase_json,
+                            self.layout.artifact_path(
+                                "phase_gantt_png", phase_name=phase_name, **scope
+                            ),
                         )
+                    )
                 # Round-nested ``calc_mcf_lb_phase_schedule`` JSONs live under
                 # ``progress/<inst>/calc_mcf_lb_and_derive_full_sch/<round>/<n>_<label>.json``.
                 # ``find_artifacts`` substitutes ``*`` for the unspecified
@@ -1628,19 +1688,29 @@ class FFcDDWReporter:
                     if sep <= 0:
                         continue
                     index_str, label = stem[:sep], stem[sep + 1 :]
-                    jobs.append(
-                        (
-                            _render_phase_gantt_from_json,
-                            phase_json,
-                            self.layout.artifact_path(
-                                "calc_mcf_lb_phase_gantt_png",
-                                round=round_part,
-                                index=index_str,
-                                label=label,
-                                **scope,
-                            ),
-                        )
+                    _add_mcf_phase(
+                        ins,
+                        phase_json,
+                        self.layout.artifact_path(
+                            "calc_mcf_lb_phase_gantt_png",
+                            round=round_part,
+                            index=index_str,
+                            label=label,
+                            **scope,
+                        ),
                     )
+
+        # Emit MCF-LB phase jobs, pinning each instance's charts to a shared
+        # ``0..max_makespan`` horizon via a bound ``force_start`` / ``force_end``.
+        for ins_name, entries in mcf_phase_entries.items():
+            horizon = mcf_phase_horizon.get(ins_name)
+            render_fn = (
+                partial(_render_phase_gantt_from_json, force_start=0, force_end=horizon)
+                if horizon is not None
+                else _render_phase_gantt_from_json
+            )
+            for src, dst in entries:
+                jobs.append((render_fn, src, dst))
 
         gantt_count = len(jobs)
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the
