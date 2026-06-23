@@ -75,20 +75,7 @@ def render_partition_gantt_svg(
     str
         Self-contained SVG document.
     """
-    # ── 1. build region lookup ──────────────────────────────────────
-    region_of: dict[tuple[str, str, str], str] = {}
-    for s_id, partition in stage_2_partition.items():
-        for rname, ops in [
-            ("LTF", partition.left_time_fixed),
-            ("LPF", partition.left_profile_fixed),
-            ("UNFIXED", partition.unfixed),
-            ("RPF", partition.right_profile_fixed),
-            ("RTF", partition.right_time_fixed),
-        ]:
-            for job, mc in ops:
-                region_of[(s_id, job, mc)] = rname
-
-    # ── 2. machine lanes ────────────────────────────────────────────
+    # ── 1. machine lanes ────────────────────────────────────────────
     lanes: list[tuple[str, str]] = []
     lane_labels: list[str] = []
     for s_id in stage_id_list:
@@ -99,7 +86,7 @@ def render_partition_gantt_svg(
     if n_lanes == 0:
         return "<svg xmlns='http://www.w3.org/2000/svg'/>"
 
-    # ── 3. per-machine boundaries + ops ─────────────────────────────
+    # ── 2. per-machine boundaries + ops ─────────────────────────────
     start_map = schedule.get_jik_2_start_time_map()
     end_map = schedule.get_jik_2_end_time_map()
 
@@ -147,14 +134,14 @@ def render_partition_gantt_svg(
         lane_boundaries[(s_id, mc)] = (left_b, right_b)
         lane_ops[(s_id, mc)] = ops_on_mc
 
-    # ── 4. draw ─────────────────────────────────────────────────────
+    # ── 3. draw ─────────────────────────────────────────────────────
     machine_height = 1.0
     bar_height = 0.8
     fig_height = max(4.0, 1.5 + n_lanes * 0.55)
 
     fig, ax = plt.subplots(figsize=(14.0, fig_height))
 
-    # 4a. background bands
+    # 3a. background bands
     for idx, (s_id, mc) in enumerate(lanes):
         y = float(idx)
         left_b, right_b = lane_boundaries[(s_id, mc)]
@@ -193,7 +180,7 @@ def render_partition_gantt_svg(
                 )
             )
 
-    # 4b. operation bars
+    # 3b. operation bars
     for idx, (s_id, mc) in enumerate(lanes):
         y = float(idx)
         bar_bottom = y + 0.1
@@ -237,7 +224,7 @@ def render_partition_gantt_svg(
                 color="gray",
             )
 
-    # 4c. boundary lines (data coords, per-lane vertical segment)
+    # 3c. boundary lines (data coords, per-lane vertical segment)
     for idx, (s_id, mc) in enumerate(lanes):
         y = float(idx)
         left_b, right_b = lane_boundaries[(s_id, mc)]
@@ -258,7 +245,7 @@ def render_partition_gantt_svg(
                 linewidth=1.2,
             )
 
-    # ── 5. axes ─────────────────────────────────────────────────────
+    # ── 4. axes ─────────────────────────────────────────────────────
     ax.set_yticks([i + 0.5 for i in range(n_lanes)])
     ax.set_yticklabels(lane_labels)
     ax.set_ylim(-0.5, float(n_lanes) + 0.5)
@@ -274,7 +261,7 @@ def render_partition_gantt_svg(
     )
     ax.set_title(title, fontsize=11, fontweight="bold")
 
-    # 5a. region legend
+    # 4a. region legend
     legend_patches = [
         mpatches.Patch(color=REGION_COLORS[r], label=r) for r in _REGION_ORDER
     ]
@@ -288,7 +275,7 @@ def render_partition_gantt_svg(
 
     plt.tight_layout()
 
-    # ── 6. export SVG string ────────────────────────────────────────
+    # ── 5. export SVG string ────────────────────────────────────────
     buf = io.BytesIO()
     fig.savefig(buf, format="svg", bbox_inches="tight")
     plt.close(fig)
