@@ -338,3 +338,144 @@ def test_stop_predicate_at_entry_returns_empty_result() -> None:
     assert result.r2_skip_reason == "stop_guard"
     assert result.r1_phase_schedules == []
     assert result.r2_phase_schedules == []
+
+
+def _assert_last_stage_durations_feasible(
+    schedule: object, instance: FFcDDWParameters
+) -> None:
+    """Every last-stage op duration must equal the instance's original p."""
+    last_stage_id = instance.stage_id_list[-1]
+    p_map = instance.get_job_2_p_map_for_stage(last_stage_id)
+    for _mc, start, end, job_id in schedule.iter_operations_on_stage(last_stage_id):  # type: ignore[attr-defined]
+        assert end - start == p_map[job_id], (
+            f"infeasible duration for {job_id}: {end - start} != {p_map[job_id]}"
+        )
+
+
+def _last_stage_durations(schedule: object, instance: FFcDDWParameters) -> dict:
+    last_stage_id = instance.stage_id_list[-1]
+    return {
+        job_id: end - start
+        for _mc, start, end, job_id in schedule.iter_operations_on_stage(  # type: ignore[attr-defined]
+            last_stage_id
+        )
+    }
+
+
+def test_last_stage_rebuild_config_increased_pr_is_default_and_keeps_before_rs() -> (
+    None
+):
+    """``"increased_pr"`` (the default) generates the last-stage schedule with
+    the *increased* p and rebuilds it to original ``p`` before
+    reverse-dispatch, so the distinct ``4_lastS_only_before_rs`` snapshot
+    is kept. The heuristic (pre-rebuild) schedule carries inflated
+    durations; the final schedule is problem-feasible (original ``p``).
+    """
+    instance = _make_multi_stage_instance()
+
+    # No explicit config → default is "increased_pr".
+    result = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        adjust_p=True,
+        adjust_r=True,
+        proceed_r2_when_nonpositive_cmax=True,
+    )
+
+    assert result.r2_ran is True
+    assert result.r2_p_increment is not None and result.r2_p_increment > 0
+    assert result.r2_heuristic is not None and result.r2_build_full is not None
+    assert result.r2_build_full.schedule is not None
+
+    # (1) generated with increased p: heuristic last-stage durations are
+    # original + p_increment for every job.
+    p_inc = result.r2_p_increment
+    last_stage_id = instance.stage_id_list[-1]
+    orig_p = instance.get_job_2_p_map_for_stage(last_stage_id)
+    heur_durations = _last_stage_durations(result.r2_heuristic.schedule, instance)
+    assert heur_durations == {j: orig_p[j] + p_inc for j in orig_p}
+
+    # (2) rebuild keeps a distinct pre-reverse-dispatch snapshot at index 4.
+    r2_labels = [label for label, _ in result.r2_phase_schedules]
+    assert any(label.endswith("4_lastS_only_before_rs") for label in r2_labels)
+
+    # (3) final schedule is problem-feasible (durations restored to original).
+    _assert_last_stage_durations_feasible(result.r2_build_full.schedule, instance)
+
+
+def test_last_stage_rebuild_config_original_pr_generates_with_original_p() -> None:
+    """``"original_pr"`` generates the last-stage schedule with the *original*
+    p/r (increments not applied to the heuristic) and reverse-dispatches it
+    directly (no rebuild), so the pre-reverse-dispatch snapshot equals
+    label 3 and is dropped. The heuristic durations are already original.
+    """
+    instance = _make_multi_stage_instance()
+
+    result = calc_mcf_lb_and_derive_full_sch(
+        instance,
+        adjust_p=True,
+        adjust_r=True,
+        proceed_r2_when_nonpositive_cmax=True,
+        last_stage_rebuild_config="original_pr",
+    )
+
+    assert result.r2_ran is True
+    assert result.r2_heuristic is not None and result.r2_build_full is not None
+    assert result.r2_build_full.schedule is not None
+
+    # Heuristic generated with the ORIGINAL p (no inflation).
+    last_stage_id = instance.stage_id_list[-1]
+    orig_p = instance.get_job_2_p_map_for_stage(last_stage_id)
+    heur_durations = _last_stage_durations(result.r2_heuristic.schedule, instance)
+    assert heur_durations == dict(orig_p)
+
+    # No rebuild → the pre-reverse-dispatch snapshot is a duplicate of label 3
+    # and is dropped (index 4 absent).
+    r2_labels = [label for label, _ in result.r2_phase_schedules]
+    assert not any(label.endswith("lastS_only_before_rs") for label in r2_labels)
+    _assert_last_stage_durations_feasible(result.r2_build_full.schedule, instance)
+
+
+def test_last_stage_rebuild_config_best_picks_smaller_pre_unflip_makespan() -> None:
+    """``"best"`` runs both variants and keeps the one whose pre-unflip
+    makespan (``BuildFullSchResult.before_unflip_makespan``) is smaller.
+    """
+    instance = _make_multi_stage_instance()
+    kw = dict(adjust_p=True, adjust_r=True, proceed_r2_when_nonpositive_cmax=True)
+
+    orig = calc_mcf_lb_and_derive_full_sch(
+        instance, last_stage_rebuild_config="original_pr", **kw
+    )
+    modi = calc_mcf_lb_and_derive_full_sch(
+        instance, last_stage_rebuild_config="increased_pr", **kw
+    )
+    best = calc_mcf_lb_and_derive_full_sch(
+        instance, last_stage_rebuild_config="best", **kw
+    )
+
+    for r in (orig, modi, best):
+        assert r.r2_build_full is not None
+        assert r.r2_build_full.schedule is not None
+
+    bu_orig = orig.r2_build_full.before_unflip_makespan
+    bu_modi = modi.r2_build_full.before_unflip_makespan
+    bu_best = best.r2_build_full.before_unflip_makespan
+    assert bu_orig is not None and bu_modi is not None and bu_best is not None
+    assert bu_best == min(bu_orig, bu_modi)
+    _assert_last_stage_durations_feasible(best.r2_build_full.schedule, instance)
+
+
+def test_single_stage_both_configs_stay_feasible() -> None:
+    """Single-stage instances skip reverse-dispatch's ``make_semi_active``,
+    but both ``"original_pr"`` (original-p generation) and ``"increased_pr"``
+    (rebuild to original ``p``) still produce problem-feasible schedules.
+    """
+    instance = _make_single_stage_instance()
+    kw = dict(adjust_p=True, adjust_r=True, proceed_r2_when_nonpositive_cmax=True)
+
+    for cfg in ("original_pr", "increased_pr", "best"):
+        result = calc_mcf_lb_and_derive_full_sch(
+            instance, last_stage_rebuild_config=cfg, **kw
+        )
+        assert result.r2_build_full is not None
+        assert result.r2_build_full.schedule is not None
+        _assert_last_stage_durations_feasible(result.r2_build_full.schedule, instance)

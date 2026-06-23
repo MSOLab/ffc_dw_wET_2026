@@ -1152,6 +1152,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         adjust_r: bool = False,
         p_adjust_coeff: float = 1.0,
         r_adjust_coeff: float = 0.5,
+        last_stage_rebuild_config: Literal[
+            "original_pr", "increased_pr", "best"
+        ] = "increased_pr",
         proceed_r2_when_nonpositive_cmax: bool = False,
         emit_phase_schedules: bool = False,
     ) -> SubroutineReport:
@@ -1227,6 +1230,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             r_adjust_coeff: Coefficient on ``makespan_delta`` used in
                 the ``adjust_r`` formula. Default ``0.5`` reproduces the
                 historical ``ceil(delta / 2)`` factor.
+            last_stage_rebuild_config: Round-2 last-stage generation
+                policy. ``"increased_pr"`` (default) generates the
+                last-stage schedule with the increased p/r and rebuilds it
+                to original ``p`` (preserving completion times) before
+                reverse-dispatch — the historical behaviour.
+                ``"original_pr"`` generates with the original p/r and
+                reverse-dispatches directly. ``"best"`` runs both and keeps
+                the smaller pre-unflip makespan.
             proceed_r2_when_nonpositive_cmax: When False (default),
                 preserves the historical ``delta_le_0`` skip — round 2
                 is skipped whenever the signed delta is ``<= 0``. When
@@ -1270,6 +1281,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             adjust_r=adjust_r,
             p_adjust_coeff=p_adjust_coeff,
             r_adjust_coeff=r_adjust_coeff,
+            last_stage_rebuild_config=last_stage_rebuild_config,
             proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
             stop_predicate=self.is_stopping_condition,
             logger=self.logger,
@@ -1301,6 +1313,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         c_diag.makespan_delta = result.makespan_delta
         if result.makespan_delta is not None:
             c_diag.makespan_delta_ref_used = makespan_delta_ref
+        if result.r2_ran:
+            c_diag.last_stage_rebuild_config_used = last_stage_rebuild_config
         c_diag.r2_ran = result.r2_ran
         c_diag.r2_skip_reason = result.r2_skip_reason
         if result.r2_apply is not None:

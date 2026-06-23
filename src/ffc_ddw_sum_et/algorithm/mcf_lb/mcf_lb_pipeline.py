@@ -303,16 +303,40 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     heatmap_sort: HeatmapSort = "end_time",
     job_placement_priority: PmPrmpSortKey = "end_time",
     last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    last_stage_rebuild_config: Literal[
+        "original_pr", "increased_pr", "best"
+    ] = "increased_pr",
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     heatmap_yaml_path: Path | None = None,
 ) -> CalcMcfLbR2Result:
     """Run round 2 (with delta-derived augmentation) of the pipeline.
 
-    Pipeline: ``apply_lb_by_mcf`` (with ``p_increment`` / ``r_increment``)
-    → ``heuristic_last_stage_only_from_mcf_lb`` (same increments)
-    → ``build_full_sch_from_last_stage_only_sch`` (with
-    ``rebuild_last_stage_with_original_p=(p_increment != 0)``).
+    Pipeline: ``apply_lb_by_mcf`` (with ``p_increment`` / ``r_increment``,
+    always augmented) → ``heuristic_last_stage_only_from_mcf_lb`` →
+    ``build_full_sch_from_last_stage_only_sch``.
+
+    The round-2 MCF LB (``apply``) is always computed on the augmented
+    instance. ``last_stage_rebuild_config`` only selects how the
+    last-stage schedule fed to reverse-dispatch is *generated*:
+
+    - ``"increased_pr"`` (default): generate the last-stage schedule with the
+      *increased* p/r (``p_increment`` / ``r_increment``), then rebuild it
+      back to the original last-stage processing times while preserving
+      completion times (``rebuild_last_stage_with_original_p=(p_increment
+      != 0)``; inter-op gaps appear) before reverse-dispatch. This is the
+      historical behaviour.
+    - ``"original_pr"``: generate the last-stage schedule with the *original*
+      p/r (increments not applied to the heuristic) and reverse-dispatch it
+      directly (no rebuild).
+    - ``"best"``: run both variants and keep the one whose pre-unflip
+      makespan (``BuildFullSchResult.before_unflip_makespan``) is smaller;
+      ties keep ``"original_pr"``.
+
+    Both ``"original_pr"`` and ``"increased_pr"`` yield problem-feasible final
+    schedules (the original-p durations are present after generation or
+    after the rebuild, respectively), including single-stage instances
+    where reverse-dispatch's ``make_semi_active`` is skipped.
 
     ``makespan_delta`` is clamped to ``>= 1`` for increment computation
     so callers may invoke r2 even on a non-positive incumbent-vs-LP gap
@@ -379,39 +403,102 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     if _stop_check():
         return _build(stop_reason="stop_guard", apply=apply)
 
-    heuristic = heuristic_last_stage_only_from_mcf_lb(
-        instance,
-        apply.mcf_preemptive_schedule,
-        logger=logger,
-        job_priority=job_placement_priority,
-        placement_priority=last_stage_only_placement_criteria,
-        p_increment=p_increment,
-        r_increment=r_increment,
-    )
-    for label, sched in heuristic.intermediate_schedules:
-        phase_schedules.append((f"2_{label}", sched))
-    phase_schedules.append(
-        ("3_lastS_only_from_mcf_lb_after_sa_iti", heuristic.schedule)
-    )
+    # The round-2 MCF LB (``apply``) is always computed on the augmented
+    # instance. ``last_stage_rebuild_config`` only selects how the
+    # last-stage schedule fed to reverse-dispatch is generated:
+    #   "original_pr": generate with the *original* p/r (no increments) and
+    #               reverse-dispatch directly (no rebuild).
+    #   "increased_pr": generate with the *increased* p/r, then restore the
+    #               original last-stage processing times while preserving
+    #               completion times (rebuild; inter-op gaps appear) before
+    #               reverse-dispatch. This is the historical default.
+    #   "best":     run both and keep the one whose pre-unflip makespan is
+    #               smaller.
+    # ``"increased_pr"`` rebuilds to original p only when there is a p inflation
+    # to undo; with ``p_increment == 0`` the rebuild is a no-op identity.
+    modified_rebuild = p_increment != 0
 
-    if _stop_check():
-        return _build(stop_reason="stop_guard", apply=apply, heuristic=heuristic)
+    def _run_heuristic(*, use_increments: bool) -> HeuristicLastStageOnlyResult:
+        return heuristic_last_stage_only_from_mcf_lb(
+            instance,
+            apply.mcf_preemptive_schedule,
+            logger=logger,
+            job_priority=job_placement_priority,
+            placement_priority=last_stage_only_placement_criteria,
+            p_increment=p_increment if use_increments else 0,
+            r_increment=r_increment if use_increments else 0,
+        )
 
-    build_full = build_full_sch_from_last_stage_only_sch(
-        instance,
-        heuristic.schedule,
-        rebuild_last_stage_with_original_p=(p_increment != 0),
-        logger=logger,
-    )
+    def _run_build(
+        heuristic_schedule: FFcSchedule, *, rebuild: bool
+    ) -> BuildFullSchResult:
+        return build_full_sch_from_last_stage_only_sch(
+            instance,
+            heuristic_schedule,
+            rebuild_last_stage_with_original_p=rebuild,
+            logger=logger,
+        )
+
+    def _record_heuristic_phases(h: HeuristicLastStageOnlyResult) -> None:
+        for label, sched in h.intermediate_schedules:
+            phase_schedules.append((f"2_{label}", sched))
+        phase_schedules.append(("3_lastS_only_from_mcf_lb_after_sa_iti", h.schedule))
+
+    if last_stage_rebuild_config == "best":
+        heuristic_orig = _run_heuristic(use_increments=False)
+        if _stop_check():
+            _record_heuristic_phases(heuristic_orig)
+            return _build(
+                stop_reason="stop_guard", apply=apply, heuristic=heuristic_orig
+            )
+        build_orig = _run_build(heuristic_orig.schedule, rebuild=False)
+
+        heuristic_mod = _run_heuristic(use_increments=True)
+        if _stop_check():
+            _record_heuristic_phases(heuristic_mod)
+            return _build(
+                stop_reason="stop_guard", apply=apply, heuristic=heuristic_mod
+            )
+        build_mod = _run_build(heuristic_mod.schedule, rebuild=modified_rebuild)
+
+        # Select by pre-unflip makespan (smaller wins). If one build failed,
+        # keep the other; ties and double-failures keep ``"original_pr"``.
+        mk_o = build_orig.before_unflip_makespan
+        mk_m = build_mod.before_unflip_makespan
+        if build_mod.schedule is None:
+            heuristic, build_full, rebuild_used = heuristic_orig, build_orig, False
+        elif build_orig.schedule is None:
+            heuristic, build_full, rebuild_used = (
+                heuristic_mod,
+                build_mod,
+                modified_rebuild,
+            )
+        elif mk_m is not None and (mk_o is None or mk_m < mk_o):
+            heuristic, build_full, rebuild_used = (
+                heuristic_mod,
+                build_mod,
+                modified_rebuild,
+            )
+        else:
+            heuristic, build_full, rebuild_used = heuristic_orig, build_orig, False
+        _record_heuristic_phases(heuristic)
+    else:
+        use_increments = last_stage_rebuild_config == "increased_pr"
+        rebuild_used = modified_rebuild if use_increments else False
+        heuristic = _run_heuristic(use_increments=use_increments)
+        _record_heuristic_phases(heuristic)
+        if _stop_check():
+            return _build(stop_reason="stop_guard", apply=apply, heuristic=heuristic)
+        build_full = _run_build(heuristic.schedule, rebuild=rebuild_used)
+
     r2_kept = dict(build_full.intermediate_schedules)
-    # Drop ``lastS_only_before_rs`` when ``p_increment == 0``: the
-    # rebuild step uses the same ``p`` as the heuristic input, so the
-    # output is identical to label 3 (mirrors r1's drop). When
-    # ``p_increment != 0`` the rebuilt schedule actually changes — keep
-    # it. Index 4 simply isn't recorded in the duplicate case; later
-    # labels keep their indices 5..9 via ``enumerate`` over the full
-    # ``_R2_BUILD_FULL_SCH_LABELS`` tuple.
-    if p_increment == 0:
+    # ``lastS_only_before_rs`` equals label 3 unless the winning variant
+    # actually rebuilt the seed with the original ``p`` — only possible
+    # when ``rebuild_used`` and ``p_increment != 0``. Drop the duplicate
+    # otherwise (mirrors r1's drop). Index 4 simply isn't recorded in the
+    # duplicate case; later labels keep their indices 5..9 via
+    # ``enumerate`` over the full ``_R2_BUILD_FULL_SCH_LABELS`` tuple.
+    if not (rebuild_used and p_increment != 0):
         r2_kept.pop("lastS_only_before_rs", None)
     for offset, label in enumerate(_R2_BUILD_FULL_SCH_LABELS):
         sched = r2_kept.get(label)
@@ -437,6 +524,9 @@ def calc_mcf_lb_and_derive_full_sch(
     adjust_r: bool = False,
     p_adjust_coeff: float = 1.0,
     r_adjust_coeff: float = 0.5,
+    last_stage_rebuild_config: Literal[
+        "original_pr", "increased_pr", "best"
+    ] = "increased_pr",
     proceed_r2_when_nonpositive_cmax: bool = False,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
@@ -480,6 +570,14 @@ def calc_mcf_lb_and_derive_full_sch(
             ``adjust_r`` formula. Default ``0.5`` reproduces the
             historical ``ceil(delta / 2)`` factor; pass a different
             value to scale the release-time augmentation.
+        last_stage_rebuild_config: Round-2 last-stage generation policy.
+            ``"increased_pr"`` (default) generates the last-stage schedule with
+            the increased p/r and rebuilds it to original ``p`` (preserving
+            completion times) before reverse-dispatch — the historical
+            behaviour. ``"original_pr"`` generates with the original p/r and
+            reverse-dispatches directly. ``"best"`` runs both and keeps the
+            smaller pre-unflip makespan. See
+            ``calc_mcf_lb_r2_and_derive_full_sch`` for details.
         proceed_r2_when_nonpositive_cmax: When False (default), the
             historical ``delta_le_0`` skip applies — round 2 is skipped
             with ``r2_skip_reason="delta_le_0"`` whenever the signed
@@ -657,6 +755,7 @@ def calc_mcf_lb_and_derive_full_sch(
         heatmap_sort=heatmap_sort,
         job_placement_priority=job_placement_priority,
         last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        last_stage_rebuild_config=last_stage_rebuild_config,
         stop_predicate=stop_predicate,
         logger=logger,
         heatmap_yaml_path=r2_heatmap_yaml_path,
