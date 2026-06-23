@@ -12,6 +12,10 @@ from routix.report import SubroutineReport
 
 from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
+from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+    CoarsenSolveReconstructAdapter,
+    CoarsenSolveReconstructOption,
+)
 from ffc_ddw_sum_et.algorithm.cpsat_adapter import CpsatAdapter, CpsatOption
 from ffc_ddw_sum_et.algorithm.cumulative import (
     BaseModelBuilder,
@@ -2482,3 +2486,117 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         unfixed_batch_count,
                     )
                     self.pw_cp(unfixed_batch_count=unfixed_batch_count, **base_kwargs)
+
+    def coarsen_solve_reconstruct(
+        self,
+        factor: int = 50,
+        timelimit: float | str | None = None,
+        solver_thread_cnt: int = 1,
+        log_search_progress: bool = False,
+        error_if_infeasible: bool = False,
+        draw_gantt: bool = False,
+    ) -> SubroutineReport:
+        """Step method: coarsen the instance, solve the base CP, and
+        reconstruct to the original scale.
+
+        Coarsens all processing times and due-window bounds by ``factor``
+        via ``ceil(value / factor)``, solves the coarsened model with
+        :class:`CoarsenSolveReconstructAdapter`, then inflates the raw
+        coarse start times back to original scale and restores original
+        processing times. Post-processing (``make_semi_active`` →
+        ``insert_idle_time``) and objective evaluation are done against
+        the original instance.
+
+        ``timelimit`` is the user-specified per-call cap (absolute seconds,
+        or any expression supported by :func:`resolve_value_expr`). The
+        actual time budget passed to the algorithm is the strict-min of
+        ``timelimit`` and the controller's remaining global time.
+        ``timelimit=None`` means "no per-call cap" — only the global time
+        limit is enforced.
+
+        Note: ``draw_gantt`` is accepted for API consistency but the adapter
+        does not render a Gantt chart; any post-work would be placed after
+        ``_register``. Currently a no-op beyond the stop-guard.
+
+        Per CLAUDE.md subroutine step contract: a single ``_register`` per
+        call, ``elapsed_time`` measured immediately before report
+        construction with no work in between.
+        """
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
+
+        instance = self.instance
+        timelimit_resolved = resolve_value_expr(
+            timelimit,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        eff_timelimit_sec = (
+            min(timelimit_resolved, remaining_sec)
+            if timelimit_resolved is not None
+            else remaining_sec
+        )
+
+        self.logger.info(
+            "coarsen_solve_reconstruct: factor=%d, effective=%.3fs "
+            "(timelimit=%s, remaining=%.3fs)",
+            factor,
+            eff_timelimit_sec,
+            f"{timelimit_resolved:.3f}s" if timelimit_resolved is not None else "None",
+            remaining_sec,
+        )
+
+        option = CoarsenSolveReconstructOption(
+            factor=factor,
+            timelimit_sec=eff_timelimit_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            log_search_progress=log_search_progress,
+            error_if_infeasible=error_if_infeasible,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = CoarsenSolveReconstructAdapter().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        obj_bound = (
+            float(result.obj_bound)
+            if result is not None and result.obj_bound is not None
+            else None
+        )
+        schedule = result.schedule if result is not None else None
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound,
+        )
+        progress_log = record.progress_log or ()
+        if schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(
+                    schedule=schedule, obj_value=obj_value, obj_bound=obj_bound
+                ),
+                progress_log=progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=progress_log)
+
+        # Post-register artifact work (per contract: after _register, not before).
+        # draw_gantt is accepted for API parity but the CSR adapter does not
+        # render a Gantt chart; add post-register emission here when needed.
+
+        return report

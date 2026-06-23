@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from functools import cached_property
 from io import StringIO
 from typing import Self, TextIO
+
+import numpy as np
 
 from .base.job_stage_p import JobStageProcessingTimeManager
 from .ffc_params import FFcParameters
@@ -271,6 +274,65 @@ class FFcDDWParameters(FFcParameters):
             new_stage_2_machines_map,
             new_p_manager,
             instance.job_2_due_window_map,
+            instance.job_2_ewt_map,
+            instance.job_2_twt_map,
+            instance.generation_params,
+        )
+
+    @classmethod
+    def coarsen_time_resolution(cls, instance: FFcParameters, factor: int) -> Self:
+        """Return a new FFcDDWParameters with all processing times and due window
+        bounds scaled down by ``factor`` using ceiling division.
+
+        Every processing time ``p`` becomes ``ceil(p / factor)``, which is >= 1
+        when the original ``p > 0``.  Every due window bound ``d`` becomes
+        ``ceil(d / factor)``.  The ``lower <= upper`` invariant is preserved
+        because both bounds are scaled by the same positive factor with the same
+        monotone operation.
+
+        Weights, job/stage/machine layout, and generation_params are preserved.
+        The new instance name is ``f"{instance.name}_coarsen{factor}"``.
+
+        Args:
+            instance: Source FFcDDWParameters instance.
+            factor: Positive integer divisor; typically 50 for the
+                coarsen_solve_reconstruct experiment.
+
+        Raises:
+            TypeError: If ``instance`` is not an FFcDDWParameters.
+            ValueError: If ``factor <= 0``.
+
+        Returns:
+            Self: A new coarsened FFcDDWParameters instance.
+        """
+        if not isinstance(instance, FFcDDWParameters):
+            raise TypeError(
+                f"{cls.__name__}.coarsen_time_resolution requires FFcDDWParameters, "
+                f"got {type(instance).__name__}"
+            )
+        if factor <= 0:
+            raise ValueError(
+                f"factor must be a positive integer; got {factor!r}."
+            )
+
+        new_df = np.ceil(instance.p_manager.df.copy() / factor).astype(int)
+        new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)
+
+        new_due_window_map = {
+            job_id: (math.ceil(lower / factor), math.ceil(upper / factor))
+            for job_id, (lower, upper) in instance._job_2_due_window_map.items()
+        }
+        new_stage_2_machines_map = {
+            s: list(instance.stage_2_machines_map[s]) for s in instance.stage_id_list
+        }
+
+        return cls(
+            f"{instance.name}_coarsen{factor}",
+            list(instance.job_id_list),
+            list(instance.stage_id_list),
+            new_stage_2_machines_map,
+            new_p_manager,
+            new_due_window_map,
             instance.job_2_ewt_map,
             instance.job_2_twt_map,
             instance.generation_params,

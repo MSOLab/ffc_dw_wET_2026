@@ -34,6 +34,7 @@ SUBROUTINE_SYMBOL_MAP: dict[str, str] = {
     "apply_lb_by_mcf": "square",
     "heuristic_last_stage_only_sch_from_mcf_lb": "triangle-up",
     "build_full_sch_from_last_stage_only_sch": "triangle-down",
+    "coarsen_solve_reconstruct": "cross",
 }
 
 
