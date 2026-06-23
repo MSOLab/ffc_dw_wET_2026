@@ -7,7 +7,7 @@ bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260618
 
-instance_worker_cnt: 96
+instance_worker_cnt: 12
 
 draw_gantt: false
 
