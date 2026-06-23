@@ -83,59 +83,6 @@ Composite steps (e.g. `calc_mcf_lb_and_derive_full_sch`) delegate to
    the trajectory, do it after `_register` (the controller has already
    captured the trajectory at that point).
 
-## Multi-Subagent Codebase Exploration
-
-When the task requires understanding a large portion of the codebase, launch
-multiple subagents in parallel — each owns a distinct domain subtree — then
-synthesize their findings.
-
-### Decomposition pattern
-
-Split by package boundary (not by file count). Each subagent gets a
-self-contained subtree with clear output expectations.
-
-Recommended split for this repository:
-
-| Subagent | Subtree | Output |
-|----------|---------|--------|
-| A | `src/ffc_ddw_sum_et/algorithm/` | Protocols, all dispatcher/algorithm implementations, data flow in/out |
-| B | `src/ffc_ddw_sum_et/orchestration/` | Controller, runners, solution manager, layout, reporting glue |
-| C | `src/ffc_ddw_sum_et/io/` + `src/ffc_ddw_sum_et/parameters/` | Parsing, serialization, instance models, due-window generation |
-| D | `src/ffc_ddw_sum_et/solution/` + `src/ffc_ddw_sum_et/report/` | Schedule objects, objective computation, post-run chart pipeline |
-
-### Launch procedure
-
-1. Create one `task` call per subagent with `subagent_type: "explore"`.
-2. Give each a **bounded prompt** — name the subtree, list key files to read,
-   specify the output format (1-2 sentence summary + key classes/functions +
-   connections to other subtrees).
-3. Wait for all results, then synthesize into a unified architecture view.
-
-### Bounded prompt template
-
-```txt
-Explore the subtree at <path>. For each major component, summarize:
-- What it does (1-2 sentences)
-- Key classes/functions
-- How it connects to other subtrees (cross-package imports, data flow)
-Return a structured summary. Do NOT read files outside this subtree unless
-they are imported by files inside it.
-```
-
-### When to use
-
-- User asks "explain the codebase" or "how does X work" where X spans
-  multiple packages.
-- Before implementing a cross-cutting change (e.g. adding a new algorithm
-  requires understanding both algorithm contracts and orchestration glue).
-- When reviewing a PR that touches 3+ packages.
-
-### When NOT to use
-
-- The change is confined to a single file or single package — use
-  `glob` + `grep` + `read` directly.
-- The subtree is small (< 10 files) — a single `explore` agent is fine.
-
 ## Deferred Design Notes
 
 - `docs/TODO.md` collects refactor ideas that are deliberately deferred
