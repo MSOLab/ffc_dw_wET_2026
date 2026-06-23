@@ -14,12 +14,40 @@ import logging
 from pathlib import Path
 from typing import Mapping, Sequence
 
+import matplotlib.colors as mcolors
+import matplotlib.lines as mlines
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 logger = logging.getLogger(__name__)
+
+# Reserved earliness/tardiness colors for the thesis intro figure.
+# Blue = earliness, bright red = tardiness (matching the left ``Fc|prmu|sumTj``
+# figure). These two are excluded from ``JOB_PALETTE`` below.
+EARLINESS_COLOR = "#1f77b4"  # blue
+TARDINESS_COLOR = "#d62728"  # red
+
+# Curated qualitative per-job palette with the red and blue families removed,
+# so per-job bars never collide with the reserved earliness/tardiness colors.
+#
+# IMPORTANT: copy this list verbatim into ``hybridflowshop`` and pick the same
+# job-id subset in the same order there. A job is colored by its position in
+# the *full* instance ``job_id_list`` (see ``DDWGanttPlotter`` below), so job
+# ``j`` keeps its color across subsets and across both intro figures. A true
+# single source of truth is impossible across two repos; this duplication is
+# deliberate and must be kept in sync by hand.
+JOB_PALETTE: tuple[str, ...] = (
+    "#2ca02c",  # green
+    "#ff7f0e",  # orange
+    "#9467bd",  # purple
+    "#8c564b",  # brown
+    "#bcbd22",  # olive
+    "#e377c2",  # magenta
+    "#7f7f7f",  # gray
+    "#17a589",  # teal-green
+)
 
 
 class PlotterBase:
@@ -325,6 +353,271 @@ class GanttPlotter(PlotterBase):
                 y=y,
                 highlight=is_highlight,
             )
+
+
+class DDWGanttPlotter(GanttPlotter):
+    """Gantt renderer for the thesis introduction slide.
+
+    Differences from :class:`GanttPlotter`:
+
+    * per-job colors come from :data:`JOB_PALETTE` (red/blue free), keyed by the
+      job's position in ``all_job_list`` (the full instance job order) so the
+      same job keeps its color across subsets and across the ``hybridflowshop``
+      middle figure;
+    * below the machine lanes it draws a per-job strip — one row per drawn job,
+      sharing the gantt's time x-axis — showing each job's due window
+      ``[d^-, d^+]``, its completion ``C_j``, and a blue earliness / red
+      tardiness segment.
+
+    The figure is exported as a vector ``.svg`` via :meth:`export_ddw`.
+    """
+
+    strip_gap = 1.0  # blank lanes between the gantt and the due-window strip
+    strip_row_height = 1.0
+    window_band_height = 0.34
+    et_linewidth = 4.0
+
+    def create_job_to_color_map(
+        self, job_list: Sequence[str]
+    ) -> dict[str, tuple[float, float, float, float]]:
+        """Assign ``JOB_PALETTE[i]`` to the job at position ``i`` in
+        ``job_list``. Callers pass the *full* instance job order as
+        ``all_job_list`` so the mapping is stable across subsets."""
+        return {
+            job: mcolors.to_rgba(JOB_PALETTE[i % len(JOB_PALETTE)])
+            for i, job in enumerate(job_list)
+        }
+
+    def export_ddw(
+        self,
+        file_path: Path,
+        start_time_map: Mapping[tuple[str, str, str], int],
+        end_time_map: Mapping[tuple[str, str, str], int],
+        job_2_dw_map: Mapping[str, tuple[int, int]],
+        job_2_completion: Mapping[str, int],
+        drawn_job_list: Sequence[str],
+        all_job_list: Sequence[str],
+        stage_list: Sequence[str],
+        machine_list_per_stage: Mapping[str, Sequence[str]],
+        title: str | None = None,
+    ) -> None:
+        """Render the intro figure and save it as ``file_path`` (``.svg``).
+
+        ``drawn_job_list`` is the (ordered) subset actually scheduled and
+        drawn; ``all_job_list`` is the full instance order used only to pin
+        each job's palette color.
+        """
+        self._ensure_figure()
+        assert self.ax is not None
+        assert self.fig is not None
+        self.ax.clear()
+        try:
+            self._plot_ddw(
+                start_time_map=start_time_map,
+                end_time_map=end_time_map,
+                job_2_dw_map=job_2_dw_map,
+                job_2_completion=job_2_completion,
+                drawn_job_list=drawn_job_list,
+                all_job_list=all_job_list,
+                stage_list=stage_list,
+                machine_list_per_stage=machine_list_per_stage,
+                title=title,
+            )
+            self.fig.savefig(file_path, bbox_inches="tight", format="svg")
+            logger.info("Intro DDW Gantt chart saved to %s", file_path)
+        finally:
+            self.close()
+
+    def _plot_ddw(
+        self,
+        start_time_map: Mapping[tuple[str, str, str], int],
+        end_time_map: Mapping[tuple[str, str, str], int],
+        job_2_dw_map: Mapping[str, tuple[int, int]],
+        job_2_completion: Mapping[str, int],
+        drawn_job_list: Sequence[str],
+        all_job_list: Sequence[str],
+        stage_list: Sequence[str],
+        machine_list_per_stage: Mapping[str, Sequence[str]],
+        title: str | None = None,
+    ) -> None:
+        self._ensure_figure()
+        assert self.ax is not None
+
+        job_to_color = self.create_job_to_color_map(list(all_job_list))
+
+        # x horizon spans the schedule, the due windows, and the completions.
+        starts = list(start_time_map.values())
+        ends = list(end_time_map.values())
+        dw_lo = [lo for lo, _ in job_2_dw_map.values()]
+        dw_hi = [hi for _, hi in job_2_dw_map.values()]
+        comp = list(job_2_completion.values())
+        earliest = min([0, *starts, *dw_lo])
+        latest = max([*ends, *dw_hi, *comp])
+        self.set_x_horizon(earliest, latest)
+
+        # Machine lanes (top block).
+        machine_lanes, machine_labels = PlotterBase.create_machine_lanes(
+            list(start_time_map.keys()), list(stage_list), machine_list_per_stage
+        )
+        machine_to_y = {
+            mc: self.machine_height * idx for idx, mc in enumerate(machine_lanes)
+        }
+        self.draw_operation_bars(
+            start_time_map=start_time_map,
+            end_time_map=end_time_map,
+            job_to_color=job_to_color,
+            machine_to_y=machine_to_y,
+            job_list=list(drawn_job_list),
+        )
+
+        lane_count = len(machine_lanes)
+        strip_base = lane_count + self.strip_gap
+        job_labels: list[str] = []
+        job_row_centers: list[float] = []
+        for row_idx, job in enumerate(drawn_job_list):
+            y_top = strip_base + row_idx * self.strip_row_height
+            yc = y_top + self.strip_row_height / 2.0
+            job_row_centers.append(yc)
+            job_labels.append(job)
+            self._draw_job_strip_row(
+                job=job,
+                y_top=y_top,
+                due_window=job_2_dw_map[job],
+                completion=job_2_completion[job],
+                color=job_to_color[job],
+            )
+
+        self._finalize_ddw_axes(
+            machine_labels=machine_labels,
+            job_labels=job_labels,
+            job_row_centers=job_row_centers,
+            strip_top=strip_base + len(drawn_job_list) * self.strip_row_height,
+            title=title,
+        )
+
+    def _draw_job_strip_row(
+        self,
+        job: str,
+        y_top: float,
+        due_window: tuple[int, int],
+        completion: int,
+        color: tuple[float, float, float, float],
+    ) -> None:
+        assert self.ax is not None
+        d_lo, d_hi = due_window
+        yc = y_top + self.strip_row_height / 2.0
+        band_y = yc - self.window_band_height / 2.0
+
+        # Due-window band [d^-, d^+] in the job's own color.
+        self.ax.add_patch(
+            patches.Rectangle(
+                (d_lo, band_y),
+                max(d_hi - d_lo, 0),
+                self.window_band_height,
+                edgecolor="black",
+                facecolor=color,
+                alpha=0.45,
+                linewidth=1.0,
+            )
+        )
+        # d^- / d^+ end markers + numeric labels.
+        for x, label in ((d_lo, "$d^-$"), (d_hi, "$d^+$")):
+            self.ax.plot(
+                [x, x],
+                [band_y, band_y + self.window_band_height],
+                color="black",
+                linewidth=1.2,
+            )
+            self.ax.text(
+                x,
+                band_y - 0.04,
+                f"{label}={x}",
+                ha="center",
+                va="top",
+                fontsize=6,
+                color="black",
+            )
+
+        # Earliness (blue) / tardiness (red) segment, time-axis consistent.
+        if completion < d_lo:
+            self.ax.plot(
+                [completion, d_lo],
+                [yc, yc],
+                color=EARLINESS_COLOR,
+                linewidth=self.et_linewidth,
+                solid_capstyle="butt",
+                zorder=5,
+            )
+        elif completion > d_hi:
+            self.ax.plot(
+                [d_hi, completion],
+                [yc, yc],
+                color=TARDINESS_COLOR,
+                linewidth=self.et_linewidth,
+                solid_capstyle="butt",
+                zorder=5,
+            )
+
+        # Completion marker C_j.
+        self.ax.plot(
+            [completion],
+            [yc],
+            marker="D",
+            markersize=6,
+            markerfacecolor="white",
+            markeredgecolor="black",
+            zorder=6,
+        )
+        self.ax.text(
+            completion,
+            y_top + self.strip_row_height - 0.04,
+            f"$C$={completion}",
+            ha="center",
+            va="bottom",
+            fontsize=6,
+            color="black",
+        )
+
+    def _finalize_ddw_axes(
+        self,
+        machine_labels: Sequence[str],
+        job_labels: Sequence[str],
+        job_row_centers: Sequence[float],
+        strip_top: float,
+        title: str | None = None,
+    ) -> None:
+        assert self.ax is not None
+        lane_count = len(machine_labels)
+        lane_ticks = [y + 0.4 for y in range(lane_count)]
+        self.ax.set_yticks(list(lane_ticks) + list(job_row_centers))
+        self.ax.set_yticklabels(list(machine_labels) + list(job_labels))
+        self.ax.set_ylim(
+            -self.machine_height / 2,
+            strip_top + self.strip_row_height / 2,
+        )
+        self.ax.set_xlabel("Time")
+        self.ax.set_title(title or self.default_title)
+        self.ax.grid(True, axis="x", linestyle="--", alpha=self.grid_alpha)
+        self.ax.invert_yaxis()
+
+        legend_handles = [
+            mlines.Line2D(
+                [],
+                [],
+                color=EARLINESS_COLOR,
+                linewidth=self.et_linewidth,
+                label="Earliness $E_j$",
+            ),
+            mlines.Line2D(
+                [],
+                [],
+                color=TARDINESS_COLOR,
+                linewidth=self.et_linewidth,
+                label="Tardiness $T_j$",
+            ),
+        ]
+        self.ax.legend(handles=legend_handles, loc="upper right", fontsize=8)
+        plt.tight_layout()
 
 
 class PreemptiveGanttPlotter(PlotterBase):

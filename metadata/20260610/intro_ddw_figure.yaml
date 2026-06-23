@@ -1,0 +1,22 @@
+# Config for scripts/render_intro_ddw_gantt.py
+#
+# Renders the thesis introduction-slide figure for the rightmost problem
+# FFc | d_j^-, d_j^+ | sum w_j^- E_j + w_j^+ T_j as a vector .svg:
+# per-job-colored gantt (red/blue free) + per-job due-window strip with
+# blue earliness / red tardiness segments.
+
+# Benchmark instance shared with the hybridflowshop middle figure.
+instance_path: benchmarks/PRA2017/small/Instance_20_2_2_0,2_0,2_10_Rep0.txt
+
+# Job subset to draw. Either an explicit ordered id list (preferred — pin the
+# same ids in hybridflowshop so colors match), or set job_count for the first N.
+job_subset: [j00, j01, j02, j03, j04, j05]
+# job_count: 6
+
+# CP-SAT time limit for the NEH-CP schedule construction (seconds).
+cp_tl_seconds: 5.0
+
+# Vector output (.svg).
+output_path: analysis/20260610/intro_ddw_gantt.svg
+
+title: "FFc | d_j^-, d_j^+ | sum w_j^- E_j + w_j^+ T_j"

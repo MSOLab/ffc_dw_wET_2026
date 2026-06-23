@@ -1,6 +1,10 @@
 """Option payload for PwCpDispatcher."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..base.alg_option import AlgOption
 from ..cumulative import PFMethod
@@ -69,6 +73,21 @@ class PwCpOption(AlgOption):
     """Cap the number of steps for which a search log is captured. ``None``
     (default) captures every step; set to a small int (e.g. 1) to verify
     hints once per run without bloating logs."""
+
+    debug_partition_gantt: bool = False
+    """When ``True``, the dispatcher renders a per-step partition gantt
+    SVG (via :func:`~ffc_ddw_sum_et.algorithm.pw_cp.visual.render_partition_gantt_svg`)
+    and writes it through ``debug_partition_gantt_path_getter``."""
+
+    debug_partition_gantt_max_steps: int | None = None
+    """Cap the number of steps for which a partition gantt is rendered.
+    ``None`` (default) renders every step; set to a small int (e.g. 3)
+    to get representative snapshots without bloating artifact storage."""
+
+    debug_partition_gantt_path_getter: Callable[[int], Path | None] | None = None
+    """Callable ``(step_idx: int) -> Path | None`` that supplies the
+    output path for the step's SVG.  Return ``None`` to skip writing
+    (e.g. when the controller has no artifact layout bound)."""
 
     def __post_init__(self) -> None:
         if self.batch_size < 1:

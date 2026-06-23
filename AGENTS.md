@@ -85,10 +85,11 @@ Composite steps (e.g. `calc_mcf_lb_and_derive_full_sch`) delegate to
 
 ## Deferred Design Notes
 
-- `docs/TODO.md` collects refactor ideas that are deliberately deferred
-  (YAGNI today but worth capturing so the reasoning isn't re-derived).
-- Before proposing a refactor, check `docs/TODO.md` to see if it has
+- `TODOS.md` (repository root) collects refactor ideas that are
+  deliberately deferred (YAGNI today but worth capturing so the
+  reasoning isn't re-derived).
+- Before proposing a refactor, check `TODOS.md` to see if it has
   already been considered — respect the "When to act" condition.
 - When a design idea is agreed to be deferred rather than acted on,
-  append it to `docs/TODO.md` with **Why** and **When to act** fields.
+  append it to `TODOS.md` with **Why** and **When to act** fields.
 - Do not execute TODO items autonomously — they are deferred by intent.

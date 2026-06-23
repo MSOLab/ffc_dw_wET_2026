@@ -1,0 +1,39 @@
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/small
+# no ins_index_source / ins_index — loads all .txt files (only 1 in small/)
+
+output_dir: output/20260512
+
+instance_worker_cnt: 1
+
+draw_gantt: true
+painter_thread_cnt: 4
+
+scenarios:
+  - name: pw_cp_debug
+    timelimit: 60.0
+    output_subdir: pw_cp_debug
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: pw_cp
+        solver_thread_cnt: 4
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 10.0
+        batch_tl_mode: "constant"
+        draw_gantt: true
+        keep_step_schedules: true
+        log_search_progress: true
+        log_search_progress_max_steps: 1
+        debug_partition_gantt: true
+        debug_partition_gantt_max_steps: 3

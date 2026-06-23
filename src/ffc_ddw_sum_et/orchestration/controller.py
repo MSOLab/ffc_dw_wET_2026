@@ -2144,6 +2144,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         keep_step_schedules: bool = False,
         log_search_progress: bool = False,
         log_search_progress_max_steps: int | None = None,
+        debug_partition_gantt: bool = False,
+        debug_partition_gantt_max_steps: int | None = None,
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
     ) -> SubroutineReport:
@@ -2203,6 +2205,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if draw_gantt:
             self._record_mcf_lb_phase(("pw_cp_before", incumbent.schedule.deepcopy()))
 
+        debug_partition_gantt_path_getter = None
+        if debug_partition_gantt:
+
+            def _gantt_path(step_idx: int) -> Path | None:
+                p = self.try_get_file_path_for_subroutine(
+                    f"step_{step_idx:03d}_partition.svg"
+                )
+                if p is not None:
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                return p
+
+            debug_partition_gantt_path_getter = _gantt_path
+
         option = PwCpOption(
             solver_thread_cnt=solver_thread_cnt,
             batch_size=batch_size_resolved,
@@ -2222,6 +2237,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             keep_step_schedules=keep_step_schedules,
             log_search_progress=log_search_progress,
             log_search_progress_max_steps=log_search_progress_max_steps,
+            debug_partition_gantt=debug_partition_gantt,
+            debug_partition_gantt_max_steps=debug_partition_gantt_max_steps,
+            debug_partition_gantt_path_getter=debug_partition_gantt_path_getter,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
         )
         spec = AlgSpec(

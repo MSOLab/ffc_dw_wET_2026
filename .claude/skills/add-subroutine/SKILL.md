@@ -14,8 +14,8 @@ post-run artifact pipeline.
 
 1. Read `docs/architecture/algorithm-principles.md` and
    `docs/architecture/io-principles.md` — they are the contract.
-2. Read `docs/TODO.md` — if the task is deferred there, stop and confirm before
-   proceeding.
+2. Read `TODOS.md` (repository root) — if the task is deferred there, stop and
+   confirm before proceeding.
 3. Read the current `orchestration/controller.py` to see the existing step
    methods (`run_fam`, `run_mcf_lb`) and mirror their shape.
 
