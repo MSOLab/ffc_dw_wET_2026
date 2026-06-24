@@ -179,6 +179,65 @@ def oracle_value(mat: pd.DataFrame, combo: tuple[str, ...]) -> float:
     return float(mat[list(combo)].min(axis=1).mean())
 
 
+def priority_key(scenario: str) -> str:
+    """Strip a leading decode-direction prefix (sd_/rd_) -> priority key."""
+    for pre in ("sd_", "rd_"):
+        if scenario.startswith(pre):
+            return scenario[len(pre) :]
+    return scenario  # no recognized prefix -> its own unit
+
+
+def best_unit_combos(
+    mat: pd.DataFrame, k: int, unit: str, top: int = 5
+) -> list[tuple[tuple[str, ...], float]]:
+    """Rank k-unit combinations by oracle mean (best first).
+
+    When unit='scenario', delegates to best_combos (existing per-method logic).
+
+    When unit='priority', groups columns by their priority key, then for each
+    k-priority combination computes the oracle as the per-instance minimum
+    over *all direction columns* that belong to those priorities.
+    The returned label is the set of priority keys.
+    """
+    if unit == "scenario":
+        return best_combos(mat, k, top=top)
+
+    # unit == 'priority'
+    # Group columns by priority key
+    priority_to_cols: dict[str, list[str]] = {}
+    for col in mat.columns:
+        pk = priority_key(col)
+        priority_to_cols.setdefault(pk, []).append(col)
+
+    # Verify every priority has at least one column in the matrix
+    for pk, cols in priority_to_cols.items():
+        if not cols:
+            raise ValueError(f"priority {pk!r} has no columns in the matrix")
+
+    priorities = list(priority_to_cols.keys())
+    if k > len(priorities):
+        return []
+
+    # Build a mapping from priority -> column indices
+    col_index = {m: i for i, m in enumerate(mat.columns)}
+    priority_to_col_indices: dict[str, list[int]] = {}
+    for pk, cols in priority_to_cols.items():
+        priority_to_col_indices[pk] = [col_index[c] for c in cols]
+
+    values = mat.to_numpy()  # [n_instances, n_methods]
+
+    scored: list[tuple[tuple[str, ...], float]] = []
+    for combo in combinations(priorities, k):
+        # Union of all direction columns for this priority combo
+        all_cols: list[int] = []
+        for pk in combo:
+            all_cols.extend(priority_to_col_indices[pk])
+        oracle_mean = float(values[:, all_cols].min(axis=1).mean())
+        scored.append((combo, oracle_mean))
+    scored.sort(key=lambda x: x[1])
+    return scored[:top]
+
+
 def marginal_contribution(mat: pd.DataFrame, base: tuple[str, ...]) -> pd.Series:
     """How much each *additional* method would improve a fixed base combo.
 
@@ -294,12 +353,14 @@ def report(
     combo_sizes: list[int],
     top: int,
     method_prefix: str | None = None,
+    unit: str = "scenario",
 ) -> None:
     n_inst = df[INSTANCE_COL].nunique()
     scope = f", methods={method_prefix}*" if method_prefix else ""
+    unit_desc = f"  unit={unit}" if unit == "priority" else ""
     print(f"\n{'=' * 70}")
     print(
-        f"Single-method mean {metric_label}  (instances={n_inst}{scope}, lower=better)"
+        f"Single-method mean {metric_label}  (instances={n_inst}{scope}, lower=better){unit_desc}"
     )
     print("=" * 70)
     ranking = mean_by_method(df, metric_col)
@@ -311,18 +372,30 @@ def report(
     )
 
     mat = metric_matrix(df, metric_col, method_prefix=method_prefix)
+    # For priority mode, k upper bound is number of priority units, not columns
+    if unit == "priority":
+        # Count unique priorities in the matrix
+        unit_count = len(set(priority_key(c) for c in mat.columns))
+    else:
+        unit_count = mat.shape[1]
     for k in combo_sizes:
-        if k < 2 or k > mat.shape[1]:
+        if k < 1 or k > unit_count:
             continue
         print(f"\n{'=' * 70}")
-        print(f"Best {k}-method combinations  (oracle: per-instance best of {k})")
+        if unit == "priority":
+            print(
+                f"Best {k}-priority combinations  (oracle: per-instance best across paired directions)"
+            )
+        else:
+            print(f"Best {k}-method combinations  (oracle: per-instance best of {k})")
         print("=" * 70)
-        combos = best_combos(mat, k, top=top)
+        combos = best_unit_combos(mat, k, unit, top=top)
         print(_fmt_combos(combos))
-        print(
-            f"\n  >> best {k}-combo: {' + '.join(combos[0][0])}  "
-            f"({_fmt_num(combos[0][1])})"
-        )
+        if combos:
+            print(
+                f"\n  >> best {k}-combo: {' + '.join(combos[0][0])}  "
+                f"({_fmt_num(combos[0][1])})"
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -354,6 +427,14 @@ def main() -> int:
         nargs="+",
         default=[2, 3],
         help="combination sizes to rank (default: 2 3)",
+    )
+    p.add_argument(
+        "--unit",
+        choices=["scenario", "priority"],
+        default="scenario",
+        help="ranking unit: scenario (default, per-method combos) or "
+        "priority (per-priority-set combos; each priority expands to "
+        "its sd_/rd_ direction columns, then oracle min over all)",
     )
     p.add_argument("--top", type=int, default=5, help="how many combos to list")
     p.add_argument(
@@ -393,6 +474,7 @@ def main() -> int:
         combo_sizes=args.combo_size,
         top=args.top,
         method_prefix=args.methods,
+        unit=args.unit,
     )
     if args.baseline:
         gain_report(
