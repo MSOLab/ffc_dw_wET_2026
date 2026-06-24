@@ -195,6 +195,43 @@ def marginal_contribution(mat: pd.DataFrame, base: tuple[str, ...]) -> pd.Series
 
 
 # --------------------------------------------------------------------------- #
+# Named-combo scoring + gain (baseline vs chosen)
+# --------------------------------------------------------------------------- #
+def parse_combo(spec: str) -> tuple[str, ...]:
+    """Parse a comma-separated scenario list into a combo tuple."""
+    names = tuple(s.strip() for s in spec.split(",") if s.strip())
+    if not names:
+        raise ValueError(f"empty combo spec: {spec!r}")
+    return names
+
+
+def _validate_names(df: pd.DataFrame, names: tuple[str, ...]) -> None:
+    present = set(df[METHOD_COL].unique())
+    missing = [m for m in names if m not in present]
+    if missing:
+        raise ValueError(f"scenarios not in sweep: {missing}; have {sorted(present)}")
+
+
+def score_combo_by_n(
+    df: pd.DataFrame, metric_col: str, combo: tuple[str, ...]
+) -> tuple[float, pd.Series]:
+    """Oracle mean (per-instance best) of an explicit combo: overall + per-n.
+
+    Per-n breakdown matters for the ``obj`` metric, whose overall mean is
+    dominated by large instances; reading the gain per size avoids reporting a
+    size-skewed single number.
+    """
+    _check_metric(df, metric_col)
+    _validate_names(df, combo)
+    overall = oracle_value(metric_matrix(df, metric_col), combo)
+    per_n = {
+        int(n_val): oracle_value(metric_matrix(sub, metric_col), combo)
+        for n_val, sub in df.groupby("n")
+    }
+    return overall, pd.Series(per_n).sort_index()
+
+
+# --------------------------------------------------------------------------- #
 # Reporting
 # --------------------------------------------------------------------------- #
 def _fmt_num(val: float) -> str:
@@ -210,6 +247,44 @@ def _fmt_series(s: pd.Series, n: int | None = None) -> str:
 
 def _fmt_combos(combos: list[tuple[tuple[str, ...], float]]) -> str:
     return "\n".join(f"  {_fmt_num(v)}  {' + '.join(c)}" for c, v in combos)
+
+
+def _fmt_per_n(s: pd.Series) -> str:
+    return "  ".join(f"n={int(idx)}:{_fmt_num(val)}" for idx, val in s.items())
+
+
+def gain_report(
+    df: pd.DataFrame,
+    metric_col: str,
+    metric_label: str,
+    baseline: tuple[str, ...],
+    chosen: tuple[str, ...] | None,
+) -> None:
+    """Score an explicit baseline combo and (optionally) the chosen combo,
+    printing the gain (baseline - chosen) overall and per-n."""
+    base_overall, base_per_n = score_combo_by_n(df, metric_col, baseline)
+    print(f"\n{'=' * 70}")
+    print(f"Baseline vs chosen  ({metric_label}, oracle per-instance best)")
+    print("=" * 70)
+    print(f"  baseline = {' + '.join(baseline)}")
+    print(f"    overall: {_fmt_num(base_overall)}    [{_fmt_per_n(base_per_n)}]")
+    if chosen is None:
+        return
+    ch_overall, ch_per_n = score_combo_by_n(df, metric_col, chosen)
+    print(f"  chosen   = {' + '.join(chosen)}")
+    print(f"    overall: {_fmt_num(ch_overall)}    [{_fmt_per_n(ch_per_n)}]")
+
+    gain_abs = base_overall - ch_overall
+    gain_pct = gain_abs / base_overall * 100 if base_overall else float("nan")
+    per_n_gain = base_per_n - ch_per_n
+    per_n_pct = per_n_gain / base_per_n * 100
+    print("\n  >> gain (baseline - chosen, positive = chosen better):")
+    print(f"     overall: {_fmt_num(gain_abs)}  ({gain_pct:+.2f}%)")
+    for idx in per_n_gain.index:
+        print(
+            f"       n={int(idx)}: {_fmt_num(per_n_gain[idx])}  "
+            f"({per_n_pct[idx]:+.2f}%)"
+        )
 
 
 def report(
@@ -281,7 +356,23 @@ def main() -> int:
         help="combination sizes to rank (default: 2 3)",
     )
     p.add_argument("--top", type=int, default=5, help="how many combos to list")
+    p.add_argument(
+        "--baseline",
+        default=None,
+        metavar="NAME[,NAME...]",
+        help="explicit scenario combo to score as oracle baseline "
+        "(e.g. sd_edd,sd_lsl,sd_osl)",
+    )
+    p.add_argument(
+        "--chosen",
+        default=None,
+        metavar="NAME[,NAME...]",
+        help="explicit scenario combo to score and compare against --baseline "
+        "(prints absolute + %% gain, per-n)",
+    )
     args = p.parse_args()
+    if args.chosen and not args.baseline:
+        p.error("--chosen requires --baseline")
 
     df = load_rpdf(args.run)
     metric_col, metric_label = METRICS[args.metric]
@@ -303,6 +394,14 @@ def main() -> int:
         top=args.top,
         method_prefix=args.methods,
     )
+    if args.baseline:
+        gain_report(
+            sliced,
+            metric_col=metric_col,
+            metric_label=metric_label,
+            baseline=parse_combo(args.baseline),
+            chosen=parse_combo(args.chosen) if args.chosen else None,
+        )
     return 0
 
 
