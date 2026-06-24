@@ -507,3 +507,64 @@ def test_coarsen_solve_reconstruct_real_pipeline_small_instance() -> None:
     # Both are acceptable; the contract only requires no double-register.
     if report.obj_value is not None:
         assert report.obj_value >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# WP-5: seed_dispatch kwarg
+# ---------------------------------------------------------------------------
+
+
+def test_seed_dispatch_kwarg_passed_to_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The seed_dispatch kwarg must flow through to the option."""
+    captured_option: list = []
+
+    def spy_pipeline(instance, option, logger):  # type: ignore[no-untyped-def]
+        captured_option.append(option)
+        return _make_trace_no_schedule()
+
+    monkeypatch.setattr(
+        "ffc_ddw_sum_et.orchestration.controller.run_coarsen_solve_reconstruct",
+        spy_pipeline,
+    )
+
+    controller = _make_controller()
+
+    def permissive_register(report, solution, **kwargs):  # type: ignore[no-untyped-def]
+        return True
+
+    controller._register = permissive_register  # type: ignore[method-assign]
+
+    controller.coarsen_solve_reconstruct(seed_dispatch="job_wise")
+
+    assert len(captured_option) == 1
+    assert captured_option[0].seed_dispatch == "job_wise"
+
+
+def test_seed_dispatch_default_is_mixed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When seed_dispatch is not specified, it must default to 'mixed'."""
+    captured_option: list = []
+
+    def spy_pipeline(instance, option, logger):  # type: ignore[no-untyped-def]
+        captured_option.append(option)
+        return _make_trace_no_schedule()
+
+    monkeypatch.setattr(
+        "ffc_ddw_sum_et.orchestration.controller.run_coarsen_solve_reconstruct",
+        spy_pipeline,
+    )
+
+    controller = _make_controller()
+
+    def permissive_register(report, solution, **kwargs):  # type: ignore[no-untyped-def]
+        return True
+
+    controller._register = permissive_register  # type: ignore[method-assign]
+
+    controller.coarsen_solve_reconstruct()
+
+    assert len(captured_option) == 1
+    assert captured_option[0].seed_dispatch == "mixed"

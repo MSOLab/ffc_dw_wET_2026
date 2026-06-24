@@ -1,15 +1,17 @@
 """Coarsen-Solve-Reconstruct adapter for the FFc-DDW problem.
 
-Coarsens a ``FFcDDWParameters`` instance by ``factor``, solves the
-coarsened model with the base CP-SAT (``BaseModelBuilder``), then
-reconstructs the raw coarse start/end times back to the original scale:
+Coarsens a ``FFcDDWParameters`` instance by ``factor``, applies a warm-start
+hint from an EDD-based dispatch seed before solving the coarsened model with
+the base CP-SAT (``BaseModelBuilder``), then reconstructs the raw coarse
+start/end times back to the original scale:
 
     reconstructed_start[j,i] = coarse_start[j,i] * factor
     reconstructed_end[j,i]   = reconstructed_start[j,i] + original_p[j,i]
 
-Post-processing (``make_semi_active`` → ``insert_idle_time``) and objective
-evaluation (``compute_weighted_earliness_tardiness``) are all done against
-the **original** instance, so metrics reflect the original problem scale.
+The dispatch seed strategy is selected via ``seed_dispatch`` (``"job_wise"``
+or ``"mixed"``). Post-processing (``make_semi_active`` → ``insert_idle_time``)
+and objective evaluation (``compute_weighted_earliness_tardiness``) are done
+against the **original** instance, so metrics reflect the original problem scale.
 
 Time budgeting follows the same pattern as ``CpsatAdapter``:
 ``CoarsenSolveReconstructOption.timelimit_sec`` is the single pre-resolved
@@ -22,6 +24,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from typing import Literal
 
 from ortools.sat.python import cp_model
 
@@ -43,6 +46,9 @@ from .cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from .cpsat_callbacks.progress_log_builder import build_progress_log
 from .cpsat_solver_options import CpsatSolverOptions, get_solver
 from .cumulative import BaseModelBuilder
+from .dispatcher.base import BaseDispatcher
+from .dispatcher.mixed import MixedDispatcher
+from .dispatcher.utils import dispatch_job_sequence_by_stages
 
 __all__ = [
     "CoarsenSolveReconstructAdapter",
@@ -70,6 +76,7 @@ class CoarsenSolveReconstructOption(AlgOption):
     solver_thread_cnt: int = 1
     log_search_progress: bool = False
     error_if_infeasible: bool = False
+    seed_dispatch: Literal["job_wise", "mixed"] = "mixed"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -105,6 +112,58 @@ class CoarsenSolveReconstructTrace:
     metrics: dict
 
 
+def _dispatch_seed_job_sequence(
+    coarsened: FFcDDWParameters,
+) -> list[str]:
+    """Return jobs sorted by (d^+_j asc, w^+_j desc, given index asc)."""
+    dw_ub = coarsened.job_2_dw_ub_map
+    twt = coarsened.job_2_twt_map
+    given_index = {j: idx for idx, j in enumerate(coarsened.job_id_list)}
+    return sorted(
+        coarsened.job_id_list,
+        key=lambda j: (dw_ub[j], -twt[j], given_index[j]),
+    )
+
+
+def _build_dispatch_seed_schedule(
+    coarsened: FFcDDWParameters,
+    strategy: Literal["job_wise", "mixed"],
+) -> FFcSchedule:
+    """Build a seed schedule via dispatch + idle insertion on coarsened scale.
+
+    * ``job_wise``: single job-wise dispatch using the EDD-derived sequence.
+    * ``mixed``: enumerate all np-list candidates, insert idle, pick the one
+      with minimum coarsened wET.
+    """
+    seq = _dispatch_seed_job_sequence(coarsened)
+    dw = coarsened.job_2_due_window_map
+    ewt = coarsened.job_2_ewt_map
+    twt = coarsened.job_2_twt_map
+
+    if strategy == "job_wise":
+        schedule = BaseDispatcher(coarsened)._create_empty_schedule(coarsened)
+        dispatch_job_sequence_by_stages(schedule, seq, coarsened.job_2_stage_2_p_map)
+        schedule.insert_idle_time(dw, ewt, twt)
+        return schedule
+
+    # strategy == "mixed": pick candidate with minimum coarsened wET
+    dispatcher = MixedDispatcher(coarsened)
+    best_obj: float | None = None
+    best_sch: FFcSchedule | None = None
+    for cand in dispatcher.iter_mixed_schedules_by_sequence(seq):
+        cand.insert_idle_time(dw, ewt, twt)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(cand, coarsened)
+        obj = sum_e + sum_t
+        if best_obj is None or obj < best_obj:
+            best_obj, best_sch = obj, cand
+    if best_sch is None:
+        raise RuntimeError(
+            f"_build_dispatch_seed_schedule(mixed): no feasible candidate "
+            f"for {coarsened.name}."
+        )
+    return best_sch
+
+
 def _solve_coarsened_model(
     coarsened_instance: FFcDDWParameters,
     *,
@@ -112,6 +171,7 @@ def _solve_coarsened_model(
     solver_thread_cnt: int,
     log_search_progress: bool,
     build_start: float,
+    seed_dispatch: Literal["job_wise", "mixed"] = "mixed",
 ) -> tuple[
     str,
     dict[tuple[str, str], int] | None,
@@ -120,26 +180,35 @@ def _solve_coarsened_model(
     float | None,
     float,
     tuple[ProgressLogEntry, ...],
+    float | None,
 ]:
     """Build, solve, and extract raw op starts/ends for the coarsened instance.
 
     Returns a tuple:
         (status_name, j_i_2_start, j_i_2_end, cp_obj_value, cp_obj_bound,
-         elapsed_sec, cp_progress_log)
+         elapsed_sec, cp_progress_log, dispatch_seed_obj)
 
     ``j_i_2_start`` and ``j_i_2_end`` are ``None`` when no solution exists.
     ``cp_obj_value`` and ``cp_obj_bound`` are ``None`` when no solution exists.
-    ``elapsed_sec`` is measured from ``build_start`` to after ``solver.solve``.
-    ``cp_progress_log`` is the merged UB/LB trajectory (coarsened scale).
-
-    The caller provides ``build_start`` (``time.monotonic()`` before the
-    ``BaseModelBuilder.build`` call) so the effective timelimit can subtract
-    model-build overhead before setting ``max_time_in_seconds``.
+    ``dispatch_seed_obj`` is the coarsened wET of the dispatch seed (None when
+    no solution). ``elapsed_sec`` is measured from ``build_start`` to after
+    ``solver.solve``. ``cp_progress_log`` is the merged UB/LB trajectory
+    (coarsened scale).
     """
     params = BaseModelBuilder.make_params(coarsened_instance)
     horizon = sum(params.p.values())
     builder = BaseModelBuilder()
-    mdl, params, op_vars, _ = builder.build(coarsened_instance, horizon=horizon)
+    mdl, params, op_vars, et_vars = builder.build(coarsened_instance, horizon=horizon)
+
+    # Apply dispatch seed as warm-start hint before solving.
+    seed_schedule = _build_dispatch_seed_schedule(coarsened_instance, seed_dispatch)
+    BaseModelBuilder.apply_hints_from_schedule(
+        mdl, params, op_vars, et_vars, seed_schedule
+    )
+    seed_sum_e, seed_sum_t = compute_weighted_earliness_tardiness(
+        seed_schedule, coarsened_instance
+    )
+    dispatch_seed_obj: float | None = float(seed_sum_e + seed_sum_t)
 
     eff_tl: float | None
     if timelimit_sec is None:
@@ -170,7 +239,16 @@ def _solve_coarsened_model(
     has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
 
     if not has_solution:
-        return status_name, None, None, None, None, elapsed, cp_progress_log
+        return (
+            status_name,
+            None,
+            None,
+            None,
+            None,
+            elapsed,
+            cp_progress_log,
+            dispatch_seed_obj,
+        )
 
     j_i_2_start = {
         (j, i): int(solver.value(op_vars.op_start[j, i]))
@@ -192,6 +270,7 @@ def _solve_coarsened_model(
         cp_obj_bound,
         elapsed,
         cp_progress_log,
+        dispatch_seed_obj,
     )
 
 
@@ -234,12 +313,14 @@ def run_coarsen_solve_reconstruct(
         coarsened_obj_bound,
         coarsened_elapsed,
         cp_progress_log,
+        dispatch_seed_obj,
     ) = _solve_coarsened_model(
         coarsened,
         timelimit_sec=option.timelimit_sec,
         solver_thread_cnt=option.solver_thread_cnt,
         log_search_progress=option.log_search_progress,
         build_start=build_start,
+        seed_dispatch=option.seed_dispatch,
     )
 
     has_solution = coarse_j_i_2_start is not None
@@ -268,6 +349,8 @@ def run_coarsen_solve_reconstruct(
             "coarsened_elapsed": coarsened_elapsed,
             "reconstructed_obj_value": None,
             "reconstructed_makespan": None,
+            "seed_dispatch": option.seed_dispatch,
+            "dispatch_seed_coarsened_obj": dispatch_seed_obj,
         }
         return CoarsenSolveReconstructTrace(
             work_status=WorkStatus.INFEASIBLE if is_infeasible else WorkStatus.ERROR,
@@ -334,6 +417,8 @@ def run_coarsen_solve_reconstruct(
         "coarsened_elapsed": coarsened_elapsed,
         "reconstructed_obj_value": obj_value,
         "reconstructed_makespan": final_schedule.makespan,
+        "seed_dispatch": option.seed_dispatch,
+        "dispatch_seed_coarsened_obj": dispatch_seed_obj,
     }
 
     return CoarsenSolveReconstructTrace(

@@ -707,3 +707,73 @@ def test_trace_obj_value_matches_adapter_obj_value() -> None:
     # Both runs are independent; we just verify obj_value is a valid float
     assert isinstance(trace.obj_value, float)
     assert trace.obj_value >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# WP-5: seed_dispatch option field and metrics
+# ---------------------------------------------------------------------------
+
+
+def test_option_seed_dispatch_default_is_mixed() -> None:
+    """CoarsenSolveReconstructOption.seed_dispatch must default to 'mixed'."""
+    opt = CoarsenSolveReconstructOption()
+    assert opt.seed_dispatch == "mixed"
+
+
+def test_option_seed_dispatch_job_wise() -> None:
+    """CoarsenSolveReconstructOption must accept 'job_wise' for seed_dispatch."""
+    opt = CoarsenSolveReconstructOption(seed_dispatch="job_wise")
+    assert opt.seed_dispatch == "job_wise"
+
+
+def test_metrics_include_seed_dispatch_keys() -> None:
+    """metrics must contain seed_dispatch and dispatch_seed_coarsened_obj."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(
+        factor=50, solver_thread_cnt=1, seed_dispatch="mixed"
+    )
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    assert "seed_dispatch" in metrics
+    assert metrics["seed_dispatch"] == "mixed"
+    assert "dispatch_seed_coarsened_obj" in metrics
+
+
+def test_metrics_seed_dispatch_job_wise() -> None:
+    """metrics['seed_dispatch'] must reflect the option value."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(
+        factor=50, solver_thread_cnt=1, seed_dispatch="job_wise"
+    )
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    assert record.result.metrics["seed_dispatch"] == "job_wise"
+
+
+def test_dispatch_seed_obj_is_non_negative() -> None:
+    """dispatch_seed_coarsened_obj must be >= 0 when a solution exists."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(
+        factor=50, solver_thread_cnt=1, seed_dispatch="mixed"
+    )
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    seed_obj = metrics["dispatch_seed_coarsened_obj"]
+    assert seed_obj is not None
+    assert seed_obj >= 0.0

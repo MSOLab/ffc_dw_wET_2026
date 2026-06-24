@@ -2494,6 +2494,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         solver_thread_cnt: int = 1,
         log_search_progress: bool = False,
         error_if_infeasible: bool = False,
+        seed_dispatch: str = "mixed",
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
         draw_cp_trajectory: bool = False,
@@ -2515,6 +2516,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``timelimit`` and the controller's remaining global time.
         ``timelimit=None`` means "no per-call cap" — only the global time
         limit is enforced.
+
+        ``seed_dispatch`` selects the dispatch seed strategy for warm-start
+        hints before solving: ``"job_wise"`` (single job-wise dispatch) or
+        ``"mixed"`` (best among mixed-dispatch np-list candidates). Default
+        is ``"mixed"``.
 
         ``draw_gantt`` is accepted for API consistency but does not
         currently render a Gantt chart; any post-work would be placed after
@@ -2570,6 +2576,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             solver_thread_cnt=solver_thread_cnt,
             log_search_progress=log_search_progress,
             error_if_infeasible=error_if_infeasible,
+            seed_dispatch=seed_dispatch,
         )
         trace = run_coarsen_solve_reconstruct(instance, option, self.logger)
 

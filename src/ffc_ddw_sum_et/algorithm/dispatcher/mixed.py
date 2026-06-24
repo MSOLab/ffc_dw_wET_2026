@@ -9,7 +9,7 @@ BN2D / Johnson / CDS / Gupta / Palmer variants.
 from __future__ import annotations
 
 import math
-from typing import Literal, Sequence
+from typing import Iterator, Literal, Sequence
 
 from ...solution.ffc_schedule import FFcSchedule
 from ...solution.objectives import compute_weighted_earliness_tardiness
@@ -30,34 +30,45 @@ class MixedDispatcher(BaseDispatcher):
         np_list.append(0)
         return np_list
 
-    def get_best_mixed_schedule_by_sequence(
+    def _stage_2_head_for_np(
+        self,
+        np: int,
+        *,
+        from_stage: str | None = None,
+        head_for_all_stages: bool = False,
+    ) -> dict[str, int]:
+        """Return np -> stage_2_head mapping for a given np value."""
+        if head_for_all_stages:
+            return {stage_id: np for stage_id in self.stage_id_list}
+        elif from_stage is not None:
+            if from_stage not in self.stage_id_list:
+                raise ValueError(f"from_stage {from_stage} not in stage list")
+            return {from_stage: np}
+        else:
+            return {self.stage_id_list[0]: np}
+
+    def iter_mixed_schedules_by_sequence(
         self,
         job_sequence: Sequence[str],
+        *,
         schedule: FFcSchedule | None = None,
         from_stage: str | None = None,
         job_2_release_t: dict[str, int] | None = None,
         machine_then_job: bool = False,
         head_for_all_stages: bool = False,
         use_palmer_index: bool = False,
-        criteria: Literal["weighted_et", "makespan"] = "weighted_et",
-    ) -> FFcSchedule | None:
-        best_obj: float | None = None
-        best_sch: FFcSchedule | None = None
+    ) -> Iterator[FFcSchedule]:
+        """Yield every candidate schedule from np_list without scoring.
 
+        Skips candidates that raise ``ValueError`` during dispatch.
+        """
         np_list = self._get_np_candidates()
-        np_2_stage_2_head: dict[int, dict[str, int]] = {}
-
-        for np in np_list:
-            if head_for_all_stages:
-                np_2_stage_2_head[np] = {
-                    stage_id: np for stage_id in self.stage_id_list
-                }
-            elif from_stage is not None:
-                if from_stage not in self.stage_id_list:
-                    raise ValueError(f"from_stage {from_stage} not in stage list")
-                np_2_stage_2_head[np] = {from_stage: np}
-            else:
-                np_2_stage_2_head[np] = {self.stage_id_list[0]: np}
+        np_2_stage_2_head: dict[int, dict[str, int]] = {
+            np: self._stage_2_head_for_np(
+                np, from_stage=from_stage, head_for_all_stages=head_for_all_stages
+            )
+            for np in np_list
+        }
 
         for np in np_list:
             _schedule = (
@@ -78,17 +89,43 @@ class MixedDispatcher(BaseDispatcher):
                 )
             except ValueError:
                 continue
+            yield _schedule
 
+    def get_best_mixed_schedule_by_sequence(
+        self,
+        job_sequence: Sequence[str],
+        schedule: FFcSchedule | None = None,
+        from_stage: str | None = None,
+        job_2_release_t: dict[str, int] | None = None,
+        machine_then_job: bool = False,
+        head_for_all_stages: bool = False,
+        use_palmer_index: bool = False,
+        criteria: Literal["weighted_et", "makespan"] = "weighted_et",
+    ) -> FFcSchedule | None:
+        """Return the best candidate by ``criteria``. Thin wrapper over
+        ``iter_mixed_schedules_by_sequence``."""
+        best_obj: float | None = None
+        best_sch: FFcSchedule | None = None
+
+        def _score(sch: FFcSchedule) -> float:
             if criteria == "makespan":
-                obj = _schedule.makespan
-            else:
-                sum_e, sum_t = compute_weighted_earliness_tardiness(
-                    _schedule, self.instance
-                )
-                obj = sum_e + sum_t
+                return sch.makespan
+            sum_e, sum_t = compute_weighted_earliness_tardiness(sch, self.instance)
+            return sum_e + sum_t
+
+        for candidate in self.iter_mixed_schedules_by_sequence(
+            job_sequence,
+            schedule=schedule,
+            from_stage=from_stage,
+            job_2_release_t=job_2_release_t,
+            machine_then_job=machine_then_job,
+            head_for_all_stages=head_for_all_stages,
+            use_palmer_index=use_palmer_index,
+        ):
+            obj = _score(candidate)
             if best_obj is None or obj < best_obj:
                 best_obj = obj
-                best_sch = _schedule
+                best_sch = candidate
 
         return best_sch
 
