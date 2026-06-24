@@ -400,12 +400,15 @@ class DDWGanttPlotter(GanttPlotter):
         stage_list: Sequence[str],
         machine_list_per_stage: Mapping[str, Sequence[str]],
         title: str | None = None,
+        vlines: Sequence[tuple[float, str, str]] | None = None,
     ) -> None:
         """Render the intro figure and save it as ``file_path`` (``.svg``).
 
         ``drawn_job_list`` is the (ordered) subset actually scheduled and
         drawn; ``all_job_list`` is the full instance order used only to pin
-        each job's palette color.
+        each job's palette color. ``vlines`` is an optional sequence of
+        ``(x, color, label)`` vertical reference lines (e.g. a d̄ marker); the
+        x-horizon is widened to keep each line on-canvas.
         """
         self._ensure_figure()
         assert self.ax is not None
@@ -422,6 +425,7 @@ class DDWGanttPlotter(GanttPlotter):
                 stage_list=stage_list,
                 machine_list_per_stage=machine_list_per_stage,
                 title=title,
+                vlines=vlines,
             )
             self.fig.savefig(file_path, bbox_inches="tight", format="svg")
             logger.info("Intro DDW Gantt chart saved to %s", file_path)
@@ -439,20 +443,24 @@ class DDWGanttPlotter(GanttPlotter):
         stage_list: Sequence[str],
         machine_list_per_stage: Mapping[str, Sequence[str]],
         title: str | None = None,
+        vlines: Sequence[tuple[float, str, str]] | None = None,
     ) -> None:
         self._ensure_figure()
         assert self.ax is not None
 
         job_to_color = self.create_job_to_color_map(list(all_job_list))
 
-        # x horizon spans the schedule, the due windows, and the completions.
+        # x horizon spans the schedule, the due windows, the completions, and
+        # any vertical reference lines (so a d̄ marker past the last completion
+        # is not clipped off-canvas).
         starts = list(start_time_map.values())
         ends = list(end_time_map.values())
         dw_lo = [lo for lo, _ in job_2_dw_map.values()]
         dw_hi = [hi for _, hi in job_2_dw_map.values()]
         comp = list(job_2_completion.values())
-        earliest = min([0, *starts, *dw_lo])
-        latest = max([*ends, *dw_hi, *comp])
+        vline_xs = [x for x, _, _ in vlines] if vlines else []
+        earliest = min([0, *starts, *dw_lo, *vline_xs])
+        latest = max([*ends, *dw_hi, *comp, *vline_xs])
         self.set_x_horizon(earliest, latest)
 
         # Machine lanes (top block).
@@ -494,6 +502,24 @@ class DDWGanttPlotter(GanttPlotter):
             strip_top=strip_base + len(drawn_job_list) * self.strip_row_height,
             title=title,
         )
+
+        # Vertical reference lines (e.g. d̄), spanning the full plot height.
+        if vlines:
+            for x, color, label in vlines:
+                self.ax.axvline(
+                    x=x, color=color, linewidth=1.3, linestyle="--", zorder=7
+                )
+                self.ax.annotate(
+                    label,
+                    xy=(x, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(0, 2),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    color=color,
+                )
 
     def _draw_job_strip_row(
         self,

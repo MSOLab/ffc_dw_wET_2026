@@ -61,6 +61,10 @@ scenarios:
     timelimit: "0.09nc"
     output_subdir: sd_wxd4
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: wxd4 }]
+  - name: sd_wxd5 # wxd2 골격 + d̄ = max(중점평균, min_j r_j + Σ_j p_last / (m_last·2))
+    timelimit: "0.09nc"
+    output_subdir: sd_wxd5
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: wxd5 }]
   - name: sd_weight_due_pos
     timelimit: "0.09nc"
     output_subdir: sd_weight_due_pos
@@ -154,6 +158,11 @@ scenarios:
     output_subdir: rd_wxd4
     subroutine_flow:
       [{ method: initialize_by_reversed_dispatch, sequence: wxd4 }]
+  - name: rd_wxd5 # wxd2 골격 + d̄ = max(중점평균, min_j r_j + Σ_j p_last / (m_last·2))
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd5
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd5 }]
   - name: rd_weight_due_pos
     timelimit: "0.09nc"
     output_subdir: rd_weight_due_pos

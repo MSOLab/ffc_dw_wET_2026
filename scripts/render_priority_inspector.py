@@ -104,10 +104,33 @@ def _mean_midpoint(instance: FFcDDWParameters) -> float:
     return sum((dl + du) / 2 for dl, du in ddw.values()) / len(ddw)
 
 
+def _wxd5_d_bar(instance: FFcDDWParameters) -> float:
+    """wxd5 center: max(midpoint mean, min_j r_j + Σ_j p_last / (m_last·2)).
+
+    Mirrors ``FFcDDWParameters.get_wxd5_job_sequence``. The second term is a
+    last-stage completion lower bound; when it exceeds the midpoint mean it
+    pushes d̄ to the right (otherwise d̄ == wxd2's midpoint mean).
+    """
+    mean_midpoint = _mean_midpoint(instance)
+    last_stage_id = instance.stage_id_list[-1]
+    p_last = instance.get_job_2_p_map_for_stage(last_stage_id)
+    r_j = instance.get_job_2_p_sum_except_last_stage()
+    p_last_total = sum(p_last.values())
+    return max(
+        mean_midpoint,
+        min(r_j.values()) + p_last_total / (instance.last_stage_mc_count * 2),
+    )
+
+
 def compute_wxd2_partition(
     instance: FFcDDWParameters,
+    d_bar: float | None = None,
 ) -> dict[str, dict]:
-    """Compute wxd2 partition data for every job.
+    """Compute wxd2/wxd5 partition data for every job.
+
+    The partition criterion and sort keys are identical for wxd2 and wxd5;
+    only the center ``d_bar`` differs. Pass ``d_bar=None`` (default) for wxd2's
+    midpoint mean, or ``_wxd5_d_bar(instance)`` for wxd5.
 
     Returns {job_id: {
         'earliness_aversion': float,
@@ -128,7 +151,8 @@ def compute_wxd2_partition(
     job_id_list = instance.job_id_list
 
     d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in job_id_list}
-    d_bar = _mean_midpoint(instance)
+    if d_bar is None:
+        d_bar = _mean_midpoint(instance)
     ew_max = max(ewt.values())
     tw_max = max(twt.values())
 
@@ -227,6 +251,15 @@ def render_priority_inspector_svg(
     dw_left = due_min - int(due_range * 0.05)
     dw_right = due_max + int(due_range * 0.05)
 
+    # Keep the d̄ overlay on-canvas: wxd5 can floor d̄ past the last due window,
+    # so widen the display range to include it rather than clipping the line.
+    if wxd2_data and dispatch_seq:
+        d_bar_overlay = wxd2_data[dispatch_seq[0]]["d_bar"]
+        if d_bar_overlay > dw_right:
+            dw_right = int(d_bar_overlay + due_range * 0.05)
+        elif d_bar_overlay < dw_left:
+            dw_left = int(d_bar_overlay - due_range * 0.05)
+
     # Layout constants
     body_left = rank_gutter_w + job_gutter_w + weight_glyph_w + 10
     body_right = width - key_gutter_w - 10
@@ -281,8 +314,8 @@ def render_priority_inspector_svg(
         f'<text x="{body_left + 5}" y="{header_height - 5}" fill="{DUE_BAND_COLOR}" text-anchor="start">Due Window</text>'
     )
 
-    # Key gutter header — label as aversion proxy for non-wxd2 rules (W7)
-    key_header = "Key" if rule_key == "wxd2" else "T-E@d̄"
+    # Key gutter header — label as aversion proxy for non-partition rules (W7)
+    key_header = "Key" if rule_key in ("wxd2", "wxd5") else "T-E@d̄"
     svg_parts.append(
         f'<text x={width - key_gutter_w // 2 - 5} y="{header_height - 5}" fill="{KEY_GUTTER_COLOR}" text-anchor="middle">{key_header}</text>'
     )
@@ -430,8 +463,13 @@ def render_panel_b_svg(
     schedule,
     drawn_jobs: list[str],
     output_dir: Path,
+    d_bar: float | None = None,
 ) -> Path:
-    """Render Panel B via DDWGanttPlotter.export_ddw. Returns the SVG path."""
+    """Render Panel B via DDWGanttPlotter.export_ddw. Returns the SVG path.
+
+    When ``d_bar`` is given, an orange dashed d̄ reference line is overlaid on
+    the schedule (matching Panel A's overlay color).
+    """
     start_map = schedule.get_jik_2_start_time_map()
     end_map = schedule.get_jik_2_end_time_map()
     last_stage_id = instance.stage_id_list[-1]
@@ -439,6 +477,8 @@ def render_panel_b_svg(
         j: schedule.get_job_end_time(last_stage_id, j) for j in drawn_jobs
     }
     job_2_dw_map = {j: instance.job_2_due_window_map[j] for j in drawn_jobs}
+
+    vlines = [(d_bar, D_BAR_COLOR, "d̄")] if d_bar is not None else None
 
     svg_path = output_dir / "panel_b_gantt.svg"
     DDWGanttPlotter().export_ddw(
@@ -452,6 +492,7 @@ def render_panel_b_svg(
         stage_list=list(instance.stage_id_list),
         machine_list_per_stage=instance.stage_2_machines_map,
         title=None,
+        vlines=vlines,
     )
     return svg_path
 
@@ -789,12 +830,16 @@ def main() -> None:
     schedule, dispatch_seq, job_2_end_time = decode_schedule(instance, args.rule_key)
     stats = compute_stats(schedule, instance, dispatch_seq, job_2_end_time)
 
-    # Compute wxd2 partition data if applicable
+    # Compute partition + d̄ overlay data if applicable. wxd2 and wxd5 share the
+    # partition/sort-key formulas; only the center d̄ differs (wxd5 floors it at
+    # a last-stage completion bound).
     wxd2_data = None
-    if args.rule_key == "wxd2":
-        wxd2_data = compute_wxd2_partition(instance)
+    if args.rule_key in ("wxd2", "wxd5"):
+        d_bar = _wxd5_d_bar(instance) if args.rule_key == "wxd5" else None
+        wxd2_data = compute_wxd2_partition(instance, d_bar=d_bar)
         logger.info(
-            "wxd2 partition: %d early, %d late",
+            "%s partition: %d early, %d late (d̄=%.1f)",
+            args.rule_key,
             sum(
                 1
                 for j in dispatch_seq
@@ -805,6 +850,7 @@ def main() -> None:
                 for j in dispatch_seq
                 if wxd2_data.get(j, {}).get("partition") == "late"
             ),
+            wxd2_data[dispatch_seq[0]]["d_bar"] if dispatch_seq else 0.0,
         )
 
     # Render Panel A
@@ -821,7 +867,14 @@ def main() -> None:
         args.output.parent if args.output else Path("output/20260625/priority_viz")
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    panel_b_svg_path = render_panel_b_svg(instance, schedule, dispatch_seq, output_dir)
+    # Overlay the d̄ line on Panel B for partition rules (wxd2/wxd5), matching
+    # Panel A's overlay.
+    panel_b_d_bar = (
+        wxd2_data[dispatch_seq[0]]["d_bar"] if wxd2_data and dispatch_seq else None
+    )
+    panel_b_svg_path = render_panel_b_svg(
+        instance, schedule, dispatch_seq, output_dir, d_bar=panel_b_d_bar
+    )
     logger.info("Panel B SVG -> %s", panel_b_svg_path)
 
     # Compose HTML
