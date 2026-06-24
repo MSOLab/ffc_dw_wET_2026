@@ -1709,15 +1709,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``sequence`` 를 forward 우선순위로 정렬한 뒤, 모든 job을 전 stage에 걸쳐
         job-centric으로 한 번에 dispatch한다
         (:meth:`MixedDispatcher.get_job_centric_schedule_by_sequence`,
-        ``np = job_count`` head). stage 역전·np-sweep·idle-time 삽입이 없는 가장
-        단순한 forward 디코드로, 복잡한 :meth:`initialize_by_reversed_dispatch` 의
-        대응이다. 정렬 키는 :func:`dispatch_seq_job_sequence` 와 동일
+        ``np = job_count`` head). decode 후 :meth:`FFcSchedule.make_semi_active` +
+        :meth:`FFcSchedule.insert_idle_time` 으로 E/T timing 보정하며, reverse
+        파이프라인(:meth:`_dispatch_by_reversed_sequence_with_iit`)과 동일한
+        보정을 공유한다. 정렬 키는 :func:`dispatch_seq_job_sequence` 와 동일
         레지스트리를 쓴다(디코더 무관, sequence만 제공).
         """
         start_elapsed = time.monotonic()
         job_sequence = dispatch_seq_job_sequence(self.instance, sequence)
         dispatcher = MixedDispatcher(self.instance, logger=self.logger)
         schedule = dispatcher.get_job_centric_schedule_by_sequence(job_sequence)
+        schedule.make_semi_active(self.instance.stage_2_job_2_p_map)
+        schedule.insert_idle_time(
+            self.instance.job_2_due_window_map,
+            self.instance.job_2_ewt_map,
+            self.instance.job_2_twt_map,
+        )
         sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
         obj_value = float(sum_e + sum_t)
 

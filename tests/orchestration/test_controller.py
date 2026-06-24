@@ -5,7 +5,11 @@ import pytest
 from routix.stopping_criteria import StoppingCriteria
 
 from ffc_ddw_sum_et.algorithm.base.alg_record import WorkStatus
-from ffc_ddw_sum_et.orchestration.controller import FFcDDWSubroutineController
+from ffc_ddw_sum_et.orchestration.controller import (
+    FFcDDWSubroutineController,
+    MixedDispatcher,
+    dispatch_seq_job_sequence,
+)
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
@@ -395,3 +399,68 @@ def test_initialize_by_simple_dispatch_unknown_key_raises() -> None:
 
     with pytest.raises(ValueError, match="Unknown DispatchSeqKey"):
         controller.initialize_by_simple_dispatch(sequence="not_a_key")
+
+
+def _make_iit_instance(name: str = "iit_instance") -> FFcDDWParameters:
+    """Instance designed so that forward decode produces earliness on the last stage.
+
+    Single-machine per stage ensures EDD order is preserved. Processing times:
+    j0: i0=2, i1=1; j1: i0=1, i1=2; j2: i0=1, i1=3
+    Due windows: j0=[5,10], j1=[4,10], j2=[3,10]
+    With EDD order (j0, j1, j2) the last-stage completion times are 3, 5, 8,
+    giving earliness of 2+1+0=3 and zero tardiness — IIT shifts all right.
+    """
+    job_id_list = ["j0", "j1", "j2"]
+    stage_id_list = ["i0", "i1"]
+    return FFcDDWParameters(
+        name=name,
+        job_id_list=job_id_list,
+        stage_id_list=stage_id_list,
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name=f"{name}_p",
+            df=pd.DataFrame([[2, 1], [1, 2], [1, 3]]),
+        ),
+        job_2_due_window_map={"j0": (5, 10), "j1": (4, 10), "j2": (3, 10)},
+        job_2_ewt_map={"j0": 1, "j1": 1, "j2": 1},
+        job_2_twt_map={"j0": 1, "j1": 1, "j2": 1},
+    )
+
+
+def test_initialize_by_simple_dispatch_iit_improves_or_equals_raw() -> None:
+    """Verify that make_semi_active + insert_idle_time never worsens E+T.
+
+    Raw left-pack decode produces a schedule with no idle time between stages.
+    After applying make_semi_active + insert_idle_time the weighted E+T must be
+    ≤ the raw value, and at least one operation start time must be right-shifted.
+    """
+    instance = _make_iit_instance()
+    controller = _make_controller(instance)
+
+    # Build raw left-pack schedule (no IIT)
+    job_sequence = dispatch_seq_job_sequence(instance, "edd")
+    dispatcher = MixedDispatcher(instance, logger=controller.logger)
+    raw_schedule = dispatcher.get_job_centric_schedule_by_sequence(job_sequence)
+    raw_e, raw_t = compute_weighted_earliness_tardiness(raw_schedule, instance)
+    raw_obj = float(raw_e + raw_t)
+    raw_start_map = raw_schedule.get_jik_2_start_time_map()
+
+    # Apply the same transformations that initialize_by_simple_dispatch now uses
+    raw_schedule.make_semi_active(instance.stage_2_job_2_p_map)
+    raw_schedule.insert_idle_time(
+        instance.job_2_due_window_map,
+        instance.job_2_ewt_map,
+        instance.job_2_twt_map,
+    )
+    iit_e, iit_t = compute_weighted_earliness_tardiness(raw_schedule, instance)
+    iit_obj = float(iit_e + iit_t)
+    iit_start_map = raw_schedule.get_jik_2_start_time_map()
+
+    # IIT must not worsen the objective
+    assert iit_obj <= raw_obj, (
+        f"IIT-applied obj ({iit_obj}) > raw left-pack obj ({raw_obj})"
+    )
+
+    # At least one start time must be right-shifted (idle actually inserted)
+    any_right_shift = any(iit_start_map[k] > raw_start_map[k] for k in raw_start_map)
+    assert any_right_shift, "No idle time was inserted; all start times unchanged"
