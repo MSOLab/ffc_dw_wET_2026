@@ -13,7 +13,7 @@ Usage::
 
     uv run python scripts/render_priority_inspector.py \\
         --instance-index 60 --rule-key wxd2 \\
-        [--compare edd] [--output output/20260625/priority_viz/0060_wxd2.html]
+        [--output output/20260625/priority_viz/0060_wxd2.html]
 
 See plans/20260625/priority_rule_simulator_viz.md for the design.
 """
@@ -38,7 +38,7 @@ from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardin
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BKS_TABLE = REPO_ROOT / "benchmarks" / "PRA2017" / "pra2017_bks_table.csv"
-DEFAULT_SMALL_DIR = REPO_ROOT / "benchmarks" / "PRA2017" / "large"
+DEFAULT_BENCHMARK_DIR = REPO_ROOT / "benchmarks" / "PRA2017" / "large"
 DEFAULT_HYBRID_MATCH = REPO_ROOT / "benchmarks" / "PRA2017" / "pra2017_hybrid_match.csv"
 
 EARLY_COLOR = "#1f77b4"  # blue
@@ -47,6 +47,10 @@ TARDY_COLOR = "#d62728"  # red
 DUE_BAND_COLOR = "#cccccc"
 DIVIDER_COLOR = "#999999"
 D_BAR_COLOR = "#ff7f0e"
+
+# Panel A weight-bar geometry (SSOT for header + row rendering)
+W_BAR_MAX = 30
+W_BAR_GAP = 35
 ROW_BG_EARLY = "#f0f4ff"
 ROW_BG_LATE = "#ffffff"
 KEY_GUTTER_COLOR = "#333333"
@@ -94,6 +98,12 @@ def get_bks(ins_index: int, bks_table: dict) -> int | None:
 # ---------------------------------------------------------------------------
 
 
+def _mean_midpoint(instance: FFcDDWParameters) -> float:
+    """Return the mean of (dl+du)/2 across all jobs — d̄ shared by wxd2 and fallback."""
+    ddw = instance.job_2_due_window_map
+    return sum((dl + du) / 2 for dl, du in ddw.values()) / len(ddw)
+
+
 def compute_wxd2_partition(
     instance: FFcDDWParameters,
 ) -> dict[str, dict]:
@@ -118,7 +128,7 @@ def compute_wxd2_partition(
     job_id_list = instance.job_id_list
 
     d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in job_id_list}
-    d_bar = sum(d_mid.values()) / len(d_mid)
+    d_bar = _mean_midpoint(instance)
     ew_max = max(ewt.values())
     tw_max = max(twt.values())
 
@@ -181,7 +191,7 @@ def render_priority_inspector_svg(
     header_height: int = 40,
     key_gutter_w: int = 80,
     time_padding: int = 100,
-) -> tuple[str, int, int, int]:
+) -> tuple[str, int, int, int, int]:
     """Render Panel A as an SVG string.
 
     Returns (svg_string, min_time, max_time, dw_left, dw_right).
@@ -255,13 +265,15 @@ def render_priority_inspector_svg(
         f'<text x={rank_gutter_w + job_gutter_w // 2 + 5} y="{header_height - 5}" fill="{LIGHT_TEXT}" text-anchor="middle">Job</text>'
     )
 
-    # Weight glyph header
-    w_center = rank_gutter_w + job_gutter_w + weight_glyph_w // 2
+    # Weight glyph header — center over bars: w- at x0+max/2, w+ at x0+gap+max/2
+    w_bar_x0 = rank_gutter_w + job_gutter_w + 5
+    w_minus_center = w_bar_x0 + W_BAR_MAX // 2
+    w_plus_center = w_bar_x0 + W_BAR_GAP + W_BAR_MAX // 2
     svg_parts.append(
-        f'<text x="{w_center}" y="{header_height - 5}" fill="{EARLY_COLOR}" text-anchor="middle">w-</text>'
+        f'<text x="{w_minus_center}" y="{header_height - 5}" fill="{EARLY_COLOR}" text-anchor="middle">w-</text>'
     )
     svg_parts.append(
-        f'<text x="{w_center + 15}" y="{header_height - 5}" fill="{TARDY_COLOR}" text-anchor="middle">w+</text>'
+        f'<text x="{w_plus_center}" y="{header_height - 5}" fill="{TARDY_COLOR}" text-anchor="middle">w+</text>'
     )
 
     # Due band header
@@ -269,9 +281,10 @@ def render_priority_inspector_svg(
         f'<text x="{body_left + 5}" y="{header_height - 5}" fill="{DUE_BAND_COLOR}" text-anchor="start">Due Window</text>'
     )
 
-    # Key gutter header
+    # Key gutter header — label as aversion proxy for non-wxd2 rules (W7)
+    key_header = "Key" if rule_key == "wxd2" else "T-E@d̄"
     svg_parts.append(
-        f'<text x={width - key_gutter_w // 2 - 5} y="{header_height - 5}" fill="{KEY_GUTTER_COLOR}" text-anchor="middle">Key</text>'
+        f'<text x={width - key_gutter_w // 2 - 5} y="{header_height - 5}" fill="{KEY_GUTTER_COLOR}" text-anchor="middle">{key_header}</text>'
     )
 
     # d_bar line (if wxd2)
@@ -279,13 +292,17 @@ def render_priority_inspector_svg(
     if wxd2_data:
         d_bar_val = wxd2_data[dispatch_seq[0]]["d_bar"] if dispatch_seq else None
 
+    # Pre-compute row-invariant values once, out of the row loop (W6/W7).
+    max_w = max(max(ewt.values()), max(twt.values()))  # weight-bar scaling
+    d_bar = _mean_midpoint(instance)  # true d̄ for non-wxd2 fallback key
+
     # Draw rows
     for rank, job_id in enumerate(dispatch_seq):
         y = header_height + rank * row_height
         dl, du = ddw[job_id]
         c = job_2_end_time.get(job_id, 0)
-        ew = ewt.get(job_id, 1)
-        tw = twt.get(job_id, 1)
+        ew = ewt[job_id]
+        tw = twt[job_id]
 
         # Row background
         partition = None
@@ -312,17 +329,14 @@ def render_priority_inspector_svg(
         )
 
         # Weight glyph: w- bar (blue), w+ bar (red)
-        max_w = max(max(ewt.values()), max(twt.values()))
         if max_w > 0:
-            w_bar_max = 30
-            w_bar_x = rank_gutter_w + job_gutter_w + 5
             ew_ratio = ew / max_w
             tw_ratio = tw / max_w
             svg_parts.append(
-                f'<rect x="{w_bar_x}" y="{y + row_height // 2 - 4}" width="{w_bar_max * ew_ratio:.0f}" height="8" fill="{EARLY_COLOR}" opacity="0.7"/>'
+                f'<rect x="{w_bar_x0}" y="{y + row_height // 2 - 4}" width="{W_BAR_MAX * ew_ratio:.0f}" height="8" fill="{EARLY_COLOR}" opacity="0.7"/>'
             )
             svg_parts.append(
-                f'<rect x="{w_bar_x + 35}" y="{y + row_height // 2 - 4}" width="{w_bar_max * tw_ratio:.0f}" height="8" fill="{TARDY_COLOR}" opacity="0.7"/>'
+                f'<rect x="{w_bar_x0 + W_BAR_GAP}" y="{y + row_height // 2 - 4}" width="{W_BAR_MAX * tw_ratio:.0f}" height="8" fill="{TARDY_COLOR}" opacity="0.7"/>'
             )
 
         # Due window band (gray bar)
@@ -385,8 +399,9 @@ def render_priority_inspector_svg(
             key_val = _fmt_key(wxd2_data[job_id]["sort_key"])
         else:
             # Generic: show tardiness_aversion - earliness_aversion delta
-            ea = ew + (dl - (dw_left + dw_right) / 2)
-            ta = tw + ((dw_left + dw_right) / 2 - du)
+            # Use true d̄ (mean midpoint, hoisted above), not display-range midpoint (W7)
+            ea = ew + (dl - d_bar)
+            ta = tw + (d_bar - du)
             key_val = _fmt_key(ta - ea)
         svg_parts.append(
             f'<text x={width - key_gutter_w // 2 - 5} y="{y + row_height // 2 + 3}" fill="{KEY_GUTTER_COLOR}" text-anchor="middle">{key_val}</text>'
@@ -508,7 +523,6 @@ def compose_html(
     panel_b_svg_path: Path,
     stats: dict,
     rule_key: str,
-    compare_key: str | None,
     instance_label: str,
     bks: int | None,
     job_2_end_time: dict[str, int],
@@ -709,12 +723,6 @@ def main() -> None:
         help="Priority rule key (default: wxd2).",
     )
     parser.add_argument(
-        "--compare",
-        type=str,
-        default=None,
-        help="Compare with another rule key (e.g. edd).",
-    )
-    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -750,9 +758,14 @@ def main() -> None:
     bks_table = load_bks_table(args.bks_csv)
 
     # Resolve benchmark directory
-    benchmark_dir = args.benchmark_dir or DEFAULT_SMALL_DIR
-    if not benchmark_dir.exists():
-        benchmark_dir = DEFAULT_SMALL_DIR
+    if args.benchmark_dir is not None:
+        if not args.benchmark_dir.exists():
+            raise FileNotFoundError(
+                f"benchmark directory does not exist: {args.benchmark_dir}"
+            )
+        benchmark_dir = args.benchmark_dir
+    else:
+        benchmark_dir = DEFAULT_BENCHMARK_DIR
 
     hybrid_match = args.hybrid_match_csv or DEFAULT_HYBRID_MATCH
     loader = BenchmarkLoader(benchmark_dir, ins_index_source=hybrid_match)
@@ -817,7 +830,6 @@ def main() -> None:
         panel_b_svg_path=panel_b_svg_path,
         stats=stats,
         rule_key=args.rule_key,
-        compare_key=args.compare,
         instance_label=instance_label,
         bks=bks,
         job_2_end_time=job_2_end_time,
