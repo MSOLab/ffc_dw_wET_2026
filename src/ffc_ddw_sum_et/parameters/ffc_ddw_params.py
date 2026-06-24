@@ -752,6 +752,27 @@ class FFcDDWParameters(FFcParameters):
 
         return sorted(self.job_id_list, key=key)
 
+    def get_wspt_twt_job_sequence(self) -> list[str]:
+        """WSPT (tardiness weight) job sequence.
+
+        Sort descending by ``w⁺_j / P_j`` (``P_j = Σ_i p_{ij}``), ties break by
+        native position. Classic WSPT rule for total weighted tardiness: when
+        the instance is congested enough that most jobs finish late (the
+        ``T=0.6, R=0.2`` regime — tight, narrowly-ranged due dates), sequencing
+        by weight-to-processing-time ratio is the single-machine optimum. The
+        ``w1`` rule (``w⁺−w⁻`` desc) ignores ``p`` entirely; this restores it.
+        """
+        twt = self._job_2_twt_map
+        p_total = {
+            j: sum(self.job_2_stage_2_p_map[j].values()) for j in self._job_id_list
+        }
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[float, int]:
+            return (-(twt[j] / p_total[j]), job_2_pos[j])
+
+        return sorted(self.job_id_list, key=key)
+
     def get_wxd1_job_sequence(self) -> list[str]:
         """
         Get the "wxd1" priority job sequence.

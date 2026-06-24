@@ -1,6 +1,7 @@
 """FFcDWwET subroutine controller for routix-based experiment orchestration."""
 
 import csv
+import logging
 import math
 import time
 from pathlib import Path
@@ -1576,8 +1577,49 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
+    def _log_dispatch_seed_diagnostics(self, label: str, schedule: FFcSchedule) -> None:
+        """DEBUG-log the E/T balance of a dispatch seed schedule.
+
+        Records weighted earliness/tardiness, the tardiness share
+        ``T/(E+T)``, and the early/on-time/tardy job counts on the last stage.
+        Used to characterise *why* a job-priority rule wins in a given regime
+        (e.g. confirming the ``T=0.6, R=0.2`` region is tardiness-dominated and
+        observing how a WSPT-style rule shifts the balance). Called after
+        ``_register`` so it adds no work to the step's timed trajectory.
+        """
+        if not self.logger.isEnabledFor(logging.DEBUG):
+            return
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
+        last_stage_id = self.instance.stage_id_list[-1]
+        ddw = self.instance.job_2_due_window_map
+        n_early = n_ontime = n_tardy = 0
+        for job_id in self.instance.job_id_list:
+            ct = schedule.get_job_end_time(last_stage_id, job_id)
+            d_lower, d_upper = ddw[job_id]
+            if ct < d_lower:
+                n_early += 1
+            elif ct > d_upper:
+                n_tardy += 1
+            else:
+                n_ontime += 1
+        n = self.instance.job_count
+        self.logger.debug(
+            "dispatch-seed[%s]: wE=%d wT=%d T/(E+T)=%.3f | "
+            "early=%d ontime=%d tardy=%d tardy%%=%.1f",
+            label,
+            sum_e,
+            sum_t,
+            sum_t / max(sum_e + sum_t, 1),
+            n_early,
+            n_ontime,
+            n_tardy,
+            100.0 * n_tardy / n,
+        )
+
     def _initialize_by_reversed_sequence(
-        self, sequence_getter: Callable[[], Sequence[str]]
+        self,
+        sequence_getter: Callable[[], Sequence[str]],
+        diag_label: str | None = None,
     ) -> SubroutineReport:
         """Time ``sequence_getter()``, dispatch via the reverse-instance + IIT
         pipeline (:meth:`_dispatch_by_reversed_sequence_with_iit`), then
@@ -1596,6 +1638,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
+        if diag_label is not None:
+            self._log_dispatch_seed_diagnostics(diag_label, schedule)
         return report
 
     def initialize_by_due2_weight_pos(self) -> SubroutineReport:
@@ -1698,7 +1742,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         일반화한 것이다.
         """
         return self._initialize_by_reversed_sequence(
-            lambda: dispatch_seq_job_sequence(self.instance, sequence)
+            lambda: dispatch_seq_job_sequence(self.instance, sequence),
+            diag_label=f"rd:{sequence}",
         )
 
     def initialize_by_simple_dispatch(
@@ -1736,6 +1781,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
+        self._log_dispatch_seed_diagnostics(f"sd:{sequence}", schedule)
         return report
 
     def run_profile_fixed_ns(

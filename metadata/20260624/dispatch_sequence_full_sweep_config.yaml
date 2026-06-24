@@ -39,6 +39,11 @@ scenarios:
     timelimit: "0.09nc"
     output_subdir: sd_w1
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: w1 }]
+  - name: sd_wspt_twt # WSPT (w⁺/P): dominates tight+narrow (T=0.6,R=0.2) region
+    timelimit: "0.09nc"
+    output_subdir: sd_wspt_twt
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: wspt_twt }]
   - name: sd_wxd1
     timelimit: "0.09nc"
     output_subdir: sd_wxd1
@@ -115,6 +120,11 @@ scenarios:
     timelimit: "0.09nc"
     output_subdir: rd_w1
     subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: w1 }]
+  - name: rd_wspt_twt # WSPT (w⁺/P): dominates tight+narrow (T=0.6,R=0.2) region
+    timelimit: "0.09nc"
+    output_subdir: rd_wspt_twt
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wspt_twt }]
   - name: rd_wxd1
     timelimit: "0.09nc"
     output_subdir: rd_wxd1
