@@ -31,7 +31,11 @@ from ortools.sat.python import cp_model
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
 from ..solution.objectives import compute_weighted_earliness_tardiness
-from ..solution.schedule_build import build_schedule_from_op_starts
+from ..solution.schedule_build import (
+    build_schedule_from_op_starts,
+    reconstruct_coarse_schedule,
+    reconstruct_raw_coarse_schedule,
+)
 from .base.alg_option import AlgOption
 from .base.alg_record import (
     AlgRecord,
@@ -376,32 +380,14 @@ def run_coarsen_solve_reconstruct(
     )
 
     # --- Reconstruct to original scale ---
+    # Raw snapshot BEFORE any postprocess, and the ET-aligned final schedule.
+    # Built by separate calls so the final's in-place postprocess cannot mutate
+    # the raw snapshot. Both share the reconstruct logic in schedule_build.
     factor = option.factor
-    original_p = instance.job_2_stage_2_p_map
-
-    reconstructed_start: dict[tuple[str, str], int] = {
-        (j, i): coarse_j_i_2_start[j, i] * factor for (j, i) in coarse_j_i_2_start
-    }
-    reconstructed_end: dict[tuple[str, str], int] = {
-        (j, i): reconstructed_start[j, i] + original_p[j][i]
-        for (j, i) in reconstructed_start
-    }
-
-    # Build raw snapshot BEFORE any postprocess (distinct from final)
-    reconstructed_raw_schedule = build_schedule_from_op_starts(
-        instance, reconstructed_start, reconstructed_end
+    reconstructed_raw_schedule = reconstruct_raw_coarse_schedule(
+        coarse_schedule, instance, factor
     )
-
-    # Build final schedule separately so postprocess cannot mutate raw snapshot
-    final_schedule = build_schedule_from_op_starts(
-        instance, reconstructed_start, reconstructed_end
-    )
-    final_schedule.make_semi_active(instance.stage_2_job_2_p_map)
-    final_schedule.insert_idle_time(
-        instance.job_2_due_window_map,
-        instance.job_2_ewt_map,
-        instance.job_2_twt_map,
-    )
+    final_schedule = reconstruct_coarse_schedule(coarse_schedule, instance, factor)
 
     sum_e, sum_t = compute_weighted_earliness_tardiness(final_schedule, instance)
     obj_value = float(sum_e + sum_t)

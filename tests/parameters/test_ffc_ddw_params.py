@@ -1,10 +1,12 @@
 from io import StringIO
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.ffc_params import FFcParameters
+from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -464,3 +466,79 @@ def test_coarsen_time_resolution_does_not_mutate_original() -> None:
         for s in instance.stage_id_list:
             assert instance.job_2_stage_2_p_map[j][s] == original_p[j][s]
     assert instance.job_2_due_window_map == original_dw
+
+
+# -----------------------------------------------------------------------------
+# get_eddub_twt_job_sequence
+# -----------------------------------------------------------------------------
+
+
+def _make_eddub_twt_instance() -> FFcDDWParameters:
+    """3-job × 1-stage instance with controlled d⁺/w⁺ values.
+
+    job0: d⁺=100, w⁺=5, pos=0
+    job1: d⁺=100, w⁺=3,  pos=1
+    job2: d⁺=200, w⁺=8,  pos=2
+    Expected order: (d⁺ asc, w⁺ desc, pos asc) → [job0, job1, job2]
+    """
+    return FFcDDWParameters(
+        name="eddub_twt_test",
+        job_id_list=["job0", "job1", "job2"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="eddub_twt_p", df=pd.DataFrame([[10], [20], [30]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (80, 100), "job2": (150, 200)},
+        job_2_ewt_map={"job0": 1, "job1": 1, "job2": 1},
+        job_2_twt_map={"job0": 5, "job1": 3, "job2": 8},
+    )
+
+
+def test_get_eddub_twt_job_sequence_d_plus_asc() -> None:
+    instance = _make_eddub_twt_instance()
+    seq = instance.get_eddub_twt_job_sequence()
+    assert seq == ["job0", "job1", "job2"]
+
+
+def test_get_eddub_twt_job_sequence_w_plus_desc_tiebreak() -> None:
+    """Same d⁺: higher w⁺ must come first."""
+    instance = FFcDDWParameters(
+        name="eddub_twt_tie",
+        job_id_list=["a", "b", "c"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="tie_p", df=pd.DataFrame([[1], [1], [1]])
+        ),
+        job_2_due_window_map={"a": (0, 10), "b": (0, 10), "c": (0, 10)},
+        job_2_ewt_map={"a": 1, "b": 1, "c": 1},
+        job_2_twt_map={"a": 2, "b": 5, "c": 3},
+    )
+    seq = instance.get_eddub_twt_job_sequence()
+    assert seq == ["b", "c", "a"]  # w⁺ desc: 5, 3, 2
+
+
+def test_get_eddub_twt_job_sequence_position_tiebreak() -> None:
+    """Same d⁺ and w⁺: preserve given (native) order."""
+    instance = FFcDDWParameters(
+        name="eddub_twt_pos",
+        job_id_list=["x", "y", "z"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="pos_p", df=pd.DataFrame([[1], [1], [1]])
+        ),
+        job_2_due_window_map={"x": (0, 10), "y": (0, 10), "z": (0, 10)},
+        job_2_ewt_map={"x": 1, "y": 1, "z": 1},
+        job_2_twt_map={"x": 5, "y": 5, "z": 5},
+    )
+    seq = instance.get_eddub_twt_job_sequence()
+    assert seq == ["x", "y", "z"]  # native position order
+
+
+def test_get_eddub_twt_job_sequence_all_jobs_included() -> None:
+    instance = _make_eddub_twt_instance()
+    seq = instance.get_eddub_twt_job_sequence()
+    assert set(seq) == set(instance.job_id_list)
+    assert len(seq) == len(instance.job_id_list)

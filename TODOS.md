@@ -239,3 +239,28 @@ to_dict objects) instead of duplicating it inline at every compact-JSON call sit
 
 **When to act:** When a second compact-JSON site appears in ffc_ddw_sum_et, or when
 routix is being tidied up and the change can be bundled in.
+
+## SSOT: consolidate the EDDUB+w⁺ dispatch-seed ordering
+
+The job ordering `(d⁺_j asc, w⁺_j desc, given index asc)` introduced by commit
+`c7f54d0` lives in two places once the new `initialize_by_eddub_twt` init method
+(see `plans/20260624/schedule_init_eddub_twt_reverse_dispatch.md`) lands:
+
+- `coarsen_solve_reconstruct.py:_dispatch_seed_job_sequence` (module-local
+  function sorting a coarsened instance).
+- `FFcDDWParameters.get_eddub_twt_job_sequence` (new getter, WP-1 of the plan).
+
+Both compute the identical key `(dw_ub[j], -twt[j], given_index[j])`. The clean
+consolidation: delete `_dispatch_seed_job_sequence` and have CSR call
+`coarsened.get_eddub_twt_job_sequence()` instead, making the params getter the
+single source of truth. Behavior is unchanged (same sort), and the existing CSR
+tests (`tests/algorithm/test_coarsen_solve_reconstruct.py`) guard the regression.
+
+**Why:** The ordering is the same logical knowledge in two representations
+(DRY / single-source-of-truth violation). Deferred from the init-method plan to
+keep that change set scoped to the new feature; the duplication is harmless until
+the ordering needs to change (then both sites must move together).
+
+**When to act:** After `get_eddub_twt_job_sequence` (plan WP-1) exists, OR when the
+c7f54d0 ordering needs to be adjusted (do the consolidation first so there is only
+one place to edit), OR when a third consumer of this ordering appears.

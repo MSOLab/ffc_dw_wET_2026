@@ -246,3 +246,46 @@ def test_apply_lb_by_mcf_r_increment_voids_lb_and_does_not_decrease() -> None:
 
     assert incremented_report.obj_bound is None
     assert incremented_controller.mcf_lb_diagnostic.mcf_lb >= baseline_mcf_lb
+
+
+def test_initialize_by_eddub_twt_registers_full_schedule() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_eddub_twt()
+
+    assert report.obj_value is not None
+    assert report.obj_bound is None
+    assert report.elapsed_time >= 0
+    assert len(controller.solution_manager.history) == 1
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+    assert incumbent.obj_bound is None
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_eddub_twt_feasible_full_schedule() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_eddub_twt()
+    assert report.obj_value is not None
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    sched = incumbent.schedule
+
+    # Every job must have a valid end time at every stage.
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            e = sched.get_job_end_time(stage_id, job_id)
+            assert e > 0

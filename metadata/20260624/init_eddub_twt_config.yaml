@@ -1,0 +1,57 @@
+# Schedule-initialization comparison for the EDDUB+w⁺ reverse-dispatch method.
+#
+# See plans/20260624/schedule_init_eddub_twt_reverse_dispatch.md.
+#
+# All scenarios share the same wall-clock budget ("0.09nc") and run a single
+# init step (no follow-up solve), so the registered incumbent's wET is the
+# quantity compared:
+#   - init_eddub_twt        : new EDDUB+w⁺ reverse-dispatch init.
+#   - init_w1 / init_edd    : existing init baselines (same/forward pipeline).
+#   - init_eddub_twt_f10/50 : coarsen-aware variant (factor=10 / 50).
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260624
+
+instance_worker_cnt: 16
+
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  - name: init_eddub_twt
+    timelimit: "0.09nc"
+    output_subdir: init_eddub_twt
+    subroutine_flow:
+      - method: initialize_by_eddub_twt
+
+  - name: init_w1 # baseline (same pipeline, different sort)
+    timelimit: "0.09nc"
+    output_subdir: init_w1
+    subroutine_flow:
+      - method: initialize_by_w1
+
+  - name: init_edd # forward-dispatch baseline
+    timelimit: "0.09nc"
+    output_subdir: init_edd
+    subroutine_flow:
+      - method: initialize_by_edd
+
+  - name: init_eddub_twt_f10 # coarsen-aware: factor=10
+    timelimit: "0.09nc"
+    output_subdir: init_eddub_twt_f10
+    subroutine_flow:
+      - method: initialize_by_eddub_twt
+        factor: 10
+
+  - name: init_eddub_twt_f50 # coarsen-aware: factor=50
+    timelimit: "0.09nc"
+    output_subdir: init_eddub_twt_f50
+    subroutine_flow:
+      - method: initialize_by_eddub_twt
+        factor: 50

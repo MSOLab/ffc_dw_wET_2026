@@ -74,7 +74,10 @@ from ffc_ddw_sum_et.solution.objectives import (
     compute_phase_obj_value,
     compute_weighted_earliness_tardiness,
 )
-from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
+from ffc_ddw_sum_et.solution.schedule_build import (
+    build_schedule_from_op_starts,
+    reconstruct_coarse_schedule,
+)
 
 from .controller_core import FFcDDWSubroutineControllerCore, MCFLBPhaseSchedule
 from .mcf_lb_phase_labels import (
@@ -1438,7 +1441,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return schedule, obj_value
 
     def _dispatch_by_reversed_sequence_with_iit(
-        self, job_sequence: Sequence[str]
+        self,
+        job_sequence: Sequence[str],
+        instance: FFcDDWParameters | None = None,
     ) -> tuple[FFcSchedule, float]:
         """Dispatch ``job_sequence`` via the reverse-instance + IIT pipeline.
 
@@ -1447,8 +1452,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         minimising makespan, unflip the result with
         :meth:`FFcSchedule.as_reversed`, push left to semi-active form, then
         insert idle time on the last stage.
+
+        ``instance`` defaults to ``self.instance``; passing a coarsened
+        instance enables dispatch on a time-resolved copy (see
+        :meth:`initialize_by_eddub_twt`).
         """
-        instance = self.instance
+        instance = instance or self.instance
         reversed_instance = FFcDDWParameters.reverse_stages(instance)
         rev_seq = list(reversed(job_sequence))
 
@@ -1627,6 +1636,50 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return self._initialize_by_reversed_sequence(
             self.instance.get_wxd2_job_sequence
         )
+
+    def initialize_by_eddub_twt(self, factor: int = 1) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in EDDUB+w⁺ order.
+
+        Sort by ``(d⁺_j asc, w⁺_j desc, position asc)``
+        (:meth:`FFcDDWParameters.get_eddub_twt_job_sequence`). Feed that
+        sequence into the reverse-instance + IIT pipeline
+        (:meth:`_dispatch_by_reversed_sequence_with_iit`) — i.e. flip stages,
+        mixed-dispatch in reverse priority order, un-flip, and apply
+        ``make_semi_active`` → ``insert_idle_time``. Same family as
+        ``initialize_by_w1`` / ``initialize_by_wxd*``; the pipeline differs
+        from the forward-dispatch ``initialize_by_edd``.
+
+        When ``factor > 1``, the instance is coarsened (time units divided by
+        ``factor``) before dispatch, then the coarse schedule is reconstructed
+        onto the original scale via :func:`reconstruct_coarse_schedule`.
+        ``factor == 1`` is identical to the no-factor path.
+        """
+        if factor == 1:
+            return self._initialize_by_reversed_sequence(
+                self.instance.get_eddub_twt_job_sequence
+            )
+
+        start_elapsed = time.monotonic()
+
+        coarsened = FFcDDWParameters.coarsen_time_resolution(self.instance, factor)
+        coarse_sched, _coarse_obj = self._dispatch_by_reversed_sequence_with_iit(
+            coarsened.get_eddub_twt_job_sequence(), instance=coarsened
+        )
+        schedule = reconstruct_coarse_schedule(coarse_sched, self.instance, factor)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
+        obj_value = float(sum_e + sum_t)
+
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
+        )
+        return report
 
     def run_profile_fixed_ns(
         self,

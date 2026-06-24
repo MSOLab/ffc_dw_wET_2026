@@ -311,9 +311,7 @@ class FFcDDWParameters(FFcParameters):
                 f"got {type(instance).__name__}"
             )
         if factor <= 0:
-            raise ValueError(
-                f"factor must be a positive integer; got {factor!r}."
-            )
+            raise ValueError(f"factor must be a positive integer; got {factor!r}.")
 
         new_df = np.ceil(instance.p_manager.df.copy() / factor).astype(int)
         new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)
@@ -616,6 +614,23 @@ class FFcDDWParameters(FFcParameters):
         job_2_pos = {job_id: pos for pos, job_id in enumerate(self._job_id_list)}
         return sorted(
             self.job_id_list, key=lambda j: (self.job_2_dw_ub_map[j], job_2_pos[j])
+        )
+
+    def get_eddub_twt_job_sequence(self) -> list[str]:
+        """EDDUB + tardiness-weight priority job sequence.
+
+        Sort by ``(d⁺_j asc, w⁺_j desc, position asc)``. Same ``d⁺`` primary
+        key as ``get_eddub_job_sequence`` but with ``w⁺`` (tardiness weight)
+        descending as the secondary key — when deadlines tie, jobs with larger
+        tardiness penalty go first. Matches the dispatch-seed ordering from
+        commit c7f54d0.
+        """
+        twt = self._job_2_twt_map
+        dw_ub = self.job_2_dw_ub_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+        return sorted(
+            self.job_id_list,
+            key=lambda j: (dw_ub[j], -twt[j], job_2_pos[j]),
         )
 
     def get_weight_due_pos_job_sequence(self) -> list[str]:
