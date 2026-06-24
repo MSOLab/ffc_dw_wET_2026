@@ -777,3 +777,103 @@ def test_dispatch_seed_obj_is_non_negative() -> None:
     seed_obj = metrics["dispatch_seed_coarsened_obj"]
     assert seed_obj is not None
     assert seed_obj >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# WP-6: v3 seed_dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_option_seed_dispatch_v3() -> None:
+    """CoarsenSolveReconstructOption must accept 'v3' for seed_dispatch."""
+    opt = CoarsenSolveReconstructOption(seed_dispatch="v3")
+    assert opt.seed_dispatch == "v3"
+
+
+def test_build_dispatch_seed_schedule_v3_feasible() -> None:
+    """_build_dispatch_seed_schedule(coarsened, 'v3') must return feasible schedule."""
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        _build_dispatch_seed_schedule,
+    )
+
+    instance = _make_small_ddw_instance()
+    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor=50)
+    seed = _build_dispatch_seed_schedule(coarsened, "v3")
+
+    assert seed is not None
+    # Check precedence: each stage start ≥ previous stage end
+    start_map = seed.get_jik_2_start_time_map()
+    end_map = seed.get_jik_2_end_time_map()
+    for j in coarsened.job_id_list:
+        stages = coarsened.stage_id_list
+        for s_idx in range(1, len(stages)):
+            prev_machines = coarsened.stage_2_machines_map[stages[s_idx - 1]]
+            curr_machines = coarsened.stage_2_machines_map[stages[s_idx]]
+            for k_prev, k_curr in zip(prev_machines, curr_machines):
+                prev_end = end_map[(j, stages[s_idx - 1], k_prev)]
+                curr_start = start_map[(j, stages[s_idx], k_curr)]
+                assert curr_start >= prev_end
+
+
+def test_metrics_include_v3_seed_dispatch() -> None:
+    """metrics['seed_dispatch'] must reflect 'v3' option."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(
+        factor=50, solver_thread_cnt=1, seed_dispatch="v3"
+    )
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    assert record.result.metrics["seed_dispatch"] == "v3"
+
+
+def test_v3_seed_coarsened_obj_non_negative() -> None:
+    """dispatch_seed_coarsened_obj must be >= 0 with seed_dispatch='v3'."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(
+        factor=50, solver_thread_cnt=1, seed_dispatch="v3"
+    )
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    seed_obj = metrics["dispatch_seed_coarsened_obj"]
+    assert seed_obj is not None
+    assert seed_obj >= 0.0
+
+
+def test_v3_seed_no_regression_mixed() -> None:
+    """seed_dispatch='v3' must not regress vs 'mixed' on a small instance."""
+    instance = _make_small_ddw_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+
+    option_mixed = CoarsenSolveReconstructOption(
+        factor=50, timelimit_sec=2.0, solver_thread_cnt=1, seed_dispatch="mixed"
+    )
+    option_v3 = CoarsenSolveReconstructOption(
+        factor=50, timelimit_sec=2.0, solver_thread_cnt=1, seed_dispatch="v3"
+    )
+
+    spec_mixed = AlgSpec(instance=instance, option=option_mixed)
+    spec_v3 = AlgSpec(instance=instance, option=option_v3)
+
+    record_mixed = adapter.run(spec_mixed)
+    record_v3 = adapter.run(spec_v3)
+
+    assert record_mixed.result is not None
+    assert record_v3.result is not None
+    mixed_obj = record_mixed.result.obj_value
+    v3_obj = record_v3.result.obj_value
+
+    # Both must produce valid solutions
+    assert mixed_obj is not None
+    assert v3_obj is not None
+    # v3 must not regress vs mixed (same timelimit)
+    assert v3_obj <= mixed_obj * 1.0

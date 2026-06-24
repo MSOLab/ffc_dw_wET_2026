@@ -27,6 +27,9 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
     BN2DDispatcher,
     BN2DOption,
     MixedDispatcher,
+    build_v3_paired_dispatch_schedule,
+    dispatch_forward_with_iit,
+    dispatch_reversed_with_iit,
 )
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.flip_makespan_cp import (
@@ -71,6 +74,7 @@ from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.sorter import (
     DispatchSeqKey,
+    V3_PRIORITY_SET,
     dispatch_seq_job_sequence,
 )
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
@@ -93,9 +97,6 @@ from .solution_manager import FFcDDWSolution
 from .value_resolver import resolve_value_expr
 
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
-
-# v3 dispatch-initialization priority set: {edd, wspt_twt, wxd2} × {sd, rd} = 6 candidates.
-V3_PRIORITY_SET: tuple[DispatchSeqKey, ...] = ("edd", "wspt_twt", "wxd2")
 
 
 # Maps unprefixed phase labels emitted by
@@ -1451,110 +1452,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def _dispatch_by_simple_sequence_with_iit(
         self, job_sequence: Sequence[str]
     ) -> tuple[FFcSchedule, float]:
-        """Forward job-centric decode + semi-active + IIT. (sd 파이프라인 코어;
-        register 하지 않음 — caller 가 책임.)"""
-        dispatcher = MixedDispatcher(self.instance, logger=self.logger)
-        schedule = dispatcher.get_job_centric_schedule_by_sequence(job_sequence)
-        schedule.make_semi_active(self.instance.stage_2_job_2_p_map)
-        schedule.insert_idle_time(
-            self.instance.job_2_due_window_map,
-            self.instance.job_2_ewt_map,
-            self.instance.job_2_twt_map,
-        )
-        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
-        return schedule, float(sum_e + sum_t)
+        """sd pipeline thin wrapper → dispatch_forward_with_iit(self.instance, ...)."""
+        return dispatch_forward_with_iit(self.instance, job_sequence, self.logger)
 
     def _dispatch_by_reversed_sequence_with_iit(
         self,
         job_sequence: Sequence[str],
         instance: FFcDDWParameters | None = None,
     ) -> tuple[FFcSchedule, float]:
-        """Dispatch ``job_sequence`` via the reverse-instance + IIT pipeline.
-
-        Steps: stage-reverse the instance, dispatch ``reversed(job_sequence)``
-        with :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`
-        minimising makespan, unflip the result with
-        :meth:`FFcSchedule.as_reversed`, push left to semi-active form, then
-        insert idle time on the last stage.
-
-        ``instance`` defaults to ``self.instance``; passing a coarsened
-        instance enables dispatch on a time-resolved copy (see
-        :meth:`initialize_by_eddub_twt`).
-        """
-        instance = instance or self.instance
-        reversed_instance = FFcDDWParameters.reverse_stages(instance)
-        rev_seq = list(reversed(job_sequence))
-
-        rev_dispatcher = MixedDispatcher(reversed_instance, logger=self.logger)
-        reversed_full_1 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
-            rev_seq,
-            machine_then_job=True,
-            criteria="makespan",
+        """rd pipeline thin wrapper → dispatch_reversed_with_iit(instance or self.instance, ...)."""
+        return dispatch_reversed_with_iit(
+            instance or self.instance, job_sequence, self.logger
         )
-        reversed_full_2 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
-            rev_seq,
-            machine_then_job=False,
-            criteria="makespan",
-        )
-        if reversed_full_1 is None and reversed_full_2 is None:
-            raise RuntimeError(
-                f"_dispatch_by_reversed_sequence_with_iit: MixedDispatcher "
-                f"produced no schedule for {instance.name}"
-            )
-        if reversed_full_1 is not None:
-            schedule_1 = reversed_full_1.as_reversed()
-        else:
-            schedule_1 = None
-        if reversed_full_2 is not None:
-            schedule_2 = reversed_full_2.as_reversed()
-        else:
-            schedule_2 = None
-
-        if schedule_1 is not None and schedule_2 is not None:
-            sum_e_1, sum_t_1 = compute_weighted_earliness_tardiness(
-                schedule_1, instance
-            )
-            obj_1 = float(sum_e_1 + sum_t_1)
-
-            sum_e_2, sum_t_2 = compute_weighted_earliness_tardiness(
-                schedule_2, instance
-            )
-            obj_2 = float(sum_e_2 + sum_t_2)
-
-            if obj_1 <= obj_2:
-                schedule = schedule_1
-                self.logger.info(
-                    "_dispatch_by_reversed_sequence_with_iit: "
-                    "machine_then_job=True better (obj=%s) than "
-                    "machine_then_job=False (obj=%s)",
-                    obj_1,
-                    obj_2,
-                )
-            else:
-                schedule = schedule_2
-                self.logger.info(
-                    "_dispatch_by_reversed_sequence_with_iit: "
-                    "machine_then_job=False better (obj=%s) than "
-                    "machine_then_job=True (obj=%s)",
-                    obj_2,
-                    obj_1,
-                )
-        else:
-            schedule = schedule_1 or schedule_2
-
-        if schedule is None:
-            raise RuntimeError(
-                f"_dispatch_by_reversed_sequence_with_iit: no schedule after "
-                f"unflipping for {instance.name}"
-            )
-        schedule.make_semi_active(instance.stage_2_job_2_p_map)
-        schedule.insert_idle_time(
-            instance.job_2_due_window_map,
-            instance.job_2_ewt_map,
-            instance.job_2_twt_map,
-        )
-        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
-        return schedule, float(sum_e + sum_t)
 
     def initialize_by_edd(
         self,
@@ -1802,14 +1711,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         하나만 register — history 에 점 하나. 기본 P* = {edd, wspt_twt, wxd2}.
         """
         start_elapsed = time.monotonic()
-        candidates: list[tuple[float, str, FFcSchedule]] = []
-        for p in priorities:
-            seq = dispatch_seq_job_sequence(self.instance, p)
-            sd_sch, sd_obj = self._dispatch_by_simple_sequence_with_iit(seq)
-            candidates.append((sd_obj, f"sd:{p}", sd_sch))
-            rd_sch, rd_obj = self._dispatch_by_reversed_sequence_with_iit(seq)
-            candidates.append((rd_obj, f"rd:{p}", rd_sch))
-        best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
+        best_sch, best_obj, best_label = build_v3_paired_dispatch_schedule(
+            self.instance, priorities, self.logger
+        )
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed, obj_value=best_obj, obj_bound=None
@@ -1817,13 +1721,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self._register(
             report,
             FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
-        )
-        self.logger.info(
-            "dispatch_v3: best=%s obj=%s of %d candidates [%s]",
-            best_label,
-            best_obj,
-            len(candidates),
-            ", ".join(f"{lab}={obj:.0f}" for obj, lab, _ in candidates),
         )
         self._log_dispatch_seed_diagnostics(f"v3:{best_label}", best_sch)
         return report
@@ -2718,9 +2615,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         limit is enforced.
 
         ``seed_dispatch`` selects the dispatch seed strategy for warm-start
-        hints before solving: ``"job_wise"`` (single job-wise dispatch) or
-        ``"mixed"`` (best among mixed-dispatch np-list candidates). Default
-        is ``"mixed"``.
+        hints before solving: ``"job_wise"`` (single job-wise dispatch),
+        ``"mixed"`` (best among mixed-dispatch np-list candidates), or
+        ``"v3"`` (v3 paired-dispatch pool: priority×{sd,rd} min-wET on
+        coarsened scale). Default is ``"mixed"``.
 
         ``draw_gantt`` is accepted for API consistency but does not
         currently render a Gantt chart; any post-work would be placed after

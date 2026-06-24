@@ -52,6 +52,7 @@ from .cpsat_solver_options import CpsatSolverOptions, get_solver
 from .cumulative import BaseModelBuilder
 from .dispatcher.base import BaseDispatcher
 from .dispatcher.mixed import MixedDispatcher
+from .dispatcher.paired import build_v3_paired_dispatch_schedule
 from .dispatcher.utils import dispatch_job_sequence_by_stages
 
 __all__ = [
@@ -80,7 +81,7 @@ class CoarsenSolveReconstructOption(AlgOption):
     solver_thread_cnt: int = 1
     log_search_progress: bool = False
     error_if_infeasible: bool = False
-    seed_dispatch: Literal["job_wise", "mixed"] = "mixed"
+    seed_dispatch: Literal["job_wise", "mixed", "v3"] = "mixed"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -131,14 +132,19 @@ def _dispatch_seed_job_sequence(
 
 def _build_dispatch_seed_schedule(
     coarsened: FFcDDWParameters,
-    strategy: Literal["job_wise", "mixed"],
+    strategy: Literal["job_wise", "mixed", "v3"],
 ) -> FFcSchedule:
     """Build a seed schedule via dispatch + idle insertion on coarsened scale.
 
     * ``job_wise``: single job-wise dispatch using the EDD-derived sequence.
     * ``mixed``: enumerate all np-list candidates, insert idle, pick the one
       with minimum coarsened wET.
+    * ``v3``: v3 paired-dispatch pool on coarsened instance → min-wET.
     """
+    if strategy == "v3":
+        seed, _obj, _label = build_v3_paired_dispatch_schedule(coarsened)
+        return seed
+
     seq = _dispatch_seed_job_sequence(coarsened)
     dw = coarsened.job_2_due_window_map
     ewt = coarsened.job_2_ewt_map
@@ -175,7 +181,7 @@ def _solve_coarsened_model(
     solver_thread_cnt: int,
     log_search_progress: bool,
     build_start: float,
-    seed_dispatch: Literal["job_wise", "mixed"] = "mixed",
+    seed_dispatch: Literal["job_wise", "mixed", "v3"] = "mixed",
 ) -> tuple[
     str,
     dict[tuple[str, str], int] | None,
