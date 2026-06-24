@@ -6,7 +6,7 @@
 run_mode: FULL_RUN
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]   # 10-instance smoke subset
+ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 output_dir: output/20260624
 instance_worker_cnt: 16
@@ -14,22 +14,23 @@ draw_gantt: false
 painter_thread_cnt: 16
 
 scenarios:
-  - name: sd_edd            # Pan et al. (2017) EDD
+  - name: sd_edd # Pan et al. (2017) EDD
     timelimit: "0.09nc"
     output_subdir: sd_edd
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: edd }]
-  - name: sd_lsl            # Pan et al. (2017) LSL
+  - name: sd_lsl # Pan et al. (2017) LSL
     timelimit: "0.09nc"
     output_subdir: sd_lsl
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: lsl }]
-  - name: sd_osl            # Pan et al. (2017) OSL
+  - name: sd_osl # Pan et al. (2017) OSL
     timelimit: "0.09nc"
     output_subdir: sd_osl
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: osl }]
   - name: sd_eddub_twt
     timelimit: "0.09nc"
     output_subdir: sd_eddub_twt
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: eddub_twt }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: eddub_twt }]
   - name: sd_w1
     timelimit: "0.09nc"
     output_subdir: sd_w1
@@ -45,16 +46,20 @@ scenarios:
   - name: sd_weight_due_pos
     timelimit: "0.09nc"
     output_subdir: sd_weight_due_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: weight_due_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: weight_due_pos }]
   - name: sd_due_weight_pos
     timelimit: "0.09nc"
     output_subdir: sd_due_weight_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: due_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due_weight_pos }]
   - name: sd_due2_weight_pos
     timelimit: "0.09nc"
     output_subdir: sd_due2_weight_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: due2_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due2_weight_pos }]
   - name: sd_due_star_weight_pos
     timelimit: "0.09nc"
     output_subdir: sd_due_star_weight_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: due_star_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due_star_weight_pos }]

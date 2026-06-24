@@ -18,22 +18,23 @@ painter_thread_cnt: 96
 
 scenarios:
   # --- simple dispatch (forward job-centric decode) ---
-  - name: sd_edd            # Pan et al. (2017) EDD
+  - name: sd_edd # Pan et al. (2017) EDD
     timelimit: "0.09nc"
     output_subdir: sd_edd
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: edd }]
-  - name: sd_lsl            # Pan et al. (2017) LSL
+  - name: sd_lsl # Pan et al. (2017) LSL
     timelimit: "0.09nc"
     output_subdir: sd_lsl
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: lsl }]
-  - name: sd_osl            # Pan et al. (2017) OSL
+  - name: sd_osl # Pan et al. (2017) OSL
     timelimit: "0.09nc"
     output_subdir: sd_osl
     subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: osl }]
   - name: sd_eddub_twt
     timelimit: "0.09nc"
     output_subdir: sd_eddub_twt
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: eddub_twt }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: eddub_twt }]
   - name: sd_w1
     timelimit: "0.09nc"
     output_subdir: sd_w1
@@ -49,37 +50,45 @@ scenarios:
   - name: sd_weight_due_pos
     timelimit: "0.09nc"
     output_subdir: sd_weight_due_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: weight_due_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: weight_due_pos }]
   - name: sd_due_weight_pos
     timelimit: "0.09nc"
     output_subdir: sd_due_weight_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: due_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due_weight_pos }]
   - name: sd_due2_weight_pos
     timelimit: "0.09nc"
     output_subdir: sd_due2_weight_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: due2_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due2_weight_pos }]
   - name: sd_due_star_weight_pos
     timelimit: "0.09nc"
     output_subdir: sd_due_star_weight_pos
-    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: due_star_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due_star_weight_pos }]
 
   # --- reversed dispatch (reverse + IIT pipeline) ---
-  - name: rd_edd            # Pan et al. (2017) EDD
+  - name: rd_edd # Pan et al. (2017) EDD
     timelimit: "0.09nc"
     output_subdir: rd_edd
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: edd }]
-  - name: rd_lsl            # Pan et al. (2017) LSL
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: edd }]
+  - name: rd_lsl # Pan et al. (2017) LSL
     timelimit: "0.09nc"
     output_subdir: rd_lsl
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: lsl }]
-  - name: rd_osl            # Pan et al. (2017) OSL
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: lsl }]
+  - name: rd_osl # Pan et al. (2017) OSL
     timelimit: "0.09nc"
     output_subdir: rd_osl
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: osl }]
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: osl }]
   - name: rd_eddub_twt
     timelimit: "0.09nc"
     output_subdir: rd_eddub_twt
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: eddub_twt }]
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: eddub_twt }]
   - name: rd_w1
     timelimit: "0.09nc"
     output_subdir: rd_w1
@@ -87,24 +96,35 @@ scenarios:
   - name: rd_wxd1
     timelimit: "0.09nc"
     output_subdir: rd_wxd1
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: wxd1 }]
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd1 }]
   - name: rd_wxd2
     timelimit: "0.09nc"
     output_subdir: rd_wxd2
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: wxd2 }]
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd2 }]
   - name: rd_weight_due_pos
     timelimit: "0.09nc"
     output_subdir: rd_weight_due_pos
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: weight_due_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: weight_due_pos }]
   - name: rd_due_weight_pos
     timelimit: "0.09nc"
     output_subdir: rd_due_weight_pos
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: due_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: due_weight_pos }]
   - name: rd_due2_weight_pos
     timelimit: "0.09nc"
     output_subdir: rd_due2_weight_pos
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: due2_weight_pos }]
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: due2_weight_pos }]
   - name: rd_due_star_weight_pos
     timelimit: "0.09nc"
     output_subdir: rd_due_star_weight_pos
-    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: due_star_weight_pos }]
+    subroutine_flow:
+      [
+        {
+          method: initialize_by_reversed_dispatch,
+          sequence: due_star_weight_pos,
+        },
+      ]
