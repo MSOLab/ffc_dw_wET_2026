@@ -1,4 +1,4 @@
-"""Single-instance runner for FAM experiment orchestration."""
+"""Single-instance runner for FFcDWwET experiment orchestration."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Experiment orchestration package for FAM scheduling."""
+"""Experiment orchestration package for FFcDWwET scheduling."""
 
 from .artifact_layout import (
     FFcArtifactLayout,

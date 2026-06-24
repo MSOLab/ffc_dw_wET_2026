@@ -1,4 +1,4 @@
-"""Experiment orchestration entry point for FAM scheduling."""
+"""Experiment orchestration entry point for FFcDWwET scheduling."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260623/coarsen_solve_reconstruct_config.yaml")
+CONFIG_PATH = Path("metadata/20260624/20260615_init_config.yaml")
 
 
 def _parse_args() -> argparse.Namespace:

@@ -1,4 +1,4 @@
-"""Scenario runner and reporting for FAM experiment orchestration."""
+"""Scenario runner and reporting for FFcDWwET experiment orchestration."""
 
 import csv
 import json

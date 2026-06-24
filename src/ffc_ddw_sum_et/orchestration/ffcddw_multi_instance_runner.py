@@ -1,4 +1,4 @@
-"""Multi-instance concurrent runner for FAM experiment orchestration."""
+"""Multi-instance concurrent runner for FFcDWwET experiment orchestration."""
 
 from __future__ import annotations
 
