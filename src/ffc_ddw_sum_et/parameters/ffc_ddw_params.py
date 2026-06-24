@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import statistics as _statistics
 from dataclasses import dataclass
 from functools import cached_property
 from io import StringIO
@@ -853,6 +854,55 @@ class FFcDDWParameters(FFcParameters):
             )
 
         return sorted(early, key=early_key) + sorted(late, key=late_key)
+
+    def _center_penalty_job_sequence(self, center: float) -> list[str]:
+        """Sort jobs lexicographically by ``(-tp_j(c), ep_j(c), d⁺_j, native pos)``.
+
+        ``tp_j``/``ep_j`` are the tardiness/earliness penalties incurred if job
+        ``j`` completes at ``center``. Tardiness leads the key (descending, via
+        ``-tp``) because — unlike earliness, which ``insert_idle_time`` can
+        recover by delaying the start — tardiness is irreversible once the job
+        is dispatched too late. So a heavy-tardiness job is rushed to the front
+        regardless of its earliness, never letting earliness override the
+        tardiness ranking. Earliness breaks ties (ascending → most
+        earliness-averse last). The third key ``d⁺_j`` (EDD⁺) orders the central
+        block — jobs with ``tp=ep=0`` whose window straddles ``center`` — by due
+        upper bound; native position is the final stable tie-break.
+        """
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        def key(j: str) -> tuple[float, float, int, int]:
+            ep = ewt[j] * max(ddw[j][0] - center, 0)
+            tp = twt[j] * max(center - ddw[j][1], 0)
+            return (-tp, ep, ddw[j][1], job_2_pos[j])
+
+        return sorted(self._job_id_list, key=key)
+
+    def get_cpd_mean_job_sequence(self) -> list[str]:
+        """center = mean of midpoints (= wxd2's d_bar)."""
+        ddw = self._job_2_due_window_map
+        mids = [(ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list]
+        return self._center_penalty_job_sequence(sum(mids) / len(mids))
+
+    def get_cpd_wmean_job_sequence(self) -> list[str]:
+        """center = penalty-weighted mean of midpoints."""
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        num = sum(
+            (ewt[j] + twt[j]) * (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list
+        )
+        den = sum(ewt[j] + twt[j] for j in self._job_id_list)
+        return self._center_penalty_job_sequence(num / den)
+
+    def get_cpd_median_job_sequence(self) -> list[str]:
+        """center = median of midpoints (outlier-robust)."""
+        ddw = self._job_2_due_window_map
+        mids = [(ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list]
+        return self._center_penalty_job_sequence(_statistics.median(mids))
 
     def get_due_star_weight_pos_job_sequence(self) -> list[str]:
         """

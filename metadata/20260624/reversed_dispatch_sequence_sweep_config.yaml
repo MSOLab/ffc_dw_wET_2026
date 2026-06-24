@@ -71,3 +71,25 @@ scenarios:
           sequence: due_star_weight_pos,
         },
       ]
+  - name: rd_cpd_mean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_mean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_mean }]
+  - name: rd_cpd_wmean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_wmean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_wmean }]
+  - name: rd_cpd_median
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_median
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_median }]
+  - name: rd_cpd_best
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_best
+    subroutine_flow:
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_mean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_wmean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_median }

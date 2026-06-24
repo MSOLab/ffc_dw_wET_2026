@@ -41,6 +41,9 @@ DispatchSeqKey = Literal[
     "w1",
     "wxd1",
     "wxd2",
+    "cpd_mean",
+    "cpd_wmean",
+    "cpd_median",
 ]
 
 
@@ -73,6 +76,9 @@ def dispatch_seq_job_sequence(
         "w1": instance.get_w1_job_sequence,
         "wxd1": instance.get_wxd1_job_sequence,
         "wxd2": instance.get_wxd2_job_sequence,
+        "cpd_mean": instance.get_cpd_mean_job_sequence,
+        "cpd_wmean": instance.get_cpd_wmean_job_sequence,
+        "cpd_median": instance.get_cpd_median_job_sequence,
     }
     if key in direct:
         return direct[key]()

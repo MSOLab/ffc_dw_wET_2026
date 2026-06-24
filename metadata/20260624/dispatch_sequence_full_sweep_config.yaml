@@ -9,7 +9,7 @@
 run_mode: FULL_RUN
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-# ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
+ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 output_dir: output/20260624
 instance_worker_cnt: 96
@@ -67,6 +67,28 @@ scenarios:
     output_subdir: sd_due_star_weight_pos
     subroutine_flow:
       [{ method: initialize_by_simple_dispatch, sequence: due_star_weight_pos }]
+  - name: sd_cpd_mean
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_mean
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_mean }]
+  - name: sd_cpd_wmean
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_wmean
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_wmean }]
+  - name: sd_cpd_median
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_median
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_median }]
+  - name: sd_cpd_best
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_best
+    subroutine_flow:
+      - { method: initialize_by_simple_dispatch, sequence: cpd_mean }
+      - { method: initialize_by_simple_dispatch, sequence: cpd_wmean }
+      - { method: initialize_by_simple_dispatch, sequence: cpd_median }
 
   # --- reversed dispatch (reverse + IIT pipeline) ---
   - name: rd_edd # Pan et al. (2017) EDD
@@ -128,3 +150,25 @@ scenarios:
           sequence: due_star_weight_pos,
         },
       ]
+  - name: rd_cpd_mean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_mean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_mean }]
+  - name: rd_cpd_wmean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_wmean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_wmean }]
+  - name: rd_cpd_median
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_median
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_median }]
+  - name: rd_cpd_best
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_best
+    subroutine_flow:
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_mean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_wmean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_median }

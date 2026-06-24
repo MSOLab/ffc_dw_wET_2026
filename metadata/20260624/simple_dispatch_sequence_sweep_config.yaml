@@ -63,3 +63,25 @@ scenarios:
     output_subdir: sd_due_star_weight_pos
     subroutine_flow:
       [{ method: initialize_by_simple_dispatch, sequence: due_star_weight_pos }]
+  - name: sd_cpd_mean
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_mean
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_mean }]
+  - name: sd_cpd_wmean
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_wmean
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_wmean }]
+  - name: sd_cpd_median
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_median
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_median }]
+  - name: sd_cpd_best
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_best
+    subroutine_flow:
+      - { method: initialize_by_simple_dispatch, sequence: cpd_mean }
+      - { method: initialize_by_simple_dispatch, sequence: cpd_wmean }
+      - { method: initialize_by_simple_dispatch, sequence: cpd_median }
