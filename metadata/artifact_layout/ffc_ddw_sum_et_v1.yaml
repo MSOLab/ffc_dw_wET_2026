@@ -31,18 +31,24 @@ artifacts:
   # carries the controller call_context prefix
   # (e.g. "1-calc_mcf_lb_and_derive_full_sch_1_mcf_preemptive_sch") so files
   # sort by subroutine-flow step on disk and don't collide across steps.
+  # Nested under a `mcf_lb_phase_schedule/` subdir so the reporter's
+  # `find_artifacts("mcf_lb_phase_schedule", ...)` glob is scoped to its own
+  # files (`progress/mcf_lb_phase_schedule/*.json`) instead of greedily
+  # matching every flat JSON in the `progress/` zone.
   - scope: instance
     zone: progress
     kind: mcf_lb_phase_schedule
-    file_template: "{phase_name}.json"
+    file_template: "mcf_lb_phase_schedule/{phase_name}.json"
   # Compact-JSON phase snapshots from FlipMakespanCpDispatcher. Same shape as
   # `solution_json` (operations[]), so the reporter reuses
   # `_render_gantt_from_solution_json` to produce a `phase_gantt_png` per file.
-  # `phase_name` carries the controller call_context prefix.
+  # `phase_name` carries the controller call_context prefix. Nested under a
+  # `flip_makespan_cp/` subdir (mirrors `mcf_lb_phase_schedule`) so its
+  # `find_artifacts` glob can't be cross-matched by the MCF-LB discovery loop.
   - scope: instance
     zone: progress
     kind: flip_makespan_cp_phase_schedule
-    file_template: "{phase_name}.json"
+    file_template: "flip_makespan_cp/{phase_name}.json"
   # Per-instance phase-metric CSVs emitted by ``calc_mcf_lb_and_derive_full_sch``.
   # One row per (round, label) snapshot in the user-spec order; r2 rows carry
   # blank cells when round 2 did not run. Always emitted (independent of

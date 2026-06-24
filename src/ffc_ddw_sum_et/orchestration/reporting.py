@@ -1715,13 +1715,17 @@ class FFcDDWReporter:
                             self.layout.artifact_path("gantt_png", **scope),
                         )
                     )
-                # Flat MCF-LB phase schedules (run_mcf_lb): unified horizon.
+                # MCF-LB phase schedules (run_mcf_lb): unified horizon. Nested
+                # under ``progress/mcf_lb_phase_schedule/`` so this glob is
+                # scoped to its own files and no longer over-matches other flat
+                # JSONs (flip phase schedules, CSR trajectory) in ``progress/``.
                 for phase_json in self.layout.find_artifacts(
                     "mcf_lb_phase_schedule",
                     scenario_name=sc.name,
                     instance_name=ins,
                 ):
-                    # phase_name == file stem (template is "{phase_name}.json")
+                    # phase_name == file stem (template is
+                    # "mcf_lb_phase_schedule/{phase_name}.json")
                     phase_name = phase_json.stem
                     _add_mcf_phase(
                         ins,
