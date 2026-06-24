@@ -148,14 +148,14 @@ def get_eddub_job_sequence(self) -> list[str]:
 에 위임해 SSOT 유지:
 
 ```python
-ReverseDispatchSeqKey = Literal[
+DispatchSeqKey = Literal[
     "edd", "eddub_twt", "lsl", "osl",
     "weight_due_pos", "due_weight_pos", "due2_weight_pos", "due_star_weight_pos",
     "w1", "wxd1", "wxd2",
 ]
 
-def reverse_dispatch_seq_job_sequence(
-    instance: FFcDDWParameters, key: ReverseDispatchSeqKey
+def dispatch_seq_job_sequence(
+    instance: FFcDDWParameters, key: DispatchSeqKey
 ) -> list[str]:
     """Map a sweep key to its instance-derived forward priority sequence."""
     direct = {
@@ -177,7 +177,7 @@ def reverse_dispatch_seq_job_sequence(
     }
     if key in shared:
         return param_sort_job_sequence(instance, shared[key])
-    raise ValueError(f"Unknown ReverseDispatchSeqKey: {key!r}")
+    raise ValueError(f"Unknown DispatchSeqKey: {key!r}")
 ```
 
 > sorter.py의 "no runtime import from the rest of the package" 제약 유지: 위 함수는
@@ -187,26 +187,26 @@ def reverse_dispatch_seq_job_sequence(
 
 ```python
 def initialize_by_reversed_dispatch(
-    self, sequence: ReverseDispatchSeqKey
+    self, sequence: DispatchSeqKey
 ) -> SubroutineReport:
     """Step: ``sequence`` 규칙으로 정렬한 뒤 reverse-instance + IIT pipeline
     (:meth:`_dispatch_by_reversed_sequence_with_iit`)으로 incumbent를 seed한다.
 
     디코더(stage-flip → mixed dispatch(역순) → un-flip → make_semi_active →
     insert_idle_time)는 고정이고 정렬 규칙만 ``sequence`` 로 바뀐다. 키는
-    :func:`reverse_dispatch_seq_job_sequence` 참조. ``initialize_by_w1`` /
+    :func:`dispatch_seq_job_sequence` 참조. ``initialize_by_w1`` /
     ``initialize_by_eddub_twt`` 와 같은 reverse 계열이며, 이들을 단일 진입점으로
     일반화한 것이다.
     """
     return self._initialize_by_reversed_sequence(
-        lambda: reverse_dispatch_seq_job_sequence(self.instance, sequence)
+        lambda: dispatch_seq_job_sequence(self.instance, sequence)
     )
 ```
 
 - `_initialize_by_reversed_sequence` 위임 → step 계약 자동 충족.
 - 기존 `initialize_by_w1` 등 thin step은 **그대로 둔다**(다른 config가 참조). 새 step은
   추가일 뿐 제거/대체 아님.
-- import: `from ..parameters.sorter import ReverseDispatchSeqKey, reverse_dispatch_seq_job_sequence`.
+- import: `from ..parameters.sorter import DispatchSeqKey, dispatch_seq_job_sequence`.
 - 범위 결정: `factor`(coarsen-aware)는 이번 sweep 요구에 없음 → **YAGNI, 미포함**.
   필요 시 `eddub_twt` 처럼 후속 확장.
 
@@ -299,8 +299,8 @@ WP-1·WP-3 후. WP-1/WP-2는 병렬 가능.
 - D2의 Pan et al. (2017) 노트 추가. 코드 동작 변경 없음.
 
 ### WP-3 — 레지스트리 + 파라미터 step
-- **3a** `parameters/sorter.py`: D3a의 `ReverseDispatchSeqKey` +
-  `reverse_dispatch_seq_job_sequence`. `ParamSortKey` 불변(ISP).
+- **3a** `parameters/sorter.py`: D3a의 `DispatchSeqKey` +
+  `dispatch_seq_job_sequence`. `ParamSortKey` 불변(ISP).
 - **3b** `orchestration/controller.py`: D3b의 `initialize_by_reversed_dispatch`
   (`initialize_by_eddub_twt` 뒤) + import.
 - 의존: WP-1(lsl/osl getter 이름).
@@ -342,7 +342,7 @@ WP-1·WP-3 후. WP-1/WP-2는 병렬 가능.
 - ✅ **파라미터 step 1개 + 전용 레지스트리**(getter별 step 11개 대신). 디코더 고정·
    정렬만 비교라는 실험 의도와 KISS/DRY에 부합.
 - ✅ **`ParamSortKey` 미확장**(ISP): neh_cp·히트맵 소비자에 sweep 전용 키를 노출하지
-   않도록 별도 `ReverseDispatchSeqKey` 신설. 6개 공유 키는 `param_sort_job_sequence`
+   않도록 별도 `DispatchSeqKey` 신설. 6개 공유 키는 `param_sort_job_sequence`
    위임으로 SSOT.
    - *대안(미채택)*: `ParamSortKey` 에 edd/lsl/osl/... 추가 — 공유 Literal이 넓어져
      두 소비자가 의미 없는 키를 받게 됨(tradeoff: 레지스트리 1개로 단순하나 ISP 위반).
@@ -362,7 +362,7 @@ job-centric으로 한 번에 내리는 forward 디코드.
   scoring 없이 모든 job을 `dispatch_job_by_stages` 로 전 stage 통과. 기존
   `_stage_2_head_for_np` / `from_job_sequence_get_schedule_mixed` 재사용.
 - **`initialize_by_simple_dispatch(sequence)`** (`orchestration/controller.py`):
-  D3a의 `reverse_dispatch_seq_job_sequence` 레지스트리(디코더 무관, sequence만 제공)로
+  D3a의 `dispatch_seq_job_sequence` 레지스트리(디코더 무관, sequence만 제공)로
   정렬 → 위 디코드 → wET register. step 계약 직접 충족(`initialize_by_edd` 패턴).
   **IIT/semi-active 없음** — "simple"의 핵심(요청 시 IIT 변형 추가 가능).
 - **config**: `metadata/20260624/simple_dispatch_sequence_sweep_config.yaml`,

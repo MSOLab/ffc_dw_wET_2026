@@ -339,7 +339,7 @@ def test_initialize_by_reversed_dispatch_unknown_key_raises() -> None:
     instance = _make_instance()
     controller = _make_controller(instance)
 
-    with pytest.raises(ValueError, match="Unknown ReverseDispatchSeqKey"):
+    with pytest.raises(ValueError, match="Unknown DispatchSeqKey"):
         controller.initialize_by_reversed_dispatch(sequence="not_a_key")
 
 
@@ -393,5 +393,5 @@ def test_initialize_by_simple_dispatch_unknown_key_raises() -> None:
     instance = _make_instance()
     controller = _make_controller(instance)
 
-    with pytest.raises(ValueError, match="Unknown ReverseDispatchSeqKey"):
+    with pytest.raises(ValueError, match="Unknown DispatchSeqKey"):
         controller.initialize_by_simple_dispatch(sequence="not_a_key")

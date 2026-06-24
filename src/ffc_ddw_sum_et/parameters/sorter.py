@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 __all__ = [
     "ParamSortKey",
     "param_sort_job_sequence",
-    "ReverseDispatchSeqKey",
-    "reverse_dispatch_seq_job_sequence",
+    "DispatchSeqKey",
+    "dispatch_seq_job_sequence",
 ]
 
 ParamSortKey = Literal[
@@ -29,7 +29,7 @@ ParamSortKey = Literal[
     "wxd2",
 ]
 
-ReverseDispatchSeqKey = Literal[
+DispatchSeqKey = Literal[
     "edd",
     "eddub_twt",
     "lsl",
@@ -61,8 +61,8 @@ def param_sort_job_sequence(instance: FFcDDWParameters, key: ParamSortKey) -> li
     raise ValueError(f"Unknown ParamSortKey: {key!r}")
 
 
-def reverse_dispatch_seq_job_sequence(
-    instance: FFcDDWParameters, key: ReverseDispatchSeqKey
+def dispatch_seq_job_sequence(
+    instance: FFcDDWParameters, key: DispatchSeqKey
 ) -> list[str]:
     """Map a sweep key to its instance-derived forward priority sequence."""
     direct = {
@@ -84,4 +84,4 @@ def reverse_dispatch_seq_job_sequence(
     }
     if key in shared:
         return param_sort_job_sequence(instance, shared[key])
-    raise ValueError(f"Unknown ReverseDispatchSeqKey: {key!r}")
+    raise ValueError(f"Unknown DispatchSeqKey: {key!r}")
