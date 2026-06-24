@@ -607,9 +607,13 @@ class FFcDDWParameters(FFcParameters):
         }
 
     def get_eddub_job_sequence(self) -> list[str]:
-        """
-        Get the EDDUB (Earliest Due Date Upper Bound) job sequence.
-        Sort by job sequence in job_id_list to break ties.
+        """EDDUB (Earliest Due Date Upper Bound) job sequence.
+
+        Sort by ``d⁺_j`` ascending; ties break by native ``job_id_list`` order.
+
+        Pan et al. (2017)의 초기화 휴리스틱 중 EDD에 해당한다(같은 논문의 LSL =
+        :meth:`get_lsl_job_sequence`, OSL = :meth:`get_osl_job_sequence`). due-window
+        모델에서는 단일 due date ``d`` 를 상한 ``d⁺_j`` 로 둔다.
         """
         job_2_pos = {job_id: pos for pos, job_id in enumerate(self._job_id_list)}
         return sorted(
@@ -632,6 +636,34 @@ class FFcDDWParameters(FFcParameters):
             self.job_id_list,
             key=lambda j: (dw_ub[j], -twt[j], job_2_pos[j]),
         )
+
+    def get_lsl_job_sequence(self) -> list[str]:
+        """LSL (smallest slack on the last machine) job sequence — Pan et al. (2017).
+
+        Sort ascending by last-stage slack ``d⁺_j − p_{m,j}`` (m = 마지막 stage),
+        ties break by native ``job_id_list`` position. ``d⁺_j`` 는 due window 상한.
+        ``get_due_weight_pos_job_sequence`` 의 ``max(0, d⁺−p_last)`` 변형과 달리 0
+        클램프·추가 tie-break 없이 논문식 그대로다.
+        """
+        p_last = self.get_job_2_p_map_for_stage(self.stage_id_list[-1])
+        dw_ub = self.job_2_dw_ub_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+        return sorted(
+            self.job_id_list,
+            key=lambda j: (dw_ub[j] - p_last[j], job_2_pos[j]),
+        )
+
+    def get_osl_job_sequence(self) -> list[str]:
+        """OSL (overall slack time) job sequence — Pan et al. (2017).
+
+        Sort ascending by overall slack ``d⁺_j − Σ_i p_{i,j}`` (모든 stage 합),
+        ties break by native ``job_id_list`` position. LSL의 일반화로, slack을 전
+        stage 처리시간 합 기준으로 계산한다. 키는 기존 점수 맵
+        :meth:`get_job_2_due_date_ub_minus_p_map` 를 재사용한다(SSOT).
+        """
+        osl = self.get_job_2_due_date_ub_minus_p_map()  # d⁺_j − Σ_i p_{i,j}
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+        return sorted(self.job_id_list, key=lambda j: (osl[j], job_2_pos[j]))
 
     def get_weight_due_pos_job_sequence(self) -> list[str]:
         """

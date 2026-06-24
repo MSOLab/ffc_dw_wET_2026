@@ -542,3 +542,178 @@ def test_get_eddub_twt_job_sequence_all_jobs_included() -> None:
     seq = instance.get_eddub_twt_job_sequence()
     assert set(seq) == set(instance.job_id_list)
     assert len(seq) == len(instance.job_id_list)
+
+
+# -------------------------------------------------------------------
+# get_lsl_job_sequence
+# -------------------------------------------------------------------
+
+
+def _make_lsl_instance() -> FFcDDWParameters:
+    """3-job × 2-stage instance with controlled d⁺ and p_last values.
+
+    job0: d⁺=100, p_last=10 → slack=90, pos=0
+    job1: d⁺=200, p_last=30 → slack=170, pos=1
+    job2: d⁺=100, p_last=20 → slack=80,  pos=2
+    Expected LSL order (slack asc, pos tie-break): [job2, job0, job1]
+    """
+    return FFcDDWParameters(
+        name="lsl_test",
+        job_id_list=["job0", "job1", "job2"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="lsl_p", df=pd.DataFrame([[10, 10], [20, 30], [30, 20]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (150, 200), "job2": (50, 100)},
+        job_2_ewt_map={"job0": 1, "job1": 1, "job2": 1},
+        job_2_twt_map={"job0": 1, "job1": 1, "job2": 1},
+    )
+
+
+def test_get_lsl_job_sequence_slack_asc() -> None:
+    instance = _make_lsl_instance()
+    seq = instance.get_lsl_job_sequence()
+    assert seq == ["job2", "job0", "job1"]  # slack: 80, 90, 170
+
+
+def test_get_lsl_job_sequence_position_tiebreak() -> None:
+    """Same slack: preserve native position order."""
+    instance = FFcDDWParameters(
+        name="lsl_tie",
+        job_id_list=["a", "b", "c"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="lsl_tie_p", df=pd.DataFrame([[5, 10], [10, 10], [15, 10]])
+        ),
+        job_2_due_window_map={"a": (50, 100), "b": (50, 100), "c": (50, 100)},
+        job_2_ewt_map={"a": 1, "b": 1, "c": 1},
+        job_2_twt_map={"a": 1, "b": 1, "c": 1},
+    )
+    # All three have p_last=10, d⁺=100 → slack=90 for all
+    # Tie-break by position → [a, b, c]
+    seq = instance.get_lsl_job_sequence()
+    assert seq == ["a", "b", "c"]
+
+
+def test_get_lsl_job_sequence_all_jobs_included() -> None:
+    instance = _make_lsl_instance()
+    seq = instance.get_lsl_job_sequence()
+    assert set(seq) == set(instance.job_id_list)
+    assert len(seq) == len(instance.job_id_list)
+
+
+def test_get_lsl_no_clamp_vs_due_weight_pos() -> None:
+    """LSL must NOT apply max(0, ...) clamp — negative slack jobs should
+    sort before non-negative ones, unlike get_due_weight_pos_job_sequence."""
+    instance = FFcDDWParameters(
+        name="lsl_neg",
+        job_id_list=["a", "b"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="lsl_neg_p", df=pd.DataFrame([[5, 100], [5, 10]])
+        ),
+        job_2_due_window_map={"a": (50, 50), "b": (50, 100)},
+        job_2_ewt_map={"a": 1, "b": 1},
+        job_2_twt_map={"a": 1, "b": 1},
+    )
+    # a: slack = 50-100 = -50, b: slack = 100-10 = 90
+    lsl_seq = instance.get_lsl_job_sequence()
+    assert lsl_seq == ["a", "b"]  # -50 < 90, no clamp
+
+
+# -------------------------------------------------------------------
+# get_osl_job_sequence
+# -------------------------------------------------------------------
+
+
+def _make_osl_instance() -> FFcDDWParameters:
+    """3-job × 2-stage instance with controlled d⁺ and total p values.
+
+    job0: d⁺=100, total_p=10+10=20 → OSL=80,  pos=0
+    job1: d⁺=200, total_p=20+30=50 → OSL=150, pos=1
+    job2: d⁺=100, total_p=30+20=50 → OSL=50,  pos=2
+    Expected OSL order (slack asc, pos tie-break): [job2, job0, job1]
+    """
+    return FFcDDWParameters(
+        name="osl_test",
+        job_id_list=["job0", "job1", "job2"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="osl_p", df=pd.DataFrame([[10, 10], [20, 30], [30, 20]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (150, 200), "job2": (50, 100)},
+        job_2_ewt_map={"job0": 1, "job1": 1, "job2": 1},
+        job_2_twt_map={"job0": 1, "job1": 1, "job2": 1},
+    )
+
+
+def test_get_osl_job_sequence_osl_asc() -> None:
+    instance = _make_osl_instance()
+    seq = instance.get_osl_job_sequence()
+    assert seq == ["job2", "job0", "job1"]  # OSL: 50, 80, 150
+
+
+def test_get_osl_job_sequence_position_tiebreak() -> None:
+    """Same OSL: preserve native position order."""
+    instance = FFcDDWParameters(
+        name="osl_tie",
+        job_id_list=["a", "b", "c"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="osl_tie_p", df=pd.DataFrame([[5, 5], [10, 0], [15, 0]])
+        ),
+        job_2_due_window_map={"a": (50, 100), "b": (50, 100), "c": (50, 100)},
+        job_2_ewt_map={"a": 1, "b": 1, "c": 1},
+        job_2_twt_map={"a": 1, "b": 1, "c": 1},
+    )
+    # OSL: a=90, b=90, c=85 → c first, then a, b by position
+    seq = instance.get_osl_job_sequence()
+    assert seq == ["c", "a", "b"]
+
+
+def test_get_osl_job_sequence_all_jobs_included() -> None:
+    instance = _make_osl_instance()
+    seq = instance.get_osl_job_sequence()
+    assert set(seq) == set(instance.job_id_list)
+    assert len(seq) == len(instance.job_id_list)
+
+
+def test_get_osl_differs_from_lsl() -> None:
+    """OSL uses total p across all stages; LSL uses only last stage.
+    When per-job stage distributions differ, the orders must differ."""
+    # job0: d⁺=100, total_p=10+10=20, p_last=10 → OSL=80, LSL=90
+    # job1: d⁺=100, total_p=5+15=20, p_last=15 → OSL=80, LSL=85
+    # OSL: both 80 → tie by position → [job0, job1]
+    # LSL: job1=85 < job0=90 → [job1, job0]
+    instance = FFcDDWParameters(
+        name="osl_vs_lsl",
+        job_id_list=["job0", "job1"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="osl_vs_lsl_p", df=pd.DataFrame([[10, 10], [5, 15]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (50, 100)},
+        job_2_ewt_map={"job0": 1, "job1": 1},
+        job_2_twt_map={"job0": 1, "job1": 1},
+    )
+    osl_seq = instance.get_osl_job_sequence()
+    lsl_seq = instance.get_lsl_job_sequence()
+    assert osl_seq != lsl_seq
+    assert osl_seq == ["job0", "job1"]  # OSL tie → position
+    assert lsl_seq == ["job1", "job0"]  # LSL: 85 < 90
+
+
+def test_get_osl_uses_existing_map() -> None:
+    """get_osl_job_sequence must reuse get_job_2_due_date_ub_minus_p_map."""
+    instance = _make_osl_instance()
+    osl_map = instance.get_job_2_due_date_ub_minus_p_map()
+    seq = instance.get_osl_job_sequence()
+    # The sequence must be sorted by osl_map values
+    positions = [osl_map[j] for j in seq]
+    assert positions == sorted(positions)

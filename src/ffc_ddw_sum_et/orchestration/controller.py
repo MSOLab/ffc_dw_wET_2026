@@ -68,6 +68,10 @@ from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
 from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+from ffc_ddw_sum_et.parameters.sorter import (
+    ReverseDispatchSeqKey,
+    reverse_dispatch_seq_job_sequence,
+)
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 from ffc_ddw_sum_et.solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ffc_ddw_sum_et.solution.objectives import (
@@ -1674,6 +1678,52 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             elapsed_time=elapsed,
             obj_value=obj_value,
             obj_bound=None,
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
+        )
+        return report
+
+    def initialize_by_reversed_dispatch(
+        self, sequence: ReverseDispatchSeqKey
+    ) -> SubroutineReport:
+        """Step: ``sequence`` 규칙으로 정렬한 뒤 reverse-instance + IIT pipeline
+        (:meth:`_dispatch_by_reversed_sequence_with_iit`)으로 incumbent를 seed한다.
+
+        디코더(stage-flip → mixed dispatch(역순) → un-flip → make_semi_active →
+        insert_idle_time)는 고정이고 정렬 규칙만 ``sequence`` 로 바뀐다. 키는
+        :func:`reverse_dispatch_seq_job_sequence` 참조. ``initialize_by_w1`` /
+        ``initialize_by_eddub_twt`` 와 같은 reverse 계열이며, 이들을 단일 진입점으로
+        일반화한 것이다.
+        """
+        return self._initialize_by_reversed_sequence(
+            lambda: reverse_dispatch_seq_job_sequence(self.instance, sequence)
+        )
+
+    def initialize_by_simple_dispatch(
+        self, sequence: ReverseDispatchSeqKey
+    ) -> SubroutineReport:
+        """Step: seed an incumbent by a single job-centric MixedDispatcher decode.
+
+        ``sequence`` 를 forward 우선순위로 정렬한 뒤, 모든 job을 전 stage에 걸쳐
+        job-centric으로 한 번에 dispatch한다
+        (:meth:`MixedDispatcher.get_job_centric_schedule_by_sequence`,
+        ``np = job_count`` head). stage 역전·np-sweep·idle-time 삽입이 없는 가장
+        단순한 forward 디코드로, 복잡한 :meth:`initialize_by_reversed_dispatch` 의
+        대응이다. 정렬 키는 :func:`reverse_dispatch_seq_job_sequence` 와 동일
+        레지스트리를 쓴다(디코더 무관, sequence만 제공).
+        """
+        start_elapsed = time.monotonic()
+        job_sequence = reverse_dispatch_seq_job_sequence(self.instance, sequence)
+        dispatcher = MixedDispatcher(self.instance, logger=self.logger)
+        schedule = dispatcher.get_job_centric_schedule_by_sequence(job_sequence)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
+        obj_value = float(sum_e + sum_t)
+
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed, obj_value=obj_value, obj_bound=None
         )
         self._register(
             report,

@@ -129,6 +129,39 @@ class MixedDispatcher(BaseDispatcher):
 
         return best_sch
 
+    def get_job_centric_schedule_by_sequence(
+        self,
+        job_sequence: Sequence[str],
+        *,
+        schedule: FFcSchedule | None = None,
+        from_stage: str | None = None,
+        job_2_release_t: dict[str, int] | None = None,
+    ) -> FFcSchedule:
+        """Single job-centric decode of ``job_sequence``.
+
+        Dispatch every job through all stages in sequence order (the full
+        ``np = job_count`` head), in exactly one pass — no np-sweep, no scoring.
+        Unlike :meth:`get_best_mixed_schedule_by_sequence` (which enumerates np
+        candidates and keeps the best), this is the simplest mixed decode: the
+        head covers all jobs, so each is sent ``job_by_stages`` and nothing
+        falls through to the stage-by-stage tail.
+        """
+        _schedule = (
+            schedule.deepcopy()
+            if schedule is not None
+            else self._create_empty_schedule()
+        )
+        stage_2_head = self._stage_2_head_for_np(self.job_count, from_stage=from_stage)
+        from_job_sequence_get_schedule_mixed(
+            _schedule,
+            job_sequence,
+            self.stage_2_job_2_p,
+            stage_2_head,
+            from_stage=from_stage,
+            job_2_release=job_2_release_t,
+        )
+        return _schedule
+
     def get_schedule_by_cds(
         self,
         schedule: FFcSchedule | None = None,

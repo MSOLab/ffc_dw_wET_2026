@@ -289,3 +289,109 @@ def test_initialize_by_eddub_twt_feasible_full_schedule() -> None:
         for job_id in instance.job_id_list:
             e = sched.get_job_end_time(stage_id, job_id)
             assert e > 0
+
+
+# -------------------------------------------------------------------
+# initialize_by_reversed_dispatch
+# -------------------------------------------------------------------
+
+
+def test_initialize_by_reversed_dispatch_lsl_registers_full_schedule() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_reversed_dispatch(sequence="lsl")
+
+    assert report.obj_value is not None
+    assert report.obj_bound is None
+    assert report.elapsed_time >= 0
+    assert len(controller.solution_manager.history) == 1
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_reversed_dispatch_osl_registers_full_schedule() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_reversed_dispatch(sequence="osl")
+
+    assert report.obj_value is not None
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_reversed_dispatch_unknown_key_raises() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    with pytest.raises(ValueError, match="Unknown ReverseDispatchSeqKey"):
+        controller.initialize_by_reversed_dispatch(sequence="not_a_key")
+
+
+# -------------------------------------------------------------------
+# initialize_by_simple_dispatch (forward job-centric MixedDispatcher decode)
+# -------------------------------------------------------------------
+
+
+def test_initialize_by_simple_dispatch_registers_full_schedule() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_simple_dispatch(sequence="edd")
+
+    assert report.obj_value is not None
+    assert report.obj_bound is None
+    assert report.elapsed_time >= 0
+    assert len(controller.solution_manager.history) == 1
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+
+    # job-centric decode places every job at every stage
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_simple_dispatch_lsl_osl_feasible() -> None:
+    for sequence in ("lsl", "osl"):
+        instance = _make_instance()
+        controller = _make_controller(instance)
+
+        report = controller.initialize_by_simple_dispatch(sequence=sequence)
+
+        incumbent = controller.solution_manager.get_incumbent()
+        assert incumbent is not None
+        assert incumbent.schedule is not None
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            incumbent.schedule, instance
+        )
+        assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_simple_dispatch_unknown_key_raises() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    with pytest.raises(ValueError, match="Unknown ReverseDispatchSeqKey"):
+        controller.initialize_by_simple_dispatch(sequence="not_a_key")
