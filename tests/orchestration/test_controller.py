@@ -464,3 +464,71 @@ def test_initialize_by_simple_dispatch_iit_improves_or_equals_raw() -> None:
     # At least one start time must be right-shifted (idle actually inserted)
     any_right_shift = any(iit_start_map[k] > raw_start_map[k] for k in raw_start_map)
     assert any_right_shift, "No idle time was inserted; all start times unchanged"
+
+
+def test_initialize_by_dispatch_v3_registers_single_incumbent() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_dispatch_v3()
+
+    assert report.obj_value is not None
+    assert report.obj_bound is None
+    assert report.elapsed_time >= 0
+    assert len(controller.solution_manager.history) == 1
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_dispatch_v3_picks_min_of_six() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_dispatch_v3()
+
+    # Call helpers directly to compute all 6 obj values
+    helpers = []
+    for p in ("edd", "wspt_twt", "wxd2"):
+        seq = dispatch_seq_job_sequence(instance, p)
+        sd_sch, sd_obj = controller._dispatch_by_simple_sequence_with_iit(seq)
+        helpers.append((sd_obj, f"sd:{p}"))
+        rd_sch, rd_obj = controller._dispatch_by_reversed_sequence_with_iit(seq)
+        helpers.append((rd_obj, f"rd:{p}"))
+
+    min_obj = min(obj for obj, _ in helpers)
+    assert report.obj_value == min_obj
+
+
+def test_initialize_by_dispatch_v3_is_deterministic() -> None:
+    instance = _make_instance()
+    controller1 = _make_controller(instance)
+    controller2 = _make_controller(instance)
+
+    report1 = controller1.initialize_by_dispatch_v3()
+    report2 = controller2.initialize_by_dispatch_v3()
+
+    assert report1.obj_value == report2.obj_value
+
+
+def test_initialize_by_simple_dispatch_uses_helper() -> None:
+    """Regression: ensure initialize_by_simple_dispatch produces same result
+    as calling the extracted helper directly."""
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_simple_dispatch(sequence="edd")
+    seq = dispatch_seq_job_sequence(instance, "edd")
+    helper_sch, helper_obj = controller._dispatch_by_simple_sequence_with_iit(seq)
+
+    assert report.obj_value == helper_obj
+    assert report.obj_bound is None

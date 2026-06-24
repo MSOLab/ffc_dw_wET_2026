@@ -94,6 +94,9 @@ from .value_resolver import resolve_value_expr
 
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
 
+# v3 dispatch-initialization priority set: {edd, wspt_twt, wxd2} × {sd, rd} = 6 candidates.
+V3_PRIORITY_SET: tuple[DispatchSeqKey, ...] = ("edd", "wspt_twt", "wxd2")
+
 
 # Maps unprefixed phase labels emitted by
 # ``build_full_sch_from_last_stage_only_sch`` (algorithm-side) onto the
@@ -1445,6 +1448,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         return schedule, obj_value
 
+    def _dispatch_by_simple_sequence_with_iit(
+        self, job_sequence: Sequence[str]
+    ) -> tuple[FFcSchedule, float]:
+        """Forward job-centric decode + semi-active + IIT. (sd 파이프라인 코어;
+        register 하지 않음 — caller 가 책임.)"""
+        dispatcher = MixedDispatcher(self.instance, logger=self.logger)
+        schedule = dispatcher.get_job_centric_schedule_by_sequence(job_sequence)
+        schedule.make_semi_active(self.instance.stage_2_job_2_p_map)
+        schedule.insert_idle_time(
+            self.instance.job_2_due_window_map,
+            self.instance.job_2_ewt_map,
+            self.instance.job_2_twt_map,
+        )
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
+        return schedule, float(sum_e + sum_t)
+
     def _dispatch_by_reversed_sequence_with_iit(
         self,
         job_sequence: Sequence[str],
@@ -1762,16 +1781,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """
         start_elapsed = time.monotonic()
         job_sequence = dispatch_seq_job_sequence(self.instance, sequence)
-        dispatcher = MixedDispatcher(self.instance, logger=self.logger)
-        schedule = dispatcher.get_job_centric_schedule_by_sequence(job_sequence)
-        schedule.make_semi_active(self.instance.stage_2_job_2_p_map)
-        schedule.insert_idle_time(
-            self.instance.job_2_due_window_map,
-            self.instance.job_2_ewt_map,
-            self.instance.job_2_twt_map,
-        )
-        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
-        obj_value = float(sum_e + sum_t)
+        schedule, obj_value = self._dispatch_by_simple_sequence_with_iit(job_sequence)
 
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
@@ -1782,6 +1792,40 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
         self._log_dispatch_seed_diagnostics(f"sd:{sequence}", schedule)
+        return report
+
+    def initialize_by_dispatch_v3(
+        self, priorities: Sequence[DispatchSeqKey] = V3_PRIORITY_SET
+    ) -> SubroutineReport:
+        """Step: justification-v3 paired dispatch pool. 각 priority 를 sd/rd 두
+        방향으로 디코드(2·len(priorities) 스케줄)한 뒤 weighted-ET 최소 incumbent
+        하나만 register — history 에 점 하나. 기본 P* = {edd, wspt_twt, wxd2}.
+        """
+        start_elapsed = time.monotonic()
+        candidates: list[tuple[float, str, FFcSchedule]] = []
+        for p in priorities:
+            seq = dispatch_seq_job_sequence(self.instance, p)
+            sd_sch, sd_obj = self._dispatch_by_simple_sequence_with_iit(seq)
+            candidates.append((sd_obj, f"sd:{p}", sd_sch))
+            rd_sch, rd_obj = self._dispatch_by_reversed_sequence_with_iit(seq)
+            candidates.append((rd_obj, f"rd:{p}", rd_sch))
+        best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed, obj_value=best_obj, obj_bound=None
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
+        )
+        self.logger.info(
+            "dispatch_v3: best=%s obj=%s of %d candidates [%s]",
+            best_label,
+            best_obj,
+            len(candidates),
+            ", ".join(f"{lab}={obj:.0f}" for obj, lab, _ in candidates),
+        )
+        self._log_dispatch_seed_diagnostics(f"v3:{best_label}", best_sch)
         return report
 
     def run_profile_fixed_ns(

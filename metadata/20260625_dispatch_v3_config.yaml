@@ -1,0 +1,20 @@
+# v3 dispatch-initialization: paired P* best-of-6, single point
+# P* = {edd, wspt_twt, wxd2}, direction-symmetric (sd/rd), m=3
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [0, 1, 2]
+
+output_dir: output
+
+draw_gantt: true
+painter_thread_cnt: 2
+
+scenarios:
+  - name: dispatch_v3
+    timelimit: 60.0
+    output_subdir: dispatch_v3
+    subroutine_flow:
+      - method: initialize_by_dispatch_v3

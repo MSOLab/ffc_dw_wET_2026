@@ -1,0 +1,23 @@
+# v3 dispatch-initialization: paired P* best-of-6, single point — FULL large set
+# P* = {edd, wspt_twt, wxd2}, direction-symmetric (sd/rd), m=3
+# Basis: analysis/20260625_dispatch_init_justification_3.md
+# Expected paired-oracle result: obj 153,184 / RPDf 0.8263 (1440 large instances).
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260625
+
+instance_worker_cnt: 48
+draw_gantt: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: dispatch_v3
+    timelimit: 60.0
+    output_subdir: dispatch_v3
+    subroutine_flow:
+      - method: initialize_by_dispatch_v3
