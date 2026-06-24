@@ -876,6 +876,98 @@ class FFcDDWParameters(FFcParameters):
 
         return sorted(early, key=early_key) + sorted(late, key=late_key)
 
+    def get_wxd3_job_sequence(self) -> list[str]:
+        """wxd2 partition (tie→early) + 그룹 내 d̄-center 가중 penalty 정렬.
+
+        Partition: earliness_aversion <= tardiness_aversion → early, else late.
+        Tie (==) goes to early (wxd2 와 반대).
+
+        Group sorting uses actual weighted penalty if the job sits at d̄:
+        - early group: sort by tp_j(d̄) descending = (-tp_j, native_pos) ascending
+        - late group:  sort by ep_j(d̄) ascending = (ep_j, native_pos) ascending
+        """
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list}
+        d_bar = sum(d_mid.values()) / len(d_mid)
+
+        earliness_aversion_score = {
+            j: ewt[j] + (ddw[j][0] - d_bar) for j in self._job_id_list
+        }
+        tardiness_aversion_score = {
+            j: twt[j] + (d_bar - ddw[j][1]) for j in self._job_id_list
+        }
+        early = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion_score[j] <= tardiness_aversion_score[j]
+        ]
+        late = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion_score[j] > tardiness_aversion_score[j]
+        ]
+
+        def early_key(j: str) -> tuple[float, int]:
+            tp = twt[j] * max(d_bar - ddw[j][1], 0)
+            return (-tp, job_2_pos[j])
+
+        def late_key(j: str) -> tuple[float, int]:
+            ep = ewt[j] * max(ddw[j][0] - d_bar, 0)
+            return (ep, job_2_pos[j])
+
+        return sorted(early, key=early_key) + sorted(late, key=late_key)
+
+    def get_wxd4_job_sequence(self) -> list[str]:
+        """wxd3 와 동일하나 그룹 내 penalty 를 앞-group 마지막-stage 완료 추정
+        baseline = max(min_j r_j + Σ_{early} p_last_j / m_last, d̄) 에서 측정."""
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list}
+        d_bar = sum(d_mid.values()) / len(d_mid)
+
+        earliness_aversion_score = {
+            j: ewt[j] + (ddw[j][0] - d_bar) for j in self._job_id_list
+        }
+        tardiness_aversion_score = {
+            j: twt[j] + (d_bar - ddw[j][1]) for j in self._job_id_list
+        }
+        early = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion_score[j] <= tardiness_aversion_score[j]
+        ]
+        late = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion_score[j] > tardiness_aversion_score[j]
+        ]
+
+        last_stage_id = self.stage_id_list[-1]
+        p_last = self.get_job_2_p_map_for_stage(last_stage_id)
+        r_j = self.get_job_2_p_sum_except_last_stage()
+        early_p_last_sum = sum(p_last[j] for j in early)
+        baseline = max(
+            min(r_j.values()) + early_p_last_sum / self.last_stage_mc_count,
+            d_bar,
+        )
+
+        def early_key(j: str) -> tuple[float, int]:
+            tp = twt[j] * max(baseline - ddw[j][1], 0)
+            return (-tp, job_2_pos[j])
+
+        def late_key(j: str) -> tuple[float, int]:
+            ep = ewt[j] * max(ddw[j][0] - baseline, 0)
+            return (ep, job_2_pos[j])
+
+        return sorted(early, key=early_key) + sorted(late, key=late_key)
+
     def _center_penalty_job_sequence(self, center: float) -> list[str]:
         """Sort jobs lexicographically by ``(-tp_j(c), ep_j(c), d⁺_j, native pos)``.
 

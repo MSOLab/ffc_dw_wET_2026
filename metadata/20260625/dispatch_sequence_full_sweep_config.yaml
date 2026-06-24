@@ -1,0 +1,203 @@
+# Dispatch sequence full sweep (wxd3/wxd4 추가): 전체 large instance에 대해
+#   (simple, reverse) x (모든 instance-기반 job priority sequence)
+# 를 한 번에 수행. 20260624 full sweep을 그대로 잇고 wxd3/wxd4 두 신규 rule을 추가.
+#   - wxd3: wxd2 partition(tie→early) + 그룹 내 d̄-center 가중 penalty 정렬
+#   - wxd4: wxd3와 동일하나 penalty 측정 기준선을
+#           max(min_j r_j + Σ_early p_last_j / m_last, d̄) (마지막 stage 완료 추정)
+#   - initialize_by_simple_dispatch: forward job-centric MixedDispatcher 디코드
+#   - initialize_by_reversed_dispatch: reverse + IIT pipeline
+# See plans/20260625/wxd3_wxd4_dispatch.md
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]  # 10-instance smoke subset
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+output_dir: output/20260625
+instance_worker_cnt: 96
+draw_gantt: false
+painter_thread_cnt: 96
+
+scenarios:
+  # --- simple dispatch (forward job-centric decode) ---
+  - name: sd_edd # Pan et al. (2017) EDD
+    timelimit: "0.09nc"
+    output_subdir: sd_edd
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: edd }]
+  - name: sd_lsl # Pan et al. (2017) LSL
+    timelimit: "0.09nc"
+    output_subdir: sd_lsl
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: lsl }]
+  - name: sd_osl # Pan et al. (2017) OSL
+    timelimit: "0.09nc"
+    output_subdir: sd_osl
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: osl }]
+  - name: sd_eddub_twt
+    timelimit: "0.09nc"
+    output_subdir: sd_eddub_twt
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: eddub_twt }]
+  - name: sd_w1
+    timelimit: "0.09nc"
+    output_subdir: sd_w1
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: w1 }]
+  - name: sd_wspt_twt # WSPT (w⁺/P): dominates tight+narrow (T=0.6,R=0.2) region
+    timelimit: "0.09nc"
+    output_subdir: sd_wspt_twt
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: wspt_twt }]
+  - name: sd_wxd1
+    timelimit: "0.09nc"
+    output_subdir: sd_wxd1
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: wxd1 }]
+  - name: sd_wxd2
+    timelimit: "0.09nc"
+    output_subdir: sd_wxd2
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: wxd2 }]
+  - name: sd_wxd3
+    timelimit: "0.09nc"
+    output_subdir: sd_wxd3
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: wxd3 }]
+  - name: sd_wxd4
+    timelimit: "0.09nc"
+    output_subdir: sd_wxd4
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: wxd4 }]
+  - name: sd_weight_due_pos
+    timelimit: "0.09nc"
+    output_subdir: sd_weight_due_pos
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: weight_due_pos }]
+  - name: sd_due_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: sd_due_weight_pos
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due_weight_pos }]
+  - name: sd_due2_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: sd_due2_weight_pos
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due2_weight_pos }]
+  - name: sd_due_star_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: sd_due_star_weight_pos
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: due_star_weight_pos }]
+  - name: sd_cpd_mean
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_mean
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_mean }]
+  - name: sd_cpd_wmean
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_wmean
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_wmean }]
+  - name: sd_cpd_median
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_median
+    subroutine_flow:
+      [{ method: initialize_by_simple_dispatch, sequence: cpd_median }]
+  - name: sd_cpd_best
+    timelimit: "0.09nc"
+    output_subdir: sd_cpd_best
+    subroutine_flow:
+      - { method: initialize_by_simple_dispatch, sequence: cpd_mean }
+      - { method: initialize_by_simple_dispatch, sequence: cpd_wmean }
+      - { method: initialize_by_simple_dispatch, sequence: cpd_median }
+
+  # --- reversed dispatch (reverse + IIT pipeline) ---
+  - name: rd_edd # Pan et al. (2017) EDD
+    timelimit: "0.09nc"
+    output_subdir: rd_edd
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: edd }]
+  - name: rd_lsl # Pan et al. (2017) LSL
+    timelimit: "0.09nc"
+    output_subdir: rd_lsl
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: lsl }]
+  - name: rd_osl # Pan et al. (2017) OSL
+    timelimit: "0.09nc"
+    output_subdir: rd_osl
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: osl }]
+  - name: rd_eddub_twt
+    timelimit: "0.09nc"
+    output_subdir: rd_eddub_twt
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: eddub_twt }]
+  - name: rd_w1
+    timelimit: "0.09nc"
+    output_subdir: rd_w1
+    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: w1 }]
+  - name: rd_wspt_twt # WSPT (w⁺/P): dominates tight+narrow (T=0.6,R=0.2) region
+    timelimit: "0.09nc"
+    output_subdir: rd_wspt_twt
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wspt_twt }]
+  - name: rd_wxd1
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd1
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd1 }]
+  - name: rd_wxd2
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd2
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd2 }]
+  - name: rd_wxd3
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd3
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd3 }]
+  - name: rd_wxd4
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd4
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd4 }]
+  - name: rd_weight_due_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_weight_due_pos
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: weight_due_pos }]
+  - name: rd_due_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_due_weight_pos
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: due_weight_pos }]
+  - name: rd_due2_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_due2_weight_pos
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: due2_weight_pos }]
+  - name: rd_due_star_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_due_star_weight_pos
+    subroutine_flow:
+      [
+        {
+          method: initialize_by_reversed_dispatch,
+          sequence: due_star_weight_pos,
+        },
+      ]
+  - name: rd_cpd_mean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_mean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_mean }]
+  - name: rd_cpd_wmean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_wmean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_wmean }]
+  - name: rd_cpd_median
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_median
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_median }]
+  - name: rd_cpd_best
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_best
+    subroutine_flow:
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_mean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_wmean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_median }
