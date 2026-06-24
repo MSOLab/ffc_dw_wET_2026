@@ -1026,6 +1026,143 @@ class FFcDDWParameters(FFcParameters):
 
         return sorted(early, key=early_key) + sorted(late, key=late_key)
 
+    def get_wxd6_job_sequence(self) -> list[str]:
+        """wxd2/5 곱셈형 키 + 2-center group sorting.
+
+        Partition is identical to wxd5:
+            d̄₅ = max(mean_midpoint, min r_j + Σ_j p_last_j / (m_last × 2))
+            early if earliness_aversion < tardiness_aversion, else late (tie→late).
+
+        Sorting centers are separated from partition:
+            early_center = min r_j + Σ_all p_last_j / m_last   (approx makespan, no ÷2, no floor)
+            late_center  = min r_j                              (raw)
+
+        - early group: sort ascending by (w⁺_j - 2·w⁻_j + 2·ew_max) * (d⁻_j - early_center)
+        - late group:  sort ascending by (w⁻_j - 2·w⁺_j + 2·tw_max) * (d⁺_j - late_center)
+        """
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list}
+        mean_midpoint = sum(d_mid.values()) / len(d_mid)
+
+        last_stage_id = self.stage_id_list[-1]
+        p_last = self.get_job_2_p_map_for_stage(last_stage_id)
+        r_j = self.get_job_2_p_sum_except_last_stage()
+        p_last_total = sum(p_last.values())
+        min_r = min(r_j.values())
+        m_last = self.last_stage_mc_count
+
+        # partition center (wxd5 d̄, ×2 유지)
+        d_bar = max(mean_midpoint, min_r + p_last_total / (m_last * 2))
+
+        # sorting centers (group-specific)
+        early_center = min_r + p_last_total / m_last
+        late_center = min_r
+
+        # partition (wxd5 와 동일: aversion score + tie>=→late)
+        earliness_aversion = {
+            j: ewt[j] + (ddw[j][0] - d_bar) for j in self._job_id_list
+        }
+        tardiness_aversion = {
+            j: twt[j] + (d_bar - ddw[j][1]) for j in self._job_id_list
+        }
+        early = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion[j] < tardiness_aversion[j]
+        ]
+        late = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion[j] >= tardiness_aversion[j]
+        ]
+
+        ew_max = max(ewt.values())
+        tw_max = max(twt.values())
+
+        def early_key(j: str) -> tuple[float, int]:
+            return (
+                (twt[j] - 2 * ewt[j] + 2 * ew_max) * (ddw[j][0] - early_center),
+                job_2_pos[j],
+            )
+
+        def late_key(j: str) -> tuple[float, int]:
+            return (
+                (ewt[j] - 2 * twt[j] + 2 * tw_max) * (ddw[j][1] - late_center),
+                job_2_pos[j],
+            )
+
+        return sorted(early, key=early_key) + sorted(late, key=late_key)
+
+    def get_wxd7_job_sequence(self) -> list[str]:
+        """쌩 weighted penalty + 2-center group sorting.
+
+        Partition is identical to wxd5:
+            d̄₅ = max(mean_midpoint, min r_j + Σ_j p_last_j / (m_last × 2))
+            early if earliness_aversion < tardiness_aversion, else late (tie→late).
+
+        Sorting centers are separated from partition:
+            early_center = min r_j + Σ_all p_last_j / m_last   (approx makespan, no ÷2, no floor)
+            late_center  = min r_j                              (raw)
+
+        - early group: sort ascending by -tp_j(early_center)
+            where tp_j(c) = w⁺_j × max(c - d⁺_j, 0)
+        - late group:  sort ascending by ep_j(late_center)
+            where ep_j(c) = w⁻_j × max(d⁻_j - c, 0)
+        """
+        ewt = self._job_2_ewt_map
+        twt = self._job_2_twt_map
+        ddw = self._job_2_due_window_map
+        job_2_pos = {j: pos for pos, j in enumerate(self._job_id_list)}
+
+        d_mid = {j: (ddw[j][0] + ddw[j][1]) / 2 for j in self._job_id_list}
+        mean_midpoint = sum(d_mid.values()) / len(d_mid)
+
+        last_stage_id = self.stage_id_list[-1]
+        p_last = self.get_job_2_p_map_for_stage(last_stage_id)
+        r_j = self.get_job_2_p_sum_except_last_stage()
+        p_last_total = sum(p_last.values())
+        min_r = min(r_j.values())
+        m_last = self.last_stage_mc_count
+
+        # partition center (wxd5 d̄, ×2 유지)
+        d_bar = max(mean_midpoint, min_r + p_last_total / (m_last * 2))
+
+        # sorting centers (group-specific)
+        early_center = min_r + p_last_total / m_last
+        late_center = min_r
+
+        # partition (wxd5 와 동일: aversion score + tie>=→late)
+        earliness_aversion = {
+            j: ewt[j] + (ddw[j][0] - d_bar) for j in self._job_id_list
+        }
+        tardiness_aversion = {
+            j: twt[j] + (d_bar - ddw[j][1]) for j in self._job_id_list
+        }
+        early = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion[j] < tardiness_aversion[j]
+        ]
+        late = [
+            j
+            for j in self._job_id_list
+            if earliness_aversion[j] >= tardiness_aversion[j]
+        ]
+
+        def early_key(j: str) -> tuple[float, int]:
+            tp = twt[j] * max(early_center - ddw[j][1], 0)
+            return (-tp, job_2_pos[j])
+
+        def late_key(j: str) -> tuple[float, int]:
+            ep = ewt[j] * max(ddw[j][0] - late_center, 0)
+            return (ep, job_2_pos[j])
+
+        return sorted(early, key=early_key) + sorted(late, key=late_key)
+
     def _center_penalty_job_sequence(self, center: float) -> list[str]:
         """Sort jobs lexicographically by ``(-tp_j(c), ep_j(c), d⁺_j, native pos)``.
 
