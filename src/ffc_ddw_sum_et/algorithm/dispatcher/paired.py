@@ -16,15 +16,21 @@ import logging
 from typing import Sequence
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
-from ffc_ddw_sum_et.parameters.sorter import V3_PRIORITY_SET, dispatch_seq_job_sequence
-from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
+from ffc_ddw_sum_et.parameters.sorter import (
+    V3_PRIORITY_SET,
+    V4_PRIORITY_SET,
+    dispatch_seq_job_sequence,
+)
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
+from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
+
 from .mixed import MixedDispatcher
 
 __all__ = [
     "dispatch_forward_with_iit",
     "dispatch_reversed_with_iit",
     "build_v3_paired_dispatch_schedule",
+    "build_v4_paired_dispatch_schedule",
 ]
 
 
@@ -152,6 +158,31 @@ def build_v3_paired_dispatch_schedule(
     best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
     log.info(
         "build_v3_paired_dispatch_schedule: best=%s obj=%s of %d candidates [%s]",
+        best_label,
+        best_obj,
+        len(candidates),
+        ", ".join(f"{lab}={obj:.0f}" for obj, lab, _ in candidates),
+    )
+    return best_sch, best_obj, best_label
+
+
+def build_v4_paired_dispatch_schedule(
+    instance: FFcDDWParameters,
+    priorities: Sequence[str] = V4_PRIORITY_SET,
+    logger: logging.Logger | None = None,
+) -> tuple[FFcSchedule, float, str]:
+    """v4 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label)."""
+    log = logger or logging.getLogger(__name__)
+    candidates: list[tuple[float, str, FFcSchedule]] = []
+    for p in priorities:
+        seq = dispatch_seq_job_sequence(instance, p)
+        sd_sch, sd_obj = dispatch_forward_with_iit(instance, seq, log)
+        candidates.append((sd_obj, f"sd:{p}", sd_sch))
+        rd_sch, rd_obj = dispatch_reversed_with_iit(instance, seq, log)
+        candidates.append((rd_obj, f"rd:{p}", rd_sch))
+    best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
+    log.info(
+        "build_v4_paired_dispatch_schedule: best=%s obj=%s of %d candidates [%s]",
         best_label,
         best_obj,
         len(candidates),

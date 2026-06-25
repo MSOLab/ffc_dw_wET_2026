@@ -19,10 +19,15 @@ __all__ = [
     "DispatchSeqKey",
     "dispatch_seq_job_sequence",
     "V3_PRIORITY_SET",
+    "V4_PRIORITY_SET",
 ]
 
 # v3 dispatch-initialization priority set: {edd, wspt_twt, wxd2} × {sd, rd} = 6 candidates.
 V3_PRIORITY_SET: tuple[DispatchSeqKey, ...] = ("edd", "wspt_twt", "wxd2")
+
+# v4 dispatch-initialization priority set: {wxd2, wspt_twt, wxd7} × {sd, rd} = 6 candidates.
+# Rule set per analysis/20260625/dispatch_init_justification_3.md §5.
+V4_PRIORITY_SET: tuple[DispatchSeqKey, ...] = ("wxd2", "wspt_twt", "wxd7")
 
 ParamSortKey = Literal[
     "weight-due-pos",

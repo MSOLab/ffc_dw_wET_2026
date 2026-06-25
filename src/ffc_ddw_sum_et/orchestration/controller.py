@@ -28,6 +28,7 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
     BN2DOption,
     MixedDispatcher,
     build_v3_paired_dispatch_schedule,
+    build_v4_paired_dispatch_schedule,
     dispatch_forward_with_iit,
     dispatch_reversed_with_iit,
 )
@@ -73,8 +74,9 @@ from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.sorter import (
-    DispatchSeqKey,
     V3_PRIORITY_SET,
+    V4_PRIORITY_SET,
+    DispatchSeqKey,
     dispatch_seq_job_sequence,
 )
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
@@ -1723,6 +1725,28 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
         )
         self._log_dispatch_seed_diagnostics(f"v3:{best_label}", best_sch)
+        return report
+
+    def initialize_by_dispatch_v4(
+        self, priorities: Sequence[DispatchSeqKey] = V4_PRIORITY_SET
+    ) -> SubroutineReport:
+        """Step: justification-v4 paired dispatch pool. 각 priority 를 sd/rd 두
+        방향으로 디코드(2·len(priorities) 스케줄)한 뒤 weighted-ET 최소 incumbent
+        하나만 register — history 에 점 하나. 기본 P* = {wxd2, wspt_twt, wxd7}.
+        """
+        start_elapsed = time.monotonic()
+        best_sch, best_obj, best_label = build_v4_paired_dispatch_schedule(
+            self.instance, priorities, self.logger
+        )
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed, obj_value=best_obj, obj_bound=None
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
+        )
+        self._log_dispatch_seed_diagnostics(f"v4:{best_label}", best_sch)
         return report
 
     def run_profile_fixed_ns(
