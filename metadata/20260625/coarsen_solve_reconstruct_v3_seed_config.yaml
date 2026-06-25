@@ -17,7 +17,7 @@ output_dir: output/20260625
 
 instance_worker_cnt: 12
 
-draw_gantt: true
+draw_gantt: false
 painter_thread_cnt: 96
 
 scenarios:
@@ -30,7 +30,7 @@ scenarios:
         factor: 64
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr64_v3
@@ -42,7 +42,7 @@ scenarios:
         factor: 64
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr32_mixed
@@ -54,7 +54,7 @@ scenarios:
         factor: 32
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr32_v3
@@ -66,7 +66,7 @@ scenarios:
         factor: 32
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr16_mixed
@@ -78,7 +78,7 @@ scenarios:
         factor: 16
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr16_v3
@@ -90,7 +90,7 @@ scenarios:
         factor: 16
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr8_mixed
@@ -102,7 +102,7 @@ scenarios:
         factor: 8
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr8_v3
@@ -114,7 +114,7 @@ scenarios:
         factor: 8
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr4_mixed
@@ -126,7 +126,7 @@ scenarios:
         factor: 4
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr4_v3
@@ -138,7 +138,7 @@ scenarios:
         factor: 4
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr2_mixed
@@ -150,7 +150,7 @@ scenarios:
         factor: 2
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr2_v3
@@ -162,7 +162,7 @@ scenarios:
         factor: 2
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr1_mixed
@@ -174,7 +174,7 @@ scenarios:
         factor: 1
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true
 
   - name: csr1_v3
@@ -186,5 +186,5 @@ scenarios:
         factor: 1
         timelimit: "0.0045nc"
         solver_thread_cnt: 8
-        emit_phase_schedules: true
+        emit_phase_schedules: false
         draw_cp_trajectory: true

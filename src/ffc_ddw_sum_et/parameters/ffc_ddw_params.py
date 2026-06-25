@@ -318,6 +318,7 @@ class FFcDDWParameters(FFcParameters):
         new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)
 
         new_due_window_map = {
+            # job_id: (math.floor(lower / factor), math.floor(upper / factor))
             job_id: (math.ceil(lower / factor), math.ceil(upper / factor))
             for job_id, (lower, upper) in instance._job_2_due_window_map.items()
         }
