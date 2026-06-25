@@ -338,16 +338,8 @@ def _render_csr_cp_trajectory_line(json_path: Path, png_path: Path) -> None:
     lb_raw = data.get("obj_bound") or []
 
     # Filter each series to pairs where the value is not None.
-    ub_points = [
-        (t, v)
-        for t, v in zip(elapsed, ub_raw)
-        if v is not None
-    ]
-    lb_points = [
-        (t, v)
-        for t, v in zip(elapsed, lb_raw)
-        if v is not None
-    ]
+    ub_points = [(t, v) for t, v in zip(elapsed, ub_raw) if v is not None]
+    lb_points = [(t, v) for t, v in zip(elapsed, lb_raw) if v is not None]
 
     if not ub_points and not lb_points:
         # Nothing to plot; skip file creation.
@@ -683,6 +675,7 @@ class FFcDDWReporter:
         self._write_statistics_yaml()
         self._write_excel_report()
         self._write_post_run_pivot_artifacts()
+        self._write_cp_gap_artifacts()
         self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
 
@@ -703,6 +696,27 @@ class FFcDDWReporter:
             layout=self.layout,
             hybrid_match_csv=self.ins_index_source,
             bks_table_csv=self.bks_table_csv_path,
+        )
+
+    def _write_cp_gap_artifacts(self) -> None:
+        """Emit CSR CP gap comparison CSV + PivotTable.js dashboard.
+
+        Skips silently when trajectory files are absent (non-CSR runs).
+        """
+        from .post_run_pivot import write_cp_gap_artifacts
+
+        if not self.ins_index_source or not self.ins_index_source.exists():
+            return
+        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
+            return
+
+        run_root = Path(self.layout.run_root)
+        write_cp_gap_artifacts(
+            run_root,
+            self.layout,
+            self.ins_index_source,
+            self.bks_table_csv_path,
+            init_filter="v3",
         )
 
     def _write_post_run_subroutine_chart_artifacts(self) -> None:
@@ -1881,17 +1895,13 @@ class FFcDDWReporter:
             for ir in sc.instance_results:
                 ins = ir.instance_name
                 scope = {"scenario_name": sc.name, "instance_name": ins}
-                traj_json = self.layout.artifact_path(
-                    "csr_cp_trajectory_json", **scope
-                )
+                traj_json = self.layout.artifact_path("csr_cp_trajectory_json", **scope)
                 if traj_json.exists():
                     jobs.append(
                         (
                             _render_csr_cp_trajectory_line,
                             traj_json,
-                            self.layout.artifact_path(
-                                "csr_cp_trajectory_png", **scope
-                            ),
+                            self.layout.artifact_path("csr_cp_trajectory_png", **scope),
                         )
                     )
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the

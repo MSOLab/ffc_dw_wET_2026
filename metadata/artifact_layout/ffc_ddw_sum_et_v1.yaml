@@ -211,6 +211,12 @@ artifacts:
   - scope: run
     kind: time_p_dashboard
     file_template: "{run_id}_time_p_dashboard.html"
+  - scope: run
+    kind: cp_gap_comparison_csv
+    file_template: "{run_id}_cp_gap_comparison.csv"
+  - scope: run
+    kind: cp_gap_dashboard
+    file_template: "{run_id}_cp_gap_dashboard.html"
   # Run-level multi-scenario subroutine flow comparison chart. Aggregates
   # endpoint/progression frames built from each scenario's obj_log_jsons.
   - scope: run
