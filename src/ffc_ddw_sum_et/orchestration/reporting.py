@@ -710,7 +710,7 @@ class FFcDDWReporter:
         if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
             return
 
-        run_root = Path(self.layout.run_root)
+        run_root = Path(self.layout.run_dir())
         write_cp_gap_artifacts(
             run_root,
             self.layout,
