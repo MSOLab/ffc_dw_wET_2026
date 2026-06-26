@@ -5,7 +5,7 @@ ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
 # ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
-output_dir: output/20260625
+output_dir: output/20260626
 
 instance_worker_cnt: 12
 
@@ -13,19 +13,11 @@ draw_gantt: false
 painter_thread_cnt: 96
 
 scenarios:
-  # v4 dispatch only
-  - name: v4_dispatch_only
-    timelimit: "0.09nc"
-    output_subdir: v4_dispatch_only
-    subroutine_flow:
-      - method: initialize_by_dispatch_v4
-
-  # v4 dispatch + C5
+  # v4 dispatch mid-C5
   - name: c5_with_v4_dispatch
     timelimit: "0.09nc"
     output_subdir: c5_with_v4_dispatch
     subroutine_flow:
-      - method: initialize_by_dispatch_v4
       - method: calc_mcf_lb_and_derive_full_sch
         draw_pmtn_sch_heatmap: false
         job_placement_priority: "end_time"
@@ -51,6 +43,7 @@ scenarios:
         skip_pf_below_obj: "makespan"
         make_semi_active_after_cp: true
         minimize_makespan_lex: false
+      - method: initialize_by_dispatch_v4
       - method: incremental_pw_cp
         solver_thread_cnt: 8
         batch_size: "m"
