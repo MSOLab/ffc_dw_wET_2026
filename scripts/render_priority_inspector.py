@@ -184,6 +184,39 @@ def compute_wxd2_partition(
     return result
 
 
+def compute_wxd7_partition(instance: FFcDDWParameters) -> dict[str, dict]:
+    """Compute wxd7 partition data for the Inspector overlay.
+
+    wxd7's partition is identical to wxd5 (same floored center d̄), but the
+    intra-group sort keys use group-specific centers rather than d̄:
+        early_center = min_j r_j + Σ_j p_last_j / m_last   (no ÷2, no floor)
+        late_center  = min_j r_j
+    Mirrors ``FFcDDWParameters.get_wxd7_job_sequence``. The returned ``sort_key``
+    is the actual within-group sort scalar (early: ``-tp_j(early_center)``,
+    late: ``ep_j(late_center)``) so Panel A's Key gutter matches dispatch order.
+    """
+    d_bar = _wxd5_d_bar(instance)
+    data = compute_wxd2_partition(instance, d_bar=d_bar)
+
+    ewt = instance.job_2_ewt_map
+    twt = instance.job_2_twt_map
+    ddw = instance.job_2_due_window_map
+    last_stage_id = instance.stage_id_list[-1]
+    p_last = instance.get_job_2_p_map_for_stage(last_stage_id)
+    r_j = instance.get_job_2_p_sum_except_last_stage()
+    min_r = min(r_j.values())
+    early_center = min_r + sum(p_last.values()) / instance.last_stage_mc_count
+    late_center = min_r
+
+    for j, entry in data.items():
+        dl, du = ddw[j]
+        if entry["partition"] == "early":
+            entry["sort_key"] = -twt[j] * max(early_center - du, 0)
+        else:
+            entry["sort_key"] = ewt[j] * max(dl - late_center, 0)
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Panel A: Priority Inspector SVG
 # ---------------------------------------------------------------------------
@@ -205,6 +238,7 @@ def render_priority_inspector_svg(
     dispatch_seq: list[str],
     job_2_end_time: dict[str, int],
     wxd2_data: dict[str, dict] | None = None,
+    d_bar_value: float | None = None,
     rule_key: str = "wxd2",
     width: int = 1200,
     rank_gutter_w: int = 45,
@@ -251,14 +285,13 @@ def render_priority_inspector_svg(
     dw_left = due_min - int(due_range * 0.05)
     dw_right = due_max + int(due_range * 0.05)
 
-    # Keep the d̄ overlay on-canvas: wxd5 can floor d̄ past the last due window,
-    # so widen the display range to include it rather than clipping the line.
-    if wxd2_data and dispatch_seq:
-        d_bar_overlay = wxd2_data[dispatch_seq[0]]["d_bar"]
-        if d_bar_overlay > dw_right:
-            dw_right = int(d_bar_overlay + due_range * 0.05)
-        elif d_bar_overlay < dw_left:
-            dw_left = int(d_bar_overlay - due_range * 0.05)
+    # Keep the d̄ overlay on-canvas: wxd5/wxd7 can floor d̄ past the last due
+    # window, so widen the display range to include it rather than clipping it.
+    if d_bar_value is not None:
+        if d_bar_value > dw_right:
+            dw_right = int(d_bar_value + due_range * 0.05)
+        elif d_bar_value < dw_left:
+            dw_left = int(d_bar_value - due_range * 0.05)
 
     # Layout constants
     body_left = rank_gutter_w + job_gutter_w + weight_glyph_w + 10
@@ -315,19 +348,22 @@ def render_priority_inspector_svg(
     )
 
     # Key gutter header — label as aversion proxy for non-partition rules (W7)
-    key_header = "Key" if rule_key in ("wxd2", "wxd5") else "T-E@d̄"
+    key_header = "Key" if rule_key in ("wxd2", "wxd5", "wxd7") else "T-E@d̄"
     svg_parts.append(
         f'<text x={width - key_gutter_w // 2 - 5} y="{header_height - 5}" fill="{KEY_GUTTER_COLOR}" text-anchor="middle">{key_header}</text>'
     )
 
-    # d_bar line (if wxd2)
-    d_bar_val = None
-    if wxd2_data:
-        d_bar_val = wxd2_data[dispatch_seq[0]]["d_bar"] if dispatch_seq else None
+    # d_bar line: rule-specific d̄ (wxd2 midpoint mean, wxd5/wxd7 floored center),
+    # falling back to the partition d̄ when an explicit value isn't supplied.
+    d_bar_val = d_bar_value
+    if d_bar_val is None and wxd2_data and dispatch_seq:
+        d_bar_val = wxd2_data[dispatch_seq[0]]["d_bar"]
 
     # Pre-compute row-invariant values once, out of the row loop (W6/W7).
     max_w = max(max(ewt.values()), max(twt.values()))  # weight-bar scaling
-    d_bar = _mean_midpoint(instance)  # true d̄ for non-wxd2 fallback key
+    # d̄ used by the non-partition "T-E@d̄" key gutter — keep it consistent with
+    # the drawn d̄ line so the displayed aversion deltas match the overlay.
+    d_bar = d_bar_val if d_bar_val is not None else _mean_midpoint(instance)
 
     # Draw rows
     for rank, job_id in enumerate(dispatch_seq):
@@ -832,11 +868,15 @@ def main() -> None:
 
     # Compute partition + d̄ overlay data if applicable. wxd2 and wxd5 share the
     # partition/sort-key formulas; only the center d̄ differs (wxd5 floors it at
-    # a last-stage completion bound).
+    # a last-stage completion bound). wxd7 reuses wxd5's partition but with
+    # group-specific sort centers (compute_wxd7_partition).
     wxd2_data = None
     if args.rule_key in ("wxd2", "wxd5"):
         d_bar = _wxd5_d_bar(instance) if args.rule_key == "wxd5" else None
         wxd2_data = compute_wxd2_partition(instance, d_bar=d_bar)
+    elif args.rule_key == "wxd7":
+        wxd2_data = compute_wxd7_partition(instance)
+    if wxd2_data:
         logger.info(
             "%s partition: %d early, %d late (d̄=%.1f)",
             args.rule_key,
@@ -853,12 +893,21 @@ def main() -> None:
             wxd2_data[dispatch_seq[0]]["d_bar"] if dispatch_seq else 0.0,
         )
 
+    # Rule-aware d̄ for the Panel A / Panel B overlay, independent of the wxd2
+    # partition machinery. wxd7 shares wxd5's floored partition center; every
+    # other rule falls back to the plain midpoint mean (matches the key gutter).
+    if args.rule_key in ("wxd5", "wxd7"):
+        d_bar_value = _wxd5_d_bar(instance)
+    else:
+        d_bar_value = _mean_midpoint(instance)
+
     # Render Panel A
     panel_a_svg, *_ = render_priority_inspector_svg(
         instance,
         dispatch_seq,
         job_2_end_time,
         wxd2_data=wxd2_data,
+        d_bar_value=d_bar_value,
         rule_key=args.rule_key,
     )
 
@@ -867,13 +916,9 @@ def main() -> None:
         args.output.parent if args.output else Path("output/20260625/priority_viz")
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Overlay the d̄ line on Panel B for partition rules (wxd2/wxd5), matching
-    # Panel A's overlay.
-    panel_b_d_bar = (
-        wxd2_data[dispatch_seq[0]]["d_bar"] if wxd2_data and dispatch_seq else None
-    )
+    # Overlay the same rule-aware d̄ line on Panel B, matching Panel A's overlay.
     panel_b_svg_path = render_panel_b_svg(
-        instance, schedule, dispatch_seq, output_dir, d_bar=panel_b_d_bar
+        instance, schedule, dispatch_seq, output_dir, d_bar=d_bar_value
     )
     logger.info("Panel B SVG -> %s", panel_b_svg_path)
 
