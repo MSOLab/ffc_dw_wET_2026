@@ -135,6 +135,8 @@ def _dispatch_seed_job_sequence(
 
 def _build_dispatch_seed_schedule(
     coarsened: FFcDDWParameters,
+    original: FFcDDWParameters,
+    factor: int,
     strategy: Literal["job_wise", "mixed", "v3", "v4"],
 ) -> FFcSchedule:
     """Build a seed schedule via dispatch + idle insertion on coarsened scale.
@@ -143,12 +145,20 @@ def _build_dispatch_seed_schedule(
     * ``mixed``: enumerate all np-list candidates, insert idle, pick the one
       with minimum coarsened wET.
     * ``v3``: v3 paired-dispatch pool on coarsened instance → min-wET.
+
+    The wET evaluation uses the new objective: ``factor * C^c`` compared
+    against the **original** due window, so the seed is consistent with the
+    CP model's objective function.
     """
     if strategy == "v3":
-        seed, _obj, _label = build_v3_paired_dispatch_schedule(coarsened)
+        seed, _obj, _label = build_v3_paired_dispatch_schedule(
+            coarsened, original_instance=original, factor=factor
+        )
         return seed
     if strategy == "v4":
-        seed, _obj, _label = build_v4_paired_dispatch_schedule(coarsened)
+        seed, _obj, _label = build_v4_paired_dispatch_schedule(
+            coarsened, original_instance=original, factor=factor
+        )
         return seed
 
     seq = _dispatch_seed_job_sequence(coarsened)
@@ -162,13 +172,18 @@ def _build_dispatch_seed_schedule(
         schedule.insert_idle_time(dw, ewt, twt)
         return schedule
 
-    # strategy == "mixed": pick candidate with minimum coarsened wET
+    # strategy == "mixed": pick the candidate with minimum wET under the CSR
+    # objective (factor-scaled completion vs the original due window), so the
+    # seed ranking matches the CP model. Idle insertion still positions ops on
+    # the coarse grid against the coarse window.
     dispatcher = MixedDispatcher(coarsened)
     best_obj: float | None = None
     best_sch: FFcSchedule | None = None
     for cand in dispatcher.iter_mixed_schedules_by_sequence(seq):
         cand.insert_idle_time(dw, ewt, twt)
-        sum_e, sum_t = compute_weighted_earliness_tardiness(cand, coarsened)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            cand, original, time_factor=factor
+        )
         obj = sum_e + sum_t
         if best_obj is None or obj < best_obj:
             best_obj, best_sch = obj, cand
@@ -182,6 +197,8 @@ def _build_dispatch_seed_schedule(
 
 def _solve_coarsened_model(
     coarsened_instance: FFcDDWParameters,
+    original_instance: FFcDDWParameters,
+    factor: int,
     *,
     timelimit_sec: float | None,
     solver_thread_cnt: int,
@@ -211,18 +228,25 @@ def _solve_coarsened_model(
     ``solver.solve``. ``cp_progress_log`` is the merged UB/LB trajectory
     (coarsened scale).
     """
-    params = BaseModelBuilder.make_params(coarsened_instance)
-    horizon = sum(params.p.values())
     builder = BaseModelBuilder()
-    mdl, params, op_vars, et_vars = builder.build(coarsened_instance, horizon=horizon)
+    mdl, params, op_vars, et_vars = builder.build(
+        coarsened_instance,
+        horizon=sum(BaseModelBuilder.make_params(coarsened_instance).p.values()),
+        time_factor=factor,
+        original_due_windows=original_instance.job_2_due_window_map,
+    )
 
     # Apply dispatch seed as warm-start hint before solving.
-    seed_schedule = _build_dispatch_seed_schedule(coarsened_instance, seed_dispatch)
+    seed_schedule = _build_dispatch_seed_schedule(
+        coarsened_instance, original_instance, factor, seed_dispatch
+    )
     BaseModelBuilder.apply_hints_from_schedule(
         mdl, params, op_vars, et_vars, seed_schedule
     )
+    # Evaluate seed under the CSR objective (factor*C^c against the original
+    # window) so the reported metric is comparable to the CP coarsened obj.
     seed_sum_e, seed_sum_t = compute_weighted_earliness_tardiness(
-        seed_schedule, coarsened_instance
+        seed_schedule, original_instance, time_factor=factor
     )
     dispatch_seed_obj: float | None = float(seed_sum_e + seed_sum_t)
 
@@ -332,6 +356,8 @@ def run_coarsen_solve_reconstruct(
         dispatch_seed_obj,
     ) = _solve_coarsened_model(
         coarsened,
+        instance,
+        option.factor,
         timelimit_sec=option.timelimit_sec,
         solver_thread_cnt=option.solver_thread_cnt,
         log_search_progress=option.log_search_progress,

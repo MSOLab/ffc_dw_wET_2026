@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260626/dispatch_v4_config_2.yaml")
+CONFIG_PATH = Path("metadata/20260625/coarsen_solve_reconstruct_v4_seed_config.yaml")
 
 
 def _parse_args() -> argparse.Namespace:

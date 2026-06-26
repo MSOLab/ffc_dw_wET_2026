@@ -71,6 +71,21 @@ class Params:
     w_t: dict[str, int]
     """$w^{+}_j$: tardiness weight for job j"""
 
+    # CSR-specific fields: original-scale due windows and time factor.
+    # When time_factor > 1, the model's completion variable C^c represents
+    # the coarse time; the penalty is computed as if the real completion
+    # were time_factor * C^c, compared against original_scale_d_lower /
+    # original_scale_d_upper.  When time_factor == 1 (default), these
+    # fields are None and the model uses d_lower / d_upper directly.
+    time_factor: int = 1
+    """Scaling factor: coarse completion is interpreted as ``time_factor * C^c``."""
+
+    original_scale_d_lower: dict[str, int] | None = None
+    """Original (pre-coarsening) $d^{-}_j$ used when ``time_factor > 1``."""
+
+    original_scale_d_upper: dict[str, int] | None = None
+    """Original (pre-coarsening) $d^{+}_j$ used when ``time_factor > 1``."""
+
 
 @dataclass
 class OperationVars:
@@ -112,6 +127,8 @@ class BaseModelBuilder:
         minimize_makespan_lex: bool = False,
         et_ub: float | None = None,
         objective: Literal["et", "makespan"] = "et",
+        time_factor: int = 1,
+        original_due_windows: dict[str, tuple[int, int]] | None = None,
     ) -> tuple[CpModel, Params, OperationVars, EarlinessTardinessVars | None]:
         """Build a CP-SAT model for the FFc DDW sum E/T problem with cumulative constraints.
 
@@ -141,6 +158,13 @@ class BaseModelBuilder:
                 lexicographic case). ``"makespan"`` skips E/T variable creation
                 entirely and minimises makespan; ``obj_lb``, ``et_ub``, and
                 ``minimize_makespan_lex`` must take their default values.
+            time_factor (int, optional): When >1, the completion variable
+                ``C^c`` represents a coarsened time grid.  The objective
+                computes E/T penalty as ``max(0, d_orig - time_factor * C^c)``
+                against ``original_due_windows``.  Defaults to 1 (no coarsening).
+            original_due_windows (dict | None, optional): Original (pre-coarsening)
+                due window ``{job_id: (d_lower, d_upper)}``. Required when
+                ``time_factor > 1``. Defaults to None.
 
         Returns:
             tuple[CpModel, Params, OperationVars, EarlinessTardinessVars | None]:
@@ -156,7 +180,12 @@ class BaseModelBuilder:
                 )
 
         mdl = CpModel()
-        params: Params = self.make_params(instance, last_stage_only=last_stage_only)
+        params: Params = self.make_params(
+            instance,
+            last_stage_only=last_stage_only,
+            time_factor=time_factor,
+            original_due_windows=original_due_windows,
+        )
         ops_vars: OperationVars = self._make_vars(
             mdl,
             params,
@@ -183,7 +212,11 @@ class BaseModelBuilder:
 
     @staticmethod
     def make_params(
-        instance: FFcDDWParameters, last_stage_only: bool = False
+        instance: FFcDDWParameters,
+        *,
+        last_stage_only: bool = False,
+        time_factor: int = 1,
+        original_due_windows: dict[str, tuple[int, int]] | None = None,
     ) -> Params:
         # stage parameters
         i_list = instance.stage_id_list
@@ -206,6 +239,16 @@ class BaseModelBuilder:
         w_e = instance.job_2_ewt_map
         w_t = instance.job_2_twt_map
 
+        # When time_factor > 1 (CSR pipeline), store original due windows
+        # so the objective function can compute penalty as
+        # max(0, d_orig - time_factor * C^c) against the coarse completion.
+        if time_factor > 1 and original_due_windows is not None:
+            d_lower_orig = {j: original_due_windows[j][0] for j in j_list}
+            d_upper_orig = {j: original_due_windows[j][1] for j in j_list}
+        else:
+            d_lower_orig = None
+            d_upper_orig = None
+
         return Params(
             i_list=i_list,
             M_of=M_of,
@@ -215,6 +258,9 @@ class BaseModelBuilder:
             d_upper=d_upper,
             w_e=w_e,
             w_t=w_t,
+            time_factor=time_factor,
+            original_scale_d_lower=d_lower_orig,
+            original_scale_d_upper=d_upper_orig,
         )
 
     @staticmethod
@@ -351,6 +397,19 @@ class BaseModelBuilder:
 
         where ``C_j = op_end[j, last_i]``.
 
+        When ``time_factor > 1`` (CSR pipeline), the completion variable
+        ``C^c`` lives on a coarsened time grid.  The penalty is computed
+        as if the real completion were ``time_factor * C^c``, compared
+        against the original-scale due window stored in
+        ``params.original_scale_d_lower`` / ``params.original_scale_d_upper``:
+
+        ``E_j = max(0, d_lower_orig_j - time_factor * C^c_j)``
+        ``T_j = max(0, time_factor * C^c_j - d_upper_orig_j)``
+
+        This is algebraically equivalent to dividing the window by
+        ``time_factor`` and multiplying weights by ``time_factor``, but
+        avoids fractional due windows entirely.
+
         Tie ``E_j`` and ``T_j`` to ``max(0, ·)`` exactly (via
         ``add_max_equality``) so every feasible solution — not just the final
         optimum — reports a matching objective value against a post-hoc E/T
@@ -387,16 +446,32 @@ class BaseModelBuilder:
         et_terms: list = []
         for j in j_list:
             C_j = variables.op_end[j, last_i]
-            d_lower_j = params.d_lower[j]
-            d_upper_j = params.d_upper[j]
-            E_j = mdl.new_int_var(0, max(d_lower_j, 0), f"E_{j}")
-            T_j = mdl.new_int_var(0, horizon, f"T_{j}")
-            if use_max_equality:
-                mdl.add_max_equality(E_j, [d_lower_j - C_j, 0])
-                mdl.add_max_equality(T_j, [C_j - d_upper_j, 0])
+
+            # Determine the due window and completion value used for penalty.
+            if params.time_factor > 1 and params.original_scale_d_lower is not None:
+                # CSR mode: penalty against original window, completion scaled.
+                d_lower_j = params.original_scale_d_lower[j]
+                d_upper_j = params.original_scale_d_upper[j]
+                scaled_C_j = params.time_factor * C_j
             else:
-                mdl.add(E_j >= d_lower_j - C_j)
-                mdl.add(T_j >= C_j - d_upper_j)
+                # Standard mode: direct comparison.
+                d_lower_j = params.d_lower[j]
+                d_upper_j = params.d_upper[j]
+                scaled_C_j = C_j
+
+            # E_j upper bound: max possible earliness is d_lower_j (when C=0).
+            # Since d_lower_j >= 0 for valid due windows, this is always d_lower_j.
+            E_j_ub = d_lower_j if d_lower_j > 0 else 0
+            T_j_ub = params.time_factor * horizon if params.time_factor > 1 else horizon
+
+            E_j = mdl.new_int_var(0, E_j_ub, f"E_{j}")
+            T_j = mdl.new_int_var(0, T_j_ub, f"T_{j}")
+            if use_max_equality:
+                mdl.add_max_equality(E_j, [d_lower_j - scaled_C_j, 0])
+                mdl.add_max_equality(T_j, [scaled_C_j - d_upper_j, 0])
+            else:
+                mdl.add(E_j >= d_lower_j - scaled_C_j)
+                mdl.add(T_j >= scaled_C_j - d_upper_j)
             E[j] = E_j
             T[j] = T_j
             if params.w_e[j]:
@@ -639,12 +714,28 @@ class BaseModelBuilder:
         For each job, compute ``E_j = max(0, d^{-}_j - C_j)`` and
         ``T_j = max(0, C_j - d^{+}_j)`` from ``C_j = ref_schedule``'s
         last-stage completion time, and apply the values as solver hints.
+
+        When ``time_factor > 1``, the completion is interpreted as
+        ``time_factor * C^c`` against the original due window.
         """
         last_i = params.i_list[-1]
         for j in params.j_list:
             C_j = ref_schedule.get_job_end_time(last_i, j)
-            E_val = max(0, params.d_lower[j] - C_j)
-            T_val = max(0, C_j - params.d_upper[j])
+
+            # Determine the due window and completion value used for hint.
+            if params.time_factor > 1 and params.original_scale_d_lower is not None:
+                # CSR mode: factor-scaled completion against original window.
+                d_lower_j = params.original_scale_d_lower[j]
+                d_upper_j = params.original_scale_d_upper[j]
+                scaled_C = params.time_factor * C_j
+            else:
+                # Standard mode.
+                d_lower_j = params.d_lower[j]
+                d_upper_j = params.d_upper[j]
+                scaled_C = C_j
+
+            E_val = max(0, d_lower_j - scaled_C)
+            T_val = max(0, scaled_C - d_upper_j)
             mdl.add_hint(et_vars.E[j], E_val)
             mdl.add_hint(et_vars.T[j], T_val)
 

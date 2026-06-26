@@ -10,13 +10,30 @@ from .mcf_preemptive_schedule import MCFPreemptiveSchedule
 
 
 def compute_weighted_earliness_tardiness(
-    schedule: FFcSchedule, instance: FFcDDWParameters
+    schedule: FFcSchedule, instance: FFcDDWParameters, *, time_factor: int = 1
 ) -> tuple[int, int]:
     """Return (sum_earliness, sum_tardiness) on the last stage of *schedule*.
 
     Uses the DDW weights ``w^{-}_j`` (earliness) and ``w^{+}_j`` (tardiness)
     against the job's due window ``[d^{-}_j, d^{+}_j]``. Missing weights default
     to 1 to match FAM's original inline calculation.
+
+    ``time_factor`` scales each completion time before the E/T comparison: a
+    job's completion ``C`` is interpreted as ``time_factor * C``. This is the
+    CSR (coarsen-solve-reconstruct) seed-evaluation case, where *schedule*
+    lives on a coarse grid but the penalty must be measured against the
+    original-scale due window of *instance* (``factor * C^c`` vs the original
+    window). The product stays integer, so the penalty is exact. The default
+    ``time_factor=1`` is the ordinary same-scale evaluation.
+
+    Invariant (caller's responsibility, not enforced): ``time_factor * C`` and
+    *instance*'s due window must be in the **same time unit**. The CSR caller
+    satisfies this by passing the **original** instance together with a
+    coarse-grid *schedule* and ``time_factor=factor``. Passing the *coarsened*
+    instance with ``time_factor=factor`` compares an original-scale completion
+    against a coarse window and is a bug. (This is the same scale-consistency
+    requirement the ``time_factor=1`` path already imposes between *schedule*
+    and *instance*; ``time_factor`` only generalises it.)
     """
     last_stage_id = instance.stage_id_list[-1]
     ewt_map = instance.job_2_ewt_map
@@ -26,7 +43,7 @@ def compute_weighted_earliness_tardiness(
     sum_earliness = 0
     sum_tardiness = 0
     for job_id in instance.job_id_list:
-        completion_time = schedule.get_job_end_time(last_stage_id, job_id)
+        completion_time = time_factor * schedule.get_job_end_time(last_stage_id, job_id)
         due_lower, due_upper = due_window_map[job_id]
         ewt = ewt_map.get(job_id, 1)
         twt = twt_map.get(job_id, 1)

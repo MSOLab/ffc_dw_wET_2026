@@ -145,15 +145,34 @@ def build_v3_paired_dispatch_schedule(
     instance: FFcDDWParameters,
     priorities: Sequence[str] = V3_PRIORITY_SET,
     logger: logging.Logger | None = None,
+    *,
+    original_instance: FFcDDWParameters | None = None,
+    factor: int = 1,
 ) -> tuple[FFcSchedule, float, str]:
-    """v3 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label)."""
+    """v3 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
+
+    When ``original_instance`` and ``factor`` are provided (CSR pipeline),
+    the wET evaluation uses ``factor * C^c`` against the original due window
+    so the seed is consistent with the CSR CP model's objective.
+    """
     log = logger or logging.getLogger(__name__)
     candidates: list[tuple[float, str, FFcSchedule]] = []
     for p in priorities:
         seq = dispatch_seq_job_sequence(instance, p)
         sd_sch, sd_obj = dispatch_forward_with_iit(instance, seq, log)
-        candidates.append((sd_obj, f"sd:{p}", sd_sch))
         rd_sch, rd_obj = dispatch_reversed_with_iit(instance, seq, log)
+        if original_instance is not None:
+            # CSR mode: re-evaluate using original window + factor-scaled
+            # completion, so candidate ranking matches the CSR CP objective.
+            sd_e, sd_t = compute_weighted_earliness_tardiness(
+                sd_sch, original_instance, time_factor=factor
+            )
+            sd_obj = sd_e + sd_t
+            rd_e, rd_t = compute_weighted_earliness_tardiness(
+                rd_sch, original_instance, time_factor=factor
+            )
+            rd_obj = rd_e + rd_t
+        candidates.append((sd_obj, f"sd:{p}", sd_sch))
         candidates.append((rd_obj, f"rd:{p}", rd_sch))
     best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
     log.info(
@@ -170,15 +189,34 @@ def build_v4_paired_dispatch_schedule(
     instance: FFcDDWParameters,
     priorities: Sequence[str] = V4_PRIORITY_SET,
     logger: logging.Logger | None = None,
+    *,
+    original_instance: FFcDDWParameters | None = None,
+    factor: int = 1,
 ) -> tuple[FFcSchedule, float, str]:
-    """v4 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label)."""
+    """v4 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
+
+    When ``original_instance`` and ``factor`` are provided (CSR pipeline),
+    the wET evaluation uses ``factor * C^c`` against the original due window
+    so the seed is consistent with the CSR CP model's objective.
+    """
     log = logger or logging.getLogger(__name__)
     candidates: list[tuple[float, str, FFcSchedule]] = []
     for p in priorities:
         seq = dispatch_seq_job_sequence(instance, p)
         sd_sch, sd_obj = dispatch_forward_with_iit(instance, seq, log)
-        candidates.append((sd_obj, f"sd:{p}", sd_sch))
         rd_sch, rd_obj = dispatch_reversed_with_iit(instance, seq, log)
+        if original_instance is not None:
+            # CSR mode: re-evaluate using original window + factor-scaled
+            # completion, so candidate ranking matches the CSR CP objective.
+            sd_e, sd_t = compute_weighted_earliness_tardiness(
+                sd_sch, original_instance, time_factor=factor
+            )
+            sd_obj = sd_e + sd_t
+            rd_e, rd_t = compute_weighted_earliness_tardiness(
+                rd_sch, original_instance, time_factor=factor
+            )
+            rd_obj = rd_e + rd_t
+        candidates.append((sd_obj, f"sd:{p}", sd_sch))
         candidates.append((rd_obj, f"rd:{p}", rd_sch))
     best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
     log.info(

@@ -791,14 +791,14 @@ def test_option_seed_dispatch_v3() -> None:
 
 
 def test_build_dispatch_seed_schedule_v3_feasible() -> None:
-    """_build_dispatch_seed_schedule(coarsened, 'v3') must return feasible schedule."""
+    """_build_dispatch_seed_schedule(coarsened, original, factor, 'v3') must return feasible schedule."""
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         _build_dispatch_seed_schedule,
     )
 
     instance = _make_small_ddw_instance()
     coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor=50)
-    seed = _build_dispatch_seed_schedule(coarsened, "v3")
+    seed = _build_dispatch_seed_schedule(coarsened, instance, 50, "v3")
 
     assert seed is not None
     # Check precedence: each stage start ≥ previous stage end
@@ -877,3 +877,125 @@ def test_v3_seed_no_regression_mixed() -> None:
     assert v3_obj is not None
     # v3 must not regress vs mixed (same timelimit)
     assert v3_obj <= mixed_obj * 1.0
+
+
+# ---------------------------------------------------------------------------
+# CSR due window quantization removal — new objective function
+# ---------------------------------------------------------------------------
+
+
+def test_csr_objective_uses_original_due_window_not_quantized() -> None:
+    """The CSR model's objective must use original due windows, not quantized ones.
+
+    This test verifies that the CP model's E/T penalty is computed as
+    ``max(0, d_orig - factor * C^c)`` against the **original** due window,
+    not the quantized ``ceil(d / factor)`` window.
+
+    We use a small instance where we can manually compute the expected penalty.
+    """
+    from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
+    from ortools.sat.python import cp_model
+
+    # Create a tiny instance with specific due windows
+    instance = _make_small_ddw_instance(
+        name="csr_obj_test",
+        processing_rows=[[60, 50], [70, 60]],  # Coarsen(factor=50) → [[2,1],[2,2]]
+        job_2_due_window_map={"j0": (72, 115), "j1": (140, 200)},  # factor=50
+        job_2_ewt_map={"j0": 1, "j1": 1},
+        job_2_twt_map={"j0": 1, "j1": 1},
+        stage_2_machine_count=(1, 1),
+    )
+
+    factor = 50
+    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor)
+
+    # Build model with CSR objective
+    builder = BaseModelBuilder()
+    params = BaseModelBuilder.make_params(coarsened)
+    horizon = sum(params.p.values())
+    mdl, params, op_vars, et_vars = builder.build(
+        coarsened,
+        horizon=horizon,
+        time_factor=factor,
+        original_due_windows=instance.job_2_due_window_map,
+    )
+
+    # Verify that params has the correct fields
+    assert params.time_factor == factor
+    assert params.original_scale_d_lower is not None
+    assert params.original_scale_d_upper is not None
+    assert params.original_scale_d_lower["j0"] == 72
+    assert params.original_scale_d_upper["j0"] == 115
+    assert params.original_scale_d_lower["j1"] == 140
+    assert params.original_scale_d_upper["j1"] == 200
+
+    # Verify that the coarse due windows are different from original
+    assert params.d_lower["j0"] != 72  # coarsened: ceil(72/50)=2
+    assert params.d_lower["j1"] != 140  # coarsened: ceil(140/50)=3
+
+    # Solve and verify the model computes penalty correctly
+    solver = cp_model.CpSolver()
+    status = solver.solve(mdl)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+    # Verify E/T values match original window with factor*C
+    last_i = params.i_list[-1]
+    for j in ["j0", "j1"]:
+        C_c = int(solver.value(op_vars.op_end[j, last_i]))
+        d_lower = params.original_scale_d_lower[j]
+        d_upper = params.original_scale_d_upper[j]
+        scaled_C = factor * C_c
+        expected_E = max(0, d_lower - scaled_C)
+        expected_T = max(0, scaled_C - d_upper)
+        actual_E = int(solver.value(et_vars.E[j]))
+        actual_T = int(solver.value(et_vars.T[j]))
+        assert actual_E == expected_E, (
+            f"Job {j}: E={actual_E} != expected {expected_E} "
+            f"(d_lower={d_lower}, C^c={C_c}, scaled_C={scaled_C})"
+        )
+        assert actual_T == expected_T, (
+            f"Job {j}: T={actual_T} != expected {expected_T} "
+            f"(d_upper={d_upper}, C^c={C_c}, scaled_C={scaled_C})"
+        )
+
+
+def test_csr_non_factor_model_uses_standard_objective() -> None:
+    """When time_factor=1 (default), the model should use standard E/T computation."""
+    from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
+    from ortools.sat.python import cp_model
+
+    instance = _make_small_ddw_instance(
+        name="standard_obj_test",
+        processing_rows=[[10, 5], [8, 7]],
+        job_2_due_window_map={"j0": (15, 25), "j1": (20, 30)},
+        job_2_ewt_map={"j0": 1, "j1": 1},
+        job_2_twt_map={"j0": 1, "j1": 1},
+        stage_2_machine_count=(1, 1),
+    )
+
+    builder = BaseModelBuilder()
+    params = BaseModelBuilder.make_params(instance)
+    horizon = sum(params.p.values())
+    mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
+
+    # Verify that params has default factor=1
+    assert params.time_factor == 1
+    assert params.original_scale_d_lower is None
+    assert params.original_scale_d_upper is None
+
+    # Solve and verify standard E/T computation
+    solver = cp_model.CpSolver()
+    status = solver.solve(mdl)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+    last_i = params.i_list[-1]
+    for j in ["j0", "j1"]:
+        C_j = int(solver.value(op_vars.op_end[j, last_i]))
+        d_lower = params.d_lower[j]
+        d_upper = params.d_upper[j]
+        expected_E = max(0, d_lower - C_j)
+        expected_T = max(0, C_j - d_upper)
+        actual_E = int(solver.value(et_vars.E[j]))
+        actual_T = int(solver.value(et_vars.T[j]))
+        assert actual_E == expected_E, f"Job {j}: E={actual_E} != expected {expected_E}"
+        assert actual_T == expected_T, f"Job {j}: T={actual_T} != expected {expected_T}"

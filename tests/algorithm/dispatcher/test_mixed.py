@@ -218,13 +218,13 @@ def test_dispatch_seed_job_sequence_given_tiebreak() -> None:
 
 
 def test_build_dispatch_seed_schedule_job_wise_feasible() -> None:
-    """_build_dispatch_seed_schedule(job_wise) must return a feasible schedule."""
+    """_build_dispatch_seed_schedule(coarsened, original, factor, job_wise) must return a feasible schedule."""
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         _build_dispatch_seed_schedule,
     )
 
     instance = _make_tiny_instance()
-    schedule = _build_dispatch_seed_schedule(instance, "job_wise")
+    schedule = _build_dispatch_seed_schedule(instance, instance, 1, "job_wise")
 
     assert schedule is not None
     end_map = schedule.get_jik_2_end_time_map()
@@ -233,13 +233,13 @@ def test_build_dispatch_seed_schedule_job_wise_feasible() -> None:
 
 
 def test_build_dispatch_seed_schedule_mixed_feasible() -> None:
-    """_build_dispatch_seed_schedule(mixed) must return a feasible schedule."""
+    """_build_dispatch_seed_schedule(coarsened, original, factor, mixed) must return a feasible schedule."""
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         _build_dispatch_seed_schedule,
     )
 
     instance = _make_tiny_instance()
-    schedule = _build_dispatch_seed_schedule(instance, "mixed")
+    schedule = _build_dispatch_seed_schedule(instance, instance, 1, "mixed")
 
     assert schedule is not None
     end_map = schedule.get_jik_2_end_time_map()
@@ -255,8 +255,8 @@ def test_mixed_seed_obj_le_job_wise_seed_obj() -> None:
     )
 
     instance = _make_tiny_instance()
-    sch_jw = _build_dispatch_seed_schedule(instance, "job_wise")
-    sch_mixed = _build_dispatch_seed_schedule(instance, "mixed")
+    sch_jw = _build_dispatch_seed_schedule(instance, instance, 1, "job_wise")
+    sch_mixed = _build_dispatch_seed_schedule(instance, instance, 1, "mixed")
 
     sum_e_jw, sum_t_jw = compute_weighted_earliness_tardiness(sch_jw, instance)
     obj_jw = sum_e_jw + sum_t_jw
