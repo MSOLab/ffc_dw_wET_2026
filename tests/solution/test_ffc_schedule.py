@@ -551,3 +551,93 @@ def test_insert_idle_time_tf_effective_window() -> None:
     fine.insert_idle_time(eff_dw, ewt, twt)
 
     assert coarse.get_jik_2_end_time_map() == fine.get_jik_2_end_time_map()
+
+
+# -------------------------------------------------------------------
+# CSR floor-based shift tests (K > 1)
+# -------------------------------------------------------------------
+
+
+def _make_iit_schedule_single_job(
+    job_id: str = "j0", coarse_c: int = 2, coarse_start: int = 0
+) -> FFcSchedule:
+    """Single-job × 3-stage schedule, 1 machine per stage."""
+    sched = FFcSchedule(
+        jobs=[job_id],
+        stages=["s0", "s1", "s2"],
+        machines_per_stage={"s0": ["m0"], "s1": ["m1"], "s2": ["m2"]},
+    )
+    sched.add_ops_times_2_mc("s0", "m0", job_id, 0, 1)
+    sched.add_ops_times_2_mc("s1", "m1", job_id, 1, 3)
+    sched.add_ops_times_2_mc("s2", "m2", job_id, coarse_start, coarse_c)
+    return sched
+
+
+def test_insert_idle_time_overshoot_safety_narrow_window() -> None:
+    """Single job, K=50, window (110,120), coarse C=2: must stay at C=2 (real 100),
+    not shift to C=3 (real 150) which would be tardy."""
+    sched = _make_iit_schedule_single_job("j0", coarse_c=2, coarse_start=0)
+    dw = {"j0": (110, 120)}
+    ewt = {"j0": 1}
+    twt = {"j0": 1}
+
+    sched.insert_idle_time(dw, ewt, twt, time_factor=50)
+
+    end_map = sched.get_jik_2_end_time_map()
+    assert end_map[("j0", "s2", "m2")] == 2
+    assert 50 * 2 == 100  # real completion, within (110,120)
+
+
+def test_insert_idle_time_overshoot_safety_real_cases() -> None:
+    """Real cases from the plan: j21 (698,712) K=29 at C=24; j037 (670,698) K=51 at C=13.
+    No job that starts early should end tardy."""
+    for job_id, window, coarse_c, K in [
+        ("j21", (698, 712), 24, 29),
+        ("j037", (670, 698), 13, 51),
+    ]:
+        sched = _make_iit_schedule_single_job(job_id, coarse_c)
+        dw = {job_id: window}
+        ewt = {job_id: 1}
+        twt = {job_id: 1}
+
+        sched.insert_idle_time(dw, ewt, twt, time_factor=K)
+
+        end_map = sched.get_jik_2_end_time_map()
+        d_lo, d_hi = window
+        real_c = K * end_map[(job_id, "s2", "m2")]
+        assert real_c <= d_hi, (
+            f"{job_id}: real completion {real_c} > d_hi={d_hi} (tardy after shift)"
+        )
+
+
+def test_insert_idle_time_termination_on_delta1_zero() -> None:
+    """Wide window (110,220), K=50, op at C=1: must terminate (no hang).
+    Floor stops at C=2 (real 100), gap=10 from the window."""
+    sched = _make_iit_schedule_single_job("j0", coarse_c=1)
+    dw = {"j0": (110, 220)}
+    ewt = {"j0": 1}
+    twt = {"j0": 1}
+
+    sched.insert_idle_time(dw, ewt, twt, time_factor=50)
+
+    end_map = sched.get_jik_2_end_time_map()
+    final_c = end_map[("j0", "s2", "m2")]
+    assert final_c == 2  # floor says "can't move" at C=1, shifts once to C=2
+
+
+def test_insert_idle_time_floor_vs_ceil_divergence_wide_window() -> None:
+    """Wide window (110,220), K=50: floor leaves residual earliness (lands at C=2,
+    cost w-·10), i.e. does NOT reach the in-due cell C=3. Locks the accepted tradeoff."""
+    sched = _make_iit_schedule_single_job("j0", coarse_c=1)
+    dw = {"j0": (110, 220)}
+    ewt = {"j0": 1}
+    twt = {"j0": 1}
+
+    sched.insert_idle_time(dw, ewt, twt, time_factor=50)
+
+    end_map = sched.get_jik_2_end_time_map()
+    final_c = end_map[("j0", "s2", "m2")]
+    real_c = 50 * final_c
+    # Floor stops at last-early cell (C=2, real=100), not the in-due cell (C=3, real=150)
+    assert final_c == 2
+    assert real_c == 100  # residual earliness = 110 - 100 = 10

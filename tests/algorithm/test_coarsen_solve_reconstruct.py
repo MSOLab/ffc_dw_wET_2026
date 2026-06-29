@@ -996,3 +996,41 @@ def test_csr_non_factor_model_uses_standard_objective() -> None:
         actual_T = int(solver.value(et_vars.T[j]))
         assert actual_E == expected_E, f"Job {j}: E={actual_E} != expected {expected_E}"
         assert actual_T == expected_T, f"Job {j}: T={actual_T} != expected {expected_T}"
+
+
+# ---------------------------------------------------------------------------
+# CSR floor-based shift: end-to-end regression
+# ---------------------------------------------------------------------------
+
+
+def test_csr_narrow_window_end_to_end() -> None:
+    """End-to-end CSR pipeline runs on a narrow-window instance and the final
+    (K=1-reconstructed) objective is a valid non-negative float.
+
+    The final reconstruct runs at K=1, so the floor change only affects the
+    coarse seed — the final schedule objective must still be valid.
+    """
+    instance = _make_small_ddw_instance(
+        name="csr_floor_e2e",
+        processing_rows=[[100, 50], [200, 100], [150, 75]],
+        job_2_due_window_map={"j0": (110, 120), "j1": (698, 712), "j2": (670, 698)},
+        job_2_ewt_map={"j0": 1, "j1": 1, "j2": 1},
+        job_2_twt_map={"j0": 1, "j1": 1, "j2": 1},
+        stage_2_machine_count=(1, 1),
+    )
+
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    assert record.result.schedule is not None
+    assert record.result.obj_value is not None
+    assert isinstance(record.result.obj_value, float)
+    assert record.result.obj_value >= 0.0
+
+    metrics = record.result.metrics
+    assert metrics is not None
+    assert metrics["factor"] == 50

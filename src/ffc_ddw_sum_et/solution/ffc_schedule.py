@@ -1582,27 +1582,22 @@ class FFcSchedule:
           the next block when delta == delta2).
 
         When ``time_factor > 1``, the schedule lives on a coarse time grid and
-        the due window belongs to the original (fine) scale.  The effective
-        coarse window is ``ceil(d / time_factor)`` for each bound, which is the
-        exact coarse-grid representation of the original boundary.  When
-        ``time_factor == 1`` the effective window equals the original window
-        and the algorithm is byte-identical to the no-factor path — a true
-        no-op for all existing (non-CSR) callers.
+        the due window belongs to the original (fine) scale.
+        Shift distance Δ₁ uses **floor** (``lo // K`` / ``hi // K``)
+        so that the shift is structurally overshoot-safe: no early job is pushed
+        past its sub-grid due window into tardiness.
+        At ``time_factor == 1``, floor equals ceil and the algorithm is byte-identical
+        to the no-factor path — a true no-op for all existing (non-CSR) callers.
 
-        Scale-consistency invariant (caller's responsibility): the schedule
-        times and the effective window (``due_window_map / time_factor``) must
-        be in the same time unit.
+        Partition uses the Multiplication form (exact, no rounding):
+        ``K * c < lo`` → S_E, ``K * c >= hi`` → S_T, else S_D.
+
+        Termination guard: when ``Δ₁ == 0`` (floor says "can't move"),
+        ``j`` is decremented to avoid an infinite loop.
         """
         last_stage_id = self.stages[-1]
         INF = 10**9
-
-        if time_factor > 1:
-            eff_window: dict[JobIdType, tuple[int, int]] = {
-                j: (-(-lo // time_factor), -(-hi // time_factor))
-                for j, (lo, hi) in due_window_map.items()
-            }
-        else:
-            eff_window = dict(due_window_map)
+        K = time_factor
 
         for mc_id in self.machines_per_stage[last_stage_id]:
             seq = self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id]
@@ -1628,11 +1623,11 @@ class FFcSchedule:
 
                 s_e, s_t, s_d = [], [], []
                 for i in range(j, block_end + 1):
-                    d_lo, d_hi = eff_window[job_ids[i]]
-                    c = ends[i]
-                    if c < d_lo:
+                    d_lo, d_hi = due_window_map[job_ids[i]]
+                    KC_j = K * ends[i]
+                    if KC_j < d_lo:
                         s_e.append(i)
-                    elif c >= d_hi:
+                    elif KC_j >= d_hi:
                         s_t.append(i)
                     else:
                         s_d.append(i)
@@ -1641,14 +1636,23 @@ class FFcSchedule:
                 sum_t = sum(twt_map.get(job_ids[i], 1) for i in s_t)
 
                 if sum_e > sum_t:
-                    delta1_vals = [eff_window[job_ids[i]][0] - ends[i] for i in s_e]
-                    delta1_vals += [eff_window[job_ids[i]][1] - ends[i] for i in s_d]
+                    delta1_vals: list[int] = []
+                    for i in s_e:
+                        d_lo, _ = due_window_map[job_ids[i]]
+                        delta1_vals.append(d_lo // K - ends[i])
+                    for i in s_d:
+                        _, d_hi = due_window_map[job_ids[i]]
+                        delta1_vals.append(d_hi // K - ends[i])
                     delta1 = min(delta1_vals) if delta1_vals else INF
                     delta = min(delta1, delta2)
-                    for i in range(j, block_end + 1):
-                        starts[i] += delta
-                        ends[i] += delta
-                    # j stays fixed — re-evaluate same position with updated times
+                    if delta > 0:
+                        for i in range(j, block_end + 1):
+                            starts[i] += delta
+                            ends[i] += delta
+                        # j stays fixed — re-evaluate same position with updated times
+                    else:
+                        # Δ₁ == 0: floor says "can't move" → make progress
+                        j -= 1
                 else:
                     j -= 1
 
