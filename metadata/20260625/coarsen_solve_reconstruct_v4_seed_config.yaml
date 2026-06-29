@@ -2,10 +2,10 @@ run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-# ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
+ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
-output_dir: output/20260625
+output_dir: output/20260629
 
 instance_worker_cnt: 12
 

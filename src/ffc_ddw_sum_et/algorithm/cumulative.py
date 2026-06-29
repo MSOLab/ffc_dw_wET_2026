@@ -375,8 +375,8 @@ class BaseModelBuilder:
         When ``time_factor > 1`` (CSR pipeline), the completion variable
         ``C^c`` lives on a coarsened time grid.  The penalty is computed
         as if the real completion were ``time_factor * C^c``, compared
-        against the original-scale due window stored in
-        ``params.original_scale_d_lower`` / ``params.original_scale_d_upper``:
+        against ``params.d_lower`` / ``params.d_upper`` (for coarsened
+        instances these hold the original-scale due window):
 
         ``E_j = max(0, d_lower_orig_j - time_factor * C^c_j)``
         ``T_j = max(0, time_factor * C^c_j - d_upper_orig_j)``

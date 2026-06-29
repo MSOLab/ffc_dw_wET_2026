@@ -513,7 +513,12 @@ def test_insert_idle_time_tf1_is_noop() -> None:
 
 
 def test_insert_idle_time_tf_effective_window() -> None:
-    """tf=2 with original window (16,24) → effective (8,12), same as tf=1 with (8,12)."""
+    """tf=2 with original window (16,24) and tf=1 with (8,12) produce the same schedule.
+
+    (16,24) is exactly divisible by K=2, so floor/ceil coincide and the
+    multiplication-based partition yields the same result as the old
+    ``ceil(d/K)`` effective-window model.  This tests the K-aligned case only.
+    """
     # Coarse schedule: j0 ends at 5, j1 ends at 7 on coarse grid
     coarse = FFcSchedule(
         jobs=["j0", "j1"],
@@ -585,7 +590,7 @@ def test_insert_idle_time_overshoot_safety_narrow_window() -> None:
 
     end_map = sched.get_jik_2_end_time_map()
     assert end_map[("j0", "s2", "m2")] == 2
-    assert 50 * 2 == 100  # real completion, within (110,120)
+    assert 50 * 2 == 100  # real completion 100 < d_lo=110 → still early (below window)
 
 
 def test_insert_idle_time_overshoot_safety_real_cases() -> None:
