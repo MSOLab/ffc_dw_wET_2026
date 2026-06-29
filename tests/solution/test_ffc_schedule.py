@@ -475,3 +475,79 @@ def test_error_cases() -> None:
                 "s1": {**DURATIONS["s1"], "j1": 99},
             },
         )
+
+
+# -------------------------------------------------------------------
+# insert_idle_time with time_factor
+# -------------------------------------------------------------------
+
+
+def _make_iit_schedule() -> FFcSchedule:
+    """2-job × 3-stage schedule, 1 machine per stage."""
+    sched = FFcSchedule(
+        jobs=["j0", "j1"],
+        stages=["s0", "s1", "s2"],
+        machines_per_stage={"s0": ["m0"], "s1": ["m1"], "s2": ["m2"]},
+    )
+    sched.add_ops_times_2_mc("s0", "m0", "j0", 0, 3)
+    sched.add_ops_times_2_mc("s0", "m0", "j1", 3, 6)
+    sched.add_ops_times_2_mc("s1", "m1", "j0", 3, 7)
+    sched.add_ops_times_2_mc("s1", "m1", "j1", 7, 11)
+    sched.add_ops_times_2_mc("s2", "m2", "j0", 7, 10)
+    sched.add_ops_times_2_mc("s2", "m2", "j1", 10, 14)
+    return sched
+
+
+def test_insert_idle_time_tf1_is_noop() -> None:
+    """time_factor=1 must produce identical results to the default call."""
+    sched1 = _make_iit_schedule()
+    sched2 = _make_iit_schedule()
+    dw = {"j0": (8, 12), "j1": (10, 16)}
+    ewt = {"j0": 1, "j1": 1}
+    twt = {"j0": 1, "j1": 1}
+
+    sched1.insert_idle_time(dw, ewt, twt)
+    sched2.insert_idle_time(dw, ewt, twt, time_factor=1)
+
+    assert sched1.get_jik_2_end_time_map() == sched2.get_jik_2_end_time_map()
+
+
+def test_insert_idle_time_tf_effective_window() -> None:
+    """tf=2 with original window (16,24) → effective (8,12), same as tf=1 with (8,12)."""
+    # Coarse schedule: j0 ends at 5, j1 ends at 7 on coarse grid
+    coarse = FFcSchedule(
+        jobs=["j0", "j1"],
+        stages=["s0", "s1", "s2"],
+        machines_per_stage={"s0": ["m0"], "s1": ["m1"], "s2": ["m2"]},
+    )
+    coarse.add_ops_times_2_mc("s0", "m0", "j0", 0, 1)
+    coarse.add_ops_times_2_mc("s0", "m0", "j1", 1, 2)
+    coarse.add_ops_times_2_mc("s1", "m1", "j0", 1, 3)
+    coarse.add_ops_times_2_mc("s1", "m1", "j1", 3, 5)
+    coarse.add_ops_times_2_mc("s2", "m2", "j0", 3, 5)
+    coarse.add_ops_times_2_mc("s2", "m2", "j1", 5, 7)
+
+    # Original window: (16, 24), factor=2 → effective (8, 12)
+    orig_dw = {"j0": (16, 24), "j1": (16, 24)}
+    ewt = {"j0": 1, "j1": 1}
+    twt = {"j0": 1, "j1": 1}
+
+    coarse.insert_idle_time(orig_dw, ewt, twt, time_factor=2)
+
+    # Compare with fine schedule using effective window directly
+    fine = FFcSchedule(
+        jobs=["j0", "j1"],
+        stages=["s0", "s1", "s2"],
+        machines_per_stage={"s0": ["m0"], "s1": ["m1"], "s2": ["m2"]},
+    )
+    fine.add_ops_times_2_mc("s0", "m0", "j0", 0, 1)
+    fine.add_ops_times_2_mc("s0", "m0", "j1", 1, 2)
+    fine.add_ops_times_2_mc("s1", "m1", "j0", 1, 3)
+    fine.add_ops_times_2_mc("s1", "m1", "j1", 3, 5)
+    fine.add_ops_times_2_mc("s2", "m2", "j0", 3, 5)
+    fine.add_ops_times_2_mc("s2", "m2", "j1", 5, 7)
+
+    eff_dw = {"j0": (8, 12), "j1": (8, 12)}
+    fine.insert_idle_time(eff_dw, ewt, twt)
+
+    assert coarse.get_jik_2_end_time_map() == fine.get_jik_2_end_time_map()

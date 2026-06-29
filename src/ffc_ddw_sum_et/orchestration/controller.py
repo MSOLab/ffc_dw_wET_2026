@@ -1639,7 +1639,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         start_elapsed = time.monotonic()
 
-        coarsened = FFcDDWParameters.coarsen_time_resolution(self.instance, factor)
+        coarsened = FFcDDWParameters.coarsen_processing_times(self.instance, factor)
         coarse_sched, _coarse_obj = self._dispatch_by_reversed_sequence_with_iit(
             coarsened.get_eddub_twt_job_sequence(), instance=coarsened
         )

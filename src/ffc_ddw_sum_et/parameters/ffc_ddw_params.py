@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import re
 import statistics as _statistics
 from dataclasses import dataclass
@@ -281,18 +280,28 @@ class FFcDDWParameters(FFcParameters):
         )
 
     @classmethod
-    def coarsen_time_resolution(cls, instance: FFcParameters, factor: int) -> Self:
-        """Return a new FFcDDWParameters with all processing times and due window
-        bounds scaled down by ``factor`` using ceiling division.
+    def coarsen_processing_times(cls, instance: FFcParameters, factor: int) -> Self:
+        """Return a new FFcDDWParameters with processing times coarsened by
+        ``factor`` using ceiling division, while preserving the original due
+        windows.
 
         Every processing time ``p`` becomes ``ceil(p / factor)``, which is >= 1
-        when the original ``p > 0``.  Every due window bound ``d`` becomes
-        ``ceil(d / factor)``.  The ``lower <= upper`` invariant is preserved
-        because both bounds are scaled by the same positive factor with the same
-        monotone operation.
+        when the original ``p > 0``.  Due window bounds are **preserved at the
+        original scale** and must be interpreted together with
+        ``time_factor=factor`` when evaluating the coarsened instance.  The
+        ``lower <= upper`` invariant is preserved because processing times are
+        independently ceiling-divided and the per-job window bounds are kept
+        unchanged.
 
         Weights, job/stage/machine layout, and generation_params are preserved.
-        The new instance name is ``f"{instance.name}_coarsen{factor}"``.
+        The new instance name is ``f"{instance.name}_coarsenp{factor}"``.
+
+        Scale-consistency invariant (caller's responsibility): the coarsened
+        instance carries coarse processing times but original due windows.
+        Evaluating it *without* ``time_factor=factor`` (e.g. a naive
+        ``compute_weighted_earliness_tardiness(coarsened)``) silently mixes
+        scales.  Always pass ``time_factor=factor`` when scoring the coarsened
+        instance.
 
         Args:
             instance: Source FFcDDWParameters instance.
@@ -308,7 +317,7 @@ class FFcDDWParameters(FFcParameters):
         """
         if not isinstance(instance, FFcDDWParameters):
             raise TypeError(
-                f"{cls.__name__}.coarsen_time_resolution requires FFcDDWParameters, "
+                f"{cls.__name__}.coarsen_processing_times requires FFcDDWParameters, "
                 f"got {type(instance).__name__}"
             )
         if factor <= 0:
@@ -317,17 +326,15 @@ class FFcDDWParameters(FFcParameters):
         new_df = np.ceil(instance.p_manager.df.copy() / factor).astype(int)
         new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)
 
-        new_due_window_map = {
-            # job_id: (math.floor(lower / factor), math.floor(upper / factor))
-            job_id: (math.ceil(lower / factor), math.ceil(upper / factor))
-            for job_id, (lower, upper) in instance._job_2_due_window_map.items()
-        }
+        # Preserve original due windows — caller interprets with time_factor.
+        new_due_window_map = dict(instance._job_2_due_window_map)
+
         new_stage_2_machines_map = {
             s: list(instance.stage_2_machines_map[s]) for s in instance.stage_id_list
         }
 
         return cls(
-            f"{instance.name}_coarsen{factor}",
+            f"{instance.name}_coarsenp{factor}",
             list(instance.job_id_list),
             list(instance.stage_id_list),
             new_stage_2_machines_map,

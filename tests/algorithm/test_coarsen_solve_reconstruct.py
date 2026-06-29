@@ -345,7 +345,7 @@ def test_run_metrics_coarsened_instance_name() -> None:
 
     assert record.result is not None
     assert record.result.metrics is not None
-    expected_name = f"{instance.name}_coarsen{factor}"
+    expected_name = f"{instance.name}_coarsenp{factor}"
     assert record.result.metrics["coarsened_instance_name"] == expected_name
 
 
@@ -797,8 +797,8 @@ def test_build_dispatch_seed_schedule_v3_feasible() -> None:
     )
 
     instance = _make_small_ddw_instance()
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor=50)
-    seed = _build_dispatch_seed_schedule(coarsened, instance, 50, "v3")
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor=50)
+    seed = _build_dispatch_seed_schedule(coarsened, 50, "v3")
 
     assert seed is not None
     # Check precedence: each stage start ≥ previous stage end
@@ -907,9 +907,9 @@ def test_csr_objective_uses_original_due_window_not_quantized() -> None:
     )
 
     factor = 50
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
 
-    # Build model with CSR objective
+    # Build model with CSR objective — original window is preserved on coarsened instance
     builder = BaseModelBuilder()
     params = BaseModelBuilder.make_params(coarsened)
     horizon = sum(params.p.values())
@@ -917,21 +917,20 @@ def test_csr_objective_uses_original_due_window_not_quantized() -> None:
         coarsened,
         horizon=horizon,
         time_factor=factor,
-        original_due_windows=instance.job_2_due_window_map,
     )
 
     # Verify that params has the correct fields
     assert params.time_factor == factor
-    assert params.original_scale_d_lower is not None
-    assert params.original_scale_d_upper is not None
-    assert params.original_scale_d_lower["j0"] == 72
-    assert params.original_scale_d_upper["j0"] == 115
-    assert params.original_scale_d_lower["j1"] == 140
-    assert params.original_scale_d_upper["j1"] == 200
+    # Due windows are now the original (preserved) values
+    assert params.d_lower["j0"] == 72
+    assert params.d_upper["j0"] == 115
+    assert params.d_lower["j1"] == 140
+    assert params.d_upper["j1"] == 200
 
-    # Verify that the coarse due windows are different from original
-    assert params.d_lower["j0"] != 72  # coarsened: ceil(72/50)=2
-    assert params.d_lower["j1"] != 140  # coarsened: ceil(140/50)=3
+    # Verify that the coarse processing times are different from original
+    coarsened_p = coarsened.job_2_stage_2_p_map
+    assert coarsened_p["j0"]["i0"] == 2  # ceil(60/50)=2
+    assert coarsened_p["j1"]["i0"] == 2  # ceil(70/50)=2
 
     # Solve and verify the model computes penalty correctly
     solver = cp_model.CpSolver()
@@ -942,8 +941,8 @@ def test_csr_objective_uses_original_due_window_not_quantized() -> None:
     last_i = params.i_list[-1]
     for j in ["j0", "j1"]:
         C_c = int(solver.value(op_vars.op_end[j, last_i]))
-        d_lower = params.original_scale_d_lower[j]
-        d_upper = params.original_scale_d_upper[j]
+        d_lower = params.d_lower[j]
+        d_upper = params.d_upper[j]
         scaled_C = factor * C_c
         expected_E = max(0, d_lower - scaled_C)
         expected_T = max(0, scaled_C - d_upper)
@@ -980,8 +979,6 @@ def test_csr_non_factor_model_uses_standard_objective() -> None:
 
     # Verify that params has default factor=1
     assert params.time_factor == 1
-    assert params.original_scale_d_lower is None
-    assert params.original_scale_d_upper is None
 
     # Solve and verify standard E/T computation
     solver = cp_model.CpSolver()

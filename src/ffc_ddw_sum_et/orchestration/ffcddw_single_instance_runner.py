@@ -623,9 +623,7 @@ class FFcDDWSingleInstanceRunner(
         traj = getattr(controller, "csr_cp_trajectory", None)
         if traj:
             try:
-                traj_path = layout.artifact_path(
-                    "csr_cp_trajectory_json", **scope
-                )
+                traj_path = layout.artifact_path("csr_cp_trajectory_json", **scope)
                 payload = {
                     "elapsed_sec": [e.elapsed_sec for e in traj],
                     "obj_value": [e.obj_value for e in traj],
@@ -633,9 +631,7 @@ class FFcDDWSingleInstanceRunner(
                 }
                 traj_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(traj_path, "w", encoding="utf-8") as f:
-                    json.dump(
-                        payload, f, separators=(",", ":"), ensure_ascii=False
-                    )
+                    json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)
             except Exception:
                 self.logger.exception(
                     "Error saving CSR CP trajectory json for %s", self.ins_name

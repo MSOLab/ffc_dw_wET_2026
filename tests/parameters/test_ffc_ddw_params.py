@@ -335,7 +335,7 @@ def test_with_stage_processing_time_increment_rejects_non_ddw_instance() -> None
 
 
 # -----------------------------------------------------------------------------
-# coarsen_time_resolution
+# coarsen_processing_times
 # -----------------------------------------------------------------------------
 
 
@@ -363,11 +363,11 @@ def _make_small_instance() -> FFcDDWParameters:
     )
 
 
-def test_coarsen_time_resolution_applies_ceil_to_processing_times() -> None:
+def test_coarsen_processing_times_applies_ceil_to_processing_times() -> None:
     instance = _make_small_instance()
     factor = 7
 
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
 
     import math
 
@@ -378,42 +378,43 @@ def test_coarsen_time_resolution_applies_ceil_to_processing_times() -> None:
             assert coarsened.job_2_stage_2_p_map[job_id][stage_id] == expected
 
 
-def test_coarsen_time_resolution_applies_ceil_to_due_windows() -> None:
-    """96..749 with factor=50 must become 2..15."""
+def test_coarsen_processing_times_preserves_due_windows() -> None:
+    """Due windows must be preserved at the original scale."""
     instance = _make_small_instance()
     factor = 50
 
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
 
-    assert coarsened.job_2_due_window_map["j0"] == (2, 15)
+    assert coarsened.job_2_due_window_map["j0"] == (96, 749)
+    assert coarsened.job_2_due_window_map["j1"] == (100, 200)
 
 
-def test_coarsen_time_resolution_all_p_ge_1() -> None:
+def test_coarsen_processing_times_all_p_ge_1() -> None:
     """All coarsened processing times must be >= 1 when originals are > 0."""
     instance = _make_small_instance()
 
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, 50)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50)
 
     for job_id in coarsened.job_id_list:
         for stage_id in coarsened.stage_id_list:
             assert coarsened.job_2_stage_2_p_map[job_id][stage_id] >= 1
 
 
-def test_coarsen_time_resolution_lower_le_upper_preserved() -> None:
+def test_coarsen_processing_times_lower_le_upper_preserved() -> None:
     instance = _make_small_instance()
 
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, 50)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50)
 
     for job_id in coarsened.job_id_list:
         lower, upper = coarsened.job_2_due_window_map[job_id]
         assert lower <= upper
 
 
-def test_coarsen_time_resolution_preserves_weights_and_layout() -> None:
+def test_coarsen_processing_times_preserves_weights_and_layout() -> None:
     instance = _make_small_instance()
     factor = 50
 
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, factor)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
 
     assert coarsened.job_2_ewt_map == instance.job_2_ewt_map
     assert coarsened.job_2_twt_map == instance.job_2_twt_map
@@ -423,36 +424,36 @@ def test_coarsen_time_resolution_preserves_weights_and_layout() -> None:
     assert coarsened.generation_params == instance.generation_params
 
 
-def test_coarsen_time_resolution_name_has_coarsen_suffix() -> None:
+def test_coarsen_processing_times_name_has_coarsenp_suffix() -> None:
     instance = _make_small_instance()
 
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, 50)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50)
 
-    assert coarsened.name == "test_instance_coarsen50"
-
-
-def test_coarsen_time_resolution_raises_value_error_for_zero_factor() -> None:
-    instance = _make_small_instance()
-
-    with pytest.raises(ValueError):
-        FFcDDWParameters.coarsen_time_resolution(instance, 0)
+    assert coarsened.name == "test_instance_coarsenp50"
 
 
-def test_coarsen_time_resolution_raises_value_error_for_negative_factor() -> None:
+def test_coarsen_processing_times_raises_value_error_for_zero_factor() -> None:
     instance = _make_small_instance()
 
     with pytest.raises(ValueError):
-        FFcDDWParameters.coarsen_time_resolution(instance, -1)
+        FFcDDWParameters.coarsen_processing_times(instance, 0)
 
 
-def test_coarsen_time_resolution_raises_type_error_for_non_ddw_instance() -> None:
+def test_coarsen_processing_times_raises_value_error_for_negative_factor() -> None:
+    instance = _make_small_instance()
+
+    with pytest.raises(ValueError):
+        FFcDDWParameters.coarsen_processing_times(instance, -1)
+
+
+def test_coarsen_processing_times_raises_type_error_for_non_ddw_instance() -> None:
     minimal = FFcParameters.__new__(FFcParameters)
 
     with pytest.raises(TypeError, match="requires FFcDDWParameters"):
-        FFcDDWParameters.coarsen_time_resolution(minimal, 50)
+        FFcDDWParameters.coarsen_processing_times(minimal, 50)
 
 
-def test_coarsen_time_resolution_does_not_mutate_original() -> None:
+def test_coarsen_processing_times_does_not_mutate_original() -> None:
     instance = _make_small_instance()
     original_p = {
         j: {s: instance.job_2_stage_2_p_map[j][s] for s in instance.stage_id_list}
@@ -460,7 +461,7 @@ def test_coarsen_time_resolution_does_not_mutate_original() -> None:
     }
     original_dw = instance.job_2_due_window_map.copy()
 
-    FFcDDWParameters.coarsen_time_resolution(instance, 50)
+    FFcDDWParameters.coarsen_processing_times(instance, 50)
 
     for j in instance.job_id_list:
         for s in instance.stage_id_list:

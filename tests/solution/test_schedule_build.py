@@ -48,7 +48,7 @@ def _coarse_schedule(
     reconstruction's ``make_semi_active`` left-shift is non-trivial, letting
     tests distinguish the raw schedule from the post-processed one.
     """
-    coarsened = FFcDDWParameters.coarsen_time_resolution(instance, FACTOR)
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, FACTOR)
     coarse_start = {
         ("j0", "i0"): 0,
         ("j1", "i0"): 0,

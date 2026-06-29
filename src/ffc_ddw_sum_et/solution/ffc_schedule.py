@@ -1568,6 +1568,8 @@ class FFcSchedule:
         due_window_map: Mapping[JobIdType, tuple[int, int]],
         ewt_map: Mapping[JobIdType, int],
         twt_map: Mapping[JobIdType, int],
+        *,
+        time_factor: int = 1,
     ) -> None:
         """Insert idle time on the last stage to minimise earliness-tardiness.
 
@@ -1578,9 +1580,29 @@ class FFcSchedule:
           starting position is re-evaluated with updated completion times
           (sets S_E/S_D/S_T may have changed, or S_M grew by merging with
           the next block when delta == delta2).
+
+        When ``time_factor > 1``, the schedule lives on a coarse time grid and
+        the due window belongs to the original (fine) scale.  The effective
+        coarse window is ``ceil(d / time_factor)`` for each bound, which is the
+        exact coarse-grid representation of the original boundary.  When
+        ``time_factor == 1`` the effective window equals the original window
+        and the algorithm is byte-identical to the no-factor path — a true
+        no-op for all existing (non-CSR) callers.
+
+        Scale-consistency invariant (caller's responsibility): the schedule
+        times and the effective window (``due_window_map / time_factor``) must
+        be in the same time unit.
         """
         last_stage_id = self.stages[-1]
         INF = 10**9
+
+        if time_factor > 1:
+            eff_window: dict[JobIdType, tuple[int, int]] = {
+                j: (-(-lo // time_factor), -(-hi // time_factor))
+                for j, (lo, hi) in due_window_map.items()
+            }
+        else:
+            eff_window = dict(due_window_map)
 
         for mc_id in self.machines_per_stage[last_stage_id]:
             seq = self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id]
@@ -1606,7 +1628,7 @@ class FFcSchedule:
 
                 s_e, s_t, s_d = [], [], []
                 for i in range(j, block_end + 1):
-                    d_lo, d_hi = due_window_map[job_ids[i]]
+                    d_lo, d_hi = eff_window[job_ids[i]]
                     c = ends[i]
                     if c < d_lo:
                         s_e.append(i)
@@ -1619,10 +1641,8 @@ class FFcSchedule:
                 sum_t = sum(twt_map.get(job_ids[i], 1) for i in s_t)
 
                 if sum_e > sum_t:
-                    delta1_vals = [due_window_map[job_ids[i]][0] - ends[i] for i in s_e]
-                    delta1_vals += [
-                        due_window_map[job_ids[i]][1] - ends[i] for i in s_d
-                    ]
+                    delta1_vals = [eff_window[job_ids[i]][0] - ends[i] for i in s_e]
+                    delta1_vals += [eff_window[job_ids[i]][1] - ends[i] for i in s_d]
                     delta1 = min(delta1_vals) if delta1_vals else INF
                     delta = min(delta1, delta2)
                     for i in range(j, block_end + 1):

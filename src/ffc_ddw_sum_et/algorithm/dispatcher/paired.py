@@ -38,6 +38,8 @@ def dispatch_forward_with_iit(
     instance: FFcDDWParameters,
     job_sequence: Sequence[str],
     logger: logging.Logger | None = None,
+    *,
+    time_factor: int = 1,
 ) -> tuple[FFcSchedule, float]:
     """sd pipeline: forward job-centric decode + semi-active + IIT + wET."""
     log = logger or logging.getLogger(__name__)
@@ -48,13 +50,16 @@ def dispatch_forward_with_iit(
     )
     dispatcher = MixedDispatcher(instance, logger=log)
     schedule = dispatcher.get_job_centric_schedule_by_sequence(job_sequence)
-    schedule.make_semi_active(instance.stage_2_job_2_p_map)
+    schedule.make_semi_active(instance.stage_2_job_2_p_map)  # TODO: remove
     schedule.insert_idle_time(
         instance.job_2_due_window_map,
         instance.job_2_ewt_map,
         instance.job_2_twt_map,
+        time_factor=time_factor,
     )
-    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(
+        schedule, instance, time_factor=time_factor
+    )
     return schedule, float(sum_e + sum_t)
 
 
@@ -62,6 +67,8 @@ def dispatch_reversed_with_iit(
     instance: FFcDDWParameters,
     job_sequence: Sequence[str],
     logger: logging.Logger | None = None,
+    *,
+    time_factor: int = 1,
 ) -> tuple[FFcSchedule, float]:
     """rd pipeline: stage-reverse + reversed mixed(makespan) + unflip + IIT + wET."""
     log = logger or logging.getLogger(__name__)
@@ -99,10 +106,14 @@ def dispatch_reversed_with_iit(
         schedule_2 = None
 
     if schedule_1 is not None and schedule_2 is not None:
-        sum_e_1, sum_t_1 = compute_weighted_earliness_tardiness(schedule_1, instance)
+        sum_e_1, sum_t_1 = compute_weighted_earliness_tardiness(
+            schedule_1, instance, time_factor=time_factor
+        )
         obj_1 = float(sum_e_1 + sum_t_1)
 
-        sum_e_2, sum_t_2 = compute_weighted_earliness_tardiness(schedule_2, instance)
+        sum_e_2, sum_t_2 = compute_weighted_earliness_tardiness(
+            schedule_2, instance, time_factor=time_factor
+        )
         obj_2 = float(sum_e_2 + sum_t_2)
 
         if obj_1 <= obj_2:
@@ -136,8 +147,11 @@ def dispatch_reversed_with_iit(
         instance.job_2_due_window_map,
         instance.job_2_ewt_map,
         instance.job_2_twt_map,
+        time_factor=time_factor,
     )
-    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(
+        schedule, instance, time_factor=time_factor
+    )
     return schedule, float(sum_e + sum_t)
 
 
@@ -146,32 +160,28 @@ def build_v3_paired_dispatch_schedule(
     priorities: Sequence[str] = V3_PRIORITY_SET,
     logger: logging.Logger | None = None,
     *,
-    original_instance: FFcDDWParameters | None = None,
     factor: int = 1,
 ) -> tuple[FFcSchedule, float, str]:
     """v3 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
 
-    When ``original_instance`` and ``factor`` are provided (CSR pipeline),
-    the wET evaluation uses ``factor * C^c`` against the original due window
+    When ``factor > 1`` (CSR pipeline), the wET evaluation uses
+    ``factor * C^c`` against the instance's (original-scale) due window
     so the seed is consistent with the CSR CP model's objective.
     """
     log = logger or logging.getLogger(__name__)
     candidates: list[tuple[float, str, FFcSchedule]] = []
     for p in priorities:
         seq = dispatch_seq_job_sequence(instance, p)
-        sd_sch, sd_obj = dispatch_forward_with_iit(instance, seq, log)
-        rd_sch, rd_obj = dispatch_reversed_with_iit(instance, seq, log)
-        if original_instance is not None:
-            # CSR mode: re-evaluate using original window + factor-scaled
-            # completion, so candidate ranking matches the CSR CP objective.
-            sd_e, sd_t = compute_weighted_earliness_tardiness(
-                sd_sch, original_instance, time_factor=factor
-            )
-            sd_obj = sd_e + sd_t
-            rd_e, rd_t = compute_weighted_earliness_tardiness(
-                rd_sch, original_instance, time_factor=factor
-            )
-            rd_obj = rd_e + rd_t
+        # ``time_factor=factor`` makes both the idle insertion *and* the wET
+        # ranking inside the helpers use the CSR objective (factor*C^c against
+        # the instance's original window), so candidates are built and scored
+        # consistently with the CSR CP model.
+        sd_sch, sd_obj = dispatch_forward_with_iit(
+            instance, seq, log, time_factor=factor
+        )
+        rd_sch, rd_obj = dispatch_reversed_with_iit(
+            instance, seq, log, time_factor=factor
+        )
         candidates.append((sd_obj, f"sd:{p}", sd_sch))
         candidates.append((rd_obj, f"rd:{p}", rd_sch))
     best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
@@ -190,32 +200,28 @@ def build_v4_paired_dispatch_schedule(
     priorities: Sequence[str] = V4_PRIORITY_SET,
     logger: logging.Logger | None = None,
     *,
-    original_instance: FFcDDWParameters | None = None,
     factor: int = 1,
 ) -> tuple[FFcSchedule, float, str]:
     """v4 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
 
-    When ``original_instance`` and ``factor`` are provided (CSR pipeline),
-    the wET evaluation uses ``factor * C^c`` against the original due window
+    When ``factor > 1`` (CSR pipeline), the wET evaluation uses
+    ``factor * C^c`` against the instance's (original-scale) due window
     so the seed is consistent with the CSR CP model's objective.
     """
     log = logger or logging.getLogger(__name__)
     candidates: list[tuple[float, str, FFcSchedule]] = []
     for p in priorities:
         seq = dispatch_seq_job_sequence(instance, p)
-        sd_sch, sd_obj = dispatch_forward_with_iit(instance, seq, log)
-        rd_sch, rd_obj = dispatch_reversed_with_iit(instance, seq, log)
-        if original_instance is not None:
-            # CSR mode: re-evaluate using original window + factor-scaled
-            # completion, so candidate ranking matches the CSR CP objective.
-            sd_e, sd_t = compute_weighted_earliness_tardiness(
-                sd_sch, original_instance, time_factor=factor
-            )
-            sd_obj = sd_e + sd_t
-            rd_e, rd_t = compute_weighted_earliness_tardiness(
-                rd_sch, original_instance, time_factor=factor
-            )
-            rd_obj = rd_e + rd_t
+        # ``time_factor=factor`` makes both the idle insertion *and* the wET
+        # ranking inside the helpers use the CSR objective (factor*C^c against
+        # the instance's original window), so candidates are built and scored
+        # consistently with the CSR CP model.
+        sd_sch, sd_obj = dispatch_forward_with_iit(
+            instance, seq, log, time_factor=factor
+        )
+        rd_sch, rd_obj = dispatch_reversed_with_iit(
+            instance, seq, log, time_factor=factor
+        )
         candidates.append((sd_obj, f"sd:{p}", sd_sch))
         candidates.append((rd_obj, f"rd:{p}", rd_sch))
     best_obj, best_label, best_sch = min(candidates, key=lambda c: c[0])
