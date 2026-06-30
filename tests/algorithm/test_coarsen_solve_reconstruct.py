@@ -1034,3 +1034,221 @@ def test_csr_narrow_window_end_to_end() -> None:
     metrics = record.result.metrics
     assert metrics is not None
     assert metrics["factor"] == 50
+
+
+# ---------------------------------------------------------------------------
+# solve=False: seed-only deterministic mode
+# ---------------------------------------------------------------------------
+
+
+def test_option_solve_default_is_true() -> None:
+    """CoarsenSolveReconstructOption.solve must default to True."""
+    opt = CoarsenSolveReconstructOption()
+    assert opt.solve is True
+
+
+def test_option_solve_false() -> None:
+    """CoarsenSolveReconstructOption must accept solve=False."""
+    opt = CoarsenSolveReconstructOption(solve=False)
+    assert opt.solve is False
+
+
+def test_solve_false_returns_feasible_on_tiny_instance() -> None:
+    """solve=False must return FEASIBLE with a valid schedule on a tiny instance."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.work_status in (WorkStatus.FEASIBLE, WorkStatus.OPTIMAL)
+    assert record.result is not None
+    assert record.result.schedule is not None
+    assert record.result.obj_value is not None
+    assert record.result.obj_value >= 0.0
+
+
+def test_solve_false_deterministic() -> None:
+    """solve=False must produce identical results across two runs on the same instance."""
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        run_coarsen_solve_reconstruct,
+    )
+    import logging
+
+    trace1 = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+    trace2 = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace1.final_schedule is not None
+    assert trace2.final_schedule is not None
+    assert trace1.obj_value == trace2.obj_value
+
+    start1 = trace1.final_schedule.get_jik_2_start_time_map()
+    start2 = trace2.final_schedule.get_jik_2_start_time_map()
+    end1 = trace1.final_schedule.get_jik_2_end_time_map()
+    end2 = trace2.final_schedule.get_jik_2_end_time_map()
+    for key in start1:
+        assert start1[key] == start2[key]
+        assert end1[key] == end2[key]
+
+
+def test_solve_false_seed_only_equivalence() -> None:
+    """solve=False final_schedule must equal _build_dispatch_seed_schedule -> reconstruct."""
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        reconstruct_coarse_schedule,
+        run_coarsen_solve_reconstruct,
+    )
+    from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+
+    instance = _make_tiny_2job_2stage_instance()
+    factor = 50
+    option = CoarsenSolveReconstructOption(
+        factor=factor, solver_thread_cnt=1, solve=False
+    )
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        _seed_and_obj,
+    )
+    import logging
+
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    # Build the expected schedule manually
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
+    seed_schedule, _ = _seed_and_obj(coarsened, factor, "mixed")
+    expected_final = reconstruct_coarse_schedule(seed_schedule, instance, factor)
+
+    assert trace.final_schedule is not None
+    assert expected_final is not None
+
+    trace_starts = trace.final_schedule.get_jik_2_start_time_map()
+    expected_starts = expected_final.get_jik_2_start_time_map()
+    trace_ends = trace.final_schedule.get_jik_2_end_time_map()
+    expected_ends = expected_final.get_jik_2_end_time_map()
+
+    for key in trace_starts:
+        assert trace_starts[key] == expected_starts[key], (
+            f"start mismatch for {key}: {trace_starts[key]} != {expected_starts[key]}"
+        )
+        assert trace_ends[key] == expected_ends[key], (
+            f"end mismatch for {key}: {trace_ends[key]} != {expected_ends[key]}"
+        )
+
+
+def test_solve_false_metrics_contract() -> None:
+    """solve=False metrics must have coarsened_status='SEED_ONLY', etc."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    assert metrics["coarsened_status"] == "SEED_ONLY"
+    assert metrics["coarsened_obj_value"] is not None
+    assert metrics["coarsened_obj_bound"] is None
+    assert metrics["dispatch_seed_coarsened_obj"] is not None
+    assert metrics["coarsened_elapsed"] >= 0.0
+
+
+def test_solve_false_termination_reason_completed() -> None:
+    """solve=False finishes deterministically, so termination is COMPLETED
+    (not TIME_LIMIT) with a FEASIBLE work_status."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.work_status is WorkStatus.FEASIBLE
+    assert record.termination_reason is TerminationReason.COMPLETED
+
+
+def test_solve_false_cp_progress_log_empty() -> None:
+    """solve=False must produce empty cp_progress_log."""
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        run_coarsen_solve_reconstruct,
+    )
+    import logging
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.cp_progress_log == ()
+
+
+def test_solve_false_coarse_schedule_has_seed_contents() -> None:
+    """solve=False coarse_schedule must have the same start/end times as the seed."""
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        _seed_and_obj,
+        run_coarsen_solve_reconstruct,
+    )
+    from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+    import logging
+
+    instance = _make_tiny_2job_2stage_instance()
+    factor = 50
+    option = CoarsenSolveReconstructOption(
+        factor=factor, solver_thread_cnt=1, solve=False
+    )
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
+    seed_schedule, _ = _seed_and_obj(coarsened, factor, "mixed")
+
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.coarse_schedule is not None
+    seed_starts = seed_schedule.get_jik_2_start_time_map()
+    seed_ends = seed_schedule.get_jik_2_end_time_map()
+    coarse_starts = trace.coarse_schedule.get_jik_2_start_time_map()
+    coarse_ends = trace.coarse_schedule.get_jik_2_end_time_map()
+    for key in seed_starts:
+        assert seed_starts[key] == coarse_starts[key], (
+            f"start mismatch for {key}: {seed_starts[key]} != {coarse_starts[key]}"
+        )
+        assert seed_ends[key] == coarse_ends[key], (
+            f"end mismatch for {key}: {seed_ends[key]} != {coarse_ends[key]}"
+        )
+
+
+def test_solve_true_default_unchanged() -> None:
+    """solve=True (default) must produce same behavior as before (has solution)."""
+    instance = _make_tiny_2job_2stage_instance()
+    adapter = CoarsenSolveReconstructAdapter()
+    # Default option (solve=True by default)
+    spec = AlgSpec(instance=instance)
+
+    record = adapter.run(spec)
+
+    assert record.work_status in (WorkStatus.OPTIMAL, WorkStatus.FEASIBLE)
+    assert record.result is not None
+    assert record.result.schedule is not None
+    assert record.result.obj_value is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    assert metrics["coarsened_status"] in ("OPTIMAL", "FEASIBLE")
+    assert metrics["coarsened_obj_value"] is not None
+
+
+def test_solve_false_trajectory_ignored() -> None:
+    """solve=False + draw_cp_trajectory=True must produce falsy trajectory."""
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        run_coarsen_solve_reconstruct,
+    )
+    import logging
+
+    instance = _make_tiny_2job_2stage_instance()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    # cp_progress_log is empty tuple -> falsy -> runner skips JSON write
+    assert not trace.cp_progress_log
+    assert trace.cp_progress_log == ()

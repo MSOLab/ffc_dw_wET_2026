@@ -2616,6 +2616,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         log_search_progress: bool = False,
         error_if_infeasible: bool = False,
         seed_dispatch: str = "mixed",
+        solve: bool = True,
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
         draw_cp_trajectory: bool = False,
@@ -2643,6 +2644,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``"mixed"`` (best among mixed-dispatch np-list candidates), or
         ``"v3"`` (v3 paired-dispatch pool: priority×{sd,rd} min-wET on
         coarsened scale). Default is ``"mixed"``.
+
+        ``solve``: when ``False``, skip the CP-SAT solve and use the dispatch
+        seed directly as the coarse schedule (seed-only deterministic mode).
+        The output equals the reconstruct of the seed — no CP noise, no
+        re-run variance. ``cp_progress_log`` is empty; ``coarsened_status``
+        is ``"SEED_ONLY"``. Default is ``True`` (preserve existing behavior).
 
         ``draw_gantt`` is accepted for API consistency but does not
         currently render a Gantt chart; any post-work would be placed after
@@ -2699,6 +2706,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             log_search_progress=log_search_progress,
             error_if_infeasible=error_if_infeasible,
             seed_dispatch=seed_dispatch,
+            solve=solve,
         )
         trace = run_coarsen_solve_reconstruct(instance, option, self.logger)
 

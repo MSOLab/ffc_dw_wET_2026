@@ -85,6 +85,13 @@ class CoarsenSolveReconstructOption(AlgOption):
     log_search_progress: bool = False
     error_if_infeasible: bool = False
     seed_dispatch: Literal["job_wise", "mixed", "v3", "v4"] = "mixed"
+    solve: bool = True
+    """When ``False``, skip CP-SAT solve and use the dispatch seed directly.
+
+    This produces a deterministic seed-only schedule (no CP noise), useful for
+    A/B testing seed quality changes. The ``coarse_schedule`` becomes the seed
+    itself; ``cp_progress_log`` is empty; ``coarsened_status`` is ``"SEED_ONLY"``.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -190,6 +197,25 @@ def _build_dispatch_seed_schedule(
     return best_sch
 
 
+def _seed_and_obj(
+    coarsened: FFcDDWParameters,
+    factor: int,
+    strategy: Literal["job_wise", "mixed", "v3", "v4"],
+) -> tuple[FFcSchedule, float]:
+    """Build a dispatch seed schedule and evaluate its coarsened wET.
+
+    Returns ``(seed_schedule, dispatch_seed_obj)`` where ``dispatch_seed_obj``
+    is the weighted earliness+tardiness computed under the CSR objective
+    (``factor * C^c`` vs the original due window).
+    """
+    seed_schedule = _build_dispatch_seed_schedule(coarsened, factor, strategy)
+    seed_sum_e, seed_sum_t = compute_weighted_earliness_tardiness(
+        seed_schedule, coarsened, time_factor=factor
+    )
+    dispatch_seed_obj: float = float(seed_sum_e + seed_sum_t)
+    return seed_schedule, dispatch_seed_obj
+
+
 def _solve_coarsened_model(
     coarsened_instance: FFcDDWParameters,
     factor: int,
@@ -229,20 +255,15 @@ def _solve_coarsened_model(
         time_factor=factor,
     )
 
-    # Apply dispatch seed as warm-start hint before solving.
-    seed_schedule = _build_dispatch_seed_schedule(
+    # Build dispatch seed and its CSR-objective wET via the shared helper
+    # (single source of truth with the seed-only path), then apply it as a
+    # warm-start hint before solving.
+    seed_schedule, dispatch_seed_obj = _seed_and_obj(
         coarsened_instance, factor, seed_dispatch
     )
     BaseModelBuilder.apply_hints_from_schedule(
         mdl, params, op_vars, et_vars, seed_schedule
     )
-    # Evaluate seed under the CSR objective (factor*C^c against the original
-    # window preserved on the coarsened instance) so the reported metric is
-    # comparable to the CP coarsened obj.
-    seed_sum_e, seed_sum_t = compute_weighted_earliness_tardiness(
-        seed_schedule, coarsened_instance, time_factor=factor
-    )
-    dispatch_seed_obj: float | None = float(seed_sum_e + seed_sum_t)
 
     eff_tl: float | None
     if timelimit_sec is None:
@@ -339,76 +360,92 @@ def run_coarsen_solve_reconstruct(
         option.solver_thread_cnt,
     )
 
-    (
-        coarsened_status_name,
-        coarse_j_i_2_start,
-        coarse_j_i_2_end,
-        coarsened_obj_value,
-        coarsened_obj_bound,
-        coarsened_elapsed,
-        cp_progress_log,
-        dispatch_seed_obj,
-    ) = _solve_coarsened_model(
-        coarsened,
-        option.factor,
-        timelimit_sec=option.timelimit_sec,
-        solver_thread_cnt=option.solver_thread_cnt,
-        log_search_progress=option.log_search_progress,
-        build_start=build_start,
-        seed_dispatch=option.seed_dispatch,
-    )
-
-    has_solution = coarse_j_i_2_start is not None
-
-    if not has_solution:
-        coarsened_status_int = {
-            "INFEASIBLE": cp_model.INFEASIBLE,
-        }.get(coarsened_status_name, -1)
-        is_infeasible = coarsened_status_int == cp_model.INFEASIBLE
-        if is_infeasible and option.error_if_infeasible:
-            raise RuntimeError(
-                f"run_coarsen_solve_reconstruct: coarsened CP proved INFEASIBLE "
-                f"for {coarsened.name}."
-            )
-        logger.warning(
-            "run_coarsen_solve_reconstruct: no feasible solution on coarsened "
-            "instance (status=%s)",
+    if option.solve:
+        (
             coarsened_status_name,
-        )
-        metrics: dict = {
-            "factor": option.factor,
-            "coarsened_instance_name": coarsened.name,
-            "coarsened_status": coarsened_status_name,
-            "coarsened_obj_value": None,
-            "coarsened_obj_bound": None,
-            "coarsened_elapsed": coarsened_elapsed,
-            "reconstructed_obj_value": None,
-            "reconstructed_makespan": None,
-            "seed_dispatch": option.seed_dispatch,
-            "dispatch_seed_coarsened_obj": dispatch_seed_obj,
-        }
-        return CoarsenSolveReconstructTrace(
-            work_status=WorkStatus.INFEASIBLE if is_infeasible else WorkStatus.ERROR,
-            termination_reason=(
-                TerminationReason.COMPLETED
-                if is_infeasible
-                else TerminationReason.ERROR
-            ),
-            error=(
-                None if is_infeasible else f"coarsened_status={coarsened_status_name}"
-            ),
-            final_schedule=None,
-            coarse_schedule=None,
-            reconstructed_raw_schedule=None,
-            cp_progress_log=cp_progress_log,
-            obj_value=None,
-            metrics=metrics,
+            coarse_j_i_2_start,
+            coarse_j_i_2_end,
+            coarsened_obj_value,
+            coarsened_obj_bound,
+            coarsened_elapsed,
+            cp_progress_log,
+            dispatch_seed_obj,
+        ) = _solve_coarsened_model(
+            coarsened,
+            option.factor,
+            timelimit_sec=option.timelimit_sec,
+            solver_thread_cnt=option.solver_thread_cnt,
+            log_search_progress=option.log_search_progress,
+            build_start=build_start,
+            seed_dispatch=option.seed_dispatch,
         )
 
-    # --- Build coarse-scale schedule snapshot ---
-    coarse_schedule = build_schedule_from_op_starts(
-        coarsened, coarse_j_i_2_start, coarse_j_i_2_end
-    )
+        has_solution = coarse_j_i_2_start is not None
+
+        if not has_solution:
+            coarsened_status_int = {
+                "INFEASIBLE": cp_model.INFEASIBLE,
+            }.get(coarsened_status_name, -1)
+            is_infeasible = coarsened_status_int == cp_model.INFEASIBLE
+            if is_infeasible and option.error_if_infeasible:
+                raise RuntimeError(
+                    f"run_coarsen_solve_reconstruct: coarsened CP proved INFEASIBLE "
+                    f"for {coarsened.name}."
+                )
+            logger.warning(
+                "run_coarsen_solve_reconstruct: no feasible solution on coarsened "
+                "instance (status=%s)",
+                coarsened_status_name,
+            )
+            metrics: dict = {
+                "factor": option.factor,
+                "coarsened_instance_name": coarsened.name,
+                "coarsened_status": coarsened_status_name,
+                "coarsened_obj_value": None,
+                "coarsened_obj_bound": None,
+                "coarsened_elapsed": coarsened_elapsed,
+                "reconstructed_obj_value": None,
+                "reconstructed_makespan": None,
+                "seed_dispatch": option.seed_dispatch,
+                "dispatch_seed_coarsened_obj": dispatch_seed_obj,
+            }
+            return CoarsenSolveReconstructTrace(
+                work_status=WorkStatus.INFEASIBLE
+                if is_infeasible
+                else WorkStatus.ERROR,
+                termination_reason=(
+                    TerminationReason.COMPLETED
+                    if is_infeasible
+                    else TerminationReason.ERROR
+                ),
+                error=(
+                    None
+                    if is_infeasible
+                    else f"coarsened_status={coarsened_status_name}"
+                ),
+                final_schedule=None,
+                coarse_schedule=None,
+                reconstructed_raw_schedule=None,
+                cp_progress_log=cp_progress_log,
+                obj_value=None,
+                metrics=metrics,
+            )
+
+        # --- Build coarse-scale schedule snapshot ---
+        coarse_schedule = build_schedule_from_op_starts(
+            coarsened, coarse_j_i_2_start, coarse_j_i_2_end
+        )
+    else:
+        # Seed-only deterministic mode: skip CP-SAT, use dispatch seed directly.
+        seed_schedule, dispatch_seed_obj = _seed_and_obj(
+            coarsened, option.factor, option.seed_dispatch
+        )
+        coarse_schedule = seed_schedule
+        coarsened_status_name = "SEED_ONLY"
+        coarsened_obj_value: float | None = dispatch_seed_obj
+        coarsened_obj_bound: float | None = None
+        coarsened_elapsed = time.monotonic() - build_start
+        cp_progress_log: tuple[ProgressLogEntry, ...] = ()
 
     # --- Reconstruct to original scale ---
     # Raw snapshot BEFORE any postprocess, and the ET-aligned final schedule.
@@ -424,6 +461,8 @@ def run_coarsen_solve_reconstruct(
     obj_value = float(sum_e + sum_t)
 
     coarsened_status_code_is_optimal = coarsened_status_name == "OPTIMAL"
+    # Seed-only mode finishes deterministically, not against a time cap.
+    is_seed_only = coarsened_status_name == "SEED_ONLY"
 
     metrics = {
         "factor": option.factor,
@@ -446,7 +485,7 @@ def run_coarsen_solve_reconstruct(
         ),
         termination_reason=(
             TerminationReason.COMPLETED
-            if coarsened_status_code_is_optimal
+            if coarsened_status_code_is_optimal or is_seed_only
             else TerminationReason.TIME_LIMIT
         ),
         error=None,

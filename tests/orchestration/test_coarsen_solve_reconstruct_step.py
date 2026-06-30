@@ -568,3 +568,64 @@ def test_seed_dispatch_default_is_mixed(
 
     assert len(captured_option) == 1
     assert captured_option[0].seed_dispatch == "mixed"
+
+
+# ---------------------------------------------------------------------------
+# solve kwarg
+# ---------------------------------------------------------------------------
+
+
+def test_solve_kwarg_passed_to_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The solve kwarg must flow through to the option."""
+    captured_option: list = []
+
+    def spy_pipeline(instance, option, logger):  # type: ignore[no-untyped-def]
+        captured_option.append(option)
+        return _make_trace_no_schedule()
+
+    monkeypatch.setattr(
+        "ffc_ddw_sum_et.orchestration.controller.run_coarsen_solve_reconstruct",
+        spy_pipeline,
+    )
+
+    controller = _make_controller()
+
+    def permissive_register(report, solution, **kwargs):  # type: ignore[no-untyped-def]
+        return True
+
+    controller._register = permissive_register  # type: ignore[method-assign]
+
+    controller.coarsen_solve_reconstruct(solve=False)
+
+    assert len(captured_option) == 1
+    assert captured_option[0].solve is False
+
+
+def test_solve_default_is_true(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When solve is not specified, it must default to True."""
+    captured_option: list = []
+
+    def spy_pipeline(instance, option, logger):  # type: ignore[no-untyped-def]
+        captured_option.append(option)
+        return _make_trace_no_schedule()
+
+    monkeypatch.setattr(
+        "ffc_ddw_sum_et.orchestration.controller.run_coarsen_solve_reconstruct",
+        spy_pipeline,
+    )
+
+    controller = _make_controller()
+
+    def permissive_register(report, solution, **kwargs):  # type: ignore[no-untyped-def]
+        return True
+
+    controller._register = permissive_register  # type: ignore[method-assign]
+
+    controller.coarsen_solve_reconstruct()
+
+    assert len(captured_option) == 1
+    assert captured_option[0].solve is True
