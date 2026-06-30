@@ -1,0 +1,171 @@
+# CSR seed-only A/B comparison config (FULL 1440 instances, 5-way).
+#
+# Deterministic seed-quality comparison across five branches:
+#   - 20260624_more_init_dispatch_solvefalse  (OLD seed algorithm)
+#   - 20260629_csr                            (NEW: floor+guard)
+#   - 20260629_csr_F                          (F: marginal floor)
+#   - 20260629_csr_L                          (L: objective look-ahead)
+#   - 20260629_csr_FL                         (F+L: combined)
+# Same config (byte-identical) on all five branches; solve=False makes
+# output = reconstruct(seed), so the per-instance obj_value delta is purely
+# the seed-algorithm difference. Distinguish runs by timestamp / git hash.
+#
+# Full benchmark: all 1440 instances across size families, factors
+# [1, 4, 16, 64], all 4 seed strategies. factor=1 is the control (coarse-grid
+# change is a K=1 no-op → all five settings must be byte-identical at factor=1).
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260701_csr_seed_only_full
+
+instance_worker_cnt: 96
+draw_gantt: false
+
+scenarios:
+  - name: mixed_f1
+    timelimit: "5nc"
+    output_subdir: mixed_f1
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 1
+        solve: false
+
+  - name: mixed_f4
+    timelimit: "5nc"
+    output_subdir: mixed_f4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 4
+        solve: false
+
+  - name: mixed_f16
+    timelimit: "5nc"
+    output_subdir: mixed_f16
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 16
+        solve: false
+
+  - name: mixed_f64
+    timelimit: "5nc"
+    output_subdir: mixed_f64
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 64
+        solve: false
+
+  - name: v3_f1
+    timelimit: "5nc"
+    output_subdir: v3_f1
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v3
+        factor: 1
+        solve: false
+
+  - name: v3_f4
+    timelimit: "5nc"
+    output_subdir: v3_f4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v3
+        factor: 4
+        solve: false
+
+  - name: v3_f16
+    timelimit: "5nc"
+    output_subdir: v3_f16
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v3
+        factor: 16
+        solve: false
+
+  - name: v3_f64
+    timelimit: "5nc"
+    output_subdir: v3_f64
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v3
+        factor: 64
+        solve: false
+
+  - name: v4_f1
+    timelimit: "5nc"
+    output_subdir: v4_f1
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 1
+        solve: false
+
+  - name: v4_f4
+    timelimit: "5nc"
+    output_subdir: v4_f4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 4
+        solve: false
+
+  - name: v4_f16
+    timelimit: "5nc"
+    output_subdir: v4_f16
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 16
+        solve: false
+
+  - name: v4_f64
+    timelimit: "5nc"
+    output_subdir: v4_f64
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 64
+        solve: false
+
+  - name: job_wise_f1
+    timelimit: "5nc"
+    output_subdir: job_wise_f1
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 1
+        solve: false
+
+  - name: job_wise_f4
+    timelimit: "5nc"
+    output_subdir: job_wise_f4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 4
+        solve: false
+
+  - name: job_wise_f16
+    timelimit: "5nc"
+    output_subdir: job_wise_f16
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 16
+        solve: false
+
+  - name: job_wise_f64
+    timelimit: "5nc"
+    output_subdir: job_wise_f64
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 64
+        solve: false
