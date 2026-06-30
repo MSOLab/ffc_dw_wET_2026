@@ -6,6 +6,6 @@
         "**/.pytest_cache/**": true,
         "**/.ruff_cache/**": true,
         "**/.venv/**": true,
-        "**/output/**": true,
+        "**/output/**": true
     }
 }
