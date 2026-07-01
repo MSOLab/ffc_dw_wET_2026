@@ -92,6 +92,11 @@ class CoarsenSolveReconstructOption(AlgOption):
     A/B testing seed quality changes. The ``coarse_schedule`` becomes the seed
     itself; ``cp_progress_log`` is empty; ``coarsened_status`` is ``"SEED_ONLY"``.
     """
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring"
+    """``insert_idle_time`` mode used when building the coarse-grid seed
+    schedule. Does not affect the final original-scale post-process, which
+    always uses standard flooring (see ``schedule_build.reconstruct_coarse_schedule``).
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -144,6 +149,7 @@ def _build_dispatch_seed_schedule(
     coarsened: FFcDDWParameters,
     factor: int,
     strategy: Literal["job_wise", "mixed", "v3", "v4"],
+    idle_mode: str = "flooring",
 ) -> FFcSchedule:
     """Build a seed schedule via dispatch + idle insertion on coarsened scale.
 
@@ -155,12 +161,20 @@ def _build_dispatch_seed_schedule(
     The wET evaluation uses the new objective: ``factor * C^c`` compared
     against the **original** due window (preserved on the coarsened instance),
     so the seed is consistent with the CP model's objective function.
+
+    ``idle_mode`` selects the ``insert_idle_time`` mode used on the coarse
+    grid (see ``FFcSchedule.insert_idle_time``); default ``"flooring"``
+    preserves prior behaviour.
     """
     if strategy == "v3":
-        seed, _obj, _label = build_v3_paired_dispatch_schedule(coarsened, factor=factor)
+        seed, _obj, _label = build_v3_paired_dispatch_schedule(
+            coarsened, factor=factor, idle_mode=idle_mode
+        )
         return seed
     if strategy == "v4":
-        seed, _obj, _label = build_v4_paired_dispatch_schedule(coarsened, factor=factor)
+        seed, _obj, _label = build_v4_paired_dispatch_schedule(
+            coarsened, factor=factor, idle_mode=idle_mode
+        )
         return seed
 
     seq = _dispatch_seed_job_sequence(coarsened)
@@ -171,7 +185,7 @@ def _build_dispatch_seed_schedule(
     if strategy == "job_wise":
         schedule = BaseDispatcher(coarsened)._create_empty_schedule(coarsened)
         dispatch_job_sequence_by_stages(schedule, seq, coarsened.job_2_stage_2_p_map)
-        schedule.insert_idle_time(dw, ewt, twt, time_factor=factor)
+        schedule.insert_idle_time(dw, ewt, twt, time_factor=factor, idle_mode=idle_mode)
         return schedule
 
     # strategy == "mixed": pick the candidate with minimum wET under the CSR
@@ -182,7 +196,7 @@ def _build_dispatch_seed_schedule(
     best_obj: float | None = None
     best_sch: FFcSchedule | None = None
     for cand in dispatcher.iter_mixed_schedules_by_sequence(seq):
-        cand.insert_idle_time(dw, ewt, twt, time_factor=factor)
+        cand.insert_idle_time(dw, ewt, twt, time_factor=factor, idle_mode=idle_mode)
         sum_e, sum_t = compute_weighted_earliness_tardiness(
             cand, coarsened, time_factor=factor
         )
@@ -201,6 +215,7 @@ def _seed_and_obj(
     coarsened: FFcDDWParameters,
     factor: int,
     strategy: Literal["job_wise", "mixed", "v3", "v4"],
+    idle_mode: str = "flooring",
 ) -> tuple[FFcSchedule, float]:
     """Build a dispatch seed schedule and evaluate its coarsened wET.
 
@@ -208,7 +223,9 @@ def _seed_and_obj(
     is the weighted earliness+tardiness computed under the CSR objective
     (``factor * C^c`` vs the original due window).
     """
-    seed_schedule = _build_dispatch_seed_schedule(coarsened, factor, strategy)
+    seed_schedule = _build_dispatch_seed_schedule(
+        coarsened, factor, strategy, idle_mode=idle_mode
+    )
     seed_sum_e, seed_sum_t = compute_weighted_earliness_tardiness(
         seed_schedule, coarsened, time_factor=factor
     )
@@ -225,6 +242,7 @@ def _solve_coarsened_model(
     log_search_progress: bool,
     build_start: float,
     seed_dispatch: Literal["job_wise", "mixed", "v3", "v4"] = "mixed",
+    idle_mode: str = "flooring",
 ) -> tuple[
     str,
     dict[tuple[str, str], int] | None,
@@ -259,7 +277,7 @@ def _solve_coarsened_model(
     # (single source of truth with the seed-only path), then apply it as a
     # warm-start hint before solving.
     seed_schedule, dispatch_seed_obj = _seed_and_obj(
-        coarsened_instance, factor, seed_dispatch
+        coarsened_instance, factor, seed_dispatch, idle_mode=idle_mode
     )
     BaseModelBuilder.apply_hints_from_schedule(
         mdl, params, op_vars, et_vars, seed_schedule
@@ -378,6 +396,7 @@ def run_coarsen_solve_reconstruct(
             log_search_progress=option.log_search_progress,
             build_start=build_start,
             seed_dispatch=option.seed_dispatch,
+            idle_mode=option.idle_mode,
         )
 
         has_solution = coarse_j_i_2_start is not None
@@ -438,7 +457,7 @@ def run_coarsen_solve_reconstruct(
     else:
         # Seed-only deterministic mode: skip CP-SAT, use dispatch seed directly.
         seed_schedule, dispatch_seed_obj = _seed_and_obj(
-            coarsened, option.factor, option.seed_dispatch
+            coarsened, option.factor, option.seed_dispatch, idle_mode=option.idle_mode
         )
         coarse_schedule = seed_schedule
         coarsened_status_name = "SEED_ONLY"

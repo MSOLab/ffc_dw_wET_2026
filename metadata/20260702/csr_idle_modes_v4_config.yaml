@@ -1,0 +1,176 @@
+# CSR idle-insertion 3-mode (flooring / ceiling / lookahead) experiment.
+#
+# Seed-only (solve=False), v4 paired-dispatch seed strategy, full benchmark
+# (PRA2017/large, 1440 instances). Compares insert_idle_time's breakpoint
+# rule on the coarse-grid seed insertion only (the final original-scale
+# post-process always uses standard flooring — see
+# schedule_build.reconstruct_coarse_schedule).
+#
+# 15 scenarios = {flooring, ceiling, lookahead} x factor {1, 2, 4, 8, 16}.
+# factor=1: ceil(d/1) == d == floor(d/1), so all three modes are byte-identical
+# (clean control group; see plan §1.3).
+#
+# See plans/20260702/csr-idle-modes-flooring-ceiling-lookahead.md
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260702_csr_idle_modes
+
+instance_worker_cnt: 48
+draw_gantt: false
+
+scenarios:
+  - name: flooring_f1
+    timelimit: "5nc"
+    output_subdir: flooring_f1
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 1
+        solve: false
+        idle_mode: flooring
+
+  - name: flooring_f2
+    timelimit: "5nc"
+    output_subdir: flooring_f2
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 2
+        solve: false
+        idle_mode: flooring
+
+  - name: flooring_f4
+    timelimit: "5nc"
+    output_subdir: flooring_f4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 4
+        solve: false
+        idle_mode: flooring
+
+  - name: flooring_f8
+    timelimit: "5nc"
+    output_subdir: flooring_f8
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 8
+        solve: false
+        idle_mode: flooring
+
+  - name: flooring_f16
+    timelimit: "5nc"
+    output_subdir: flooring_f16
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 16
+        solve: false
+        idle_mode: flooring
+
+  - name: ceiling_f1
+    timelimit: "5nc"
+    output_subdir: ceiling_f1
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 1
+        solve: false
+        idle_mode: ceiling
+
+  - name: ceiling_f2
+    timelimit: "5nc"
+    output_subdir: ceiling_f2
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 2
+        solve: false
+        idle_mode: ceiling
+
+  - name: ceiling_f4
+    timelimit: "5nc"
+    output_subdir: ceiling_f4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 4
+        solve: false
+        idle_mode: ceiling
+
+  - name: ceiling_f8
+    timelimit: "5nc"
+    output_subdir: ceiling_f8
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 8
+        solve: false
+        idle_mode: ceiling
+
+  - name: ceiling_f16
+    timelimit: "5nc"
+    output_subdir: ceiling_f16
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 16
+        solve: false
+        idle_mode: ceiling
+
+  - name: lookahead_f1
+    timelimit: "5nc"
+    output_subdir: lookahead_f1
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 1
+        solve: false
+        idle_mode: lookahead
+
+  - name: lookahead_f2
+    timelimit: "5nc"
+    output_subdir: lookahead_f2
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 2
+        solve: false
+        idle_mode: lookahead
+
+  - name: lookahead_f4
+    timelimit: "5nc"
+    output_subdir: lookahead_f4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 4
+        solve: false
+        idle_mode: lookahead
+
+  - name: lookahead_f8
+    timelimit: "5nc"
+    output_subdir: lookahead_f8
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 8
+        solve: false
+        idle_mode: lookahead
+
+  - name: lookahead_f16
+    timelimit: "5nc"
+    output_subdir: lookahead_f16
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 16
+        solve: false
+        idle_mode: lookahead

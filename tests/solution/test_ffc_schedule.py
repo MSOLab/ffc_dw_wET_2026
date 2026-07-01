@@ -646,3 +646,82 @@ def test_insert_idle_time_floor_vs_ceil_divergence_wide_window() -> None:
     # Floor stops at last-early cell (C=2, real=100), not the in-due cell (C=3, real=150)
     assert final_c == 2
     assert real_c == 100  # residual earliness = 110 - 100 = 10
+
+
+# -------------------------------------------------------------------
+# idle_mode variants (flooring / ceiling / lookahead)
+# -------------------------------------------------------------------
+
+
+def test_insert_idle_time_flooring_matches_default_call() -> None:
+    """idle_mode='flooring' explicit must match omitting idle_mode entirely
+    (regression guard: default behavior stays byte-identical)."""
+    sched1 = _make_iit_schedule()
+    sched2 = _make_iit_schedule()
+    dw = {"j0": (8, 12), "j1": (10, 16)}
+    ewt = {"j0": 1, "j1": 1}
+    twt = {"j0": 1, "j1": 1}
+
+    sched1.insert_idle_time(dw, ewt, twt, time_factor=2)
+    sched2.insert_idle_time(dw, ewt, twt, time_factor=2, idle_mode="flooring")
+
+    assert sched1.get_jik_2_end_time_map() == sched2.get_jik_2_end_time_map()
+
+
+def test_insert_idle_time_factor1_all_modes_identical() -> None:
+    """At time_factor=1, ceil(d/1) == floor(d/1) == d, so flooring/ceiling/
+    lookahead must produce byte-identical schedules (plan §1.3 — a clean
+    control group at factor=1)."""
+    dw = {"j0": (8, 12), "j1": (10, 16)}
+    ewt = {"j0": 1, "j1": 1}
+    twt = {"j0": 1, "j1": 1}
+
+    end_maps = {}
+    for mode in ("flooring", "ceiling", "lookahead"):
+        sched = _make_iit_schedule()
+        sched.insert_idle_time(dw, ewt, twt, time_factor=1, idle_mode=mode)
+        end_maps[mode] = sched.get_jik_2_end_time_map()
+
+    assert end_maps["flooring"] == end_maps["ceiling"] == end_maps["lookahead"]
+
+
+def test_insert_idle_time_ceiling_vs_flooring_diverge_on_non_multiple_window() -> None:
+    """K=50, window (110,220), single early job at C=1: K does not divide
+    d_lo=110 (floor=2, ceil=3), so ceiling shifts one coarse cell further
+    right than flooring for this early job (C=3 vs C=2)."""
+    dw = {"j0": (110, 220)}
+    ewt = {"j0": 1}
+    twt = {"j0": 1}
+
+    floor_sched = _make_iit_schedule_single_job("j0", coarse_c=1)
+    floor_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="flooring")
+
+    ceil_sched = _make_iit_schedule_single_job("j0", coarse_c=1)
+    ceil_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="ceiling")
+
+    floor_end = floor_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
+    ceil_end = ceil_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
+
+    assert floor_end == 2
+    assert ceil_end == 3
+
+
+def test_insert_idle_time_ceiling_never_stalls_where_flooring_does() -> None:
+    """K=50, window (105,300), single early job at C=2: flooring hits
+    Delta_1=0 (floor(105/50)=2=C) and stalls (j -= 1, no shift), but ceiling
+    (ceil(105/50)=3) still shifts forward — ceiling never stalls (plan §1.1)."""
+    dw = {"j0": (105, 300)}
+    ewt = {"j0": 1}
+    twt = {"j0": 1}
+
+    floor_sched = _make_iit_schedule_single_job("j0", coarse_c=2)
+    floor_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="flooring")
+
+    ceil_sched = _make_iit_schedule_single_job("j0", coarse_c=2)
+    ceil_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="ceiling")
+
+    floor_end = floor_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
+    ceil_end = ceil_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
+
+    assert floor_end == 2  # flooring stalls: Delta_1 == 0
+    assert ceil_end == 3  # ceiling still shifts forward

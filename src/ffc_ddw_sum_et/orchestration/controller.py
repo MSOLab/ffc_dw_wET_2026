@@ -2617,6 +2617,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         error_if_infeasible: bool = False,
         seed_dispatch: str = "mixed",
         solve: bool = True,
+        idle_mode: str = "flooring",
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
         draw_cp_trajectory: bool = False,
@@ -2650,6 +2651,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         The output equals the reconstruct of the seed — no CP noise, no
         re-run variance. ``cp_progress_log`` is empty; ``coarsened_status``
         is ``"SEED_ONLY"``. Default is ``True`` (preserve existing behavior).
+
+        ``idle_mode`` selects the ``insert_idle_time`` breakpoint rule used
+        when building the coarse-grid dispatch seed: ``"flooring"``
+        (default, byte-identical to prior behavior), ``"ceiling"``, or
+        ``"lookahead"``. Does not affect the final original-scale
+        post-process (always standard flooring).
 
         ``draw_gantt`` is accepted for API consistency but does not
         currently render a Gantt chart; any post-work would be placed after
@@ -2707,6 +2714,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible=error_if_infeasible,
             seed_dispatch=seed_dispatch,
             solve=solve,
+            idle_mode=idle_mode,
         )
         trace = run_coarsen_solve_reconstruct(instance, option, self.logger)
 

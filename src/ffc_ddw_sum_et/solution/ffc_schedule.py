@@ -1570,6 +1570,7 @@ class FFcSchedule:
         twt_map: Mapping[JobIdType, int],
         *,
         time_factor: int = 1,
+        idle_mode: str = "flooring",
     ) -> None:
         """Insert idle time on the last stage to minimise earliness-tardiness.
 
@@ -1582,17 +1583,31 @@ class FFcSchedule:
           the next block when delta == delta2).
 
         When ``time_factor > 1``, the schedule lives on a coarse time grid and
-        the due window belongs to the original (fine) scale.
-        Shift distance Δ₁ uses **floor** (``lo // K`` / ``hi // K``)
-        so that the shift is structurally overshoot-safe: no early job is pushed
-        past its sub-grid due window into tardiness.
-        At ``time_factor == 1``, floor equals ceil and the algorithm is byte-identical
-        to the no-factor path — a true no-op for all existing (non-CSR) callers.
+        the due window belongs to the original (fine) scale. The partition
+        (``K * c < lo`` → S_E, ``K * c >= hi`` → S_T, else S_D — the
+        Multiplication form, exact, no rounding) is shared by all three
+        ``idle_mode`` values; only the shift breakpoint Δ₁ (and whether the
+        shift is unconditional) differs:
 
-        Partition uses the Multiplication form (exact, no rounding):
-        ``K * c < lo`` → S_E, ``K * c >= hi`` → S_T, else S_D.
+        - ``"flooring"`` (default): Δ₁ uses **floor** (``lo // K`` /
+          ``hi // K``), overshoot-safe (no early job is pushed past its
+          sub-grid due window into tardiness). When Δ₁ == 0 the shift stalls
+          and ``j`` is decremented to make progress. This is byte-identical
+          to the original (pre-idle_mode) behaviour.
+        - ``"ceiling"``: Δ₁ uses **ceil** (``-(-lo // K)`` / ``-(-hi // K)``).
+          Δ₁ >= 1 always (see plan §1.1), so the shift is unconditional —
+          never stalls.
+        - ``"lookahead"``: computes the floor-based candidate Δ_a and the
+          Δ_a + 1 candidate Δ_b (each capped by delta2), and picks whichever
+          minimises the block's local E/T objective (``block_obj``). Falls
+          back to the flooring stall rule (``j -= 1``) when the chosen shift
+          is 0.
 
-        Termination guard: when ``Δ₁ == 0`` (floor says "can't move"),
+        At ``time_factor == 1``, floor equals ceil and all three modes are
+        byte-identical to the no-factor path — a true no-op for all existing
+        (non-CSR) callers.
+
+        Termination guard: when the chosen shift is 0 (flooring/lookahead),
         ``j`` is decremented to avoid an infinite loop.
         """
         last_stage_id = self.stages[-1]
@@ -1635,24 +1650,70 @@ class FFcSchedule:
                 sum_e = sum(ewt_map.get(job_ids[i], 1) for i in s_e)
                 sum_t = sum(twt_map.get(job_ids[i], 1) for i in s_t)
 
+                def block_obj(shift: int) -> int:
+                    total = 0
+                    for i in range(j, block_end + 1):
+                        d_lo, d_hi = due_window_map[job_ids[i]]
+                        c = ends[i] + shift
+                        ewt = ewt_map.get(job_ids[i], 1)
+                        twt = twt_map.get(job_ids[i], 1)
+                        total += ewt * max(0, d_lo - K * c) + twt * max(0, K * c - d_hi)
+                    return total
+
                 if sum_e > sum_t:
-                    delta1_vals: list[int] = []
-                    for i in s_e:
-                        d_lo, _ = due_window_map[job_ids[i]]
-                        delta1_vals.append(d_lo // K - ends[i])
-                    for i in s_d:
-                        _, d_hi = due_window_map[job_ids[i]]
-                        delta1_vals.append(d_hi // K - ends[i])
-                    delta1 = min(delta1_vals) if delta1_vals else INF
-                    delta = min(delta1, delta2)
-                    if delta > 0:
+                    if idle_mode == "flooring":
+                        delta1_vals: list[int] = []
+                        for i in s_e:
+                            d_lo, _ = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_lo // K - ends[i])
+                        for i in s_d:
+                            _, d_hi = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_hi // K - ends[i])
+                        delta1 = min(delta1_vals) if delta1_vals else INF
+                        delta = min(delta1, delta2)
+                        if delta > 0:
+                            for i in range(j, block_end + 1):
+                                starts[i] += delta
+                                ends[i] += delta
+                        else:
+                            j -= 1
+                    elif idle_mode == "ceiling":
+                        delta1_vals = []
+                        for i in s_e:
+                            d_lo, _ = due_window_map[job_ids[i]]
+                            delta1_vals.append(-(-d_lo // K) - ends[i])  # ceil(d_lo/K)
+                        for i in s_d:
+                            _, d_hi = due_window_map[job_ids[i]]
+                            delta1_vals.append(-(-d_hi // K) - ends[i])  # ceil(d_hi/K)
+                        delta1 = min(delta1_vals) if delta1_vals else INF
+                        delta = min(
+                            delta1, delta2
+                        )  # >= 1 always -> unconditional shift
                         for i in range(j, block_end + 1):
                             starts[i] += delta
                             ends[i] += delta
-                        # j stays fixed — re-evaluate same position with updated times
+                    elif idle_mode == "lookahead":
+                        delta1_vals = []
+                        for i in s_e:
+                            d_lo, _ = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_lo // K - ends[i])
+                        for i in s_d:
+                            _, d_hi = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_hi // K - ends[i])
+                        delta1 = min(delta1_vals) if delta1_vals else INF
+                        da = min(delta1, delta2)
+                        db = min(delta1 + 1, delta2)
+                        best = (
+                            db if (db != da and block_obj(db) < block_obj(da)) else da
+                        )
+                        if best > 0:
+                            for i in range(j, block_end + 1):
+                                starts[i] += best
+                                ends[i] += best
+                        else:
+                            j -= 1
                     else:
-                        # Δ₁ == 0: floor says "can't move" → make progress
-                        j -= 1
+                        raise ValueError(f"unknown idle_mode: {idle_mode!r}")
                 else:
                     j -= 1
 
