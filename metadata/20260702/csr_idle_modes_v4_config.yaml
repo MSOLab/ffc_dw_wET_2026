@@ -21,7 +21,7 @@ bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260702_csr_idle_modes
 
-instance_worker_cnt: 48
+instance_worker_cnt: 96
 draw_gantt: false
 
 scenarios:
