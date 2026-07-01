@@ -100,9 +100,9 @@ def main() -> None:
     _domination(df, "coarse_obj", "COARSE")
     _domination(df, "recon_obj", "RECON")
 
-    # E/T split (coarse) to show where the gap sits.
-    et = df.groupby(["factor", "mode"])[["coarse_E", "coarse_T"]].mean().round(1)
-    print("\n=== COARSE E/T split (mean) ===")
+    # Weighted E/T split (coarse) to show where the gap sits.
+    et = df.groupby(["factor", "mode"])[["coarse_wE", "coarse_wT"]].mean().round(1)
+    print("\n=== COARSE weighted E/T split (mean) ===")
     print(et.reindex(MODE_ORDER, level=1).to_string())
 
     # Save a wide coarse-obj table: factor rows, mode means + diffs.
