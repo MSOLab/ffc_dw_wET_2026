@@ -1,4 +1,4 @@
-"""End-to-end tests for PwCpDispatcher on a small FFcDDW instance."""
+"""End-to-end tests for SwCpDispatcher on a small FFcDDW instance."""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ from ffc_ddw_sum_et.algorithm.base.alg_record import (
 )
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.neh_cp import NehCpDispatcher, NehCpOption
-from ffc_ddw_sum_et.algorithm.pw_cp import PwCpDispatcher, PwCpOption, PwCpStepEntry
+from ffc_ddw_sum_et.algorithm.sw_cp import SwCpDispatcher, SwCpOption, SwCpStepEntry
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
 
 
-def _make_instance(name: str = "pw_cp_test") -> FFcDDWParameters:
+def _make_instance(name: str = "sw_cp_test") -> FFcDDWParameters:
     """5-job 2-stage instance with parallel machines on stage i0."""
     return FFcDDWParameters(
         name=name,
@@ -53,13 +53,13 @@ def test_dispatcher_returns_feasible_record() -> None:
 
     spec = AlgSpec(
         instance=instance,
-        option=PwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
+        option=SwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
         ref_solution=seed,
     )
-    record = PwCpDispatcher().run(spec)
+    record = SwCpDispatcher().run(spec)
 
     assert record.work_status == WorkStatus.FEASIBLE
-    assert record.algorithm_id == "pw_cp"
+    assert record.algorithm_id == "sw_cp"
     assert record.instance_id == instance.name
     assert record.termination_reason == TerminationReason.COMPLETED
 
@@ -70,10 +70,10 @@ def test_dispatcher_does_not_worsen_incumbent() -> None:
 
     spec = AlgSpec(
         instance=instance,
-        option=PwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
+        option=SwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
         ref_solution=seed,
     )
-    record = PwCpDispatcher().run(spec)
+    record = SwCpDispatcher().run(spec)
 
     assert record.result is not None
     assert record.result.obj_value is not None
@@ -87,10 +87,10 @@ def test_dispatcher_obj_value_matches_recomputed_weighted_et() -> None:
 
     spec = AlgSpec(
         instance=instance,
-        option=PwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
+        option=SwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
         ref_solution=seed,
     )
-    record = PwCpDispatcher().run(spec)
+    record = SwCpDispatcher().run(spec)
 
     assert record.result is not None
     schedule = record.result.schedule
@@ -105,10 +105,10 @@ def test_dispatcher_schedules_every_op() -> None:
 
     spec = AlgSpec(
         instance=instance,
-        option=PwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
+        option=SwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
         ref_solution=seed,
     )
-    record = PwCpDispatcher().run(spec)
+    record = SwCpDispatcher().run(spec)
 
     assert record.result is not None
     schedule = record.result.schedule
@@ -124,10 +124,10 @@ def test_dispatcher_step_log_present() -> None:
 
     spec = AlgSpec(
         instance=instance,
-        option=PwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
+        option=SwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
         ref_solution=seed,
     )
-    record = PwCpDispatcher().run(spec)
+    record = SwCpDispatcher().run(spec)
 
     assert record.result is not None
     metrics = record.result.metrics
@@ -135,4 +135,4 @@ def test_dispatcher_step_log_present() -> None:
     step_log = metrics.get("step_log")
     assert step_log is not None
     for entry in step_log:
-        assert isinstance(entry, PwCpStepEntry)
+        assert isinstance(entry, SwCpStepEntry)

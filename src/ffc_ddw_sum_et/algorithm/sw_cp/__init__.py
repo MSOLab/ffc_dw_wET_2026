@@ -1,8 +1,8 @@
-"""PW-CP algorithm package: sliding-window CP refinement."""
+"""SW-CP algorithm package: sliding-window CP refinement."""
 
-from .cp_model import PwCpBuildResult, PwCpModelBuilder
-from .dispatcher import PwCpDispatcher
-from .option import PwCpOption
+from .cp_model import SwCpBuildResult, SwCpModelBuilder
+from .dispatcher import SwCpDispatcher
+from .option import SwCpOption
 from .partition import (
     JobMcType,
     OperationPartition,
@@ -10,17 +10,17 @@ from .partition import (
     build_stage_2_batch_list,
     validate_and_get_batch_count,
 )
-from .step_log import PwCpStepEntry
+from .step_log import SwCpStepEntry
 from .visual import REGION_COLORS, render_partition_gantt_svg
 
 __all__ = [
     "JobMcType",
     "OperationPartition",
-    "PwCpBuildResult",
-    "PwCpDispatcher",
-    "PwCpModelBuilder",
-    "PwCpOption",
-    "PwCpStepEntry",
+    "SwCpBuildResult",
+    "SwCpDispatcher",
+    "SwCpModelBuilder",
+    "SwCpOption",
+    "SwCpStepEntry",
     "REGION_COLORS",
     "build_operation_partition",
     "build_stage_2_batch_list",

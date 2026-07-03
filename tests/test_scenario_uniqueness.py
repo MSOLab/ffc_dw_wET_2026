@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from main import _validate_scenario_uniqueness
 from ffc_ddw_sum_et.orchestration.artifact_layout import FFcArtifactLayout
+from main import _validate_scenario_uniqueness
 
 
 def test_unique_names_pass() -> None:

@@ -1,6 +1,6 @@
-# `pw_cp`
+# `sw_cp`
 
-`FFcDDWSubroutineController.pw_cp` — sliding-window CP-SAT refinement of an
+`FFcDDWSubroutineController.sw_cp` — sliding-window CP-SAT refinement of an
 existing feasible incumbent for the FFcDDW weighted earliness/tardiness
 problem. Operations on each stage are partitioned into time-ordered batches;
 a window slides across them, and at each position a CP-SAT sub-model
@@ -8,18 +8,18 @@ re-optimises the time and machine assignment of operations inside the window
 while preserving the surrounding schedule structure via dummy bars and
 profile-fixed precedence chains.
 
-A companion composite, `FFcDDWSubroutineController.incremental_pw_cp`,
-iterates `pw_cp` over a range of `unfixed_batch_count` values with
+A companion composite, `FFcDDWSubroutineController.incremental_sw_cp`,
+iterates `sw_cp` over a range of `unfixed_batch_count` values with
 configurable repetition policies.
 
 The algorithm-side entry point is
-[`PwCpDispatcher`](../../src/ffc_ddw_sum_et/algorithm/pw_cp/dispatcher.py)
+[`PwCpDispatcher`](../../src/ffc_ddw_sum_et/algorithm/sw_cp/dispatcher.py)
 (conforms to the `Algorithm` / `AlgSpec` / `AlgRecord` contract — see
 [algorithm-principles.md](../algorithm-principles.md)). The controller-side
 adapter
-[`controller.pw_cp`](../../src/ffc_ddw_sum_et/orchestration/controller.py)
+[`controller.sw_cp`](../../src/ffc_ddw_sum_et/orchestration/controller.py)
 resolves expression-grammar inputs, builds a
-[`PwCpOption`](../../src/ffc_ddw_sum_et/algorithm/pw_cp/option.py),
+[`PwCpOption`](../../src/ffc_ddw_sum_et/algorithm/sw_cp/option.py),
 dispatches via `PwCpDispatcher`, registers the resulting schedule, and
 emits the per-step `_step_log.yaml` next to the controller's working
 directory.
@@ -32,7 +32,7 @@ jobs whose last-stage operation is non-time-fixed in the partition.
 ## Signature
 
 ```python
-def pw_cp(
+def sw_cp(
     self,
     solver_thread_cnt: int = 1,
     batch_size: int | float | str = "m",
@@ -78,10 +78,10 @@ def pw_cp(
 | `draw_gantt` | When `True`, snapshots the incumbent before/after into `mcf_lb_phase_schedules` for post-run PNG rendering. |
 | `horizon_makespan_multiplier` | Multiplier on the incumbent’s makespan to size the CP-SAT horizon: `horizon = ceil(incumbent.makespan × multiplier)`. Default `1.25`. Must be `>= 1.0`. |
 
-## Segunda signature: `incremental_pw_cp`
+## Segunda signature: `incremental_sw_cp`
 
 ```python
-def incremental_pw_cp(
+def incremental_sw_cp(
     self,
     solver_thread_cnt: int = 1,
     batch_size: int | float | str = "m",
@@ -109,13 +109,13 @@ def incremental_pw_cp(
 
 For each `unfixed_batch_count` in `[min, max]`:
 
-- **`"always"`**: invoke `self.pw_cp(unfixed_batch_count=count, ...)` once.
-- **`"if_no_improvement"`**: invoke `self.pw_cp(...)` repeatedly at this
+- **`"always"`**: invoke `self.sw_cp(unfixed_batch_count=count, ...)` once.
+- **`"if_no_improvement"`**: invoke `self.sw_cp(...)` repeatedly at this
   count until a pass produces no improvement on the incumbent’s weighted
   E+T (FFcDDW’s primary objective — replaces hybridflowshop’s makespan
   criterion).
 
-Each inner `pw_cp` call registers its own report. The composite itself
+Each inner `sw_cp` call registers its own report. The composite itself
 does not register. Per-iteration `temporarily_extended_context` tags each
 inner call’s `call_context` so per-instance step-log paths do not collide
 across iterations. `is_stopping_condition()` short-circuits both loops.
@@ -314,7 +314,7 @@ For each `(step, unfixed_start)`:
 | `ctx.solution_manager` | Single registration (once, after the dispatcher returns). |
 | `ctx.mcf_lb_phase_schedules` | Before/after snapshots when `draw_gantt=True`. |
 | `<subroutine_dir>/…_step_log.yaml` | Dumped when `try_get_file_path_for_subroutine` is callable. |
-| `ctx.call_context` | Extended per iteration by `incremental_pw_cp` (batch_NNN/reps_NNN). |
+| `ctx.call_context` | Extended per iteration by `incremental_sw_cp` (batch_NNN/reps_NNN). |
 
 ## Early-return / error paths
 
@@ -336,12 +336,12 @@ For each `(step, unfixed_start)`:
   `apply_end_hints_from_end_time_map`,
   `add_stage_ops_precedence_constraints_after_dispatch_from_schedule`.
 - [`decode_pf_method`, `PFMethod`](../../src/ffc_ddw_sum_et/algorithm/cumulative.py)
-- [`OperationPartition`](../../src/ffc_ddw_sum_et/algorithm/pw_cp/partition.py) —
+- [`OperationPartition`](../../src/ffc_ddw_sum_et/algorithm/sw_cp/partition.py) —
   `build_stage_2_batch_list`, `build_operation_partition`,
   `validate_and_get_batch_count`.
-- [`PwCpModelBuilder`](../../src/ffc_ddw_sum_et/algorithm/pw_cp/cp_model.py) —
+- [`PwCpModelBuilder`](../../src/ffc_ddw_sum_et/algorithm/sw_cp/cp_model.py) —
   `build()`, `build_full_schedule_from_cp()`.
-- [`PwCpOption`](../../src/ffc_ddw_sum_et/algorithm/pw_cp/option.py)
+- [`PwCpOption`](../../src/ffc_ddw_sum_et/algorithm/sw_cp/option.py)
 - [`resolve_per_step_tl`](../../src/ffc_ddw_sum_et/algorithm/step_tl_resolver.py)
 - [`ObjectiveValueRecorder`](../../src/ffc_ddw_sum_et/algorithm/cpsat_callbacks/obj_value_recorder.py)
 - [`FFcSchedule`](../../src/ffc_ddw_sum_et/solution/ffc_schedule.py) —
@@ -362,12 +362,12 @@ For each `(step, unfixed_start)`:
   CP and incremental refinement pattern. There the objective is makespan
   plus common spacing with per-batch lower bound; here the objective is
   weighted E/T with a partial-job formulation.
-- `hybridflowshop/pw_cp/dispatcher.py` — source of the partition model
+- `hybridflowshop/sw_cp/dispatcher.py` — source of the partition model
   (dummy bars, non-fixed-job precedence constraints, profile-fix,
   three-phase schedule reconstruction).
 - `neh_cp` — alternative CP-based refinement that appends jobs
-  incrementally. `pw_cp` partitions operations in time instead, making it
+  incrementally. `sw_cp` partitions operations in time instead, making it
   complementary (one refines by job count, the other by time window).
 - `mcf_lb` — seeding subroutine that produces the initial incumbent
-  required by `pw_cp`. `pw_cp` is typically chained after
+  required by `sw_cp`. `sw_cp` is typically chained after
   `calc_mcf_lb_and_derive_full_sch` or `neh_cp`.

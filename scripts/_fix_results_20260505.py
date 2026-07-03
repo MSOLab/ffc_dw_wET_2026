@@ -29,8 +29,7 @@ def per_run_table(records: list[dict]) -> str:
     return (
         "- **결과**:\n\n"
         "  | scenarioName | mean RPDf (BKS>0) | mean bestObj | n |\n"
-        "  |---|---|---|---|\n"
-        + "\n".join(rows)
+        "  |---|---|---|---|\n" + "\n".join(rows)
     )
 
 

@@ -1,4 +1,4 @@
-"""PwCpDispatcher: sliding-window CP refinement of an incumbent FFcDDW schedule."""
+"""SwCpDispatcher: sliding-window CP refinement of an incumbent FFcDDW schedule."""
 
 from __future__ import annotations
 
@@ -22,29 +22,29 @@ from ..base.alg_spec import AlgSpec
 from ..cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from ..step_tl_resolver import resolve_per_step_tl
 from ..utils import trunc4
-from .cp_model import PwCpModelBuilder
-from .option import PwCpOption
+from .cp_model import SwCpModelBuilder
+from .option import SwCpOption
 from .partition import (
     build_operation_partition,
     build_stage_2_batch_list,
     validate_and_get_batch_count,
 )
-from .step_log import PwCpStepEntry
+from .step_log import SwCpStepEntry
 from .visual import render_partition_gantt_svg
 
-__all__ = ["PwCpDispatcher"]
+__all__ = ["SwCpDispatcher"]
 
 
-class PwCpDispatcher:
+class SwCpDispatcher:
     """Refine a feasible FFcDDW incumbent via sliding-window CP-SAT."""
 
-    algorithm_id = "pw_cp"
+    algorithm_id = "sw_cp"
 
     def run(self, spec: AlgSpec) -> AlgRecord:
         instance = self._validate_instance(spec)
         if spec.ref_solution is None:
             raise ValueError(
-                "PwCpDispatcher requires spec.ref_solution (a feasible "
+                "SwCpDispatcher requires spec.ref_solution (a feasible "
                 "incumbent FFcSchedule) — chain it after a seeding "
                 "subroutine such as calc_mcf_lb_and_derive_full_sch."
             )
@@ -68,7 +68,7 @@ class PwCpDispatcher:
         max_batch_cnt = validate_and_get_batch_count(initial_batches)
         if max_batch_cnt < option.unfixed_batch_count:
             logger.info(
-                "pw_cp: max_batch_cnt=%d < unfixed_batch_count=%d; nothing to do.",
+                "sw_cp: max_batch_cnt=%d < unfixed_batch_count=%d; nothing to do.",
                 max_batch_cnt,
                 option.unfixed_batch_count,
             )
@@ -95,7 +95,7 @@ class PwCpDispatcher:
         )
 
         logger.info(
-            "pw_cp: incumbent E+T=%.0f, batches=%d, iterations=%d, "
+            "sw_cp: incumbent E+T=%.0f, batches=%d, iterations=%d, "
             "unfixed=%d, lpf=%d, rpf=%d, pf_method=%s, wall_clock_deadline=%s",
             self._full_obj(incumbent, instance),
             max_batch_cnt,
@@ -109,8 +109,8 @@ class PwCpDispatcher:
             else "None",
         )
 
-        builder = PwCpModelBuilder()
-        step_entries: list[PwCpStepEntry] = []
+        builder = SwCpModelBuilder()
+        step_entries: list[SwCpStepEntry] = []
         progress_entries: list[ProgressLogEntry] = []
         step_schedules: list[tuple[int, FFcSchedule, FFcSchedule | None]] = []
         prev_elapsed_seconds = 0.0
@@ -123,7 +123,7 @@ class PwCpDispatcher:
             current_batch_cnt = validate_and_get_batch_count(stage_2_batch)
             if current_batch_cnt != max_batch_cnt:
                 raise AssertionError(
-                    "pw_cp: batch count changed during run "
+                    "sw_cp: batch count changed during run "
                     f"(initial={max_batch_cnt}, current={current_batch_cnt})."
                 )
 
@@ -150,7 +150,7 @@ class PwCpDispatcher:
                 j for p in stage_2_partition.values() for j, _ in p.non_time_fixed
             }
             if not sub_jobs:
-                logger.debug("pw_cp step %d: empty non-time-fixed set; skipping.", step)
+                logger.debug("sw_cp step %d: empty non-time-fixed set; skipping.", step)
                 continue
 
             rj_schedule = incumbent.deepcopy()
@@ -179,7 +179,7 @@ class PwCpDispatcher:
                         svg_path.parent.mkdir(parents=True, exist_ok=True)
                         svg_path.write_text(svg)
                         logger.debug(
-                            "pw_cp step %d: partition gantt -> %s", step, svg_path
+                            "sw_cp step %d: partition gantt -> %s", step, svg_path
                         )
 
             sub_instance = FFcDDWParameters.create_instance_of_job_subset(
@@ -265,7 +265,7 @@ class PwCpDispatcher:
                 cand_obj = self._full_obj(cand, instance)
                 if cp_divergence_count:
                     logger.debug(
-                        "pw_cp step %d: %d ops realised at later end-time than CP "
+                        "sw_cp step %d: %d ops realised at later end-time than CP "
                         "(cumulative auto-assignment couldn't honour exact CP times). "
                         "Schedule is still feasible; objective recomputed from "
                         "realised positions.",
@@ -300,7 +300,7 @@ class PwCpDispatcher:
                 else None
             )
             step_entries.append(
-                PwCpStepEntry(
+                SwCpStepEntry(
                     step=step,
                     elapsed_time=trunc4(step_elapsed_seconds),
                     TL=trunc4(applied_tl_seconds),
@@ -322,7 +322,7 @@ class PwCpDispatcher:
             prev_elapsed_seconds = step_elapsed_seconds
 
             logger.info(
-                "pw_cp step %d: unfixed[%d:%d) ntf_ops=%d sub_jobs=%d "
+                "sw_cp step %d: unfixed[%d:%d) ntf_ops=%d sub_jobs=%d "
                 "status=%s cp_obj=%s incumbent=%.0f→%.0f accepted=%s "
                 "wall=%.3fs TL=%s",
                 step,
@@ -343,7 +343,7 @@ class PwCpDispatcher:
 
             if spec.stop_predicate is not None and spec.stop_predicate():
                 logger.info(
-                    "pw_cp: stop_predicate fired after step %d/%d; stopping.",
+                    "sw_cp: stop_predicate fired after step %d/%d; stopping.",
                     step + 1,
                     len(iteration_idxs),
                 )
@@ -353,7 +353,7 @@ class PwCpDispatcher:
                 remaining = option.wall_clock_deadline_sec - time.monotonic()
                 if remaining <= 0:
                     logger.info(
-                        "pw_cp: wall_clock_deadline exceeded after step %d/%d; "
+                        "sw_cp: wall_clock_deadline exceeded after step %d/%d; "
                         "stopping.",
                         step + 1,
                         len(iteration_idxs),
@@ -406,7 +406,7 @@ class PwCpDispatcher:
         their E+T is a constant equal to ``full_obj(rj_schedule)`` minus
         ``rj_schedule``'s contribution from ``objective_jobs``.
         """
-        full = PwCpDispatcher._full_obj(rj_schedule, instance)
+        full = SwCpDispatcher._full_obj(rj_schedule, instance)
         last_i = instance.stage_id_list[-1]
         dw = instance.job_2_due_window_map
         ewt = instance.job_2_ewt_map
@@ -421,7 +421,7 @@ class PwCpDispatcher:
     @staticmethod
     def _apply_tl_and_deadline(
         solver: cp_model.CpSolver,
-        option: PwCpOption,
+        option: SwCpOption,
         per_step_tl: float | None,
         start_elapsed: float,
         step: int,
@@ -436,14 +436,14 @@ class PwCpDispatcher:
         applied: float | None = None
         if per_step_tl is not None:
             # ``apply_cumulative_tl`` is currently a no-op placeholder for
-            # pw_cp (unlike neh_cp, where it selects a cumulative schedule).
+            # sw_cp (unlike neh_cp, where it selects a cumulative schedule).
             solver.parameters.max_time_in_seconds = per_step_tl
             applied = per_step_tl
         if option.wall_clock_deadline_sec is not None:
             remaining = option.wall_clock_deadline_sec - time.monotonic()
             if remaining <= 0:
                 logger.info(
-                    "pw_cp: wall_clock_deadline_sec exceeded before step "
+                    "sw_cp: wall_clock_deadline_sec exceeded before step "
                     "%d/%d solve; stopping.",
                     step + 1,
                     total_steps,
@@ -457,7 +457,7 @@ class PwCpDispatcher:
     def _make_completed_record(
         self,
         instance: FFcDDWParameters,
-        option: PwCpOption,
+        option: SwCpOption,
         incumbent: FFcSchedule,
         *,
         step_entries,
@@ -492,7 +492,7 @@ class PwCpDispatcher:
     def _make_stopped_record(
         self,
         instance: FFcDDWParameters,
-        option: PwCpOption,
+        option: SwCpOption,
         incumbent: FFcSchedule,
         step_entries,
         progress_entries,
@@ -535,13 +535,13 @@ class PwCpDispatcher:
     def _validate_instance(self, spec: AlgSpec) -> FFcDDWParameters:
         if not isinstance(spec.instance, FFcDDWParameters):
             raise TypeError(
-                "PwCpDispatcher requires FFcDDWParameters as spec.instance."
+                "SwCpDispatcher requires FFcDDWParameters as spec.instance."
             )
         return spec.instance
 
-    def _resolve_option(self, spec: AlgSpec) -> PwCpOption:
+    def _resolve_option(self, spec: AlgSpec) -> SwCpOption:
         if spec.option is None:
-            return PwCpOption()
-        if not isinstance(spec.option, PwCpOption):
-            raise TypeError("PwCpDispatcher requires PwCpOption as spec.option.")
+            return SwCpOption()
+        if not isinstance(spec.option, SwCpOption):
+            raise TypeError("SwCpDispatcher requires SwCpOption as spec.option.")
         return spec.option

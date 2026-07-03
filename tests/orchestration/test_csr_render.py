@@ -36,8 +36,20 @@ def _operations_json(path: Path, *, makespan: int = 10) -> None:
         "stages": _STAGES,
         "machinesPerStage": _MACHINES,
         "operations": [
-            {"job": "J0", "stage": "S0", "machine": "M0", "start": 0, "end": makespan // 2},
-            {"job": "J1", "stage": "S0", "machine": "M0", "start": makespan // 2, "end": makespan},
+            {
+                "job": "J0",
+                "stage": "S0",
+                "machine": "M0",
+                "start": 0,
+                "end": makespan // 2,
+            },
+            {
+                "job": "J1",
+                "stage": "S0",
+                "machine": "M0",
+                "start": makespan // 2,
+                "end": makespan,
+            },
         ],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +59,7 @@ def _operations_json(path: Path, *, makespan: int = 10) -> None:
 # ---------------------------------------------------------------------------
 # _render_phase_gantt_from_json — reuse with / without force
 # ---------------------------------------------------------------------------
+
 
 def test_render_phase_gantt_no_force(tmp_path: Path) -> None:
     """Render a phase Gantt without forced x-axis — PNG produced and non-empty."""
@@ -76,6 +89,7 @@ def test_render_phase_gantt_with_force(tmp_path: Path) -> None:
 # Shared-horizon helper: _phase_makespan_from_json
 # ---------------------------------------------------------------------------
 
+
 def test_shared_horizon_is_max_of_raw_and_final(tmp_path: Path) -> None:
     """force_end for raw+final pair equals the max of their makespans."""
     raw_json = tmp_path / "2_reconstructed_raw.json"
@@ -101,6 +115,7 @@ def test_phase_makespan_from_json_missing_file(tmp_path: Path) -> None:
 # _render_csr_cp_trajectory_line
 # ---------------------------------------------------------------------------
 
+
 def test_render_csr_cp_trajectory_with_partial_nones(tmp_path: Path) -> None:
     """Trajectory with some None entries still produces a non-empty PNG."""
     json_path = tmp_path / "MyInstance_csr_cp_trajectory.json"
@@ -108,7 +123,7 @@ def test_render_csr_cp_trajectory_with_partial_nones(tmp_path: Path) -> None:
     data = {
         "elapsed_sec": [0.0, 1.0, 2.0, 3.0],
         "obj_value": [None, 100, 90, None],  # UB appears at t=1 and t=2
-        "obj_bound": [0, 0, None, 80],        # LB has a gap at t=2
+        "obj_bound": [0, 0, None, 80],  # LB has a gap at t=2
     }
     json_path.write_text(json.dumps(data), encoding="utf-8")
 

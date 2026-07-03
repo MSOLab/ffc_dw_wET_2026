@@ -11,9 +11,9 @@ draw_gantt: true
 painter_thread_cnt: 4
 
 scenarios:
-  - name: pw_cp_debug
+  - name: sw_cp_debug
     timelimit: 60.0
-    output_subdir: pw_cp_debug
+    output_subdir: sw_cp_debug
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
         draw_pmtn_sch_heatmap: false
@@ -21,7 +21,7 @@ scenarios:
         last_stage_only_placement_criteria: "dist"
         adjust_p: false
         adjust_r: false
-      - method: pw_cp
+      - method: sw_cp
         solver_thread_cnt: 4
         batch_size: "m"
         step_size: 2

@@ -1,15 +1,15 @@
-# Plan: Port `pw_cp` into `ffc_ddw_sum_et`
+# Plan: Port `sw_cp` into `ffc_ddw_sum_et`
 
 ## Context
 
 `ffc_ddw_sum_et` solves FFcDDW (hybrid flowshop with due windows, weighted E/T from due window). Two upstream PW-CP implementations exist:
 
-- `/home/hjt/code/flowshop-tardiness/flowshop_tardiness/controller/pw_cp.py` — permutation flowshop, indirect-precedence CP. **Not** the structural template (assumes single permutation per stage; incompatible with parallel machines per stage).
-- `/home/hjt/code/hybridflowshop/hybridflowshop/controller/pw_cp.py` (`PwCpConstructor`) — hybrid flowshop, 5-region sliding window (ltf | lpf | unfixed | rpf | rtf), cumulative + dummy-bar CP. **Structural template** for this port.
+- `/home/hjt/code/flowshop-tardiness/flowshop_tardiness/controller/sw_cp.py` — permutation flowshop, indirect-precedence CP. **Not** the structural template (assumes single permutation per stage; incompatible with parallel machines per stage).
+- `/home/hjt/code/hybridflowshop/hybridflowshop/controller/sw_cp.py` (`PwCpConstructor`) — hybrid flowshop, 5-region sliding window (ltf | lpf | unfixed | rpf | rtf), cumulative + dummy-bar CP. **Structural template** for this port.
 
 User decisions (final):
 
-- Algorithm name: `pw_cp` (single variant).
+- Algorithm name: `sw_cp` (single variant).
 - Non-final batch objective: **direct partial weighted E/T minimization over the sub-instance** ((a)안). No `common_spacing`, no lex 2-phase (deferred).
 - Sub-instance composition: **hybridflowshop fidelity** — left/right dummy bars + release-time trick. Time-fixed ops do NOT get CP variables; their footprint is represented by dummy bars and (for cross-stage precedence) by stage-0 release on jobs with an LTF prefix.
 - `spec.ref_solution` is **required**; raise an error if absent.
@@ -19,7 +19,7 @@ User decisions (final):
 
 ## Goal
 
-Add a sliding-window CP refiner that improves an FFcDDW incumbent by re-solving an unfixed window plus a profile-fixed buffer at each step, directly minimizing weighted E/T over the sub-window. Algorithm id: `"pw_cp"`. Self-contained under `src/ffc_ddw_sum_et/algorithm/pw_cp/`.
+Add a sliding-window CP refiner that improves an FFcDDW incumbent by re-solving an unfixed window plus a profile-fixed buffer at each step, directly minimizing weighted E/T over the sub-window. Algorithm id: `"sw_cp"`. Self-contained under `src/ffc_ddw_sum_et/algorithm/sw_cp/`.
 
 ## File layout
 
@@ -27,7 +27,7 @@ Add a sliding-window CP refiner that improves an FFcDDW incumbent by re-solving 
 
 - `src/ffc_ddw_sum_et/solution/ffc_schedule.py` — add `FFcSchedule.delay_job_latest_leq_obj_contrib_all_stages(self, job_2_dw_ub_map)`. Body: call existing `self.delay_job_latest_leq_obj_contrib(job_2_dw_ub_map)` first (fixes every last-stage end / every C_j); then for `i` in `reversed(self.stages[:-1])`, for each `mc_id` in `self.machines_per_stage[i]`, scan that machine's `__stage_2_mc_2_job_tuple_seq[i][mc_id]` from latest to earliest and rewrite each op's end as `min(op_start_of_same_job_on_stage_i+1, next_op_new_start_on_same_machine_or_+inf)`, with `new_start = new_end - duration`. After each stage's pass, call `self._rebuild_stage_time_caches(i)` to refresh the cached lookup maps. No mutation of `__stage_2_mc_2_job_tuple_seq` ordering — only timestamps shift; the per-machine sequence order is preserved.
 
-**Algorithm core** under `src/ffc_ddw_sum_et/algorithm/pw_cp/`:
+**Algorithm core** under `src/ffc_ddw_sum_et/algorithm/sw_cp/`:
 
 - `__init__.py` — re-export `PwCpDispatcher`, `PwCpOption`.
 - `option.py` — `PwCpOption(AlgOption)` dataclass.
@@ -38,14 +38,14 @@ Add a sliding-window CP refiner that improves an FFcDDW incumbent by re-solving 
 
 **Subroutine integration** (mirrors existing `mcf_lb`/`neh_cp` step methods on the controller):
 
-- `src/ffc_ddw_sum_et/orchestration/controller.py` — add `run_pw_cp(self, ...)` method. Body: build `AlgSpec(instance, option=PwCpOption(**kwargs), ref_solution=current_incumbent, alg_root=self.subroutine_dir, logger=self.logger, stop_predicate=self.stop_predicate)`, call `PwCpDispatcher().run(spec)`, register the resulting incumbent via `self._register(report, sol)`. Two-phase Gantt: emit before/after Gantt PNGs around the call, gated on the controller's `draw_gantt` flag. Per CLAUDE.md subroutine step contract: a single `_register` per call; `elapsed_time = time.monotonic() - start_elapsed` measured immediately before report construction, no work between measurement and `_register`.
+- `src/ffc_ddw_sum_et/orchestration/controller.py` — add `run_sw_cp(self, ...)` method. Body: build `AlgSpec(instance, option=PwCpOption(**kwargs), ref_solution=current_incumbent, alg_root=self.subroutine_dir, logger=self.logger, stop_predicate=self.stop_predicate)`, call `PwCpDispatcher().run(spec)`, register the resulting incumbent via `self._register(report, sol)`. Two-phase Gantt: emit before/after Gantt PNGs around the call, gated on the controller's `draw_gantt` flag. Per CLAUDE.md subroutine step contract: a single `_register` per call; `elapsed_time = time.monotonic() - start_elapsed` measured immediately before report construction, no work between measurement and `_register`.
 - `src/ffc_ddw_sum_et/orchestration/ffcddw_single_instance_runner.py` — no change required if the existing `_save_obj_log` aggregator already re-bases trajectories per step (verify during implementation; controller contract already covers this).
-- `configs/pw_cp/<scenario>.yaml` (or wherever existing scenario YAMLs live — locate by reading existing `mcf_lb` / `neh_cp` configs, e.g. `configs/neh_cp/*.yaml`) — a new dedicated experiment scenario invoking `run_pw_cp` with default option values, plus a small grid (`unfixed_batch_count ∈ {2,3}`, `pf_method ∈ {"PF0","PF1"}`).
+- `configs/sw_cp/<scenario>.yaml` (or wherever existing scenario YAMLs live — locate by reading existing `mcf_lb` / `neh_cp` configs, e.g. `configs/neh_cp/*.yaml`) — a new dedicated experiment scenario invoking `run_sw_cp` with default option values, plus a small grid (`unfixed_batch_count ∈ {2,3}`, `pf_method ∈ {"PF0","PF1"}`).
 - `main.py` — wire the new scenario name into the dispatch table (mirror the existing `neh_cp` / `mcf_lb` registration). The `add-subroutine` skill is the canonical executor of this wiring; invoke it once the algorithm core is in place.
 
-**Tests** under `tests/algorithm/pw_cp/` (shape mirrored from `tests/algorithm/neh_cp/`).
+**Tests** under `tests/algorithm/sw_cp/` (shape mirrored from `tests/algorithm/neh_cp/`).
 
-**Two-phase Gantt and per-step CSV** follow the conventions used by existing controller methods — reuse the controller-level Gantt helper (e.g. `self._draw_gantt(...)`) and per-step CSV writer (e.g. `hfs_summary`-style helper) rather than re-implementing inside `pw_cp/`.
+**Two-phase Gantt and per-step CSV** follow the conventions used by existing controller methods — reuse the controller-level Gantt helper (e.g. `self._draw_gantt(...)`) and per-step CSV writer (e.g. `hfs_summary`-style helper) rather than re-implementing inside `sw_cp/`.
 
 Reuse without copy from `algorithm/`:
 
@@ -82,7 +82,7 @@ Skipped intentionally (deferred): `tighten_ranges`, `use_lns_only`, `non_time_fi
 
 ## CP model (`PwCpModelBuilder`)
 
-Cannot reuse `BaseModelBuilder.build` directly because it creates op vars for every `(j, i)`. PW-CP needs partition-aware variable creation. New builder, with shapes deliberately mirroring hybridflowshop's `cpsat_model_2/pw_cp.py:PwCpModelBuilder`:
+Cannot reuse `BaseModelBuilder.build` directly because it creates op vars for every `(j, i)`. PW-CP needs partition-aware variable creation. New builder, with shapes deliberately mirroring hybridflowshop's `cpsat_model_2/sw_cp.py:PwCpModelBuilder`:
 
 **Reference schedule**: every CP-model construction step below reads start/end constants from `rj_schedule = incumbent.deepcopy(); rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(instance.job_2_dw_ub_map)` — NOT from the raw incumbent. `rj_schedule` has identical per-job objective contribution (E_j, T_j) but every op is at its latest objective-preserving position, giving non-time-fixed ops maximal left-side slack inside the window.
 
@@ -123,7 +123,7 @@ Cannot reuse `BaseModelBuilder.build` directly because it creates op vars for ev
 run(spec):
   instance = _validate_instance(spec)              # FFcDDWParameters
   if spec.ref_solution is None:
-      raise ValueError("pw_cp requires spec.ref_solution")
+      raise ValueError("sw_cp requires spec.ref_solution")
   option   = _resolve_option(spec)                  # PwCpOption()
   logger   = spec.logger or logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ run(spec):
   return AlgRecord(
       work_status=WorkStatus.FEASIBLE,
       instance_id=instance.name,
-      algorithm_id="pw_cp",
+      algorithm_id="sw_cp",
       option=option,
       result=AlgResult(schedule=incumbent, obj_value=obj_value,
                        obj_bound=None, metrics=metrics),
@@ -270,7 +270,7 @@ run(spec):
 `_build_full_schedule_from_cp` reconstructs a full `FFcSchedule` by:
 
 1. Starting from `rj_schedule.deepcopy()` and removing all non-time-fixed `(j, i, k)` ops via `FFcSchedule.remove_operations`.
-2. For each non-time-fixed `(j, i)`, dispatching the op back with `op_start = solver.Value(op_vars.op_start[j,i])` and `op_end = solver.Value(op_vars.op_end[j,i])` via `FFcSchedule.add_ops_times_2_mc(stage_id=i, mc_id=k, job_id=j, start, end)` where `k` is the assigned machine — chosen by **earliest free machine on stage `i` at time `start`** within the machines listed in `instance.stage_2_machines_map[i]` (matches hybridflowshop's `create_pw_cp_schedule` machine assignment policy).
+2. For each non-time-fixed `(j, i)`, dispatching the op back with `op_start = solver.Value(op_vars.op_start[j,i])` and `op_end = solver.Value(op_vars.op_end[j,i])` via `FFcSchedule.add_ops_times_2_mc(stage_id=i, mc_id=k, job_id=j, start, end)` where `k` is the assigned machine — chosen by **earliest free machine on stage `i` at time `start`** within the machines listed in `instance.stage_2_machines_map[i]` (matches hybridflowshop's `create_sw_cp_schedule` machine assignment policy).
 
 ## Reused helpers (with paths)
 
@@ -289,11 +289,11 @@ run(spec):
 - `ObjectiveValueRecorder` — `algorithm/cpsat_callbacks/obj_value_recorder.py`
 - `AlgSpec`, `AlgRecord`, `AlgResult`, `ProgressLogEntry`, `WorkStatus`, `TerminationReason`, `AlgOption` — `algorithm/base/`
 - Reference for TL/deadline plumbing, semi-active gating, step entry, accept/reject, AlgRecord assembly: `algorithm/neh_cp/dispatcher.py:120-280, 339-371, 480-582`.
-- Reference structural template for partition / dummy bars / capacity / non-fixed-precedence: `/home/hjt/code/hybridflowshop/hybridflowshop/cpsat_model_2/pw_cp.py` (PwCpModelBuilder) and `/home/hjt/code/hybridflowshop/hybridflowshop/controller/pw_cp.py` (sliding loop).
+- Reference structural template for partition / dummy bars / capacity / non-fixed-precedence: `/home/hjt/code/hybridflowshop/hybridflowshop/cpsat_model_2/sw_cp.py` (PwCpModelBuilder) and `/home/hjt/code/hybridflowshop/hybridflowshop/controller/sw_cp.py` (sliding loop).
 
 ## Verification
 
-1. **Unit tests** under `tests/algorithm/pw_cp/` (mirror `tests/algorithm/neh_cp/`):
+1. **Unit tests** under `tests/algorithm/sw_cp/` (mirror `tests/algorithm/neh_cp/`):
    - `test_option.py` — defaults, frozen, validation of `step_size>=1`, `unfixed_batch_count>=1`.
    - `test_partition.py` — 5-region splits at edge offsets (start, middle, end of timeline); `enable_promotion_profile_fixed` promotes correctly; `validate_and_get_batch_count` raises on uneven stage batch counts.
    - `test_cp_model.py` — on a 3-job/2-stage/1-machine instance, verify `PwCpModelBuilder.build` creates op vars only for non-time-fixed ops; left/right dummy intervals match `[0, left_boundary]` / `[right_boundary, horizon]` **with boundaries sourced from `rj_schedule`**; profile-fix precedence forces the expected order.
@@ -302,21 +302,21 @@ run(spec):
    - `test_dispatcher_stop.py` — assert `wall_clock_deadline_sec` and `spec.stop_predicate` short-circuit cleanly with `termination_reason == STOP_REQUESTED`.
    - `test_dispatcher_no_ref_solution.py` — assert `ValueError` when `spec.ref_solution is None`.
 
-2. **Algorithm contract test** — register `pw_cp` in `tests/algorithm/test_algorithm_contracts.py` so the shared shape-checks (option type, AlgRecord shape, instance-id passthrough) run.
+2. **Algorithm contract test** — register `sw_cp` in `tests/algorithm/test_algorithm_contracts.py` so the shared shape-checks (option type, AlgRecord shape, instance-id passthrough) run.
 
 3. **Smoke test (algorithm core)** via `uv run python` ad-hoc:
    ```bash
    uv run python -c "from ffc_ddw_sum_et.algorithm.neh_cp import NehCpDispatcher, NehCpOption; \
-     from ffc_ddw_sum_et.algorithm.pw_cp import PwCpDispatcher, PwCpOption; \
+     from ffc_ddw_sum_et.algorithm.sw_cp import PwCpDispatcher, PwCpOption; \
      ...; rec1 = NehCpDispatcher().run(spec1); \
      spec2 = AlgSpec(instance=ins, option=PwCpOption(unfixed_batch_count=3, cp_tl_seconds=2.0), ref_solution=rec1.result.schedule); \
      rec2 = PwCpDispatcher().run(spec2); print(rec1.result.obj_value, '->', rec2.result.obj_value)"
    ```
    Expect `rec2.obj_value <= rec1.obj_value`.
 
-4. **Subroutine integration smoke test**: `uv run python main.py` with the new `pw_cp` scenario YAML on one small instance. Verify (a) `_obj_log.json` is produced with monotonic non-increasing E/T, (b) before/after Gantt PNGs are emitted to the subroutine output dir, (c) per-step CSV rows are appended, (d) the run terminates within the configured stopping criterion.
+4. **Subroutine integration smoke test**: `uv run python main.py` with the new `sw_cp` scenario YAML on one small instance. Verify (a) `_obj_log.json` is produced with monotonic non-increasing E/T, (b) before/after Gantt PNGs are emitted to the subroutine output dir, (c) per-step CSV rows are appended, (d) the run terminates within the configured stopping criterion.
 
-5. **Lint**: `uv run ruff check src/ffc_ddw_sum_et/algorithm/pw_cp tests/algorithm/pw_cp src/ffc_ddw_sum_et/orchestration/controller.py` and `uv run ruff format` on the same paths.
+5. **Lint**: `uv run ruff check src/ffc_ddw_sum_et/algorithm/sw_cp tests/algorithm/sw_cp src/ffc_ddw_sum_et/orchestration/controller.py` and `uv run ruff format` on the same paths.
 
 ## Risks
 
@@ -332,7 +332,7 @@ run(spec):
 
 6. **`PFMethod="PF1"` default may be too tight on small windows.** If `unfixed_batch_count=1`, profile-fix precedence forces the entire chain order from the incumbent and the CP can only swap timings, not order. Documented behavior; users seeking exploration should set `unfixed_batch_count >= 2` or `pf_method="PF0"`. Add a brief docstring note on `PwCpOption.pf_method`.
 
-7. **Subroutine step contract drift.** The CLAUDE.md per-step contract is load-bearing for `_obj_log.json` re-basing. The `run_pw_cp` method must do all work, then measure `elapsed = monotonic() - start`, then construct the report, then `_register` — with **no** intervening work (Gantt PNG emission, CSV row append, etc. happen *after* `_register`). The two-phase Gantt's "before" snapshot must be taken *before* `start = monotonic()` is captured to avoid skewing the trajectory. Verify by reading `_save_obj_log` in `ffcddw_single_instance_runner.py` during implementation.
+7. **Subroutine step contract drift.** The CLAUDE.md per-step contract is load-bearing for `_obj_log.json` re-basing. The `run_sw_cp` method must do all work, then measure `elapsed = monotonic() - start`, then construct the report, then `_register` — with **no** intervening work (Gantt PNG emission, CSV row append, etc. happen *after* `_register`). The two-phase Gantt's "before" snapshot must be taken *before* `start = monotonic()` is captured to avoid skewing the trajectory. Verify by reading `_save_obj_log` in `ffcddw_single_instance_runner.py` during implementation.
 
 ## Open follow-ups (explicitly deferred)
 

@@ -41,7 +41,7 @@ for t_rec, vb in value_recorder.entries:
 ## 범위
 
 - 변경 파일
-  - `src/ffc_ddw_sum_et/algorithm/pw_cp/dispatcher.py` — 콜백 루프 직전에
+  - `src/ffc_ddw_sum_et/algorithm/sw_cp/dispatcher.py` — 콜백 루프 직전에
     `full_offset` 계산, 루프 안에서 `vb.value + full_offset` 기록.
 - 변경하지 않는 것
   - `PwCpBuildResult.et_offset_partial`은 그대로 둔다. 진단/스텝 로그용으로 의미
@@ -126,7 +126,7 @@ def _compute_full_progress_offset(
 
 ## 검증
 
-- 기존 `tests/algorithm/pw_cp/` 회귀가 깨지지 않는지 `uv run pytest tests/algorithm/pw_cp -q`.
+- 기존 `tests/algorithm/sw_cp/` 회귀가 깨지지 않는지 `uv run pytest tests/algorithm/sw_cp -q`.
 - 한 인스턴스에 대해 `scripts/build_subroutine_flow_charts.py`(혹은 동등 경로)로
   차트 재생성 후, 배치 구간 trajectory 값이 매니페스트 최종 obj_value 부근으로
   수렴하는지 한 번만 눈으로 확인. (사용자가 본인 환경에서 재실행 예정.)

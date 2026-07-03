@@ -1,4 +1,4 @@
-"""Operation partitioning for the PW-CP sliding window.
+"""Operation partitioning for the SW-CP sliding window.
 
 Each batch step partitions the operations on every stage into five
 regions around the unfixed window:
@@ -198,6 +198,6 @@ def validate_and_get_batch_count(
     unique = set(counts.values())
     if len(unique) > 1:
         raise ValueError(
-            f"PW-CP requires identical batch counts across stages, got {counts}."
+            f"SW-CP requires identical batch counts across stages, got {counts}."
         )
     return next(iter(unique), 0)

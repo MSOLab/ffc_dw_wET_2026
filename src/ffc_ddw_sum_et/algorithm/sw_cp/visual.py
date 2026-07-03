@@ -1,4 +1,4 @@
-"""Debugging gantt visualisation for pw_cp's five-region partition.
+"""Debugging gantt visualisation for sw_cp's five-region partition.
 
 Renders a per-machine SVG gantt chart where every operation bar is
 coloured by its partition region (LTF, LPF, Unfixed, RPF, RTF),
@@ -47,7 +47,7 @@ def render_partition_gantt_svg(
     unfixed_start: int,
     unfixed_batch_count: int,
 ) -> str:
-    """Render one pw_cp step's five-region partition as an SVG string.
+    """Render one sw_cp step's five-region partition as an SVG string.
 
     Parameters
     ----------
@@ -255,7 +255,7 @@ def render_partition_gantt_svg(
     ax.grid(True, axis="x", linestyle="--", alpha=0.3)
 
     title = (
-        f"pw_cp  step={step}  "
+        f"sw_cp  step={step}  "
         f"unfixed=[{unfixed_start},{unfixed_start + unfixed_batch_count})  "
         f"horizon={horizon}"
     )

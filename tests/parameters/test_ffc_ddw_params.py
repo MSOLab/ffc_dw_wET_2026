@@ -4,9 +4,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.ffc_params import FFcParameters
-from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

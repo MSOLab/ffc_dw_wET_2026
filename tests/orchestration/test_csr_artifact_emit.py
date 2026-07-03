@@ -21,13 +21,14 @@ from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import (
 )
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_layout(tmp_path: Path, run_id: str = "20260623T000000_000000") -> FFcArtifactLayout:
+def _make_layout(
+    tmp_path: Path, run_id: str = "20260623T000000_000000"
+) -> FFcArtifactLayout:
     return FFcArtifactLayout(run_root=tmp_path / run_id, run_id=run_id)
 
 
@@ -213,9 +214,7 @@ class TestEmitCsrPhaseSchedules:
         assert not p1.exists()
         assert p2.exists()
 
-    def test_empty_csr_phase_schedules_writes_nothing(
-        self, tmp_path: Path
-    ) -> None:
+    def test_empty_csr_phase_schedules_writes_nothing(self, tmp_path: Path) -> None:
         """When csr_phase_schedules is empty, no files are written."""
         layout = _make_layout(tmp_path)
         scope = {"scenario_name": "sc", "instance_name": "test_ins"}
@@ -225,9 +224,7 @@ class TestEmitCsrPhaseSchedules:
         runner._emit_csr_artifacts(controller, layout, scope)
 
         # No progress dir files should exist for csr kinds
-        progress_dir = layout.artifact_path(
-            "csr_cp_trajectory_json", **scope
-        ).parent
+        progress_dir = layout.artifact_path("csr_cp_trajectory_json", **scope).parent
         csr_files = list(progress_dir.glob("*csr*")) if progress_dir.exists() else []
         assert csr_files == []
 
@@ -243,9 +240,7 @@ class TestEmitCsrPhaseSchedules:
 
 
 class TestEmitCsrCpTrajectory:
-    def test_trajectory_json_written_with_parallel_arrays(
-        self, tmp_path: Path
-    ) -> None:
+    def test_trajectory_json_written_with_parallel_arrays(self, tmp_path: Path) -> None:
         """csr_cp_trajectory_json is written with parallel elapsed_sec/obj_value/obj_bound arrays."""
         layout = _make_layout(tmp_path)
         scope = {"scenario_name": "sc", "instance_name": "test_ins"}

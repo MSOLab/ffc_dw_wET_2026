@@ -33,5 +33,9 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 88
 
+[tool.ruff.lint]
+# Keep ruff's default rules (E4, E7, E9, F) and add isort import sorting.
+extend-select = ["I"]
+
 [tool.ty.environment]
 python = ".venv"

@@ -36,7 +36,7 @@
 - `src/ffc_ddw_sum_et/algorithm/cpsat_adapter.py`: full-instance base CP adapter.
 - `src/ffc_ddw_sum_et/algorithm/cumulative.py`: base CP model builder.
 - `src/ffc_ddw_sum_et/orchestration/controller.py`: `solve_base_model_cpsat`,
-  `neh_cp`, `pw_cp` step contract 및 `_register` 패턴.
+  `neh_cp`, `sw_cp` step contract 및 `_register` 패턴.
 - `/home/hjt/code/hybridflowshop/.../hfs_cp_lns.py`: tau coarsening은
   `ceil(p/tau)` surrogate를 푸는 선례로만 참조한다. 이번 FFc-DDW 설계는
   hybridflowshop의 `machine_sequence`/`stage_sequence` restore를 쓰지 않고,
@@ -202,7 +202,7 @@ metrics에 남길 값:
 3. `lb_init_baseline`
    - 현재 repo에서 LB-init 역할을 하는 `calc_mcf_lb_and_derive_full_sch`
      또는 이미 쓰는 MCF-LB initialization flow.
-4. 선택: `csr50_then_pw_cp`
+4. 선택: `csr50_then_sw_cp`
    - RQ2에서 순수 reconstruct 품질과 후속 refinement seed 품질을 분리하고 싶을 때만.
 
 CP-SAT solution pool 시나리오(`csr50_pool` 등)는 v1 범위에서 제외한다.

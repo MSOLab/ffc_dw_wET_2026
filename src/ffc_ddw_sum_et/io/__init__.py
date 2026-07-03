@@ -6,11 +6,7 @@
 # foreign packages before this package's namespace is populated, we get a
 # partial-init ImportError. So io-internal-only modules are imported first,
 # THEN io modules with cross-package deps.
-from .typing import NumericTV, ScalarTV, numeric_type_set, scalar_type_set
-from .text_data_parser import TextDataParser
 from .df_manager import DfManager
-from .table_2d_manager import Table2DManager
-
 from .parallel_mc_cost_heatmap import (
     HeatmapSort,
     SignedCostHeatmapData,
@@ -27,6 +23,9 @@ from .schedule_yaml import (
     load_preemptive_schedule_yaml,
     load_schedule_yaml,
 )
+from .table_2d_manager import Table2DManager
+from .text_data_parser import TextDataParser
+from .typing import NumericTV, ScalarTV, numeric_type_set, scalar_type_set
 
 __all__ = [
     "DfManager",

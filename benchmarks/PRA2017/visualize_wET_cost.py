@@ -47,7 +47,9 @@ def _sort_jobs(
 def build_wet_cost_matrix(
     instance: FFcDDWParameters,
     sort: Literal["due-window", "neh-cp", "due-window-2"] = "due-window",
-) -> tuple[list[str], list[int], np.ndarray, list[tuple[float, float, int]], list[int], float]:
+) -> tuple[
+    list[str], list[int], np.ndarray, list[tuple[float, float, int]], list[int], float
+]:
     calJ = _sort_jobs(instance, sort=sort)
     last_stage = instance.stage_id_list[-1]
     p = instance.get_job_2_p_map_for_stage(last_stage)
@@ -183,7 +185,9 @@ def main() -> None:
     with instance_path.open() as fh:
         instance = FFcDDWParameters.from_pra_2017_data(instance_path.stem, fh)
 
-    y_labels, t_axis, Z, rects, earliest_starts, threshold = build_wet_cost_matrix(instance, sort=args.sort)
+    y_labels, t_axis, Z, rects, earliest_starts, threshold = build_wet_cost_matrix(
+        instance, sort=args.sort
+    )
     fig = make_figure(
         y_labels,
         t_axis,

@@ -45,7 +45,15 @@ can pick up the same architectural intent.
   `algorithm.base.alg_record`, `algorithm.base.alg_option`,
   `algorithm.base.algorithm`, `algorithm.options.*`, `algorithm.fam`,
   `algorithm.dispatcher.*`, `algorithm.mcf_lb.*`, `algorithm.neh_cp.*`,
-  `algorithm.flip_makespan_cp.*`, `algorithm.pw_cp.*`.
+  `algorithm.flip_makespan_cp.*`, `algorithm.sw_cp.*`.
+- **Naming note:** the algorithm now called `sw_cp` (sliding-window CP,
+  classes `SwCp*`, controller steps `sw_cp` / `incremental_sw_cp`) was
+  formerly named `pw_cp` (`PwCp*`, `incremental_pw_cp`) to match the paper.
+  Older artifacts still carry the old name: on-disk `output/` results,
+  `algorithm_id`/step-labels in historical runs, and file/directory names
+  such as `metadata/**/pw_cp_*.yaml`, `docs/algorithms/pw_cp.*`, and
+  `plans/**/pw_cp_*` were intentionally left unrenamed. When reading old
+  data or docs, treat `pw_cp` as the same algorithm as today's `sw_cp`.
 
 ### Subroutine step contract (controller.py)
 

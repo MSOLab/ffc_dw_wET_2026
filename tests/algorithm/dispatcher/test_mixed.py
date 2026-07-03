@@ -13,7 +13,6 @@ from ffc_ddw_sum_et.algorithm.dispatcher.mixed import MixedDispatcher
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

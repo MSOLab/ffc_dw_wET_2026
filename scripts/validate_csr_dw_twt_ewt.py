@@ -87,15 +87,15 @@ def current_coarse_penalty(case: Case) -> int:
     """
     lo = math.ceil(case.d_lo / case.factor)
     hi = math.ceil(case.d_hi / case.factor)
-    return case.w_e * max(lo - case.c_coarse, 0) + case.w_t * max(
-        case.c_coarse - hi, 0
-    )
+    return case.w_e * max(lo - case.c_coarse, 0) + case.w_t * max(case.c_coarse - hi, 0)
 
 
 def check_user_example() -> None:
     """The exact example from the request: factor=50, window=(72, 115)."""
     print("=== User example: factor=50, window=(72, 115), w^-=w^+=1 ===")
-    print(f"{'C^c':>4} {'real':>5} {'original':>9} {'scaled':>9} {'current(coarse)':>16}")
+    print(
+        f"{'C^c':>4} {'real':>5} {'original':>9} {'scaled':>9} {'current(coarse)':>16}"
+    )
     for c in (1, 2, 3):
         case = Case(factor=50, d_lo=72, d_hi=115, w_e=1, w_t=1, c_coarse=c)
         orig = original_penalty(case)

@@ -38,7 +38,7 @@ method별 end_sec / obj_value를 wide 포맷으로). 새 차트는 그 CSV를 �
 `ffc_ddw_sum_et`엔 그 CSV가 없다. 대신 SSOT는 `<instance>_obj_log.json` 의
 `notes` 매핑이고, `obj_log_loader.iter_scenario_instance_progressions` →
 `build_endpoint_df`로 이미 디코드된다. 다만 endpoint_df는 **nested step 단위**
-(예: `3-incremental_pw_cp.1-batch_002`)로 한 행씩이라서, **top-level method 단위**
+(예: `3-incremental_sw_cp.1-batch_002`)로 한 행씩이라서, **top-level method 단위**
 로 collapse 해야 새 차트의 한 점이 만들어진다.
 
 ### Top-level method 추출 알고리즘
@@ -49,16 +49,16 @@ method별 end_sec / obj_value를 wide 포맷으로). 새 차트는 그 CSV를 �
 "notes": {
   "0.349": "1-calc_mcf_lb_and_derive_full_sch",
   "7.265": "2-neh_cp",
-  "12.015": "3-incremental_pw_cp.1-batch_002",
-  "16.693": "3-incremental_pw_cp.2-batch_003",
-  "21.389": "3-incremental_pw_cp.3-batch_004",
-  "22.501": "3-incremental_pw_cp.4-batch_005"
+  "12.015": "3-incremental_sw_cp.1-batch_002",
+  "16.693": "3-incremental_sw_cp.2-batch_003",
+  "21.389": "3-incremental_sw_cp.3-batch_004",
+  "22.501": "3-incremental_sw_cp.4-batch_005"
 }
 ```
 
-`obj_log_loader._parse_step_label("3-incremental_pw_cp.1-batch_002")` →
-`(3, "incremental_pw_cp.1-batch_002")`. 즉 `subroutine_name` 컬럼은 dot suffix
-를 유지한다. Top-level method name은 dot 이전 부분: `"incremental_pw_cp"`.
+`obj_log_loader._parse_step_label("3-incremental_sw_cp.1-batch_002")` →
+`(3, "incremental_sw_cp.1-batch_002")`. 즉 `subroutine_name` 컬럼은 dot suffix
+를 유지한다. Top-level method name은 dot 이전 부분: `"incremental_sw_cp"`.
 
 Collapse 규칙 (instance별):
 
@@ -137,10 +137,10 @@ uv run python scripts/build_subroutine_flow_charts.py \
 
 # 새 artifact:
 #   output/20260511/20260511T131001_441211/{run_id}_multi_scenario_method_mean_rpdf_and_mean_norm_time_scatter.html
-#   output/20260511/20260511T131001_441211/mcf_lb_neh_cp_incremental_pw_cp_m_base_cpsat/summary_method_mean_rpdf_and_mean_norm_time_scatter.html
+#   output/20260511/20260511T131001_441211/mcf_lb_neh_cp_incremental_sw_cp_m_base_cpsat/summary_method_mean_rpdf_and_mean_norm_time_scatter.html
 
-# 시나리오 차트가 top-level method만 (3개: calc_mcf_lb_and_derive_full_sch, neh_cp, incremental_pw_cp) 보여야 함
-grep -oE '"method":\[[^]]+\]' output/20260511/20260511T131001_441211/mcf_lb_neh_cp_incremental_pw_cp_m_base_cpsat/summary_method_mean_rpdf_and_mean_norm_time_scatter.html
+# 시나리오 차트가 top-level method만 (3개: calc_mcf_lb_and_derive_full_sch, neh_cp, incremental_sw_cp) 보여야 함
+grep -oE '"method":\[[^]]+\]' output/20260511/20260511T131001_441211/mcf_lb_neh_cp_incremental_sw_cp_m_base_cpsat/summary_method_mean_rpdf_and_mean_norm_time_scatter.html
 
 # 비개선 method가 끼어 있다면 (시나리오에 따라) 자동 드롭 여부 확인
 # 마지막 method는 비개선이어도 포함되는지 확인
@@ -168,7 +168,7 @@ kept = [c for i, c in enumerate(candidates) if c["improves"] or i == last_idx]
    `instance_id=1` (int) 이 `"1.0"` 로 변해서 baseline 매핑이 다 실패한 버그가
    있었음. 컬럼별로 `df["instance_id"].astype(str).tolist()` 한 뒤 zip으로
    순회하는 패턴이 안전.
-2. **`subroutine_name` 의 dot suffix**: `incremental_pw_cp.1-batch_002` 을 그대로
+2. **`subroutine_name` 의 dot suffix**: `incremental_sw_cp.1-batch_002` 을 그대로
    group key로 쓰면 안 됨. `call_index`로 group한 뒤 method name은
    `subroutine_name.split(".", 1)[0]` 로 잘라 쓰기.
 3. **RPDf 공식 일관성**: `post_run_chart_writer._rpdf` (= `2*(obj-ref)/(obj+ref)`,

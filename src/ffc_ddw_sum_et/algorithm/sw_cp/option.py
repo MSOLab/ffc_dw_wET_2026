@@ -1,4 +1,4 @@
-"""Option payload for PwCpDispatcher."""
+"""Option payload for SwCpDispatcher."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from ..base.alg_option import AlgOption
 from ..cumulative import PFMethod
 from ..step_tl_resolver import BatchTlMode
 
-__all__ = ["PwCpOption"]
+__all__ = ["SwCpOption"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class PwCpOption(AlgOption):
-    """Algorithm-side option for sliding-window CP refinement (PW-CP).
+class SwCpOption(AlgOption):
+    """Algorithm-side option for sliding-window CP refinement (SW-CP).
 
     All time-limit fields are pre-resolved scalars; the controller
     adapter is responsible for evaluating any ``"<n>nc"``-style
@@ -76,7 +76,7 @@ class PwCpOption(AlgOption):
 
     debug_partition_gantt: bool = False
     """When ``True``, the dispatcher renders a per-step partition gantt
-    SVG (via :func:`~ffc_ddw_sum_et.algorithm.pw_cp.visual.render_partition_gantt_svg`)
+    SVG (via :func:`~ffc_ddw_sum_et.algorithm.sw_cp.visual.render_partition_gantt_svg`)
     and writes it through ``debug_partition_gantt_path_getter``."""
 
     debug_partition_gantt_max_steps: int | None = None

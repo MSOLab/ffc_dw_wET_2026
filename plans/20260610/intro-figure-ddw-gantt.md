@@ -8,7 +8,7 @@ this repository's problem `FFc | d_j^-, d_j^+ | sum w_j^- E_j + w_j^+ T_j`.
 
 The figure currently shown was produced by the **partition debug visualization**
 `render_partition_gantt_svg()` in
-`src/ffc_ddw_sum_et/algorithm/pw_cp/visual.py`, which colors each operation by its
+`src/ffc_ddw_sum_et/algorithm/sw_cp/visual.py`, which colors each operation by its
 *partition region* (`REGION_COLORS`: LTF / LPF / UNFIXED / RPF / RTF), **not by
 job**. That viz is debug-only and must stay as-is; it is the wrong artifact for
 the slide.
@@ -118,7 +118,7 @@ legible.
 - `metadata/20260610/intro_ddw_figure.yaml` — config: benchmark instance, job
   subset (explicit ids or count), cp time limit, output path, title.
 
-Do **NOT** modify `algorithm/pw_cp/visual.py` — the partition viz remains
+Do **NOT** modify `algorithm/sw_cp/visual.py` — the partition viz remains
 debug-only and is not the slide artifact.
 
 ## Schedule source (was under-specified)

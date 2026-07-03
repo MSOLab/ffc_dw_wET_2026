@@ -1,11 +1,11 @@
-"""Per-step step-log entry for PW-CP runs."""
+"""Per-step step-log entry for SW-CP runs."""
 
 from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class PwCpStepEntry:
-    """One sliding-window step entry in the PW-CP step log.
+class SwCpStepEntry:
+    """One sliding-window step entry in the SW-CP step log.
 
     ``incumbent_obj_before`` / ``cp_obj`` / ``incumbent_obj_after``
     capture the weighted E+T of the surrounding incumbent state per

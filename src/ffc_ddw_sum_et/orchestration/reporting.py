@@ -5,9 +5,9 @@ import json
 import logging
 import os
 from collections import defaultdict
-from functools import partial
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 

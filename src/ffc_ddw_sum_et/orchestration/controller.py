@@ -65,11 +65,11 @@ from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpOption,
 )
 from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
-from ffc_ddw_sum_et.algorithm.pw_cp import (
-    PwCpDispatcher,
-    PwCpOption,
-)
 from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
+from ffc_ddw_sum_et.algorithm.sw_cp import (
+    SwCpDispatcher,
+    SwCpOption,
+)
 from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
@@ -2264,7 +2264,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         return report
 
-    def pw_cp(
+    def sw_cp(
         self,
         solver_thread_cnt: int = 1,
         batch_size: int | float | str = "m",
@@ -2288,11 +2288,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
     ) -> SubroutineReport:
-        """Step method: refine the incumbent via :class:`PwCpDispatcher`.
+        """Step method: refine the incumbent via :class:`SwCpDispatcher`.
 
         Resolves expression-grammar inputs (``cp_tl`` / ``total_timelimit``)
-        into pre-resolved scalars, hands them to :class:`PwCpOption`,
-        dispatches via :class:`PwCpDispatcher` (with the controller-level
+        into pre-resolved scalars, hands them to :class:`SwCpOption`,
+        dispatches via :class:`SwCpDispatcher` (with the controller-level
         wall-clock deadline and stop predicate threaded in), then
         registers the resulting schedule and emits the per-step
         ``_step_log.yaml`` next to the controller's working directory.
@@ -2313,7 +2313,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         incumbent = self.solution_manager.get_incumbent()
         if incumbent is None or incumbent.schedule is None:
             raise RuntimeError(
-                "pw_cp requires an incumbent schedule; chain it after a "
+                "sw_cp requires an incumbent schedule; chain it after a "
                 "seeding subroutine such as calc_mcf_lb_and_derive_full_sch."
             )
 
@@ -2330,7 +2330,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             1, int(math.ceil(resolve_value_expr(batch_size, n, c, m)))
         )
         self.logger.info(
-            "pw_cp: batch_size=%r -> %d (n=%d, c=%d, m=%d)",
+            "sw_cp: batch_size=%r -> %d (n=%d, c=%d, m=%d)",
             batch_size,
             batch_size_resolved,
             n,
@@ -2342,7 +2342,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         wall_clock_deadline_sec = time.monotonic() + remaining_sec
 
         if draw_gantt:
-            self._record_mcf_lb_phase(("pw_cp_before", incumbent.schedule.deepcopy()))
+            self._record_mcf_lb_phase(("sw_cp_before", incumbent.schedule.deepcopy()))
 
         debug_partition_gantt_path_getter = None
         if debug_partition_gantt:
@@ -2357,7 +2357,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
             debug_partition_gantt_path_getter = _gantt_path
 
-        option = PwCpOption(
+        option = SwCpOption(
             solver_thread_cnt=solver_thread_cnt,
             batch_size=batch_size_resolved,
             step_size=step_size,
@@ -2388,7 +2388,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             logger=self.logger,
             stop_predicate=self.is_stopping_condition,
         )
-        record = PwCpDispatcher().run(spec)
+        record = SwCpDispatcher().run(spec)
 
         elapsed = time.monotonic() - start_elapsed
         result = record.result
@@ -2414,7 +2414,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         # Post-register diagnostics (per contract: after _register, not before).
         if draw_gantt and result is not None and result.schedule is not None:
-            self._record_mcf_lb_phase(("pw_cp_after", result.schedule.deepcopy()))
+            self._record_mcf_lb_phase(("sw_cp_after", result.schedule.deepcopy()))
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")
@@ -2428,7 +2428,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         return report
 
-    def incremental_pw_cp(
+    def incremental_sw_cp(
         self,
         solver_thread_cnt: int = 1,
         batch_size: int | float | str = "m",
@@ -2454,20 +2454,20 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
     ) -> None:
-        """Composite step: iterate :meth:`pw_cp` over a range of
+        """Composite step: iterate :meth:`sw_cp` over a range of
         ``unfixed_batch_count`` values.
 
         Mirrors ``hybridflowshop/controller/hfs_cp_lns.py:incremental_pw_cp``.
         For each ``count`` in ``[unfixed_batch_count_min, unfixed_batch_count_max]``:
 
-        - ``"always"``: invoke ``self.pw_cp(unfixed_batch_count=count, ...)``
+        - ``"always"``: invoke ``self.sw_cp(unfixed_batch_count=count, ...)``
           once.
-        - ``"if_no_improvement"``: invoke ``self.pw_cp(...)`` repeatedly at
+        - ``"if_no_improvement"``: invoke ``self.sw_cp(...)`` repeatedly at
           this count until a pass produces no improvement on the incumbent's
           weighted E+T (FFcDDW's primary objective, replacing
           hybridflowshop's makespan criterion).
 
-        Each inner ``pw_cp`` call registers its own report in the standard
+        Each inner ``sw_cp`` call registers its own report in the standard
         way; this composite does not register itself. Per-iteration
         ``temporarily_extended_context`` tags each inner call's
         ``call_context`` so per-instance step-log paths don't collide
@@ -2489,7 +2489,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         incumbent = self.solution_manager.get_incumbent()
         if incumbent is None or incumbent.schedule is None:
             raise RuntimeError(
-                "incremental_pw_cp requires an incumbent schedule; chain it "
+                "incremental_sw_cp requires an incumbent schedule; chain it "
                 "after a seeding subroutine such as "
                 "calc_mcf_lb_and_derive_full_sch."
             )
@@ -2509,7 +2509,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ),
         )
         self.logger.info(
-            "incremental_pw_cp: batch_size=%r -> %d (m=%d)",
+            "incremental_sw_cp: batch_size=%r -> %d (m=%d)",
             batch_size,
             batch_size_resolved,
             instance.last_stage_mc_count,
@@ -2537,7 +2537,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         self.logger.info(
-            "incremental_pw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
+            "incremental_sw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
             increment_unfixed_batch_count_flag,
             unfixed_batch_count_min,
             unfixed_batch_count_max,
@@ -2548,7 +2548,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ):
             if self.is_stopping_condition():
                 self.logger.info(
-                    "incremental_pw_cp: stopping condition met before "
+                    "incremental_sw_cp: stopping condition met before "
                     "unfixed_batch_count=%d",
                     unfixed_batch_count,
                 )
@@ -2558,14 +2558,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             with self.temporarily_extended_context(context_name):
                 if increment_unfixed_batch_count_flag == "if_no_improvement":
                     self.logger.info(
-                        "incremental_pw_cp[count=%d]: repeat-until-no-improvement.",
+                        "incremental_sw_cp[count=%d]: repeat-until-no-improvement.",
                         unfixed_batch_count,
                     )
                     rep = 0
                     while True:
                         if self.is_stopping_condition():
                             self.logger.info(
-                                "incremental_pw_cp[count=%d]: stop after rep=%d.",
+                                "incremental_sw_cp[count=%d]: stop after rep=%d.",
                                 unfixed_batch_count,
                                 rep,
                             )
@@ -2573,7 +2573,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         rep += 1
                         obj_before = self.solution_manager.best_obj_value
                         with self.temporarily_extended_context(f"reps_{rep:03d}"):
-                            self.pw_cp(
+                            self.sw_cp(
                                 unfixed_batch_count=unfixed_batch_count,
                                 **base_kwargs,
                             )
@@ -2584,7 +2584,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                             or obj_after >= obj_before
                         ):
                             self.logger.info(
-                                "incremental_pw_cp[count=%d]: no improvement "
+                                "incremental_sw_cp[count=%d]: no improvement "
                                 "(%s -> %s); advancing to next count.",
                                 unfixed_batch_count,
                                 f"{obj_before:.0f}"
@@ -2594,7 +2594,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                             )
                             break
                         self.logger.info(
-                            "incremental_pw_cp[count=%d, rep=%d]: improved "
+                            "incremental_sw_cp[count=%d, rep=%d]: improved "
                             "%.0f -> %.0f; repeating.",
                             unfixed_batch_count,
                             rep,
@@ -2603,10 +2603,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         )
                 else:
                     self.logger.info(
-                        "incremental_pw_cp[count=%d]: single pass.",
+                        "incremental_sw_cp[count=%d]: single pass.",
                         unfixed_batch_count,
                     )
-                    self.pw_cp(unfixed_batch_count=unfixed_batch_count, **base_kwargs)
+                    self.sw_cp(unfixed_batch_count=unfixed_batch_count, **base_kwargs)
 
     def coarsen_solve_reconstruct(
         self,

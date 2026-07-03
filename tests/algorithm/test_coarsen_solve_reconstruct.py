@@ -28,7 +28,6 @@ from ffc_ddw_sum_et.parameters.base.job_stage_p import (
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.ffc_params import FFcParameters
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -389,11 +388,12 @@ def test_trace_is_frozen_dataclass() -> None:
     assert is_dataclass(CoarsenSolveReconstructTrace)
     # Frozen: attempting a setattr must raise
     instance = _make_tiny_2job_2stage_instance()
+    import logging
+
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         CoarsenSolveReconstructOption,
         run_coarsen_solve_reconstruct,
     )
-    import logging
 
     option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
     trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
@@ -893,8 +893,9 @@ def test_csr_objective_uses_original_due_window_not_quantized() -> None:
 
     We use a small instance where we can manually compute the expected penalty.
     """
-    from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
     from ortools.sat.python import cp_model
+
+    from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
 
     # Create a tiny instance with specific due windows
     instance = _make_small_ddw_instance(
@@ -960,8 +961,9 @@ def test_csr_objective_uses_original_due_window_not_quantized() -> None:
 
 def test_csr_non_factor_model_uses_standard_objective() -> None:
     """When time_factor=1 (default), the model should use standard E/T computation."""
-    from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
     from ortools.sat.python import cp_model
+
+    from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
 
     instance = _make_small_ddw_instance(
         name="standard_obj_test",
@@ -1074,10 +1076,11 @@ def test_solve_false_deterministic() -> None:
     instance = _make_tiny_2job_2stage_instance()
     option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
 
+    import logging
+
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         run_coarsen_solve_reconstruct,
     )
-    import logging
 
     trace1 = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
     trace2 = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
@@ -1109,10 +1112,11 @@ def test_solve_false_seed_only_equivalence() -> None:
         factor=factor, solver_thread_cnt=1, solve=False
     )
 
+    import logging
+
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         _seed_and_obj,
     )
-    import logging
 
     trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
 
@@ -1173,10 +1177,11 @@ def test_solve_false_termination_reason_completed() -> None:
 
 def test_solve_false_cp_progress_log_empty() -> None:
     """solve=False must produce empty cp_progress_log."""
+    import logging
+
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         run_coarsen_solve_reconstruct,
     )
-    import logging
 
     instance = _make_tiny_2job_2stage_instance()
     option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)
@@ -1187,12 +1192,13 @@ def test_solve_false_cp_progress_log_empty() -> None:
 
 def test_solve_false_coarse_schedule_has_seed_contents() -> None:
     """solve=False coarse_schedule must have the same start/end times as the seed."""
+    import logging
+
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         _seed_and_obj,
         run_coarsen_solve_reconstruct,
     )
     from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
-    import logging
 
     instance = _make_tiny_2job_2stage_instance()
     factor = 50
@@ -1240,10 +1246,11 @@ def test_solve_true_default_unchanged() -> None:
 
 def test_solve_false_trajectory_ignored() -> None:
     """solve=False + draw_cp_trajectory=True must produce falsy trajectory."""
+    import logging
+
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
         run_coarsen_solve_reconstruct,
     )
-    import logging
 
     instance = _make_tiny_2job_2stage_instance()
     option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1, solve=False)

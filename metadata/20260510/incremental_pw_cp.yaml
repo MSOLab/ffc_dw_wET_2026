@@ -13,9 +13,9 @@ draw_gantt: false
 painter_thread_cnt: 4
 
 scenarios:
-  - name: incremental_pw_cp_always
+  - name: incremental_sw_cp_always
     timelimit: "0.1nc"
-    output_subdir: incremental_pw_cp_always
+    output_subdir: incremental_sw_cp_always
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
         draw_pmtn_sch_heatmap: false
@@ -23,7 +23,7 @@ scenarios:
         last_stage_only_placement_criteria: "dist"
         adjust_p: true
         adjust_r: true
-      - method: incremental_pw_cp
+      - method: incremental_sw_cp
         solver_thread_cnt: 4
         batch_size: 1
         step_size: 1
@@ -36,9 +36,9 @@ scenarios:
         total_timelimit: "0.02nc"
         batch_tl_mode: "constant"
 
-  - name: incremental_pw_cp_if_no_improvement
+  - name: incremental_sw_cp_if_no_improvement
     timelimit: "0.1nc"
-    output_subdir: incremental_pw_cp_if_no_improvement
+    output_subdir: incremental_sw_cp_if_no_improvement
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
         draw_pmtn_sch_heatmap: false
@@ -46,7 +46,7 @@ scenarios:
         last_stage_only_placement_criteria: "dist"
         adjust_p: true
         adjust_r: true
-      - method: incremental_pw_cp
+      - method: incremental_sw_cp
         solver_thread_cnt: 4
         batch_size: 1
         step_size: 1

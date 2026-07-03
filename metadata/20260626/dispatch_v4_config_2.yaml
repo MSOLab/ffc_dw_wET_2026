@@ -44,7 +44,7 @@ scenarios:
         make_semi_active_after_cp: true
         minimize_makespan_lex: false
       - method: initialize_by_dispatch_v4
-      - method: incremental_pw_cp
+      - method: incremental_sw_cp
         solver_thread_cnt: 8
         batch_size: "m"
         step_size: 1

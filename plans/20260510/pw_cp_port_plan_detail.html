@@ -160,7 +160,7 @@
 <nav class="toc">
   <div class="title">PW-CP Detail Decisions</div>
   <div class="crumb">plans/20260510/</div>
-  <a href="pw_cp_port_plan.html" style="color: var(--accent); font-size: 12.5px;">← Main plan</a>
+  <a href="sw_cp_port_plan.html" style="color: var(--accent); font-size: 12.5px;">← Main plan</a>
 
   <div class="label">Sections</div>
   <a href="#naming">Naming &amp; placement</a>
@@ -181,13 +181,13 @@
 
 <h1>PW-CP Port — Detail Decisions</h1>
 <div class="meta">
-  <span>plans/20260510/pw_cp_port_plan_detail.md</span> ·
-  <span>Main plan: <a href="pw_cp_port_plan.html">pw_cp_port_plan.html</a></span> ·
+  <span>plans/20260510/sw_cp_port_plan_detail.md</span> ·
+  <span>Main plan: <a href="sw_cp_port_plan.html">sw_cp_port_plan.html</a></span> ·
   <span>Frozen: 2026-05-10</span>
 </div>
 
 <div class="override-banner">
-  <b>Override notice.</b> This file freezes the user-confirmed implementation decisions surfaced during the planning conversation on 2026-05-10. Read together with the main plan; <b>this file overrides any conflicting wording</b> in <code>pw_cp_port_plan.md</code>.
+  <b>Override notice.</b> This file freezes the user-confirmed implementation decisions surfaced during the planning conversation on 2026-05-10. Read together with the main plan; <b>this file overrides any conflicting wording</b> in <code>sw_cp_port_plan.md</code>.
 </div>
 
 <h2 id="naming">Naming and placement</h2>
@@ -195,15 +195,15 @@
 <div class="decisions">
   <div class="decision">
     <div class="key">Controller step method</div>
-    <div class="val"><code>pw_cp</code> (no <code>run_</code> prefix). Matches the <code>neh_cp</code> peer. The <code>subroutine_flow.method:</code> key in YAML resolves directly to this attribute.</div>
+    <div class="val"><code>sw_cp</code> (no <code>run_</code> prefix). Matches the <code>neh_cp</code> peer. The <code>subroutine_flow.method:</code> key in YAML resolves directly to this attribute.</div>
   </div>
   <div class="decision">
     <div class="key">Algorithm package path</div>
-    <div class="val"><code>src/ffc_ddw_sum_et/algorithm/pw_cp/</code> (<code>__init__</code>, <code>option</code>, <code>step_log</code>, <code>partition</code>, <code>cp_model</code>, <code>dispatcher</code>).</div>
+    <div class="val"><code>src/ffc_ddw_sum_et/algorithm/sw_cp/</code> (<code>__init__</code>, <code>option</code>, <code>step_log</code>, <code>partition</code>, <code>cp_model</code>, <code>dispatcher</code>).</div>
   </div>
   <div class="decision">
     <div class="key">Experiment YAML</div>
-    <div class="val"><code>metadata/20260510/pw_cp_grid.yaml</code>. <span class="badge warn">override</span> The <code>configs/</code> path mentioned in the plan does <b>not</b> exist in this repo — every scenario YAML lives under <code>metadata/&lt;date&gt;/</code>.</div>
+    <div class="val"><code>metadata/20260510/sw_cp_grid.yaml</code>. <span class="badge warn">override</span> The <code>configs/</code> path mentioned in the plan does <b>not</b> exist in this repo — every scenario YAML lives under <code>metadata/&lt;date&gt;/</code>.</div>
   </div>
 </div>
 
@@ -214,7 +214,7 @@
 <pre><code>subroutine_flow:
   - method: calc_mcf_lb_and_derive_full_sch
     # …default seeding params (mirror 20260507_*)
-  - method: pw_cp
+  - method: sw_cp
     # …PW-CP option fields below
 </code></pre>
 
@@ -249,13 +249,13 @@
   </div>
 </div>
 
-<p>The <code>pw_cp</code> step method computes <code>wall_clock_deadline_sec = time.monotonic() + self.timer.get_remaining_sec(self.stopping_criteria.timelimit)</code> and threads it through <code>PwCpOption.wall_clock_deadline_sec</code>. The dispatcher clamps each batch's CP-SAT <code>max_time_in_seconds</code> by the remaining deadline (mirror <code>neh_cp</code> lines 258-274), and breaks the loop with <code>TerminationReason.STOP_REQUESTED</code> when the deadline is hit.</p>
+<p>The <code>sw_cp</code> step method computes <code>wall_clock_deadline_sec = time.monotonic() + self.timer.get_remaining_sec(self.stopping_criteria.timelimit)</code> and threads it through <code>PwCpOption.wall_clock_deadline_sec</code>. The dispatcher clamps each batch's CP-SAT <code>max_time_in_seconds</code> by the remaining deadline (mirror <code>neh_cp</code> lines 258-274), and breaks the loop with <code>TerminationReason.STOP_REQUESTED</code> when the deadline is hit.</p>
 
 <p>The controller-side <code>stop_predicate=self.is_stopping_condition</code> is also threaded into <code>AlgSpec</code> so the loop can react to <em>either</em> the deadline or the controller-managed stop predicate.</p>
 
 <h2 id="machine-reassign"><code>_build_full_schedule_from_cp</code> — machine reassignment policy</h2>
 
-<p>Use hybridflowshop's validated pattern (<code>create_pw_cp_schedule</code> in <code>/home/hjt/code/hybridflowshop/.../cpsat_model_2/pw_cp.py</code>):</p>
+<p>Use hybridflowshop's validated pattern (<code>create_sw_cp_schedule</code> in <code>/home/hjt/code/hybridflowshop/.../cpsat_model_2/sw_cp.py</code>):</p>
 
 <ol>
   <li>Start from <code>rj_schedule.deepcopy()</code> and remove every non-time-fixed <code>(j, i, k)</code> op via <code>FFcSchedule.remove_operations</code>.</li>
@@ -323,10 +323,10 @@
 
 <h2 id="gantt">Per-step Gantt</h2>
 
-<p><code>pw_cp</code> accepts a per-call <code>draw_gantt: bool = False</code> kwarg. When True, the controller appends two snapshots to the existing <code>mcf_lb_phase_schedules</code> list (the mechanism is generic despite the name):</p>
+<p><code>sw_cp</code> accepts a per-call <code>draw_gantt: bool = False</code> kwarg. When True, the controller appends two snapshots to the existing <code>mcf_lb_phase_schedules</code> list (the mechanism is generic despite the name):</p>
 
-<pre><code>(self._mcf_lb_phase_name("pw_cp_before"), incumbent.schedule.deepcopy())
-(self._mcf_lb_phase_name("pw_cp_after"),  result.schedule.deepcopy())
+<pre><code>(self._mcf_lb_phase_name("sw_cp_before"), incumbent.schedule.deepcopy())
+(self._mcf_lb_phase_name("sw_cp_after"),  result.schedule.deepcopy())
 </code></pre>
 
 <p>The post-run reporter renders these into PNGs alongside MCF-LB phase PNGs.</p>
@@ -380,14 +380,14 @@ rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(instance.job_2_dw_ub_map
 <p>Plan-mandated 5 unit-test files plus the schedule-method test:</p>
 
 <ol class="tests">
-  <li>tests/algorithm/pw_cp/test_option.py</li>
-  <li>tests/algorithm/pw_cp/test_partition.py</li>
-  <li>tests/algorithm/pw_cp/test_cp_model.py</li>
-  <li>tests/algorithm/pw_cp/test_dispatcher.py</li>
-  <li>tests/algorithm/pw_cp/test_dispatcher_stop.py</li>
-  <li>tests/algorithm/pw_cp/test_dispatcher_no_ref_solution.py</li>
+  <li>tests/algorithm/sw_cp/test_option.py</li>
+  <li>tests/algorithm/sw_cp/test_partition.py</li>
+  <li>tests/algorithm/sw_cp/test_cp_model.py</li>
+  <li>tests/algorithm/sw_cp/test_dispatcher.py</li>
+  <li>tests/algorithm/sw_cp/test_dispatcher_stop.py</li>
+  <li>tests/algorithm/sw_cp/test_dispatcher_no_ref_solution.py</li>
   <li>tests/solution/test_ffc_schedule_delay_all_stages.py</li>
-  <li>Register <code>pw_cp</code> in tests/algorithm/test_algorithm_contracts.py so the shared AlgRecord shape-checks run.</li>
+  <li>Register <code>sw_cp</code> in tests/algorithm/test_algorithm_contracts.py so the shared AlgRecord shape-checks run.</li>
 </ol>
 
 <h2 id="outofscope">Out of scope <span class="badge muted">deferred</span></h2>
@@ -416,7 +416,7 @@ rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(instance.job_2_dw_ub_map
 </div>
 
 <hr>
-<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/pw_cp_port_plan_detail.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/sw_cp_port_plan_detail.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
 
 </main>
 </div>

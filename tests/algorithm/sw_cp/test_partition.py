@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ffc_ddw_sum_et.algorithm.pw_cp import (
+from ffc_ddw_sum_et.algorithm.sw_cp import (
     OperationPartition,
     build_operation_partition,
     validate_and_get_batch_count,

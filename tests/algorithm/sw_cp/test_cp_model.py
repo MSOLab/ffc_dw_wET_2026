@@ -1,4 +1,4 @@
-"""Structural tests for PwCpModelBuilder.
+"""Structural tests for SwCpModelBuilder.
 
 Verifies that op vars are created only for non-time-fixed ops and that
 the dummy bars cap the available capacity at the rj_schedule's
@@ -10,25 +10,25 @@ from __future__ import annotations
 import pandas as pd
 
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
+from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
 from ffc_ddw_sum_et.algorithm.neh_cp import NehCpDispatcher, NehCpOption
-from ffc_ddw_sum_et.algorithm.pw_cp import (
-    PwCpModelBuilder,
+from ffc_ddw_sum_et.algorithm.sw_cp import (
+    SwCpModelBuilder,
     build_operation_partition,
     build_stage_2_batch_list,
 )
-from ffc_ddw_sum_et.algorithm.cumulative import BaseModelBuilder
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
 
 def _make_instance() -> FFcDDWParameters:
     return FFcDDWParameters(
-        name="pw_cp_cp_model_test",
+        name="sw_cp_cp_model_test",
         job_id_list=["j0", "j1", "j2", "j3"],
         stage_id_list=["i0", "i1"],
         stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
         p_manager=JobStageProcessingTimeManager(
-            name="pw_cp_cp_model_test_p",
+            name="sw_cp_cp_model_test_p",
             df=pd.DataFrame([[2, 3], [2, 2], [2, 1], [1, 2]]),
         ),
         job_2_due_window_map={
@@ -73,7 +73,7 @@ def test_op_vars_only_for_non_time_fixed() -> None:
     sub_instance = FFcDDWParameters.create_instance_of_job_subset(instance, sub_jobs)
 
     horizon = sum(BaseModelBuilder.make_params(instance).p.values())
-    build = PwCpModelBuilder().build(
+    build = SwCpModelBuilder().build(
         sub_instance,
         rj_schedule,
         stage_2_partition,
@@ -121,7 +121,7 @@ def test_objective_jobs_are_last_stage_non_time_fixed() -> None:
     sub_instance = FFcDDWParameters.create_instance_of_job_subset(instance, sub_jobs)
 
     horizon = sum(BaseModelBuilder.make_params(instance).p.values())
-    build = PwCpModelBuilder().build(
+    build = SwCpModelBuilder().build(
         sub_instance,
         rj_schedule,
         stage_2_partition,

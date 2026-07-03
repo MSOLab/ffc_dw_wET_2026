@@ -1,6 +1,6 @@
-"""Partition-aware CP-SAT builder for PW-CP sliding-window batches.
+"""Partition-aware CP-SAT builder for SW-CP sliding-window batches.
 
-Mirrors hybridflowshop's ``PwCpModelBuilder`` for the structural
+Mirrors hybridflowshop's ``SwCpModelBuilder`` for the structural
 skeleton (op vars only for non-time-fixed; left/right dummy bars per
 machine; cumulative-with-dummy-bar capacity; non-fixed job precedence
 constants from a right-justified incumbent), but replaces the
@@ -27,11 +27,11 @@ from ..cumulative import (
 )
 from .partition import OperationPartition
 
-__all__ = ["PwCpBuildResult", "PwCpModelBuilder"]
+__all__ = ["SwCpBuildResult", "SwCpModelBuilder"]
 
 
 @dataclass
-class PwCpBuildResult:
+class SwCpBuildResult:
     mdl: CpModel
     sub_params: Params
     op_vars: OperationVars
@@ -44,8 +44,8 @@ class PwCpBuildResult:
     recomputes the full progress offset from rj_schedule instead)."""
 
 
-class PwCpModelBuilder:
-    """Build the partition-aware CP-SAT model for one PW-CP batch."""
+class SwCpModelBuilder:
+    """Build the partition-aware CP-SAT model for one SW-CP batch."""
 
     def build(
         self,
@@ -55,7 +55,7 @@ class PwCpModelBuilder:
         *,
         horizon: int,
         pf_method: PFMethod,
-    ) -> PwCpBuildResult:
+    ) -> SwCpBuildResult:
         mdl = CpModel()
 
         # Parameters
@@ -96,7 +96,7 @@ class PwCpModelBuilder:
         self._apply_hints(mdl, sub_params, op_vars, rj_schedule, stage_2_partition)
         self._apply_et_hints(mdl, sub_params, et_vars, objective_jobs, rj_schedule)
 
-        return PwCpBuildResult(
+        return SwCpBuildResult(
             mdl=mdl,
             sub_params=sub_params,
             op_vars=op_vars,
@@ -447,10 +447,10 @@ class PwCpModelBuilder:
         if ops_to_remove:
             result.remove_operations(ops_to_remove)
 
-        divergence = PwCpModelBuilder._replay_non_time_fixed(
+        divergence = SwCpModelBuilder._replay_non_time_fixed(
             result, full_instance, stage_2_partition, op_vars, solver
         )
-        divergence += PwCpModelBuilder._replay_right_time_fixed(
+        divergence += SwCpModelBuilder._replay_right_time_fixed(
             result, full_instance, stage_2_partition, rj_schedule
         )
         return result, divergence

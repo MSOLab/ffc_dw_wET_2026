@@ -44,23 +44,27 @@ def aggregate(df: pd.DataFrame) -> list[dict]:
         bo_n = grp["bestObj"].notna().sum()
         mcf_mean = grp["mcfLb"].mean() if grp["mcfLb"].notna().any() else None
         if bo_n > 0:
-            records.append({
-                "run": int(r),
-                "scen": scen,
-                "metric": "bestObj",
-                "mean_RPDf": round(grp["RPDf_BKS_data"].mean(), 4),
-                "mean_value": round(grp["bestObj"].mean(), 1),
-                "n": int(grp["instanceName"].count()),
-            })
+            records.append(
+                {
+                    "run": int(r),
+                    "scen": scen,
+                    "metric": "bestObj",
+                    "mean_RPDf": round(grp["RPDf_BKS_data"].mean(), 4),
+                    "mean_value": round(grp["bestObj"].mean(), 1),
+                    "n": int(grp["instanceName"].count()),
+                }
+            )
         else:
-            records.append({
-                "run": int(r),
-                "scen": scen,
-                "metric": "mcfLb (no incumbent)",
-                "mean_RPDf": None,
-                "mean_value": round(mcf_mean, 1) if mcf_mean is not None else None,
-                "n": int(grp["instanceName"].count()),
-            })
+            records.append(
+                {
+                    "run": int(r),
+                    "scen": scen,
+                    "metric": "mcfLb (no incumbent)",
+                    "mean_RPDf": None,
+                    "mean_value": round(mcf_mean, 1) if mcf_mean is not None else None,
+                    "n": int(grp["instanceName"].count()),
+                }
+            )
     return records
 
 
@@ -73,16 +77,24 @@ def print_summary(records: list[dict], top_n: int = 10, bottom_n: int = 5) -> No
     if no_inc:
         print(f"\n--- No-incumbent RUNs/scenarios ({len(no_inc)}) ---")
         for rec in no_inc:
-            print(f"  RUN {rec['run']:>2} {rec['scen'][:40]:40s} mcfLb_mean={fmt_int(rec['mean_value'])}")
+            print(
+                f"  RUN {rec['run']:>2} {rec['scen'][:40]:40s} mcfLb_mean={fmt_int(rec['mean_value'])}"
+            )
 
-    ranked = sorted([r for r in records if r["metric"] == "bestObj"], key=lambda x: x["mean_RPDf"])
+    ranked = sorted(
+        [r for r in records if r["metric"] == "bestObj"], key=lambda x: x["mean_RPDf"]
+    )
     print(f"\n--- Top {top_n} by mean RPDf (lowest = best) ---")
     for rec in ranked[:top_n]:
-        print(f"  RPDf={rec['mean_RPDf']:.4f} bestObj={fmt_int(rec['mean_value']):>11s} RUN {rec['run']:>2} {rec['scen']}")
+        print(
+            f"  RPDf={rec['mean_RPDf']:.4f} bestObj={fmt_int(rec['mean_value']):>11s} RUN {rec['run']:>2} {rec['scen']}"
+        )
 
     print(f"\n--- Bottom {bottom_n} by mean RPDf ---")
     for rec in ranked[-bottom_n:]:
-        print(f"  RPDf={rec['mean_RPDf']:.4f} bestObj={fmt_int(rec['mean_value']):>11s} RUN {rec['run']:>2} {rec['scen']}")
+        print(
+            f"  RPDf={rec['mean_RPDf']:.4f} bestObj={fmt_int(rec['mean_value']):>11s} RUN {rec['run']:>2} {rec['scen']}"
+        )
 
 
 def main() -> None:

@@ -1,4 +1,4 @@
-"""Sanity tests for PwCpOption defaults / validation."""
+"""Sanity tests for SwCpOption defaults / validation."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import dataclasses
 
 import pytest
 
-from ffc_ddw_sum_et.algorithm.pw_cp import PwCpOption
+from ffc_ddw_sum_et.algorithm.sw_cp import SwCpOption
 
 
 def test_defaults_match_plan() -> None:
-    opt = PwCpOption()
+    opt = SwCpOption()
     assert opt.solver_thread_cnt == 1
     assert opt.batch_size == 1
     assert opt.step_size == 1
@@ -29,26 +29,26 @@ def test_defaults_match_plan() -> None:
 
 
 def test_frozen() -> None:
-    opt = PwCpOption()
+    opt = SwCpOption()
     with pytest.raises(dataclasses.FrozenInstanceError):
         opt.solver_thread_cnt = 4  # type: ignore[misc]
 
 
 def test_validation_step_size_min() -> None:
     with pytest.raises(ValueError, match="step_size must be >= 1"):
-        PwCpOption(step_size=0)
+        SwCpOption(step_size=0)
 
 
 def test_validation_unfixed_min() -> None:
     with pytest.raises(ValueError, match="unfixed_batch_count must be >= 1"):
-        PwCpOption(unfixed_batch_count=0)
+        SwCpOption(unfixed_batch_count=0)
 
 
 def test_validation_left_profile_nonneg() -> None:
     with pytest.raises(ValueError, match="left_profile_fixed_batch_count must be >= 0"):
-        PwCpOption(left_profile_fixed_batch_count=-1)
+        SwCpOption(left_profile_fixed_batch_count=-1)
 
 
 def test_validation_batch_size_min() -> None:
     with pytest.raises(ValueError, match="batch_size must be >= 1"):
-        PwCpOption(batch_size=0)
+        SwCpOption(batch_size=0)

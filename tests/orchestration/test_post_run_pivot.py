@@ -8,17 +8,16 @@ regression.
 import json
 from pathlib import Path
 
-import pytest
 import pandas as pd
+import pytest
 
 from ffc_ddw_sum_et.orchestration.post_run_pivot import (
-    compute_cp_gaps,
-    read_csr_cp_trajectory_endpoint,
-    collect_cp_gap_rows,
     _merge_instance_meta,
     build_rpdf_comparison_df,
+    collect_cp_gap_rows,
+    compute_cp_gaps,
+    read_csr_cp_trajectory_endpoint,
 )
-
 
 # --- compute_cp_gaps ---
 

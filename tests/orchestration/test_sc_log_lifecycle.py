@@ -18,13 +18,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from routix.logging import PrefixLevelFilter, _MANAGED_TAG
+from routix.logging import _MANAGED_TAG, PrefixLevelFilter
 from routix.type_defs import RunMode
 
 from ffc_ddw_sum_et.orchestration.artifact_layout import FFcArtifactLayout
 from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import (
-    FFcDDWSingleInstanceRunner,
     _SC_LOGGER_PREFIX,
+    FFcDDWSingleInstanceRunner,
 )
 
 

@@ -60,14 +60,20 @@ def main() -> None:
         print(f"  RUN {rec['run']:>2} {rec['scen']:50s} mcfLb_mean={rec['mean_value']}")
     print()
 
-    ranked = sorted([r for r in records if r["metric"] == "bestObj"], key=lambda x: x["mean_RPDf"])
+    ranked = sorted(
+        [r for r in records if r["metric"] == "bestObj"], key=lambda x: x["mean_RPDf"]
+    )
     print("--- Top 10 by mean RPDf (lowest = best) ---")
     for rec in ranked[:10]:
-        print(f"  RPDf={rec['mean_RPDf']:.4f} bestObj={rec['mean_value']:>11.1f} RUN {rec['run']:>2} {rec['scen']}")
+        print(
+            f"  RPDf={rec['mean_RPDf']:.4f} bestObj={rec['mean_value']:>11.1f} RUN {rec['run']:>2} {rec['scen']}"
+        )
     print()
     print("--- Worst 10 ---")
     for rec in ranked[-10:]:
-        print(f"  RPDf={rec['mean_RPDf']:.4f} bestObj={rec['mean_value']:>11.1f} RUN {rec['run']:>2} {rec['scen']}")
+        print(
+            f"  RPDf={rec['mean_RPDf']:.4f} bestObj={rec['mean_value']:>11.1f} RUN {rec['run']:>2} {rec['scen']}"
+        )
 
 
 if __name__ == "__main__":

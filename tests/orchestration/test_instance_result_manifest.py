@@ -21,11 +21,10 @@ from routix.io import dump_yaml
 
 from ffc_ddw_sum_et.orchestration.artifact_layout import FFcArtifactLayout
 from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import (
+    _MANIFEST_SCHEMA_VERSION,
     FFcDDWSingleInstanceRunner,
     InstanceResult,
-    _MANIFEST_SCHEMA_VERSION,
 )
-
 
 _SCENARIO = "sc"
 
