@@ -153,10 +153,26 @@ class SwCpDispatcher:
                 logger.debug("sw_cp step %d: empty non-time-fixed set; skipping.", step)
                 continue
 
+            rtf_ops = {
+                (j, i, k)
+                for i, part in stage_2_partition.items()
+                for j, k in part.right_time_fixed
+            }
             rj_schedule = incumbent.deepcopy()
-            rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(
-                instance.job_2_dw_ub_map
+            rj_schedule.delay_operations_latest_leq_obj_contrib(
+                rtf_ops, instance.job_2_dw_ub_map
             )
+
+            rj_obj = self._full_obj(rj_schedule, instance)
+            inc_obj = self._full_obj(incumbent, instance)
+            assert rj_obj <= inc_obj + 1e-6, f"rj obj {rj_obj} > incumbent {inc_obj}"
+            if rj_obj < inc_obj - 1e-6:
+                logger.warning(
+                    "sw_cp: rj obj %.1f < incumbent obj %.1f "
+                    "(insert_idle_time left E/T on the table)",
+                    rj_obj,
+                    inc_obj,
+                )
 
             if (
                 option.debug_partition_gantt
