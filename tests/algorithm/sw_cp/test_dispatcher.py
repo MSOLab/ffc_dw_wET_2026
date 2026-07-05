@@ -136,3 +136,33 @@ def test_dispatcher_step_log_present() -> None:
     assert step_log is not None
     for entry in step_log:
         assert isinstance(entry, SwCpStepEntry)
+
+
+def test_dispatcher_progress_log_carries_obj_bound() -> None:
+    """CP-SAT's best_objective_bound must flow into progress_log entries
+    (mapped into full-instance objective space via full_offset) instead
+    of being dropped as ``None`` — this is what populates the obj_log's
+    ``obj_bound`` series downstream."""
+    instance = _make_instance()
+    seed, _ = _seed_incumbent(instance)
+
+    spec = AlgSpec(
+        instance=instance,
+        option=SwCpOption(cp_tl_seconds=1.0, unfixed_batch_count=2),
+        ref_solution=seed,
+    )
+    record = SwCpDispatcher().run(spec)
+
+    assert record.progress_log is not None
+    assert any(entry.obj_bound is not None for entry in record.progress_log)
+
+    assert record.result is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    step_log = metrics.get("step_log")
+    assert step_log is not None
+    for entry in step_log:
+        assert (
+            entry.unfixed_op_count + entry.profile_fixed_op_count
+            == entry.non_time_fixed_op_count
+        )

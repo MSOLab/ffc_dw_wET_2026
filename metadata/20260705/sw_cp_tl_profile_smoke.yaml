@@ -1,0 +1,36 @@
+# Smoke validation for the SW-CP time-limit profiling experiment.
+# One instance, one (production) window config. Purpose: confirm the pipeline
+# runs and that `<instance>_obj_log.json` carries both the UB (obj_value) and
+# LB (obj_bound) trajectory before launching the full sweep (sw_cp_tl_profile.yaml).
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [60]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+output_dir: output/20260705_sw_cp_tl_profile_smoke
+instance_worker_cnt: 1
+draw_gantt: false
+scenarios:
+  - name: u2_pf2
+    timelimit: 100000.0
+    output_subdir: u2_pf2
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 60.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false

@@ -1,0 +1,143 @@
+# SW-CP time-limit profiling experiment.
+#
+# Goal: gather evidence for a size-aware per-sub-CP time-limit policy
+# TL = a*(#unfixed_ops) + b*(#profile_fixed_ops) + c, by running SW-CP with a
+# generous *uniform* per-sub-CP cap (cp_tl=300s, "enough time") while recording
+# the full within-sub-CP UB/LB trajectory into the standard
+# `<instance>_obj_log.json` (obj_value = UB, obj_bound = LB). Offline analysis
+# then asks "if each sub-CP had been cut at TL=f(#unfixed,#pfixed), how much of
+# the generous-cap objective improvement would remain?".
+#
+# Window-config sweep (star design around the production config u2_pf2) so that
+# #unfixed and #profile_fixed vary *independently* -- otherwise both scale as
+# k*m*c and their TL coefficients are unidentifiable (perfect collinearity):
+#   u1_pf2 / u2_pf2 / u4_pf2  -> vary #unfixed at fixed #pfixed
+#   u2_pf0 / u2_pf2 / u2_pf4  -> vary #pfixed  at fixed #unfixed
+#
+# Instances: 10-instance smoke subset (all n=50, T=0.6, R=0.2; c in {5,10},
+# m in {3,5}, W in {10,20}) for pipeline validation. Expand to a real
+# (n,c,T,R) grid afterwards.
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+output_dir: output/20260705_sw_cp_tl_profile
+instance_worker_cnt: 10
+draw_gantt: false
+scenarios:
+  - name: u1_pf2
+    timelimit: 100000.0
+    output_subdir: u1_pf2
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 1
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 300.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false
+  - name: u2_pf2
+    timelimit: 100000.0
+    output_subdir: u2_pf2
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 300.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false
+  - name: u4_pf2
+    timelimit: 100000.0
+    output_subdir: u4_pf2
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 4
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 300.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false
+  - name: u2_pf0
+    timelimit: 100000.0
+    output_subdir: u2_pf0
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 0
+        right_profile_fixed_batch_count: 0
+        pf_method: "PF1"
+        cp_tl: 300.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false
+  - name: u2_pf4
+    timelimit: 100000.0
+    output_subdir: u2_pf4
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 4
+        right_profile_fixed_batch_count: 4
+        pf_method: "PF1"
+        cp_tl: 300.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false

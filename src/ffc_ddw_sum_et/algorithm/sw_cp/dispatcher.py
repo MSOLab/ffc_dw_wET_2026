@@ -306,7 +306,7 @@ class SwCpDispatcher:
                         ProgressLogEntry(
                             elapsed_sec=t_rec + offset_sec,
                             obj_value=float(vb.value) + full_offset,
-                            obj_bound=None,
+                            obj_bound=float(vb.bound) + full_offset,
                         )
                     )
 
@@ -402,6 +402,22 @@ class SwCpDispatcher:
                 if applied_tl_seconds is not None and applied_tl_seconds > 0
                 else None
             )
+            unfixed_op_count = sum(len(p.unfixed) for p in stage_2_partition.values())
+            profile_fixed_op_count = sum(
+                len(p.left_profile_fixed) + len(p.right_profile_fixed)
+                for p in stage_2_partition.values()
+            )
+            non_time_fixed_op_count = sum(
+                len(p.non_time_fixed) for p in stage_2_partition.values()
+            )
+            assert (
+                unfixed_op_count + profile_fixed_op_count == non_time_fixed_op_count
+            ), (
+                "sw_cp: unfixed_op_count + profile_fixed_op_count != "
+                "non_time_fixed_op_count "
+                f"({unfixed_op_count} + {profile_fixed_op_count} != "
+                f"{non_time_fixed_op_count})"
+            )
             step_entries.append(
                 SwCpStepEntry(
                     step=step,
@@ -409,9 +425,9 @@ class SwCpDispatcher:
                     TL=trunc4(applied_tl_seconds),
                     elapsed_portion=trunc4(elapsed_portion),
                     unfixed_batch_start_idx=unfixed_start,
-                    non_time_fixed_op_count=sum(
-                        len(p.non_time_fixed) for p in stage_2_partition.values()
-                    ),
+                    unfixed_op_count=unfixed_op_count,
+                    profile_fixed_op_count=profile_fixed_op_count,
+                    non_time_fixed_op_count=non_time_fixed_op_count,
                     sub_job_count=len(sub_jobs),
                     incumbent_obj_before=incumbent_obj_before,
                     cp_obj=cand_obj,
@@ -431,7 +447,7 @@ class SwCpDispatcher:
                 step,
                 unfixed_start,
                 unfixed_start + option.unfixed_batch_count,
-                sum(len(p.non_time_fixed) for p in stage_2_partition.values()),
+                non_time_fixed_op_count,
                 len(sub_jobs),
                 solver.StatusName(status),
                 f"{cand_obj:.0f}" if cand_obj is not None else "None",

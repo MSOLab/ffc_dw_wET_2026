@@ -22,7 +22,8 @@ class SwCpStepEntry:
 
     ``non_time_fixed_op_count`` is the size of the CP sub-problem this
     step solved (sum across stages of jobs with at least one
-    non-time-fixed op in the partition).
+    non-time-fixed op in the partition), and equals
+    ``unfixed_op_count + profile_fixed_op_count``.
     """
 
     step: int
@@ -30,6 +31,8 @@ class SwCpStepEntry:
     TL: float | None
     elapsed_portion: float | None
     unfixed_batch_start_idx: int
+    unfixed_op_count: int
+    profile_fixed_op_count: int
     non_time_fixed_op_count: int
     sub_job_count: int
     incumbent_obj_before: float
