@@ -130,3 +130,103 @@ git commit -m "chore(sw-cp-vis): redraw post partition gantt before/after CP"
   별도 요청 시 진행(코드 변경을 pre-fix 위에 얹어 재실행). 본 plan 범위 밖.
 - **branch 성격**: 이 branch는 원래 분석-trace 목적. src feat 커밋을 얹는 게 부담되면
   나중에 dev-line으로 cherry-pick 이동 가능(사용자 결정).
+
+---
+
+# v2 (2026-07-05 후속): 3단계 분할 + render 누락-바 버그 수정
+
+> ⚠️ v1(commit `04a02c5`+`ceed235`)은 완료됨. 아래는 사용자 피드백에 따른 후속.
+> 코드 변경 포함 → **검토 후 진행**.
+
+## v2.0 사용자 피드백 (관측 3건)
+
+1. **버그(누락 바):** `..._2_after_cp.svg` step_000의 첫 stage에 op 20개가 그려져야 하는데
+   2개만 그려짐. **실측:** step_000 before=op-bar 32/label 40, after=16/21 — 약 절반 누락.
+2. **진단 가설:** before의 stage2 RTF 경계는 400 직전 1 / 직후 1 인데, after는 RTF op 둘 다
+   400 이후. → CP 해 자체가 아니라 **`make_semi_active` + `insert_idle_time`** 후처리에서
+   밀린 것으로 의심. 확인하려면 후처리 **전/후**를 분리해서 봐야 함.
+3. post-fix의 before/after 그림 재생성 필요.
+
+## v2.1 버그 원인 (코드로 확정)
+
+- `cp_model.build_full_schedule_from_cp` (cp_model.py:438-456): LTF는 incumbent 위치
+  유지하지만, **non-time-fixed·RTF op은 machine을 재배정**하며 replay
+  (Phase A greedy machine select / Phase B target-machine matching — 그 docstring 참조).
+- `visual.render_partition_gantt_svg` (visual.py:118-134): op 바를 partition region의
+  `(job, k)` 로 **incumbent machine `k`** 를 써서 `start_map.get((job, s_id, k))` 조회.
+  → CP가 machine을 바꾼 op은 조회 miss → **바 누락**. (step_000 stage i0엔 LTF가 없어
+  대부분 재배정 대상이라 누락이 큼.)
+- **결론:** after 스케줄(cand)을 그리려면 op 바를 **incumbent machine이 아니라 렌더 대상
+  스케줄의 실제 machine lane** 에 배치해야 함. region 색은 machine 무관하게 `(job)→region`
+  으로 칠함.
+
+## v2.2 코드 변경 설계
+
+### (A) `visual.py` — op 바를 실제 스케줄 machine에 배치 (버그 수정)
+- 현재: region_ops `(job, k)` 를 돌며 `k`(incumbent)로 조회 → 재배정 시 miss.
+- 변경: stage별 `job → region_name` 맵을 partition에서 구성(`k` 무시; 한 job은 stage당
+  한 region). 그 다음 **렌더 대상 스케줄의 실제 op** `(job, s_id, mc)→start/end` 를 돌며,
+  그 job이 해당 stage의 어느 region이면 그 색으로 lane `(s_id, mc)` 에 바를 그림.
+  region에 없는 op은 skip(=기존 before와 동일 집합 유지). → before는 결과 불변(machine 일치),
+  after는 실제 위치로 바가 모두 나옴.
+- **경계선(dummy boundary)** 기준: 좌/우 경계선은 CP가 푼 **고정 제약**(rj_schedule의 LTF end /
+  RTF start)이므로, after/sm_iti 그림에서도 **rj_schedule 기준으로 고정**해서 그린다.
+  → render에 `ref_schedule: FFcSchedule | None = None` 추가(None이면 `schedule` 사용=기존 before).
+  경계선 계산(visual.py:107-134)만 `ref_schedule` 사용, op 바는 `schedule` 사용.
+  이로써 "400 경계선"이 세 그림에서 같은 자리에 있어 RTF가 상대적으로 얼마나 밀렸는지 눈으로 비교 가능.
+
+### (B) `dispatcher.py` — 3단계로 분리
+현재 after 1장(sm+iti 후) → **3장**:
+- `1_before_cp` : `rj_schedule` (기존).
+- `2_after_cp`  : `build_full_schedule_from_cp` 직후 **raw CP 해** (sm+iti 이전).
+- `3_after_sm_iti` : `make_semi_active`+`insert_idle_time` 후 (= 기존 `2_after_cp` 내용).
+
+`make_semi_active`/`insert_idle_time` 는 cand를 **in-place 변형**하므로,
+`build_full_schedule_from_cp` 직후 `cand_raw = cand.deepcopy()` 로 raw 상태를 잡아둔다
+(debug_gantt일 때만). 렌더 3콜 모두 `ref_schedule=rj_schedule` 전달.
+- 루프 상단에 `cand_raw = None` 초기화, `if status in (OPTIMAL,FEASIBLE):` 안에서 set.
+- after 렌더 블록: `if debug_gantt and cand is not None:` 에서 `cand_raw`("2_after_cp") +
+  `cand`("3_after_sm_iti") 두 번 write. `cand_raw` 는 not-None 보장(cand와 동시 생성).
+
+### (C) `_write_partition_gantt` / phase label
+- `phase` 인자에 `"2_after_cp"`, `"3_after_sm_iti"` 추가 사용(파일명 규칙 그대로).
+- label: "after CP (raw)", "after CP + semi-active/idle".
+- controller `_gantt_path(step, phase)` 는 임의 phase 문자열 지원 → **변경 불필요**.
+
+## v2.3 재생성 & 커밋
+
+1. 코드 변경 (A~C) → `ruff check`/`format` → smoke import.
+2. **post-fix 재실행**(현재 코드): `uv run python main.py --config metadata/20260705/rj_rtf_vis_compare.yaml`.
+   - step별 3장(`_1_before_cp`,`_2_after_cp`,`_3_after_sm_iti`) 생성 확인
+     (`find output/20260705 -iname "*partition_*.svg"`).
+3. `analysis/rj_rtf_vis/20260705/post/` 교체: 기존 2장짜리(`_1_before_cp`,`_2_after_cp`=구 sm_iti) 삭제,
+   새 3장 세트 복사. README/compare.md 갱신
+   (**핵심 확인**: 2_after_cp에서 RTF가 경계선 전/후로 올바른지, 3_after_sm_iti에서 밀렸는지 — 사용자 가설 검증).
+4. 커밋(git=main agent):
+   ```sh
+   git add src/ffc_ddw_sum_et/algorithm/sw_cp/dispatcher.py \
+           src/ffc_ddw_sum_et/algorithm/sw_cp/visual.py \
+           plans/20260705/partition_gantt_before_after_cp.md
+   git commit -m "fix(sw-cp): draw gantt bars by actual machine; add raw-CP phase"
+   git add -f analysis/rj_rtf_vis/20260705/post analysis/rj_rtf_vis/20260705/compare.md
+   git commit -m "chore(sw-cp-vis): redraw post gantt in 3 phases (before/after-cp/sm-iti)"
+   ```
+
+## v2.4 결정 (사용자 확정 2026-07-05)
+
+- **[Q1] → pre 도 3단계로 재생성.** `pre/`, `post/` 모두 3단계 세트로.
+  - `post/` : 현재 HEAD(post-fix rj-build + v2 viz)로 재실행.
+  - `pre/` : v2 viz 는 유지하되 **rj-build 만 pre-fix 버전**(`delay_job_latest_leq_obj_contrib_all_stages`)
+    으로 돌려야 함. 방법: **post 재생성·커밋을 먼저** 끝낸 뒤, `dispatcher.py`의 rj-build 블록만
+    working-tree에서 임시로 pre-fix 버전으로 바꿔 실행 → `pre/` 복사 → `git checkout` 으로 복원
+    (임시 편집은 커밋 안 함). `pre/README.md`에 "pre-fix rj-build + v2 viz (working-tree 임시)" 명시.
+    실행 순서상 post-fix 코드가 항상 커밋된 HEAD 상태로 남음.
+- **[Q2] → rj_schedule 고정 경계선.** 세 그림 모두 rj_schedule 기준 경계선(§v2.2-A대로).
+
+## v2.5 Risks
+
+- **visual.py 리팩터 영향:** op 바 선택 로직을 "partition→schedule lookup"에서
+  "schedule op→region color"로 바꾸므로 before 그림도 재검증 필요(machine 일치 시 동일해야 함).
+  회귀 확인: 재생성한 `_1_before_cp` 를 기존 커밋본과 (ID noise 제외) 기하 비교.
+- **deepcopy 비용:** step당 cand 1회 추가 deepcopy(debug_gantt일 때만) — 무시 가능.
+- **한 job이 stage당 2 region?** partition 불변식상 없음(가정). 구성 시 중복이면 assert.
