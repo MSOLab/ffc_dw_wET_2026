@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections.abc import Callable
+from pathlib import Path
 
 from ortools.sat.python import cp_model
 
 from ...parameters.ffc_ddw_params import FFcDDWParameters
-from ...solution.ffc_schedule import FFcSchedule
+from ...solution.ffc_schedule import FFcSchedule, StageIdType
 from ...solution.objectives import compute_weighted_earliness_tardiness
 from ..base.alg_record import (
     AlgRecord,
@@ -25,6 +27,7 @@ from ..utils import trunc4
 from .cp_model import SwCpModelBuilder
 from .option import SwCpOption
 from .partition import (
+    OperationPartition,
     build_operation_partition,
     build_stage_2_batch_list,
     validate_and_get_batch_count,
@@ -33,6 +36,42 @@ from .step_log import SwCpStepEntry
 from .visual import render_partition_gantt_svg
 
 __all__ = ["SwCpDispatcher"]
+
+
+def _write_partition_gantt(
+    getter: Callable[[int, str], Path | None],
+    schedule: FFcSchedule,
+    stage_2_partition: dict[StageIdType, OperationPartition],
+    instance: FFcDDWParameters,
+    horizon: int,
+    step: int,
+    unfixed_start: int,
+    unfixed_batch_count: int,
+    phase: str,
+    phase_label: str,
+    logger: logging.Logger,
+) -> None:
+    """Render one sw_cp step's partition gantt and write it via ``getter``.
+
+    Shared by the before-CP (``rj_schedule``) and after-CP (``cand``) call
+    sites so the render/write/log sequence isn't duplicated.
+    """
+    svg = render_partition_gantt_svg(
+        schedule,
+        stage_2_partition,
+        stage_id_list=instance.stage_id_list,
+        machines_per_stage=instance.stage_2_machines_map,
+        horizon=horizon,
+        step=step,
+        unfixed_start=unfixed_start,
+        unfixed_batch_count=unfixed_batch_count,
+        phase_label=phase_label,
+    )
+    svg_path = getter(step, phase)
+    if svg_path is not None:
+        svg_path.parent.mkdir(parents=True, exist_ok=True)
+        svg_path.write_text(svg)
+        logger.debug("sw_cp step %d: partition gantt (%s) -> %s", step, phase, svg_path)
 
 
 class SwCpDispatcher:
@@ -174,29 +213,29 @@ class SwCpDispatcher:
                     inc_obj,
                 )
 
-            if (
+            debug_gantt = (
                 option.debug_partition_gantt
                 and option.debug_partition_gantt_path_getter is not None
-            ):
-                max_gantt = option.debug_partition_gantt_max_steps
-                if max_gantt is None or step < max_gantt:
-                    svg = render_partition_gantt_svg(
-                        rj_schedule,
-                        stage_2_partition,
-                        stage_id_list=instance.stage_id_list,
-                        machines_per_stage=instance.stage_2_machines_map,
-                        horizon=horizon,
-                        step=step,
-                        unfixed_start=unfixed_start,
-                        unfixed_batch_count=option.unfixed_batch_count,
-                    )
-                    svg_path = option.debug_partition_gantt_path_getter(step)
-                    if svg_path is not None:
-                        svg_path.parent.mkdir(parents=True, exist_ok=True)
-                        svg_path.write_text(svg)
-                        logger.debug(
-                            "sw_cp step %d: partition gantt -> %s", step, svg_path
-                        )
+                and (
+                    option.debug_partition_gantt_max_steps is None
+                    or step < option.debug_partition_gantt_max_steps
+                )
+            )
+            if debug_gantt:
+                assert option.debug_partition_gantt_path_getter is not None
+                _write_partition_gantt(
+                    option.debug_partition_gantt_path_getter,
+                    rj_schedule,
+                    stage_2_partition,
+                    instance,
+                    horizon,
+                    step,
+                    unfixed_start,
+                    option.unfixed_batch_count,
+                    "1_before_cp",
+                    "before CP",
+                    logger,
+                )
 
             sub_instance = FFcDDWParameters.create_instance_of_job_subset(
                 instance, sub_jobs
@@ -288,6 +327,22 @@ class SwCpDispatcher:
                         step,
                         cp_divergence_count,
                     )
+
+            if debug_gantt and cand is not None:
+                assert option.debug_partition_gantt_path_getter is not None
+                _write_partition_gantt(
+                    option.debug_partition_gantt_path_getter,
+                    cand,
+                    stage_2_partition,
+                    instance,
+                    horizon,
+                    step,
+                    unfixed_start,
+                    option.unfixed_batch_count,
+                    "2_after_cp",
+                    "after CP",
+                    logger,
+                )
 
             incumbent_obj_before = self._full_obj(incumbent, instance)
             accepted = (

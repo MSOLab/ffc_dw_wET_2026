@@ -46,15 +46,17 @@ def render_partition_gantt_svg(
     step: int,
     unfixed_start: int,
     unfixed_batch_count: int,
+    phase_label: str | None = None,
 ) -> str:
     """Render one sw_cp step's five-region partition as an SVG string.
 
     Parameters
     ----------
     schedule : FFcSchedule
-        The right-justified reference schedule (``rj_schedule`` in the
-        dispatcher) whose ``(job, stage, machine) -> start/end`` maps
-        drive bar placement.
+        The schedule whose ``(job, stage, machine) -> start/end`` maps
+        drive bar placement. May be the before-CP reference schedule
+        (``rj_schedule`` in the dispatcher) or the after-CP solved
+        schedule (``cand``).
     stage_2_partition : dict
         The per-stage :class:`OperationPartition` for this step.
     stage_id_list : list[str]
@@ -69,6 +71,8 @@ def render_partition_gantt_svg(
         Batch index where the unfixed window starts.
     unfixed_batch_count : int
         Number of batches in the unfixed window.
+    phase_label : str | None
+        Optional "before CP"/"after CP" label appended to the plot title.
 
     Returns
     -------
@@ -259,6 +263,8 @@ def render_partition_gantt_svg(
         f"unfixed=[{unfixed_start},{unfixed_start + unfixed_batch_count})  "
         f"horizon={horizon}"
     )
+    if phase_label:
+        title += f"  ({phase_label})"
     ax.set_title(title, fontsize=11, fontweight="bold")
 
     # 4a. region legend

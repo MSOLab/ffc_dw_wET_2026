@@ -2347,9 +2347,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         debug_partition_gantt_path_getter = None
         if debug_partition_gantt:
 
-            def _gantt_path(step_idx: int) -> Path | None:
+            def _gantt_path(step_idx: int, phase: str) -> Path | None:
                 p = self.try_get_file_path_for_subroutine(
-                    f"step_{step_idx:03d}_partition.svg"
+                    f"step_{step_idx:03d}_partition_{phase}.svg"
                 )
                 if p is not None:
                     p.parent.mkdir(parents=True, exist_ok=True)

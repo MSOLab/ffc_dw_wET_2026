@@ -84,10 +84,11 @@ class SwCpOption(AlgOption):
     ``None`` (default) renders every step; set to a small int (e.g. 3)
     to get representative snapshots without bloating artifact storage."""
 
-    debug_partition_gantt_path_getter: Callable[[int], Path | None] | None = None
-    """Callable ``(step_idx: int) -> Path | None`` that supplies the
-    output path for the step's SVG.  Return ``None`` to skip writing
-    (e.g. when the controller has no artifact layout bound)."""
+    debug_partition_gantt_path_getter: Callable[[int, str], Path | None] | None = None
+    """Callable ``(step_idx: int, phase: str) -> Path | None`` that supplies the
+    output path for the step's SVG.  ``phase`` is ``"1_before_cp"`` or
+    ``"2_after_cp"``.  Return ``None`` to skip writing (e.g. when the
+    controller has no artifact layout bound)."""
 
     def __post_init__(self) -> None:
         if self.batch_size < 1:
