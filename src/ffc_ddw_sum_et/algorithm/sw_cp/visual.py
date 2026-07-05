@@ -18,7 +18,7 @@ matplotlib.rcParams["svg.fonttype"] = "none"  # Use <text> not font paths
 import matplotlib.patches as mpatches  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
-from ...solution.ffc_schedule import FFcSchedule, StageIdType  # noqa: E402
+from ...solution.ffc_schedule import FFcSchedule, JobIdType, StageIdType  # noqa: E402
 from .partition import OperationPartition  # noqa: E402
 
 __all__ = ["REGION_COLORS", "render_partition_gantt_svg"]
@@ -35,6 +35,14 @@ ambers for profile-fixed, green for the unfixed window."""
 
 _REGION_ORDER = ("LTF", "LPF", "UNFIXED", "RPF", "RTF")
 
+_REGION_ATTRS: dict[str, str] = {
+    "LTF": "left_time_fixed",
+    "LPF": "left_profile_fixed",
+    "UNFIXED": "unfixed",
+    "RPF": "right_profile_fixed",
+    "RTF": "right_time_fixed",
+}
+
 
 def render_partition_gantt_svg(
     schedule: FFcSchedule,
@@ -47,6 +55,7 @@ def render_partition_gantt_svg(
     unfixed_start: int,
     unfixed_batch_count: int,
     phase_label: str | None = None,
+    ref_schedule: FFcSchedule | None = None,
 ) -> str:
     """Render one sw_cp step's five-region partition as an SVG string.
 
@@ -73,6 +82,13 @@ def render_partition_gantt_svg(
         Number of batches in the unfixed window.
     phase_label : str | None
         Optional "before CP"/"after CP" label appended to the plot title.
+    ref_schedule : FFcSchedule | None
+        Optional reference schedule used to compute the per-machine
+        left/right boundary lines (the LTF/RTF positions). When ``None``
+        (default), ``schedule`` itself is used. Pass the same
+        ``rj_schedule`` here across the before/after renders to keep the
+        boundary lines pinned to the reference frame so the displacement
+        of RTF ops is visually comparable across phases.
 
     Returns
     -------
@@ -90,53 +106,78 @@ def render_partition_gantt_svg(
     if n_lanes == 0:
         return "<svg xmlns='http://www.w3.org/2000/svg'/>"
 
-    # ── 2. per-machine boundaries + ops ─────────────────────────────
-    start_map = schedule.get_jik_2_start_time_map()
-    end_map = schedule.get_jik_2_end_time_map()
+    # Reference schedule supplies the boundary positions; the rendered
+    # schedule supplies the actual op bars (which may live on a different
+    # machine lane than the incumbent ``k`` recorded in the partition —
+    # CP-SAT is free to reassign non-time-fixed ops across machines).
+    ref = ref_schedule if ref_schedule is not None else schedule
+    ref_start_map = ref.get_jik_2_start_time_map()
+    ref_end_map = ref.get_jik_2_end_time_map()
+    src_start_map = schedule.get_jik_2_start_time_map()
+    src_end_map = schedule.get_jik_2_end_time_map()
 
+    # Per-stage ``job -> region_name`` index (a job occupies exactly one
+    # region per stage; machine ``k`` in the partition tuple is the
+    # incumbent machine, not necessarily the one CP assigns now).
+    stage_2_job_2_region: dict[StageIdType, dict[JobIdType, str]] = {}
+    for s_id, part in stage_2_partition.items():
+        j2r: dict[JobIdType, str] = {}
+        for rname in _REGION_ORDER:
+            for job, _k in getattr(part, _REGION_ATTRS[rname]):
+                if job in j2r and j2r[job] != rname:
+                    raise AssertionError(
+                        f"partition invariant violated: job {job!r} in "
+                        f"multiple regions on stage {s_id!r} "
+                        f"({j2r[job]} and {rname})"
+                    )
+                j2r[job] = rname
+        stage_2_job_2_region[s_id] = j2r
+
+    lane_set: set[tuple[str, str]] = set(lanes)
+
+    # ── 2. per-machine boundaries (from ref) + ops (from schedule) ───
     lane_boundaries: dict[tuple[str, str], tuple[int, int]] = {}
-    lane_ops: dict[tuple[str, str], list[tuple[str, int, int, str]]] = {}
+    lane_ops: dict[tuple[str, str], list[tuple[str, int, int, str]]] = {
+        lane: [] for lane in lanes
+    }
 
     for s_id, mc in lanes:
         partition = stage_2_partition.get(s_id)
         ltf_ends: list[int] = []
         rtf_starts: list[int] = []
-        ops_on_mc: list[tuple[str, int, int, str]] = []
 
         if partition is not None:
             for job, k in partition.left_time_fixed:
                 if k == mc:
-                    e = end_map.get((job, s_id, k))
+                    e = ref_end_map.get((job, s_id, k))
                     if e is not None:
                         ltf_ends.append(e)
             for job, k in partition.right_time_fixed:
                 if k == mc:
-                    s = start_map.get((job, s_id, k))
+                    s = ref_start_map.get((job, s_id, k))
                     if s is not None:
                         rtf_starts.append(s)
-
-            for rname in _REGION_ORDER:
-                region_ops = getattr(
-                    partition,
-                    {
-                        "LTF": "left_time_fixed",
-                        "LPF": "left_profile_fixed",
-                        "UNFIXED": "unfixed",
-                        "RPF": "right_profile_fixed",
-                        "RTF": "right_time_fixed",
-                    }[rname],
-                )
-                for job, k in region_ops:
-                    if k == mc:
-                        s = start_map.get((job, s_id, k))
-                        e = end_map.get((job, s_id, k))
-                        if s is not None and e is not None:
-                            ops_on_mc.append((job, s, e, rname))
 
         left_b = max(ltf_ends) if ltf_ends else 0
         right_b = min(rtf_starts) if rtf_starts else horizon
         lane_boundaries[(s_id, mc)] = (left_b, right_b)
-        lane_ops[(s_id, mc)] = ops_on_mc
+
+    # Op bars: iterate the schedule's actual operations and place each on
+    # its actual machine lane, coloured by the partition region of
+    # ``(job, stage)``. This avoids the previous incumbent-``k`` lookup
+    # which dropped bars when CP reassigned an op to another machine.
+    for (job, s_id, mc), s in src_start_map.items():
+        if (s_id, mc) not in lane_set:
+            continue
+        if s_id not in stage_2_partition:
+            continue
+        rname = stage_2_job_2_region.get(s_id, {}).get(job)
+        if rname is None:
+            continue
+        e = src_end_map.get((job, s_id, mc))
+        if e is None or e <= s:
+            continue
+        lane_ops[(s_id, mc)].append((job, s, e, rname))
 
     # ── 3. draw ─────────────────────────────────────────────────────
     machine_height = 1.0

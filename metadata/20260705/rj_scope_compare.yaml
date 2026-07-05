@@ -1,0 +1,54 @@
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/small
+output_dir: output/20260705
+instance_worker_cnt: 1
+draw_gantt: false
+scenarios:
+  - name: rj_all_ops
+    timelimit: 300.0
+    output_subdir: rj_all_ops
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "all_ops"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 60.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: true
+        debug_partition_gantt: true
+        debug_partition_gantt_max_steps: 3
+  - name: rj_rtf_only
+    timelimit: 300.0
+    output_subdir: rj_rtf_only
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 1
+        batch_size: "m"
+        step_size: 2
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 60.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: true
+        debug_partition_gantt: true
+        debug_partition_gantt_max_steps: 3

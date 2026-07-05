@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from ..base.alg_option import AlgOption
 from ..cumulative import PFMethod
@@ -86,9 +87,25 @@ class SwCpOption(AlgOption):
 
     debug_partition_gantt_path_getter: Callable[[int, str], Path | None] | None = None
     """Callable ``(step_idx: int, phase: str) -> Path | None`` that supplies the
-    output path for the step's SVG.  ``phase`` is ``"1_before_cp"`` or
-    ``"2_after_cp"``.  Return ``None`` to skip writing (e.g. when the
-    controller has no artifact layout bound)."""
+    output path for the step's SVG.  ``phase`` is one of ``"1_before_cp"``,
+    ``"2_after_cp"`` (raw CP solution, before semi-active + idle-time
+    post-processing), or ``"3_after_sm_iti"``.  Return ``None`` to skip
+    writing (e.g. when the controller has no artifact layout bound)."""
+
+    rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only"
+    """Reference schedule (``rj_schedule``) build scope for right-justify.
+
+    ``"rtf_only"`` (default): only the RTF (right-time-fixed) operations are
+    right-justified via
+    :meth:`FFcSchedule.delay_operations_latest_leq_obj_contrib`; every other
+    operation keeps its incumbent position (treated as a fixed obstacle).
+    This preserves the current dispatcher behavior when the field is unset.
+
+    ``"all_ops"``: every operation across all stages is right-justified via
+    :meth:`FFcSchedule.delay_job_latest_leq_obj_contrib_all_stages`. This is
+    the legacy "pre-fix" behavior (commit ``bbaf408``). Objective is still
+    non-increasing.
+    """
 
     def __post_init__(self) -> None:
         if self.batch_size < 1:
@@ -114,4 +131,9 @@ class SwCpOption(AlgOption):
                 "horizon_makespan_multiplier must be >= 1.0 "
                 "(values < 1 would clip the incumbent itself), got "
                 f"{self.horizon_makespan_multiplier}"
+            )
+        if self.rj_right_justify_scope not in {"rtf_only", "all_ops"}:
+            raise ValueError(
+                "rj_right_justify_scope must be one of "
+                f"{{'rtf_only','all_ops'}}, got {self.rj_right_justify_scope!r}"
             )

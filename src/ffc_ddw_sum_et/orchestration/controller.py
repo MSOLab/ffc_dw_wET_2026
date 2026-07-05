@@ -2287,6 +2287,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         debug_partition_gantt_max_steps: int | None = None,
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
+        rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
     ) -> SubroutineReport:
         """Step method: refine the incumbent via :class:`SwCpDispatcher`.
 
@@ -2380,6 +2381,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             debug_partition_gantt_max_steps=debug_partition_gantt_max_steps,
             debug_partition_gantt_path_getter=debug_partition_gantt_path_getter,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
+            rj_right_justify_scope=rj_right_justify_scope,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2453,6 +2455,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         log_search_progress_max_steps: int | None = None,
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
+        rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
     ) -> None:
         """Composite step: iterate :meth:`sw_cp` over a range of
         ``unfixed_batch_count`` values.
@@ -2534,6 +2537,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             log_search_progress_max_steps=log_search_progress_max_steps,
             draw_gantt=draw_gantt,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
+            rj_right_justify_scope=rj_right_justify_scope,
         )
 
         self.logger.info(

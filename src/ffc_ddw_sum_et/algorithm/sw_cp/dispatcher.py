@@ -50,11 +50,14 @@ def _write_partition_gantt(
     phase: str,
     phase_label: str,
     logger: logging.Logger,
+    ref_schedule: FFcSchedule | None = None,
 ) -> None:
     """Render one sw_cp step's partition gantt and write it via ``getter``.
 
     Shared by the before-CP (``rj_schedule``) and after-CP (``cand``) call
-    sites so the render/write/log sequence isn't duplicated.
+    sites so the render/write/log sequence isn't duplicated. ``ref_schedule``
+    (typically the ``rj_schedule``) pins the per-machine boundary lines
+    across phases; pass ``None`` to derive boundaries from ``schedule``.
     """
     svg = render_partition_gantt_svg(
         schedule,
@@ -66,6 +69,7 @@ def _write_partition_gantt(
         unfixed_start=unfixed_start,
         unfixed_batch_count=unfixed_batch_count,
         phase_label=phase_label,
+        ref_schedule=ref_schedule,
     )
     svg_path = getter(step, phase)
     if svg_path is not None:
@@ -192,15 +196,20 @@ class SwCpDispatcher:
                 logger.debug("sw_cp step %d: empty non-time-fixed set; skipping.", step)
                 continue
 
-            rtf_ops = {
-                (j, i, k)
-                for i, part in stage_2_partition.items()
-                for j, k in part.right_time_fixed
-            }
             rj_schedule = incumbent.deepcopy()
-            rj_schedule.delay_operations_latest_leq_obj_contrib(
-                rtf_ops, instance.job_2_dw_ub_map
-            )
+            if option.rj_right_justify_scope == "all_ops":
+                rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(
+                    instance.job_2_dw_ub_map
+                )
+            else:  # "rtf_only" — preserve the default dispatcher behavior.
+                rtf_ops = {
+                    (j, i, k)
+                    for i, part in stage_2_partition.items()
+                    for j, k in part.right_time_fixed
+                }
+                rj_schedule.delay_operations_latest_leq_obj_contrib(
+                    rtf_ops, instance.job_2_dw_ub_map
+                )
 
             rj_obj = self._full_obj(rj_schedule, instance)
             inc_obj = self._full_obj(incumbent, instance)
@@ -235,6 +244,7 @@ class SwCpDispatcher:
                     "1_before_cp",
                     "before CP",
                     logger,
+                    ref_schedule=rj_schedule,
                 )
 
             sub_instance = FFcDDWParameters.create_instance_of_job_subset(
@@ -301,6 +311,7 @@ class SwCpDispatcher:
                     )
 
             cand: FFcSchedule | None = None
+            cand_raw: FFcSchedule | None = None
             cand_obj: float | None = None
             cp_divergence_count = 0
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -311,6 +322,11 @@ class SwCpDispatcher:
                     build_result.op_vars,
                     solver,
                 )
+                if debug_gantt:
+                    # Snapshot the raw CP solution *before* make_semi_active /
+                    # insert_idle_time so the after-CP phase can be inspected
+                    # independently of the post-processing pass.
+                    cand_raw = cand.deepcopy()
                 cand.make_semi_active(instance.stage_2_job_2_p_map)
                 cand.insert_idle_time(
                     instance.job_2_due_window_map,
@@ -330,6 +346,21 @@ class SwCpDispatcher:
 
             if debug_gantt and cand is not None:
                 assert option.debug_partition_gantt_path_getter is not None
+                if cand_raw is not None:
+                    _write_partition_gantt(
+                        option.debug_partition_gantt_path_getter,
+                        cand_raw,
+                        stage_2_partition,
+                        instance,
+                        horizon,
+                        step,
+                        unfixed_start,
+                        option.unfixed_batch_count,
+                        "2_after_cp",
+                        "after CP (raw)",
+                        logger,
+                        ref_schedule=rj_schedule,
+                    )
                 _write_partition_gantt(
                     option.debug_partition_gantt_path_getter,
                     cand,
@@ -339,9 +370,10 @@ class SwCpDispatcher:
                     step,
                     unfixed_start,
                     option.unfixed_batch_count,
-                    "2_after_cp",
-                    "after CP",
+                    "3_after_sm_iti",
+                    "after CP + semi-active/idle",
                     logger,
+                    ref_schedule=rj_schedule,
                 )
 
             incumbent_obj_before = self._full_obj(incumbent, instance)
