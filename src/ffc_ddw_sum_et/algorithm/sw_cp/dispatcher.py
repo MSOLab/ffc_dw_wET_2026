@@ -196,6 +196,13 @@ class SwCpDispatcher:
                 logger.debug("sw_cp step %d: empty non-time-fixed set; skipping.", step)
                 continue
 
+            # non_time_fixed op count: computed once here (before solve) so the
+            # "proportional" TL (kappa * ntf) can be applied, and reused for the
+            # post-solve logging below (DRY — the partition is fixed for this step).
+            non_time_fixed_op_count = sum(
+                len(p.non_time_fixed) for p in stage_2_partition.values()
+            )
+
             rj_schedule = incumbent.deepcopy()
             if option.rj_right_justify_scope == "all_ops":
                 rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(
@@ -260,10 +267,17 @@ class SwCpDispatcher:
             )
 
             solver = cp_model.CpSolver()
+            # proportional mode: per-CP TL = kappa * ntf (kappa = option field).
+            # other modes use ``per_step_tl`` by the resolver.
+            step_tl = (
+                option.non_time_fixed_op_time_limit_multiplier * non_time_fixed_op_count
+                if option.batch_tl_mode == "proportional"
+                else (per_step_tl[step] if per_step_tl is not None else None)
+            )
             applied_tl_seconds = self._apply_tl_and_deadline(
                 solver,
                 option,
-                per_step_tl[step] if per_step_tl is not None else None,
+                step_tl,
                 start_elapsed,
                 step,
                 len(iteration_idxs),
@@ -407,9 +421,7 @@ class SwCpDispatcher:
                 len(p.left_profile_fixed) + len(p.right_profile_fixed)
                 for p in stage_2_partition.values()
             )
-            non_time_fixed_op_count = sum(
-                len(p.non_time_fixed) for p in stage_2_partition.values()
-            )
+            # non_time_fixed_op_count reuses the value computed before solve.
             assert (
                 unfixed_op_count + profile_fixed_op_count == non_time_fixed_op_count
             ), (

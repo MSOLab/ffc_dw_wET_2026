@@ -42,6 +42,10 @@ class SwCpOption(AlgOption):
     total_timelimit_seconds: float | None = None
     batch_tl_mode: BatchTlMode = "constant"
     batch_tl_offset_seconds: float = 0.01
+    non_time_fixed_op_time_limit_multiplier: float | None = None
+    """kappa for ``"proportional"`` mode (seconds/operation count).
+    per-CP TL = kappa * non_time_fixed_op_count.
+    required if ``batch_tl_mode == "proportional"``."""
     apply_cumulative_tl: bool = False
     wall_clock_deadline_sec: float | None = None
     """Optional ``time.monotonic()`` deadline used to clamp each batch's
@@ -136,4 +140,20 @@ class SwCpOption(AlgOption):
             raise ValueError(
                 "rj_right_justify_scope must be one of "
                 f"{{'rtf_only','all_ops'}}, got {self.rj_right_justify_scope!r}"
+            )
+        if (
+            self.non_time_fixed_op_time_limit_multiplier is not None
+            and self.non_time_fixed_op_time_limit_multiplier <= 0
+        ):
+            raise ValueError(
+                "non_time_fixed_op_time_limit_multiplier must be > 0, got "
+                f"{self.non_time_fixed_op_time_limit_multiplier}"
+            )
+        if (
+            self.batch_tl_mode == "proportional"
+            and self.non_time_fixed_op_time_limit_multiplier is None
+        ):
+            raise ValueError(
+                "batch_tl_mode='proportional' requires "
+                "non_time_fixed_op_time_limit_multiplier (kappa) to be set."
             )
