@@ -52,3 +52,38 @@ def test_validation_left_profile_nonneg() -> None:
 def test_validation_batch_size_min() -> None:
     with pytest.raises(ValueError, match="batch_size must be >= 1"):
         SwCpOption(batch_size=0)
+
+
+def test_default_kappa_is_none() -> None:
+    opt = SwCpOption()
+    assert opt.non_time_fixed_op_time_limit_multiplier is None
+
+
+def test_validation_kappa_must_be_positive() -> None:
+    with pytest.raises(
+        ValueError, match="non_time_fixed_op_time_limit_multiplier must be > 0"
+    ):
+        SwCpOption(non_time_fixed_op_time_limit_multiplier=0.0)
+
+
+def test_validation_proportional_requires_kappa() -> None:
+    with pytest.raises(ValueError, match="batch_tl_mode='proportional' requires"):
+        SwCpOption(batch_tl_mode="proportional")
+
+
+def test_proportional_with_kappa_is_valid() -> None:
+    opt = SwCpOption(
+        batch_tl_mode="proportional",
+        non_time_fixed_op_time_limit_multiplier=0.5,
+    )
+    assert opt.batch_tl_mode == "proportional"
+    assert opt.non_time_fixed_op_time_limit_multiplier == 0.5
+
+
+def test_kappa_allowed_with_non_proportional_mode() -> None:
+    opt = SwCpOption(
+        batch_tl_mode="constant",
+        non_time_fixed_op_time_limit_multiplier=0.5,
+    )
+    assert opt.batch_tl_mode == "constant"
+    assert opt.non_time_fixed_op_time_limit_multiplier == 0.5

@@ -11,6 +11,7 @@ from ffc_ddw_sum_et.algorithm.base.alg_record import (
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.neh_cp import NehCpDispatcher, NehCpOption
 from ffc_ddw_sum_et.algorithm.sw_cp import SwCpDispatcher, SwCpOption, SwCpStepEntry
+from ffc_ddw_sum_et.algorithm.utils import trunc4
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
@@ -162,6 +163,41 @@ def test_dispatcher_progress_log_carries_obj_bound() -> None:
     step_log = metrics.get("step_log")
     assert step_log is not None
     for entry in step_log:
+        assert (
+            entry.unfixed_op_count + entry.profile_fixed_op_count
+            == entry.non_time_fixed_op_count
+        )
+
+
+def test_dispatcher_proportional_tl_equals_kappa_times_ntf() -> None:
+    """batch_tl_mode='proportional': each step's applied TL must equal
+    kappa * non_time_fixed_op_count (truncated to 4 dp), and the ntf
+    invariant (unfixed + profile_fixed == ntf) must still hold."""
+    kappa = 0.5
+    instance = _make_instance()
+    seed, _ = _seed_incumbent(instance)
+
+    spec = AlgSpec(
+        instance=instance,
+        option=SwCpOption(
+            batch_tl_mode="proportional",
+            non_time_fixed_op_time_limit_multiplier=kappa,
+            unfixed_batch_count=2,
+        ),
+        ref_solution=seed,
+    )
+    record = SwCpDispatcher().run(spec)
+
+    assert record.work_status == WorkStatus.FEASIBLE
+    assert record.result is not None
+    metrics = record.result.metrics
+    assert metrics is not None
+    step_log = metrics.get("step_log")
+    assert step_log
+    for entry in step_log:
+        assert isinstance(entry, SwCpStepEntry)
+        expected_tl = trunc4(kappa * entry.non_time_fixed_op_count)
+        assert entry.TL == expected_tl
         assert (
             entry.unfixed_op_count + entry.profile_fixed_op_count
             == entry.non_time_fixed_op_count
