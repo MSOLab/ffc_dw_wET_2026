@@ -55,11 +55,29 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         help="One or more run directories; windows from all are pooled.",
     )
+    parser.add_argument(
+        "--scenario",
+        default=None,
+        help=(
+            "If set, pool only windows from this scenario (e.g. 'u2_pf2'). "
+            "A run dir may physically contain several scenarios "
+            "(u2_pf2/u4_pf2, incl. stale/partial ones); without this filter "
+            "collect_rows pools ALL of them, which silently contaminates a "
+            "scenario-specific table. Default: pool every scenario found."
+        ),
+    )
     args = parser.parse_args(argv)
 
-    rows = [r for r in collect_rows(args.run_dirs) if r["I"] and r["I"] > 0]
+    all_rows = collect_rows(args.run_dirs)
+    found_scenarios = sorted({r["scenario"] for r in all_rows})
+    if args.scenario is not None:
+        all_rows = [r for r in all_rows if r["scenario"] == args.scenario]
+    rows = [r for r in all_rows if r["I"] and r["I"] > 0]
     if not rows:
-        print("no I>0 windows found")
+        print(
+            f"no I>0 windows found (scenario filter={args.scenario!r}; "
+            f"scenarios present in run dirs: {found_scenarios})"
+        )
         return 1
 
     ntf = np.array([r["non_time_fixed_op_count"] for r in rows], dtype=float)
@@ -82,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
 
     ntf_med = float(np.median(ntf))
     print(f"runs: {', '.join(args.run_dirs)}")
+    n_inst = len({(r["scenario"], r["instance"]) for r in rows})
+    print(
+        f"scenario filter: {args.scenario!r}   "
+        f"scenarios present: {found_scenarios}   pooled instances: {n_inst}"
+    )
     print(
         f"I>0 windows: {len(rows)}   non_time_fixed: "
         f"min={ntf.min():.0f} median={ntf_med:.0f} max={ntf.max():.0f}"

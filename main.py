@@ -23,7 +23,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260702/csr_idle_modes_v4_config.yaml")
+CONFIG_PATH = Path("metadata/20260707/sw_cp_tl_profile_t8_rescued12.yaml")
 
 
 def _parse_args() -> argparse.Namespace:

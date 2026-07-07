@@ -205,6 +205,72 @@ re-litigated.
 
 ---
 
+### 3.3 Full-grid k-for-capture table (n=50–200, thread=8, u2_pf2) — 2026-07-07
+
+Full-grid confirmation of the §3.1/§3.2 direction, on the **8-thread** runs
+(§3.2 obs 4 decision). Scenario **u2_pf2 only** (u4_pf2 deferred — the bigN
+u4_pf2 was abandoned partial and is out of scope). Pool of **270 instances**
+under the NEW representative policy: per `(n,c,m,T,R,W)` cell scan `rep0..rep4`,
+take the first non-optimal rep, drop a cell only if all 5 reps are optimal
+(258 rep0 + 12 rescued non-rep0; 18 cells stay dropped, all at `T=0.2,R=1.0`).
+Runs pooled = 68 (n=50 rep0) + 190 (n≥100 rep0) + 12 (rescued). Method:
+`k_for_capture.py --scenario u2_pf2` over the three run dirs (offline replay,
+`I>0` windows). Artifacts: `…_t8/20260706T015554_738214/analysis/`
+(`k_for_capture_270_u2_report.md`, `…_u2_pooled.csv`, `…_cohort_*.csv`,
+`…_by_TR.csv`). `k` is in **s/op** (`TL = k·non_time_fixed_op_count`) — the
+size-normalised primary number; `TL@med = k·median_ntf` is a seconds illustration
+vs the fixed 120 s cap.
+
+**Pooled table — 270 u2_pf2 (7627 I>0 windows, median_ntf=150):**
+
+| p% | A k | B2 k | B1 medk | B1 P75k | B1 P90k | B2 TL@med |
+|---:|---:|---:|---:|---:|---:|---:|
+| 50 | 0.002 | 0.002 | 0.002 | 0.024 | 0.319 | 0.3 s |
+| 80 | 0.225 | 0.080 | 0.016 | 0.400 | 0.800 | 12 s |
+| 90 | 0.479 | 0.400 | 0.033 | 0.400 | 0.800 | 60 s |
+| 95 | 0.800 | 0.800 | 0.051 | 0.405 | 0.800 | 120 s |
+| 99 | 1.333 | 1.333 | 0.076 | 0.552 | 0.800 | 200 s |
+
+**`k` is roughly size-invariant (supports size-proportional `TL = k·ntf`).**
+Operational B2 `k` barely drifts from n=50 to n≥100:
+
+| p% | B2 k n=50 (68) | B2 k n≥100 (190) | n≥100 − n=50 |
+|---:|---:|---:|---:|
+| 80 | 0.044 | 0.091 | +0.047 |
+| 90 | 0.470 | 0.400 | −0.070 |
+
+(median_ntf n=50=150, n≥100=180; `k` is s/op so it is directly comparable.) The
+rescued-12 cohort (median_ntf=90, 208 windows) is too small for a standalone `k`
+read — it sits inside the pooled distribution and moved the pooled median_ntf/k
+negligibly (sanity only).
+
+**But budget-need tracks difficulty (T), not size — `(T,R)` breakdown.**
+B2 `k` and the `reached_cap` fraction both rise monotonically with **T**
+(tardiness tightness); **R** is a weak secondary axis. This directly confirms
+§3.2 obs 3 on the full grid.
+
+| T \ R | B2 k@80 (0.2 / 0.6 / 1.0) | reached_cap (0.2 / 0.6 / 1.0) |
+|---:|---|---|
+| 0.2 | 0.031 / 0.006 / 0.011 | 0.33 / 0.18 / 0.12 |
+| 0.4 | 0.115 / 0.057 / 0.152 | 0.42 / 0.38 / 0.32 |
+| 0.6 | 0.195 / 0.143 / 0.220 | 0.50 / 0.52 / 0.57 |
+
+From T=0.2 to T=0.6 the required B2 `k@80` grows ~10–20×. The easy corner
+`(T=0.2, R=1.0)` is thin by construction — 14 instances (vs 32 elsewhere), 166
+I>0 windows (vs ~900), `reached_cap`=0.12 — because 18 of its cells are all-rep
+optimal and dropped. So a single global `k` over-budgets easy (low-T) windows and
+under-budgets hard (high-T) ones; a difficulty-aware (T-aware) `k` would fit
+better than a pure size-proportional one — echoing §3.1 obs 1 / §3.2 obs 3.
+
+**Operational takeaway (B2, trustworthy p ≤ 90):** ~80% of the achievable UB
+improvement is captured at **B2 k=0.080 s/op** (≈12 s at a median window) and 90%
+at **k=0.400 s/op** (≈60 s) — both well under the current fixed **120 s** cap.
+p ≥ 95 implies TL@med ≥ 120 s (beyond the cap, "cannot reduce"): not a
+trustworthy TL-reduction target. Real proof still requires the end-to-end A/B
+(§8 item 5) — these are offline-replay, directional.
+
+---
+
 ## 4. Instrumentation — what changed (final form)
 
 Design principle (from user feedback): **do not invent a bespoke artifact**;

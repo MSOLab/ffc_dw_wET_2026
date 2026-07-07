@@ -1,0 +1,63 @@
+# SW-CP time-limit profiling — RESCUED-12 top-up run (u2_pf2 only).
+#
+# Purpose: complete the u2_pf2 profiling set for the NEW representative policy.
+# The old policy took rep0 per (n,c,m,T,R,W) cell and dropped cells whose rep0
+# was optimal (ub==lb) -> 258 instances. The new policy instead scans rep0..rep4
+# and takes the FIRST non-optimal rep, dropping a cell only if ALL 5 reps are
+# optimal -> 270 instances (258 + 12 "rescued" cells whose rep0 was optimal but
+# a later rep is non-optimal; 18 cells remain all-optimal at T=0.2,R=1.0).
+#
+# The existing thread=8 u2_pf2 profiling already covers the 258 rep0 instances
+# (n=50: output/20260705_sw_cp_tl_profile_t8/20260706T015554_738214/u2_pf2;
+#  n>=100: output/20260705_sw_cp_tl_profile_t8_bigN/20260707T022259_167411/u2_pf2).
+# This run adds ONLY the 12 rescued (non-rep0) instances so the full 270-instance
+# u2_pf2 set can be pooled for the k-for-capture report.
+#
+# The u4_pf2 computation is DEFERRED (stopped by the user); this run does NOT
+# include u4_pf2.
+#
+# Settings MUST match the existing u2_pf2 profiling exactly for the pooled table
+# to stay consistent: solver_thread_cnt=8, instance_worker_cnt=12 (12*8 = 96
+# PHYSICAL cores; do NOT raise to 192 logical/hyperthreaded), cp_tl=120,
+# step_size=1, unfixed=2, pfixed=2/2, PF1, batch_size=m, rj rtf_only.
+#
+# The 12 rescued instances (insIndex -> instance), by n {50:3, 100:3, 150:4, 200:2}:
+#     23 Instance_50_5_3_0,2_1_10_Rep3      112 Instance_50_5_5_0,2_1_10_Rep2
+#    206 Instance_50_10_3_0,2_1_20_Rep1     416 Instance_100_5_3_0,4_1_20_Rep1
+#    648 Instance_100_10_5_0,2_0,6_20_Rep3  656 Instance_100_10_5_0,2_1_20_Rep1
+#    743 Instance_150_5_3_0,2_1_10_Rep3     776 Instance_150_5_3_0,4_1_20_Rep1
+#    832 Instance_150_5_5_0,2_1_10_Rep2    1014 Instance_150_10_5_0,2_1_10_Rep4
+#   1137 Instance_200_5_3_0,4_1_20_Rep2    1371 Instance_200_10_5_0,2_1_10_Rep1
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# 12 rescued (non-rep0) representative instances under the new policy.
+ins_index: [23, 112, 206, 416, 648, 656, 743, 776, 832, 1014, 1137, 1371]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+output_dir: output/20260707_sw_cp_tl_profile_t8_rescued12
+instance_worker_cnt: 12
+draw_gantt: false
+scenarios:
+  - name: u2_pf2
+    timelimit: 100000.0
+    output_subdir: u2_pf2
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 8
+        batch_size: "m"
+        step_size: 1
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 120.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false
