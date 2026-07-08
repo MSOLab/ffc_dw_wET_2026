@@ -8,8 +8,9 @@ start/end times back to the original scale:
     reconstructed_start[j,i] = coarse_start[j,i] * factor
     reconstructed_end[j,i]   = reconstructed_start[j,i] + original_p[j,i]
 
-The dispatch seed strategy is selected via ``seed_dispatch`` (``"job_wise"``
-or ``"mixed"``). Post-processing (``make_semi_active`` → ``insert_idle_time``)
+The dispatch seed strategy is selected via ``seed_dispatch`` (``"job_wise"``,
+``"mixed"``, ``"v3"``, or ``"v4"``). Post-processing (``make_semi_active`` →
+``insert_idle_time``)
 and objective evaluation (``compute_weighted_earliness_tardiness``) are done
 against the **original** instance, so metrics reflect the original problem scale.
 
@@ -98,6 +99,19 @@ class CoarsenSolveReconstructOption(AlgOption):
     always uses standard flooring (see ``schedule_build.reconstruct_coarse_schedule``).
     """
 
+    def __post_init__(self) -> None:
+        valid_dispatch = {"job_wise", "mixed", "v3", "v4"}
+        if self.seed_dispatch not in valid_dispatch:
+            raise ValueError(
+                f"seed_dispatch must be one of {valid_dispatch}, "
+                f"got {self.seed_dispatch!r}"
+            )
+        valid_idle = {"flooring", "ceiling", "lookahead"}
+        if self.idle_mode not in valid_idle:
+            raise ValueError(
+                f"idle_mode must be one of {valid_idle}, got {self.idle_mode!r}"
+            )
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CoarsenSolveReconstructTrace:
@@ -153,6 +167,8 @@ def _build_dispatch_seed_schedule(
     grid (see ``FFcSchedule.insert_idle_time``); default ``"flooring"``
     preserves prior behaviour.
     """
+    if strategy not in {"job_wise", "mixed", "v3", "v4"}:
+        raise ValueError(f"Unknown seed_dispatch strategy: {strategy!r}")
     if strategy == "v3":
         seed, _obj, _label = build_v3_paired_dispatch_schedule(
             coarsened, factor=factor, idle_mode=idle_mode

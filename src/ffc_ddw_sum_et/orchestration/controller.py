@@ -2650,9 +2650,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         ``seed_dispatch`` selects the dispatch seed strategy for warm-start
         hints before solving: ``"job_wise"`` (single job-wise dispatch),
-        ``"mixed"`` (best among mixed-dispatch np-list candidates), or
+        ``"mixed"`` (best among mixed-dispatch np-list candidates),
         ``"v3"`` (v3 paired-dispatch pool: priority×{sd,rd} min-wET on
-        coarsened scale). Default is ``"mixed"``.
+        coarsened scale), or ``"v4"`` (v4 paired-dispatch with expanded
+        priority set). Default is ``"mixed"``.
 
         ``solve``: when ``False``, skip the CP-SAT solve and use the dispatch
         seed directly as the coarse schedule (seed-only deterministic mode).
