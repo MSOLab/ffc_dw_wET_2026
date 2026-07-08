@@ -37,6 +37,8 @@ from .visual import render_partition_gantt_svg
 
 __all__ = ["SwCpDispatcher"]
 
+_FP_TOLERANCE: float = 1e-6
+
 
 def _write_partition_gantt(
     getter: Callable[[int, str], Path | None],
@@ -220,8 +222,10 @@ class SwCpDispatcher:
 
             rj_obj = self._full_obj(rj_schedule, instance)
             inc_obj = self._full_obj(incumbent, instance)
-            assert rj_obj <= inc_obj + 1e-6, f"rj obj {rj_obj} > incumbent {inc_obj}"
-            if rj_obj < inc_obj - 1e-6:
+            assert rj_obj <= inc_obj + _FP_TOLERANCE, (
+                f"rj obj {rj_obj} > incumbent {inc_obj}"
+            )
+            if rj_obj < inc_obj - _FP_TOLERANCE:
                 logger.warning(
                     "sw_cp: rj obj %.1f < incumbent obj %.1f "
                     "(insert_idle_time left E/T on the table)",

@@ -13,7 +13,7 @@ Imported by both ``orchestration.controller`` (refactored thin wrappers) and
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import Literal, Sequence
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.sorter import (
@@ -40,7 +40,7 @@ def dispatch_forward_with_iit(
     logger: logging.Logger | None = None,
     *,
     time_factor: int = 1,
-    idle_mode: str = "flooring",
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float]:
     """sd pipeline: forward job-centric decode + semi-active + IIT + wET."""
     log = logger or logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def dispatch_reversed_with_iit(
     logger: logging.Logger | None = None,
     *,
     time_factor: int = 1,
-    idle_mode: str = "flooring",
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float]:
     """rd pipeline: stage-reverse + reversed mixed(makespan) + unflip + IIT + wET."""
     log = logger or logging.getLogger(__name__)
@@ -165,7 +165,7 @@ def build_v3_paired_dispatch_schedule(
     logger: logging.Logger | None = None,
     *,
     factor: int = 1,
-    idle_mode: str = "flooring",
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float, str]:
     """v3 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
 
@@ -206,7 +206,7 @@ def build_v4_paired_dispatch_schedule(
     logger: logging.Logger | None = None,
     *,
     factor: int = 1,
-    idle_mode: str = "flooring",
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float, str]:
     """v4 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
 

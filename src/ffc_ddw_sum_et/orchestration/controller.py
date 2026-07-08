@@ -14,6 +14,7 @@ from routix.report import SubroutineReport
 from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+    DEFAULT_COARSEN_FACTOR,
     CoarsenSolveReconstructOption,
     run_coarsen_solve_reconstruct,
 )
@@ -2618,14 +2619,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
     def coarsen_solve_reconstruct(
         self,
-        factor: int = 50,
+        factor: int = DEFAULT_COARSEN_FACTOR,
         timelimit: float | str | None = None,
         solver_thread_cnt: int = 1,
         log_search_progress: bool = False,
         error_if_infeasible: bool = False,
         seed_dispatch: str = "mixed",
         solve: bool = True,
-        idle_mode: str = "flooring",
+        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
         draw_cp_trajectory: bool = False,

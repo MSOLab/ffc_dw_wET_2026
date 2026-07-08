@@ -66,6 +66,8 @@ __all__ = [
     "run_coarsen_solve_reconstruct",
 ]
 
+DEFAULT_COARSEN_FACTOR: int = 50
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CoarsenSolveReconstructOption(AlgOption):
@@ -80,7 +82,7 @@ class CoarsenSolveReconstructOption(AlgOption):
     due-window bounds via ``ceil(value / factor)``.
     """
 
-    factor: int = 50
+    factor: int = DEFAULT_COARSEN_FACTOR
     timelimit_sec: float | None = None
     solver_thread_cnt: int = 1
     log_search_progress: bool = False
@@ -150,7 +152,7 @@ def _build_dispatch_seed_schedule(
     coarsened: FFcDDWParameters,
     factor: int,
     strategy: Literal["job_wise", "mixed", "v3", "v4"],
-    idle_mode: str = "flooring",
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> FFcSchedule:
     """Build a seed schedule via dispatch + idle insertion on coarsened scale.
 
@@ -218,7 +220,7 @@ def _seed_and_obj(
     coarsened: FFcDDWParameters,
     factor: int,
     strategy: Literal["job_wise", "mixed", "v3", "v4"],
-    idle_mode: str = "flooring",
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float]:
     """Build a dispatch seed schedule and evaluate its coarsened wET.
 
@@ -245,7 +247,7 @@ def _solve_coarsened_model(
     log_search_progress: bool,
     build_start: float,
     seed_dispatch: Literal["job_wise", "mixed", "v3", "v4"] = "mixed",
-    idle_mode: str = "flooring",
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[
     str,
     dict[tuple[str, str], int] | None,

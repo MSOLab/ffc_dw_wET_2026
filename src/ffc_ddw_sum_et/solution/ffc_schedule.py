@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import bisect
 import logging
-from typing import Iterable, Iterator, Mapping, Sequence
+from typing import Iterable, Iterator, Literal, Mapping, Sequence
 
 JobIdType = str
 StageIdType = str
@@ -1652,7 +1652,7 @@ class FFcSchedule:
         twt_map: Mapping[JobIdType, int],
         *,
         time_factor: int = 1,
-        idle_mode: str = "flooring",
+        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> None:
         """Insert idle time on the last stage to minimise earliness-tardiness.
 
