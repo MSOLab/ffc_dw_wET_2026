@@ -129,6 +129,13 @@ def main() -> None:
             on=["instanceName", "mode", "factor"],
             how="inner",
         )
+        if len(merged) != len(df):
+            n_missing = len(df) - len(merged)
+            print(
+                f"WARNING: summary matched {len(merged)}/{len(df)} dump rows "
+                f"({n_missing} unmatched on (instanceName, mode, factor)); "
+                "the cross-check below is PARTIAL, not a full reproduction."
+            )
         max_abs = (merged["recon_obj"] - merged["bestObj"]).abs().max()
         print(
             f"\nrecon_obj vs summary bestObj — max |diff| = {max_abs} "
