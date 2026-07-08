@@ -725,3 +725,75 @@ def test_insert_idle_time_ceiling_never_stalls_where_flooring_does() -> None:
 
     assert floor_end == 2  # flooring stalls: Delta_1 == 0
     assert ceil_end == 3  # ceiling still shifts forward
+
+
+# ---------------------------------------------------------------------------
+# delay_operations_latest_leq_obj_contrib
+# ---------------------------------------------------------------------------
+
+
+def test_delay_operations_right_shifts_only() -> None:
+    """Selected operations must only move right (new_end >= old_end)."""
+    _, schedule = build_manual_schedules()
+    old_end_map = schedule.get_jik_2_end_time_map()
+
+    # Select one operation on the last stage
+    op_set = {("j1", "s3", "s3_m1")}
+    # d_plus for each job — set high enough to allow shifting
+    job_2_dw_ub = {"j1": 100, "j2": 100, "j3": 100, "j4": 100}
+
+    schedule.delay_operations_latest_leq_obj_contrib(op_set, job_2_dw_ub)
+
+    new_end_map = schedule.get_jik_2_end_time_map()
+    for key in old_end_map:
+        assert new_end_map[key] >= old_end_map[key], (
+            f"{key} moved left: {old_end_map[key]} -> {new_end_map[key]}"
+        )
+
+
+def test_delay_operations_respects_d_plus_cap() -> None:
+    """Last-stage selected ops must not exceed d_plus (no tardiness push)."""
+    _, schedule = build_manual_schedules()
+
+    # j1 ends at s3_m1 at time 9 (MANUAL_OPS). Set d_plus = 8 so it is
+    # already tardy and should NOT move.
+    op_set = {("j1", "s3", "s3_m1")}
+    job_2_dw_ub = {"j1": 8, "j2": 100, "j3": 100, "j4": 100}
+
+    old_end = schedule.get_jik_2_end_time_map()[("j1", "s3", "s3_m1")]
+    schedule.delay_operations_latest_leq_obj_contrib(op_set, job_2_dw_ub)
+    new_end = schedule.get_jik_2_end_time_map()[("j1", "s3", "s3_m1")]
+
+    # old_end=9 >= d_plus=8, so the op stays in place
+    assert new_end == old_end
+
+
+def test_delay_operations_no_precedence_violation() -> None:
+    """After delay, upstream end <= downstream start for every job."""
+    _, schedule = build_manual_schedules()
+    job_2_dw_ub = {"j1": 100, "j2": 100, "j3": 100, "j4": 100}
+
+    # Delay all last-stage ops
+    op_set = {
+        ("j1", "s3", "s3_m1"),
+        ("j2", "s3", "s3_m1"),
+        ("j3", "s3", "s3_m1"),
+        ("j4", "s3", "s3_m1"),
+    }
+    schedule.delay_operations_latest_leq_obj_contrib(op_set, job_2_dw_ub)
+
+    end_map = schedule.get_jik_2_end_time_map()
+    start_map = schedule.get_jik_2_start_time_map()
+    for job_id in ["j1", "j2", "j3", "j4"]:
+        for idx in range(len(STAGES) - 1):
+            s1, s2 = STAGES[idx], STAGES[idx + 1]
+            # Find the machine for this job on each stage
+            for mc1 in MACHINES[s1]:
+                e1 = end_map.get((job_id, s1, mc1))
+                if e1 is not None:
+                    for mc2 in MACHINES[s2]:
+                        s2_start = start_map.get((job_id, s2, mc2))
+                        if s2_start is not None:
+                            assert s2_start >= e1, (
+                                f"{job_id}: {s1} end {e1} > {s2} start {s2_start}"
+                            )
