@@ -231,10 +231,7 @@ def write_post_run_subroutine_chart_artifacts(
                 scenario_name,
             )
 
-        method_points = load_method_mean_metrics(
-            progressions,
-            baseline_obj_by_instance=baseline_obj_map,
-        )
+        method_points = load_method_mean_metrics(progressions, baseline_obj_map)
         if method_points:
             scenario_entry = {"label": scenario_name, "method_points": method_points}
             per_scenario_path = layout.artifact_path(
