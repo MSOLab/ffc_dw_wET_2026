@@ -16,7 +16,11 @@ from typing import Any
 import pandas as pd
 
 from ._chart_constants import series_colors_json, symbol_map_json
-from .np_utils import progression_points_to_arrays, step_function_mean_over_union
+from .np_utils import (
+    decimate_step_series,
+    progression_points_to_arrays,
+    step_function_mean_over_union,
+)
 from .step_path import build_step_path
 from .trajectory_utils import (
     build_best_so_far_progression_points,
@@ -37,6 +41,12 @@ _POSITIVE_AXIS_PADDING = 1.05
 # Minimum normalized-time x-axis upper. Prevents the chart from
 # squeezing horizontally when every scenario finishes well before t=1.
 _MIN_NORMALIZED_TIME_X_UPPER = 1.0
+
+# Upper bound on breakpoints kept per scenario mean step series. The raw
+# union-of-change-times mean carries 10^5-10^6 points (one per any
+# instance's improvement); at this resolution the sub-quantum thinning is
+# visually lossless while shrinking the emitted HTML from ~70MB to ~1MB.
+_MEAN_SERIES_MAX_POINTS = 4000
 
 
 def _positive_axis_upper(values: list[float]) -> float:
@@ -201,6 +211,9 @@ def _build_scenario_mean_series(
         progression_points_to_arrays(m["progression_points"]) for m in models
     ]
     mean_x, mean_y = step_function_mean_over_union(model_arrays)
+    mean_x, mean_y = decimate_step_series(
+        mean_x, mean_y, max_points=_MEAN_SERIES_MAX_POINTS
+    )
 
     step_x, step_y = build_step_path(mean_x, mean_y)
     guide_df = (

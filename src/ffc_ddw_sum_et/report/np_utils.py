@@ -54,6 +54,48 @@ def step_function_mean_over_union(
     return event_times.tolist(), mean_y_arr.tolist()
 
 
+def decimate_step_series(
+    xs: list[float],
+    ys: list[float],
+    *,
+    max_points: int,
+) -> tuple[list[float], list[float]]:
+    """Thin out a near-monotone mean step series to ``<= ~max_points`` points.
+
+    ``step_function_mean_over_union`` samples at the union of every
+    instance's change times; across 10^3 instances that is 10^5-10^6
+    breakpoints, at each of which the mean shifts by only ~1/N of one
+    instance's delta — visually invisible. This keeps a point only when
+    ``y`` has moved at least one *quantum* (the y-range divided by
+    ``max_points``) from the last kept point, always retaining the first
+    and last. For a monotone series that bounds the output to
+    ``max_points`` points (each kept step drops by >= quantum and the
+    total drop is the y-range), collapsing flat runs without altering the
+    staircase within sub-quantum resolution.
+
+    ``xs``/``ys`` must be equal-length. ``max_points <= 2`` or a series of
+    <= 2 points is returned unchanged.
+    """
+    n = len(ys)
+    if n <= 2 or max_points <= 2:
+        return xs, ys
+    y_span = max(ys) - min(ys)
+    if y_span <= 0.0:
+        return [xs[0], xs[-1]], [ys[0], ys[-1]]
+    quantum = y_span / max_points
+    out_x = [xs[0]]
+    out_y = [ys[0]]
+    last_y = ys[0]
+    for i in range(1, n - 1):
+        if abs(ys[i] - last_y) >= quantum:
+            out_x.append(xs[i])
+            out_y.append(ys[i])
+            last_y = ys[i]
+    out_x.append(xs[-1])
+    out_y.append(ys[-1])
+    return out_x, out_y
+
+
 def progression_points_to_arrays(
     progression_points: list[ProgressionPoint],
 ) -> tuple[np.ndarray, np.ndarray]:

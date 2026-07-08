@@ -35,8 +35,12 @@ def load_method_mean_metrics(
 
     Builds the data behind
     ``<run_id>_multi_scenario_method_mean_rpdf_and_mean_norm_time_scatter.html``:
-    each controller step (top-level method) becomes one averaged point so the
-    chart can trace the quality/time trade-off along the controller flow. Called
+    each controller step becomes one averaged point so the chart can trace the
+    quality/time trade-off along the controller flow. Steps are keyed by the
+    *full* ``subroutine_name``, so a step that emits several endpoints under one
+    call_index (e.g. ``incremental_sw_cp`` registering per batch as
+    ``incremental_sw_cp.<n>-batch_<id>``) contributes one point *per batch*
+    rather than a single collapsed marker. Called
     by :func:`~.post_run_chart_writer.write_post_run_subroutine_chart_artifacts`
     during post-run reporting — after the run has finished and every instance's
     ``<instance>_obj_log.json`` is on disk — and by
@@ -72,8 +76,11 @@ def load_method_mean_metrics(
             Defaults to False.
 
     Returns:
-        list[dict[str, Any]]: ``{method, mean_time_pct, mean_rpdf,
-        instance_count}`` dicts in ``call_index`` order. ``mean_time_pct`` is
+        list[dict[str, Any]]: ``{method, label, mean_time_pct, mean_rpdf,
+        instance_count}`` dicts in controller (first-appearance) order.
+        ``method`` is the base name (pre-``.``) used for the marker
+        symbol/colour; ``label`` is the full ``subroutine_name`` (carrying the
+        batch suffix) shown in the hover. ``mean_time_pct`` is
         ``global_end_sec / timelimit_sec`` in ``[0, 1]``; ``mean_rpdf`` is the
         mean of ``rpd_f(obj, ref) = 2*(obj-ref)/(obj+ref)``;
         ``instance_count`` is the carry-forward total (active instances), not
@@ -88,7 +95,21 @@ def load_method_mean_metrics(
     if endpoint_df.empty:
         return []
 
-    instance_data: dict[str, list[tuple[int, str, float, float, float]]] = {}
+    # Fine-grained step key: the *full* subroutine_name keeps each
+    # incremental_sw_cp batch (``incremental_sw_cp.<n>-batch_<id>``) as its
+    # own point instead of collapsing the whole call_index into a single
+    # marker. Order = first appearance across the endpoint frame (controller
+    # order), matching the flow-comparison guide markers. The display
+    # ``method`` is the base name (pre-``.``) so all batches share one
+    # symbol/colour; ``label`` carries the full name for the hover.
+    step_order = {
+        name: idx
+        for idx, name in enumerate(
+            dict.fromkeys(endpoint_df["subroutine_name"].tolist())
+        )
+    }
+
+    instance_data: dict[str, list[tuple[int, str, str, float, float, float]]] = {}
     for ins_id, ins_grp in endpoint_df.groupby("instance_id", sort=True):
         ins_id_str = str(ins_id)
         timelimit = timelimit_map.get(ins_id_str)
@@ -97,40 +118,43 @@ def load_method_mean_metrics(
         ref = baseline_obj_by_instance.get(ins_id_str)
         if ref is None:
             continue
-        methods: list[tuple[int, str, float, float, float]] = []
-        for ci, ci_grp in ins_grp.groupby("call_index", sort=True):
-            best_idx = ci_grp["global_end_sec"].idxmax()
-            best_row = ci_grp.loc[best_idx]
-            method_name = str(best_row["subroutine_name"]).split(".", 1)[0]
+        steps: list[tuple[int, str, str, float, float, float]] = []
+        for name, name_grp in ins_grp.groupby("subroutine_name", sort=False):
+            best_idx = name_grp["global_end_sec"].idxmax()
+            best_row = name_grp.loc[best_idx]
+            full_name = str(name)
+            base_name = full_name.split(".", 1)[0]
             time_pct = float(best_row["global_end_sec"]) / timelimit
             obj = float(best_row["obj_value"])
             rp = rpd_f(obj, ref)
             if math.isnan(rp):
                 continue
-            methods.append((int(ci), method_name, time_pct, rp, obj))
-        methods.sort(key=lambda x: x[0])
-        instance_data[ins_id_str] = methods
+            steps.append(
+                (step_order[full_name], base_name, full_name, time_pct, rp, obj)
+            )
+        steps.sort(key=lambda x: x[0])
+        instance_data[ins_id_str] = steps
 
-    method_order: dict[int, str] = {}
-    for methods in instance_data.values():
-        for ci, name, _, _, _ in methods:
-            if ci not in method_order:
-                method_order[ci] = name
-    sorted_ci = sorted(method_order)
+    step_labels: dict[int, tuple[str, str]] = {}
+    for steps in instance_data.values():
+        for order_idx, base_name, full_name, _, _, _ in steps:
+            if order_idx not in step_labels:
+                step_labels[order_idx] = (base_name, full_name)
+    sorted_order = sorted(step_labels)
 
     # Per-instance last observed (time_pct, rpdf, obj) — carry-forward source.
     prev_state_by_instance: dict[str, tuple[float, float, float]] = {}
     # Instances that entered the flow at least once (carry-forward eligible).
     active_instances: set[str] = set()
     candidates: list[dict[str, Any]] = []
-    for ci in sorted_ci:
-        method_name = method_order[ci]
+    for order_idx in sorted_order:
+        base_name, full_name = step_labels[order_idx]
         reached: list[tuple[str, float, float, float]] = []
         improves = False
-        for ins_id, methods in instance_data.items():
+        for ins_id, steps in instance_data.items():
             found: tuple[float, float, float] | None = None
-            for m_ci, m_name, t_pct, r, obj in methods:
-                if m_ci == ci:
+            for s_order, _, _, t_pct, r, obj in steps:
+                if s_order == order_idx:
                     found = (t_pct, r, obj)
                     break
             if found is not None:
@@ -166,7 +190,8 @@ def load_method_mean_metrics(
                     rpdfs.append(ps[1])
         candidates.append(
             {
-                "method": method_name,
+                "method": base_name,
+                "label": full_name,
                 "improves": improves,
                 "mean_time_pct": sum(time_pcts) / len(time_pcts),
                 "mean_rpdf": sum(rpdfs) / len(rpdfs),
@@ -183,7 +208,7 @@ def load_method_mean_metrics(
             else:
                 logger.info(
                     "Dropping non-improving method %r",
-                    cand["method"],
+                    cand["label"],
                 )
         candidates = kept
 
@@ -222,6 +247,7 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
         xs = [float(p["mean_time_pct"]) for p in method_points]
         ys = [float(p["mean_rpdf"]) for p in method_points]
         names = [str(p["method"]) for p in method_points]
+        labels = [str(p.get("label", p["method"])) for p in method_points]
         counts = [int(p["instance_count"]) for p in method_points]
         traces.append(
             {
@@ -229,6 +255,7 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
                 "x": xs,
                 "y": ys,
                 "method": names,
+                "label": labels,
                 "instance_count": counts,
             }
         )
@@ -266,7 +293,7 @@ _HTML_TEMPLATE = Template("""<!doctype html>
 
     const traces = payload.traces.map((trace, idx) => {
       const seriesColor = SERIES_COLORS[idx % SERIES_COLORS.length];
-      const customdata = trace.method.map((name, i) => [trace.scenario, name, trace.instance_count[i]]);
+      const customdata = trace.method.map((name, i) => [trace.scenario, trace.label[i], trace.instance_count[i]]);
       return {
         type: "scatter",
         mode: "lines+markers",
