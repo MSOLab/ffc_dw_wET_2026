@@ -84,6 +84,7 @@ def main() -> None:
 
     instance_worker_cnt = config.get("instance_worker_cnt", 1)
     draw_gantt = bool(config.get("draw_gantt", True))
+    draw_progress_plot = bool(config.get("draw_progress_plot", False))
     painter_thread_cnt = int(config.get("painter_thread_cnt", 1))
 
     benchmark_dir = Path(config["benchmark_dir"])
@@ -126,6 +127,7 @@ def main() -> None:
         scenario_names=scenario_names,
         instance_worker_cnt=instance_worker_cnt,
         draw_gantt=draw_gantt,
+        draw_progress_plot=draw_progress_plot,
         painter_thread_cnt=painter_thread_cnt,
         ins_index_source=ins_index_source,
         bks_table_csv_path=bks_table_csv_path,

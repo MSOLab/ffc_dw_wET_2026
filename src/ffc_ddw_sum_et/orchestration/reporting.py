@@ -373,6 +373,131 @@ def _render_csr_cp_trajectory_line(json_path: Path, png_path: Path) -> None:
         logger.exception("Failed to render CSR trajectory for %s", json_path)
 
 
+def _render_progress_plot(json_path: Path, png_path: Path) -> None:
+    """Render controller-frame UB/LB-vs-time step chart from ``_obj_log.json``.
+
+    Reads ``{"obj_value":{"data":{...},"notes":{...}},
+    "obj_bound":{"data":{...}}}`` and plots two step-style lines:
+    UB from ``obj_value.data`` (solid) and LB from ``obj_bound.data`` (dashed).
+    Step-boundary annotations from ``obj_value.notes`` are rendered as rotated
+    vertical labels.  Module-level for ``ProcessPoolExecutor`` picklability.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not available, skipping %s", json_path)
+        return
+
+    try:
+        with open(json_path) as f:
+            log = json.load(f)
+    except Exception:
+        logger.exception("Failed to load obj_log %s", json_path)
+        return
+
+    obj_value = log.get("obj_value", {})
+    obj_bound = log.get("obj_bound", {})
+    value_data = obj_value.get("data", {})
+    bound_data = obj_bound.get("data", {})
+    notes = obj_value.get("notes", {})
+
+    def _sorted_pairs(
+        d: dict[str, float],
+    ) -> tuple[list[float], list[float]]:
+        items = sorted(((float(k), v) for k, v in d.items()), key=lambda kv: kv[0])
+        if not items:
+            return [], []
+        xs, ys = zip(*items)
+        return list(xs), list(ys)
+
+    ub_t, ub_y = _sorted_pairs(value_data)
+    lb_t, lb_y = _sorted_pairs(bound_data)
+
+    # UB is minimized: keep only best-so-far points, dropping any increase.
+    def _running_min(
+        ts: list[float], ys: list[float]
+    ) -> tuple[list[float], list[float]]:
+        out_t: list[float] = []
+        out_y: list[float] = []
+        best: float | None = None
+        for t, y in zip(ts, ys):
+            if best is None or y <= best:
+                best = y
+                out_t.append(t)
+                out_y.append(y)
+        return out_t, out_y
+
+    ub_t, ub_y = _running_min(ub_t, ub_y)
+
+    if not ub_t and not lb_t:
+        return
+
+    note_items = sorted(((float(k), v) for k, v in notes.items()), key=lambda kv: kv[0])
+
+    # Derive label from filename: "MyInstance_progress_plot" -> "MyInstance"
+    instance_label = png_path.stem.replace("_progress_plot", "")
+
+    try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        if ub_t:
+            ax.step(
+                ub_t,
+                ub_y,
+                where="post",
+                label="objValue",
+                linewidth=1.5,
+            )
+        if lb_t:
+            ax.step(
+                lb_t,
+                lb_y,
+                where="post",
+                label="objBound",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.7,
+            )
+
+        # Step-boundary annotations (rotated vertical labels at top of chart)
+        if note_items and ub_t:
+            all_t = ub_t + lb_t + [t for t, _ in note_items]
+            span = max(all_t) - min(all_t) or 1.0
+            pad = span * 0.04
+            ax.set_xlim(min(all_t) - pad, max(all_t) + pad)
+            ymin, ymax = ax.get_ylim()
+            ymax_padded = ymax + (ymax - ymin) * 0.18
+            ax.set_ylim(ymin, ymax_padded)
+            for t, label in note_items:
+                ax.axvline(t, linestyle=":", linewidth=0.8, alpha=0.5)
+                ax.annotate(
+                    label,
+                    xy=(t, ymax_padded),
+                    xytext=(-4, -2),
+                    textcoords="offset points",
+                    rotation=90,
+                    va="top",
+                    ha="right",
+                    fontsize=7,
+                    clip_on=False,
+                )
+
+        ax.set_title(instance_label)
+        ax.set_xlabel("controller time (s)")
+        ax.set_ylabel("objective")
+        ax.legend(loc="lower right")
+        ax.grid(True, linestyle="--", alpha=0.6)
+        fig.tight_layout()
+        fig.savefig(str(png_path), dpi=150)
+        plt.close(fig)
+    except Exception:
+        logger.exception("Failed to render progress plot for %s", json_path)
+
+
 @dataclass
 class ScenarioResult:
     """Aggregated result for one scenario."""
@@ -414,6 +539,7 @@ class FFcDDWMultiScenarioRunner(
         self,
         scenario_names: list[str] | None = None,
         draw_gantt: bool = True,
+        draw_progress_plot: bool = False,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
@@ -437,6 +563,7 @@ class FFcDDWMultiScenarioRunner(
         ]
         super().__init__(**kwargs)
         self.draw_gantt = draw_gantt
+        self.draw_progress_plot = draw_progress_plot
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = ins_index_source
         self.bks_table_csv_path = bks_table_csv_path
@@ -575,6 +702,7 @@ class FFcDDWMultiScenarioRunner(
             scenario_results,
             layout=layout,
             draw_gantt=self.draw_gantt,
+            draw_progress_plot=self.draw_progress_plot,
             painter_thread_cnt=self.painter_thread_cnt,
             ins_index_source=self.ins_index_source,
             bks_table_csv_path=self.bks_table_csv_path,
@@ -594,6 +722,7 @@ class FFcDDWReporter:
         *,
         layout: ArtifactLayout,
         draw_gantt: bool = True,
+        draw_progress_plot: bool = False,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
@@ -603,6 +732,7 @@ class FFcDDWReporter:
         self.scenario_results = scenario_results
         self.layout = layout
         self.draw_gantt = draw_gantt
+        self.draw_progress_plot = draw_progress_plot
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = (
             Path(ins_index_source) if ins_index_source is not None else None
@@ -678,6 +808,7 @@ class FFcDDWReporter:
         self._write_cp_gap_artifacts()
         self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
+        self._generate_progress_plots()
 
     def _write_post_run_pivot_artifacts(self) -> None:
         """Emit long-format RPDf comparison CSV + 3 PivotTable.js HTML files."""
@@ -1948,6 +2079,54 @@ class FFcDDWReporter:
                     future.result()
                 except Exception:
                     logger.exception("Gantt worker failed")
+
+    def _generate_progress_plots(self) -> None:
+        """Render per-instance progress plot PNGs from ``_obj_log.json``.
+
+        Gated by ``draw_progress_plot``.  Each PNG shows controller-frame
+        UB (obj_value, solid step line) and LB (obj_bound, dashed step line)
+        vs elapsed time.  Rendering fans out across a ``ProcessPoolExecutor``
+        sized by ``painter_thread_cnt``.
+        """
+        if not self.draw_progress_plot:
+            logger.info("draw_progress_plot=False; skipping progress plot rendering")
+            return
+
+        jobs: list[tuple[Any, Path, Path]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {"scenario_name": sc.name, "instance_name": ins}
+                obj_log = self.layout.artifact_path("obj_log_json", **scope)
+                if obj_log.exists():
+                    png = self.layout.artifact_path("progress_plot_png", **scope)
+                    jobs.append((_render_progress_plot, obj_log, png))
+
+        if not jobs:
+            return
+
+        worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
+        logger.info(
+            "Rendering %d progress plots with %d worker(s)",
+            len(jobs),
+            worker_cnt,
+        )
+        if worker_cnt == 1:
+            for fn, src, dst in jobs:
+                fn(src, dst)
+            return
+
+        pool_kwargs: dict[str, Any] = {"max_workers": worker_cnt}
+        if self._setup_logging_args is not None:
+            pool_kwargs["initializer"] = setup_logging
+            pool_kwargs["initargs"] = self._setup_logging_args
+        with ProcessPoolExecutor(**pool_kwargs) as executor:
+            futures = [executor.submit(fn, src, dst) for fn, src, dst in jobs]
+            for future in futures:
+                try:
+                    future.result()
+                except Exception:
+                    logger.exception("Progress plot worker failed")
 
     def _write_excel_report(self) -> None:
         """Write Excel report with dashboard, statistics, and analysis sheets."""

@@ -17,6 +17,7 @@ output_dir: output
 # instance_worker_cnt: 4
 
 draw_gantt: true
+draw_progress_plot: false
 painter_thread_cnt: 2
 
 scenarios:

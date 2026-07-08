@@ -132,6 +132,12 @@ artifacts:
     zone: report
     kind: phase_gantt_png
     file_template: "{phase_name}_gantt.png"
+  # Per-instance progress plot: controller-frame UB/LB vs time, rendered from
+  # obj_log_json.  Gated by draw_progress_plot config flag.
+  - scope: instance
+    zone: report
+    kind: progress_plot_png
+    file_template: "{instance_name}_progress_plot.png"
   # Paired Gantt PNG for ``calc_mcf_lb_phase_schedule``. Two-level nested
   # layout mirrors the source JSON tree.
   - scope: instance
