@@ -30,3 +30,13 @@ def test_coerce_skip_pf_below_obj_none() -> None:
 def test_coerce_skip_pf_below_obj_invalid_string_raises() -> None:
     with pytest.raises(ValueError, match="Invalid skip_pf_below_obj"):
         NehCpOption.coerce_skip_pf_below_obj("not-a-number")
+
+
+def test_proportional_batch_tl_mode_rejected() -> None:
+    with pytest.raises(ValueError, match="proportional.*not supported"):
+        NehCpOption(batch_tl_mode="proportional")
+
+
+def test_constant_and_linear_accepted() -> None:
+    assert NehCpOption(batch_tl_mode="constant").batch_tl_mode == "constant"
+    assert NehCpOption(batch_tl_mode="linear").batch_tl_mode == "linear"
