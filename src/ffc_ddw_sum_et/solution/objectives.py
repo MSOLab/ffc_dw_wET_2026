@@ -27,13 +27,13 @@ def compute_weighted_earliness_tardiness(
     ``time_factor=1`` is the ordinary same-scale evaluation.
 
     Invariant (caller's responsibility, not enforced): ``time_factor * C`` and
-    *instance*'s due window must be in the **same time unit**. The CSR caller
-    satisfies this by passing the **original** instance together with a
-    coarse-grid *schedule* and ``time_factor=factor``. Passing the *coarsened*
-    instance with ``time_factor=factor`` compares an original-scale completion
-    against a coarse window and is a bug. (This is the same scale-consistency
-    requirement the ``time_factor=1`` path already imposes between *schedule*
-    and *instance*; ``time_factor`` only generalises it.)
+    *instance*'s due window must be in the **same time unit**. The CSR seed path
+    passes the **coarsened** instance with ``time_factor=factor``; this is
+    correct because ``coarsen_processing_times`` preserves the
+    **original-scale** due window on the coarsened instance (SSOT), so
+    ``factor * C^c`` is measured against the original window. (This is the same
+    scale-consistency requirement the ``time_factor=1`` path already imposes
+    between *schedule* and *instance*; ``time_factor`` only generalises it.)
     """
     last_stage_id = instance.stage_id_list[-1]
     ewt_map = instance.job_2_ewt_map

@@ -9,8 +9,12 @@ instance; then
     RPDf_BKS = (BKS - best) / (BKS + best) * 2
 
 with the winner side scoring 0 (so the 0/0 case where both are 0 is defined as
-0). This matches the convention in ``metrics_ffc_ddw_wET.py`` of the
-Juntaek-PhD-Thesis scripts and ``scripts/build_results_index.py``.
+0). This is the symmetric two-sided form used in ``metrics_ffc_ddw_wET.py`` of
+the Juntaek-PhD-Thesis scripts. NOTE: ``scripts/build_results_index.py``'s
+``RPDf_BKS_data`` is a *one-sided signed* variant (no ``min(Alg, BKS)``
+substitution); the two agree only when ``Alg >= BKS`` and diverge (0 here vs a
+negative value there) whenever the algorithm beats BKS. Do not cross-reference
+them as the same metric on Alg-beats-BKS instances.
 
 Output: a T x R pivot (T as columns, R as rows) of mean RPDf for Alg, for BKS,
 and Alg-BKS, each with a ``Total`` column and ``Total`` row, written as
