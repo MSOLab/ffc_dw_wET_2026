@@ -1259,3 +1259,53 @@ def test_solve_false_trajectory_ignored() -> None:
     # cp_progress_log is empty tuple -> falsy -> runner skips JSON write
     assert not trace.cp_progress_log
     assert trace.cp_progress_log == ()
+
+
+# ---------------------------------------------------------------------------
+# Multi-machine reconstruct path
+# ---------------------------------------------------------------------------
+
+
+def test_run_multi_machine_returns_feasible_or_optimal() -> None:
+    """CSR must complete on a multi-machine instance (stage_2_machine_count > 1).
+
+    Exercises the greedy machine-assignment loop in reconstruct that can
+    raise 'No free machine' when |M_i| > 1.
+    """
+    instance = _make_small_ddw_instance(
+        name="csr_multi_mc",
+        processing_rows=[[100, 50], [200, 100], [150, 75]],
+        stage_2_machine_count=(2, 2),
+    )
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.work_status in (WorkStatus.OPTIMAL, WorkStatus.FEASIBLE)
+    assert record.result is not None
+    assert record.result.schedule is not None
+
+
+def test_run_multi_machine_schedule_queryable() -> None:
+    """Every (stage_id, job_id) end time must be queryable on a multi-machine instance."""
+    instance = _make_small_ddw_instance(
+        name="csr_multi_mc_q",
+        processing_rows=[[100, 50], [200, 100], [150, 75]],
+        stage_2_machine_count=(2, 2),
+    )
+    adapter = CoarsenSolveReconstructAdapter()
+    option = CoarsenSolveReconstructOption(factor=50, solver_thread_cnt=1)
+    spec = AlgSpec(instance=instance, option=option)
+
+    record = adapter.run(spec)
+
+    assert record.result is not None
+    schedule = record.result.schedule
+    assert schedule is not None
+
+    for job_id in instance.job_id_list:
+        for stage_id in instance.stage_id_list:
+            end = schedule.get_job_end_time(stage_id, job_id)
+            assert end >= 0, f"Negative end time for ({stage_id}, {job_id})"
