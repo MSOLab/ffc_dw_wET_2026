@@ -87,3 +87,18 @@ def test_kappa_allowed_with_non_proportional_mode() -> None:
     )
     assert opt.batch_tl_mode == "constant"
     assert opt.non_time_fixed_op_time_limit_multiplier == 0.5
+
+
+def test_rj_scope_default_is_rtf_only() -> None:
+    assert SwCpOption().rj_right_justify_scope == "rtf_only"
+
+
+def test_rj_scope_all_ops_is_valid() -> None:
+    assert (
+        SwCpOption(rj_right_justify_scope="all_ops").rj_right_justify_scope == "all_ops"
+    )
+
+
+def test_rj_scope_invalid_rejected() -> None:
+    with pytest.raises(ValueError, match="rj_right_justify_scope must be one of"):
+        SwCpOption(rj_right_justify_scope="everything")  # type: ignore[arg-type]

@@ -202,3 +202,24 @@ def test_dispatcher_proportional_tl_equals_kappa_times_ntf() -> None:
             entry.unfixed_op_count + entry.profile_fixed_op_count
             == entry.non_time_fixed_op_count
         )
+
+
+def test_dispatcher_rj_all_ops_does_not_worsen() -> None:
+    """Running with rj_right_justify_scope='all_ops' must not worsen the incumbent."""
+    instance = _make_instance()
+    seed, seed_obj = _seed_incumbent(instance)
+
+    spec = AlgSpec(
+        instance=instance,
+        option=SwCpOption(
+            cp_tl_seconds=1.0,
+            unfixed_batch_count=2,
+            rj_right_justify_scope="all_ops",
+        ),
+        ref_solution=seed,
+    )
+    record = SwCpDispatcher().run(spec)
+
+    assert record.result is not None
+    assert record.result.obj_value is not None
+    assert record.result.obj_value <= seed_obj
