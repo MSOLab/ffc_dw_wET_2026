@@ -143,11 +143,7 @@ def test_base_dispatcher_creates_empty_schedule() -> None:
 
 
 def test_dispatch_seed_job_sequence_edd_order() -> None:
-    """_dispatch_seed_job_sequence must sort by d^+ ascending."""
-    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
-        _dispatch_seed_job_sequence,
-    )
-
+    """get_eddub_twt_job_sequence must sort by d^+ ascending."""
     df = pd.DataFrame([[10, 5], [8, 4], [6, 3]])
     instance = FFcDDWParameters(
         name="seq_test",
@@ -160,16 +156,12 @@ def test_dispatch_seed_job_sequence_edd_order() -> None:
         job_2_twt_map={"A": 1, "B": 1, "C": 1},
     )
     # d^+ values: A=200, B=100, C=80 → sorted: C, B, A
-    seq = _dispatch_seed_job_sequence(instance)
+    seq = instance.get_eddub_twt_job_sequence()
     assert seq == ["C", "B", "A"]
 
 
 def test_dispatch_seed_job_sequence_twt_tiebreak() -> None:
     """When d^+ is equal, sort by w^+ descending."""
-    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
-        _dispatch_seed_job_sequence,
-    )
-
     df = pd.DataFrame([[10, 5], [8, 4], [6, 3]])
     instance = FFcDDWParameters(
         name="twt_test",
@@ -186,16 +178,12 @@ def test_dispatch_seed_job_sequence_twt_tiebreak() -> None:
         job_2_twt_map={"A": 3, "B": 2, "C": 1},
     )
     # d^+ all equal → sort by w^+ desc: A(3), B(2), C(1)
-    seq = _dispatch_seed_job_sequence(instance)
+    seq = instance.get_eddub_twt_job_sequence()
     assert seq == ["A", "B", "C"]
 
 
 def test_dispatch_seed_job_sequence_given_tiebreak() -> None:
     """When d^+ and w^+ are equal, preserve given job order."""
-    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
-        _dispatch_seed_job_sequence,
-    )
-
     df = pd.DataFrame([[10, 5], [8, 4], [6, 3]])
     instance = FFcDDWParameters(
         name="given_test",
@@ -212,7 +200,7 @@ def test_dispatch_seed_job_sequence_given_tiebreak() -> None:
         job_2_twt_map={"A": 1, "B": 1, "C": 1},
     )
     # All equal → preserve given order: B, A, C
-    seq = _dispatch_seed_job_sequence(instance)
+    seq = instance.get_eddub_twt_job_sequence()
     assert seq == ["B", "A", "C"]
 
 
