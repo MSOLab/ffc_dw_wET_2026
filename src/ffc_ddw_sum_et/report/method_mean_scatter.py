@@ -54,6 +54,11 @@ def load_method_mean_metrics(
     full-sample mean rather than the mean over reachers only — matching the
     ``analysis_wide`` / ``analysis_long`` sheets of ``*_report.xlsx``.
 
+    Each step plots the **best-so-far incumbent** (running-min obj), not its
+    own raw ``obj_value``: a step that registers a solution worse than the
+    incumbent it received (e.g. ``neh_cp`` after ``run_flip_makespan_cp_...``)
+    plots the incumbent, so the trajectory never degrades in RPDf.
+
     Instances with no baseline ref, non-positive timelimit, or all-NaN rpdf are
     excluded from every point; a method that no instance reached is skipped
     (its carry-forward point would duplicate the previous one).
@@ -133,7 +138,26 @@ def load_method_mean_metrics(
                 (step_order[full_name], base_name, full_name, time_pct, rp, obj)
             )
         steps.sort(key=lambda x: x[0])
-        instance_data[ins_id_str] = steps
+        # Best-so-far (incumbent) carry-forward: a step whose raw obj_value is
+        # worse than the running-best incumbent — e.g. neh_cp registering a
+        # solution worse than the flip-makespan incumbent it received — must
+        # plot the incumbent, not its own worse output. The incumbent never
+        # degrades, so obj is a running minimum and rpdf is recomputed from it.
+        best_obj = math.inf
+        carried: list[tuple[int, str, str, float, float, float]] = []
+        for s_order, base_name, full_name, time_pct, _rp, obj in steps:
+            best_obj = min(best_obj, obj)
+            carried.append(
+                (
+                    s_order,
+                    base_name,
+                    full_name,
+                    time_pct,
+                    rpd_f(best_obj, ref),
+                    best_obj,
+                )
+            )
+        instance_data[ins_id_str] = carried
 
     step_labels: dict[int, tuple[str, str]] = {}
     for steps in instance_data.values():

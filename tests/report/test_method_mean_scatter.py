@@ -105,6 +105,36 @@ def test_non_improving_batch_dropped_when_opted_in() -> None:
     assert "incremental_sw_cp.3-batch_004" in labels
 
 
+def test_worse_step_clamped_to_incumbent() -> None:
+    # neh_cp (call 3) registers a solution *worse* than the incumbent it
+    # received from flip (call 2). The incumbent never degrades, so the neh_cp
+    # point must plot best(prev, current) = the flip incumbent, not neh_cp's
+    # own worse obj.
+    from ffc_ddw_sum_et._calc import rpd_f
+
+    def run(instance_id: str) -> InstanceProgression:
+        return _progression(
+            instance_id,
+            [
+                _seg(2, "run_flip_makespan_cp_from_incumbent", 2.0, 100.0),
+                _seg(3, "neh_cp", 3.0, 140.0),  # worse than flip's 100
+                _seg(4, "incremental_sw_cp.1-batch_002", 4.0, 90.0),
+            ],
+        )
+
+    progs = [run("InstA")]
+    baseline = {"InstA": 50.0}
+
+    points = load_method_mean_metrics(progs, baseline)
+    flip = next(p for p in points if p["method"].startswith("run_flip"))
+    neh = next(p for p in points if p["method"] == "neh_cp")
+    # neh_cp is clamped to the flip incumbent (best-so-far), not rpd_f(140, 50).
+    assert neh["mean_rpdf"] == flip["mean_rpdf"] == rpd_f(100.0, 50.0)
+    # It is therefore a non-improving step.
+    dropped = load_method_mean_metrics(progs, baseline, drop_non_improving_methods=True)
+    assert "neh_cp" not in [p["label"] for p in dropped]
+
+
 def test_endpoint_carries_forward_unreached_instances() -> None:
     # InstA runs the full flow through solve; InstB is cut off after the last
     # batch and never reaches solve. The solve endpoint must still average over
