@@ -269,9 +269,5 @@ the ordering needs to change (then both sites must move together).
 c7f54d0 ordering needs to be adjusted (do the consolidation first so there is only
 one place to edit), OR when a third consumer of this ordering appears.
 
-**Status (2026-07-08):** Triggered. Both sites now exist live and were verified
-identical in the 2026-07-08 review: `_dispatch_seed_job_sequence`
-(`coarsen_solve_reconstruct.py:135`, key `(dw_ub[j], -twt[j], given_index[j])`)
-and `FFcDDWParameters.get_eddub_twt_job_sequence`
-(`ffc_ddw_params.py:632`, key `(dw_ub[j], -twt[j], job_2_pos[j])`). The
-consolidation is now actionable (see optional WP10).
+**Status (2026-07-08):** Done. Consolidated in WP10: `_dispatch_seed_job_sequence`
+deleted, CSR now calls `coarsened.get_eddub_twt_job_sequence()` directly.

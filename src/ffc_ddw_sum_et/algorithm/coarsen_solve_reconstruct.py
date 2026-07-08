@@ -132,19 +132,6 @@ class CoarsenSolveReconstructTrace:
     metrics: dict
 
 
-def _dispatch_seed_job_sequence(
-    coarsened: FFcDDWParameters,
-) -> list[str]:
-    """Return jobs sorted by (d^+_j asc, w^+_j desc, given index asc)."""
-    dw_ub = coarsened.job_2_dw_ub_map
-    twt = coarsened.job_2_twt_map
-    given_index = {j: idx for idx, j in enumerate(coarsened.job_id_list)}
-    return sorted(
-        coarsened.job_id_list,
-        key=lambda j: (dw_ub[j], -twt[j], given_index[j]),
-    )
-
-
 def _build_dispatch_seed_schedule(
     coarsened: FFcDDWParameters,
     factor: int,
@@ -177,7 +164,7 @@ def _build_dispatch_seed_schedule(
         )
         return seed
 
-    seq = _dispatch_seed_job_sequence(coarsened)
+    seq = coarsened.get_eddub_twt_job_sequence()
     dw = coarsened.job_2_due_window_map
     ewt = coarsened.job_2_ewt_map
     twt = coarsened.job_2_twt_map
