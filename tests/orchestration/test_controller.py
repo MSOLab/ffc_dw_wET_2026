@@ -532,3 +532,63 @@ def test_initialize_by_simple_dispatch_uses_helper() -> None:
 
     assert report.obj_value == helper_obj
     assert report.obj_bound is None
+
+
+# ---------------------------------------------------------------------------
+# initialize_by_dispatch_v4
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_by_dispatch_v4_registers_single_incumbent() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_dispatch_v4()
+
+    assert report.obj_value is not None
+    assert report.obj_bound is None
+    assert report.elapsed_time >= 0
+    assert len(controller.solution_manager.history) == 1
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_dispatch_v4_picks_min_of_N() -> None:
+    from ffc_ddw_sum_et.parameters.sorter import V4_PRIORITY_SET
+
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_dispatch_v4()
+
+    helpers = []
+    for p in V4_PRIORITY_SET:
+        seq = dispatch_seq_job_sequence(instance, p)
+        sd_sch, sd_obj = controller._dispatch_by_simple_sequence_with_iit(seq)
+        helpers.append((sd_obj, f"sd:{p}"))
+        rd_sch, rd_obj = controller._dispatch_by_reversed_sequence_with_iit(seq)
+        helpers.append((rd_obj, f"rd:{p}"))
+
+    min_obj = min(obj for obj, _ in helpers)
+    assert report.obj_value == min_obj
+
+
+def test_initialize_by_dispatch_v4_is_deterministic() -> None:
+    instance = _make_instance()
+    controller1 = _make_controller(instance)
+    controller2 = _make_controller(instance)
+
+    report1 = controller1.initialize_by_dispatch_v4()
+    report2 = controller2.initialize_by_dispatch_v4()
+
+    assert report1.obj_value == report2.obj_value
