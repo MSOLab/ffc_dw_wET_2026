@@ -31,6 +31,10 @@ timer/context management, consider overriding `_call_method` instead — see
 hybridflowshop's `hybridflowshop/controller/controller_core.py:467` for an
 existing precedent of extending the routix step hook.
 
+**Status (2026-07-08):** Triggered. The controller now has ~20+ step methods
+and ~29 `_register` call sites (was 2 when the TODO was written). The
+boilerplate cost is real and the decorator is now actionable.
+
 ## Hardcoded TL (time limit) formula in analysis_long sheet
 
 The `analysis_long` Excel sheet computes `TL = 0.09 * job_count * stage_count`
@@ -264,3 +268,10 @@ the ordering needs to change (then both sites must move together).
 **When to act:** After `get_eddub_twt_job_sequence` (plan WP-1) exists, OR when the
 c7f54d0 ordering needs to be adjusted (do the consolidation first so there is only
 one place to edit), OR when a third consumer of this ordering appears.
+
+**Status (2026-07-08):** Triggered. Both sites now exist live and were verified
+identical in the 2026-07-08 review: `_dispatch_seed_job_sequence`
+(`coarsen_solve_reconstruct.py:135`, key `(dw_ub[j], -twt[j], given_index[j])`)
+and `FFcDDWParameters.get_eddub_twt_job_sequence`
+(`ffc_ddw_params.py:632`, key `(dw_ub[j], -twt[j], job_2_pos[j])`). The
+consolidation is now actionable (see optional WP10).
