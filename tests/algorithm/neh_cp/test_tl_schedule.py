@@ -100,3 +100,34 @@ def test_linear_mode_falls_back_to_constant_when_offset_too_large() -> None:
         logger=_logger(),
     )
     assert result == [2.5, 2.5, 2.5, 2.5]
+
+
+def test_proportional_mode_returns_none_with_no_budget() -> None:
+    """proportional mode delegates TL to the dispatcher (kappa * ntf);
+    the resolver must not produce a per-step list."""
+    result = resolve_per_step_tl(
+        cp_tl_from_arg=None,
+        total_seconds=None,
+        num_batches=None,
+        batch_count=4,
+        batch_tl_mode="proportional",
+        batch_tl_offset_seconds=0.01,
+        logger=_logger(),
+    )
+    assert result is None
+
+
+def test_proportional_mode_returns_none_regardless_of_total_seconds() -> None:
+    """Even when a total_seconds budget is set, proportional mode must
+    yield None — the dispatcher computes per-CP TL from kappa * ntf,
+    not from the resolver's budget split."""
+    result = resolve_per_step_tl(
+        cp_tl_from_arg=2.5,
+        total_seconds=10.0,
+        num_batches=None,
+        batch_count=4,
+        batch_tl_mode="proportional",
+        batch_tl_offset_seconds=0.01,
+        logger=_logger(),
+    )
+    assert result is None

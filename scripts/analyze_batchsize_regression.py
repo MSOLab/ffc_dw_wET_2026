@@ -178,7 +178,9 @@ for bs in [5, 10, 15]:
 # ---------------------------------------------------------------
 # Save per-scenario recommendations
 # ---------------------------------------------------------------
-result_df.to_csv(ANALYSIS_DIR / "batch_size_regression_recommendations.csv", index=False)
+result_df.to_csv(
+    ANALYSIS_DIR / "batch_size_regression_recommendations.csv", index=False
+)
 print("\nRecommendations saved to batch_size_regression_recommendations.csv")
 
 # Save actual per-instance winner

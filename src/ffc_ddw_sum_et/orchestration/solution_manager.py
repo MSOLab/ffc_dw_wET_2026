@@ -1,4 +1,4 @@
-"""Solution tracking for FAM experiment orchestration."""
+"""Solution tracking for FFcDWwET experiment orchestration."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class FFcDDWSolution:
 
 
 class FFcDDWSolutionManager(SolutionManager[FFcDDWSubroutineReport, FFcDDWSolution]):
-    """Tracks the incumbent best solution across multiple FAM runs."""
+    """Tracks the incumbent best solution across multiple FFcDWwET runs."""
 
     def _get_obj_value(self, solution: FFcDDWSolution) -> float:
         if solution.obj_value is None:

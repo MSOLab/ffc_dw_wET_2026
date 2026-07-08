@@ -35,6 +35,7 @@ from .base.alg_record import (
 from .base.alg_spec import AlgSpec
 from .cpsat_callbacks.obj_bound_recorder import ObjectiveBoundRecorder
 from .cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
+from .cpsat_callbacks.progress_log_builder import build_progress_log
 from .cpsat_solver_options import CpsatSolverOptions, get_solver
 from .cumulative import BaseModelBuilder
 
@@ -272,34 +273,13 @@ class CpsatAdapter:
         """Merge solution-callback and best-bound-callback entries into a
         single ``progress_log`` time series.
 
-        - Solution callback fires at solve-time t with both ``v`` and ``b``.
-        - Best-bound callback fires at solve-time t with ``b`` only.
-        - When the two callbacks fire at the same timestamp, the solution
-          callback wins (carries v in addition to b).
-        Entries are sorted by ``elapsed_sec`` ascending.
+        Delegates to ``build_progress_log`` (shared helper) so the merge
+        rule stays in one place across adapters.
         """
-        entries: list[ProgressLogEntry] = []
-        for t, vb in value_recorder.entries:
-            entries.append(
-                ProgressLogEntry(
-                    elapsed_sec=t,
-                    obj_value=float(vb.value),
-                    obj_bound=float(vb.bound),
-                )
-            )
-        value_t_set = {t for t, _ in value_recorder.entries}
-        for t, b in bound_recorder.entries:
-            if t in value_t_set:
-                continue
-            entries.append(
-                ProgressLogEntry(
-                    elapsed_sec=t,
-                    obj_value=None,
-                    obj_bound=float(b),
-                )
-            )
-        entries.sort(key=lambda e: e.elapsed_sec)
-        return tuple(entries)
+        return build_progress_log(
+            value_recorder=value_recorder,
+            bound_recorder=bound_recorder,
+        )
 
     @staticmethod
     def _validate_instance(spec: AlgSpec) -> FFcDDWParameters:

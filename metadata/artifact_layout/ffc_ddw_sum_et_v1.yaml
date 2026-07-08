@@ -31,18 +31,24 @@ artifacts:
   # carries the controller call_context prefix
   # (e.g. "1-calc_mcf_lb_and_derive_full_sch_1_mcf_preemptive_sch") so files
   # sort by subroutine-flow step on disk and don't collide across steps.
+  # Nested under a `mcf_lb_phase_schedule/` subdir so the reporter's
+  # `find_artifacts("mcf_lb_phase_schedule", ...)` glob is scoped to its own
+  # files (`progress/mcf_lb_phase_schedule/*.json`) instead of greedily
+  # matching every flat JSON in the `progress/` zone.
   - scope: instance
     zone: progress
     kind: mcf_lb_phase_schedule
-    file_template: "{phase_name}.json"
+    file_template: "mcf_lb_phase_schedule/{phase_name}.json"
   # Compact-JSON phase snapshots from FlipMakespanCpDispatcher. Same shape as
   # `solution_json` (operations[]), so the reporter reuses
   # `_render_gantt_from_solution_json` to produce a `phase_gantt_png` per file.
-  # `phase_name` carries the controller call_context prefix.
+  # `phase_name` carries the controller call_context prefix. Nested under a
+  # `flip_makespan_cp/` subdir (mirrors `mcf_lb_phase_schedule`) so its
+  # `find_artifacts` glob can't be cross-matched by the MCF-LB discovery loop.
   - scope: instance
     zone: progress
     kind: flip_makespan_cp_phase_schedule
-    file_template: "{phase_name}.json"
+    file_template: "flip_makespan_cp/{phase_name}.json"
   # Per-instance phase-metric CSVs emitted by ``calc_mcf_lb_and_derive_full_sch``.
   # One row per (round, label) snapshot in the user-spec order; r2 rows carry
   # blank cells when round 2 did not run. Always emitted (independent of
@@ -80,6 +86,37 @@ artifacts:
     zone: progress
     kind: calc_mcf_lb_r2_summary_yaml
     file_template: "calc_mcf_lb_and_derive_full_sch/r2/r2_summary.yaml"
+
+  # ---- CSR (coarsen_solve_reconstruct) progress artifacts ----
+  # Three intermediate schedule snapshots from the CSR step:
+  #   1_coarse_solver_result — solver output on the coarsened instance (coarsened time-scale).
+  #   2_reconstructed_raw   — inflated starts + original p_ij, before make_semi_active/insert_idle_time.
+  #   3_final               — fully postprocessed schedule (original time-scale).
+  # Compact JSON, operations[] shape — same as mcf_lb_phase_schedule.
+  # Nested under a ``coarsen_solve_reconstruct/`` subdir so the reporter's
+  # greedy ``mcf_lb_phase_schedule`` discovery (which globs ``progress/*.json``
+  # non-recursively) does NOT pick these up and re-render them on the MCF
+  # shared horizon — the CSR Gantts need their own per-snapshot horizons.
+  # The `phase_name` carries the step call_context + 1_/2_/3_ sort key.
+  # Rendered to PNG by the reporter via `phase_gantt_png` (reused — that kind
+  # is already keyed by {phase_name} and shared with mcf_lb/flip_makespan_cp).
+  - scope: instance
+    zone: progress
+    kind: csr_phase_schedule
+    file_template: "coarsen_solve_reconstruct/{phase_name}.json"
+  # CP-SAT objective trajectory captured during the coarsened solve.
+  # Coarsened-scale obj_value/obj_bound — NOT mixed into the shared obj_log
+  # (which is original-scale and used for cross-step RPD/optimality-gap).
+  - scope: instance
+    zone: progress
+    kind: csr_cp_trajectory_json
+    file_template: "{instance_name}_csr_cp_trajectory.json"
+  # UB/LB-vs-time line graph rendered from csr_cp_trajectory_json.
+  # x-axis = solve elapsed seconds; two lines: UB (obj_value) and LB (obj_bound).
+  - scope: instance
+    zone: progress
+    kind: csr_cp_trajectory_png
+    file_template: "{instance_name}_csr_cp_trajectory.png"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
@@ -174,6 +211,12 @@ artifacts:
   - scope: run
     kind: time_p_dashboard
     file_template: "{run_id}_time_p_dashboard.html"
+  - scope: run
+    kind: cp_gap_comparison_csv
+    file_template: "{run_id}_cp_gap_comparison.csv"
+  - scope: run
+    kind: cp_gap_dashboard
+    file_template: "{run_id}_cp_gap_dashboard.html"
   # Run-level multi-scenario subroutine flow comparison chart. Aggregates
   # endpoint/progression frames built from each scenario's obj_log_jsons.
   - scope: run

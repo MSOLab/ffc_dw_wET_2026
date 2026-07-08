@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import bisect
 import logging
-from typing import Iterable, Iterator, Mapping, Sequence
+from typing import Iterable, Iterator, Literal, Mapping, Sequence
 
 JobIdType = str
 StageIdType = str
@@ -1530,6 +1530,88 @@ class FFcSchedule:
 
             self._make_stage_right_justified(stage_id, next_stage_start_map)
 
+    def delay_operations_latest_leq_obj_contrib(
+        self,
+        operation_set: set[OperationType] | frozenset[OperationType],
+        job_2_dw_ub_map: Mapping[JobIdType, int],
+    ) -> None:
+        """Right-justify only the operations in ``operation_set`` to their
+        latest objective-preserving positions; leave every other operation
+        at its incumbent position (treated as a fixed obstacle).
+
+        This is the operation-scoped counterpart of
+        :meth:`delay_job_latest_leq_obj_contrib_all_stages`. The sliding-window
+        CP dispatcher uses it to right-justify **only the RTF (right-time-fixed)
+        operations** of a window, so the reference schedule stays
+        objective-equal to the incumbent (delaying an RTF op within
+        ``<= d_plus`` cannot change any last-stage completion).
+
+        Selection differs from :meth:`make_right_justified`: an empty
+        ``operation_set`` selects **nothing** (no-op), not everything.
+
+        For each selected operation the new end is:
+        - last stage: kept in place if already tardy (``old_end >=
+          d_plus[j]``), otherwise ``min(d_plus[j], machine_successor_start)``;
+        - upstream stage: ``min(next_stage_start[j], machine_successor_start)``.
+
+        Machine order and every duration are preserved; non-selected
+        operations keep their incumbent start/end and act as fixed obstacles.
+
+        Args:
+            operation_set: ``(job_id, stage_id, mc_id)`` triples to delay.
+            job_2_dw_ub_map: ``job_id -> d_plus[j]`` mapping (last-stage cap).
+        """
+        if not self.stages or not operation_set:
+            return
+
+        next_stage_job_2_start_time: Mapping[JobIdType, int] = {}
+        for stage_idx in range(len(self.stages) - 1, -1, -1):
+            stage_id = self.stages[stage_idx]
+            is_last_stage = stage_idx == len(self.stages) - 1
+
+            for mc_id in self.machines_per_stage[stage_id]:
+                seq = self.__stage_2_mc_2_job_tuple_seq[stage_id][mc_id]
+                if not seq:
+                    continue
+
+                machine_next_start: int | None = None
+                new_seq_rev: list[tuple[JobIdType, int, int]] = []
+                for job_id, old_start, old_end in reversed(seq):
+                    if (job_id, stage_id, mc_id) in operation_set:
+                        duration = old_end - old_start
+                        if is_last_stage:
+                            cap = job_2_dw_ub_map[job_id]
+                            if old_end >= cap:
+                                new_start, new_end = old_start, old_end
+                            else:
+                                new_end = (
+                                    cap
+                                    if machine_next_start is None
+                                    else min(cap, machine_next_start)
+                                )
+                                new_start = new_end - duration
+                        else:
+                            cap = next_stage_job_2_start_time[job_id]
+                            new_end = (
+                                cap
+                                if machine_next_start is None
+                                else min(cap, machine_next_start)
+                            )
+                            new_start = new_end - duration
+                    else:
+                        new_start, new_end = old_start, old_end
+                    new_seq_rev.append((job_id, new_start, new_end))
+                    machine_next_start = new_start
+
+                self.__stage_2_mc_2_job_tuple_seq[stage_id][mc_id] = list(
+                    reversed(new_seq_rev)
+                )
+
+            self._rebuild_stage_time_caches(stage_id)
+            next_stage_job_2_start_time = dict(
+                self.__stage_2_job_2_start_time[stage_id]
+            )
+
     def _make_stage_right_justified(
         self,
         stage_id: StageIdType,
@@ -1568,6 +1650,9 @@ class FFcSchedule:
         due_window_map: Mapping[JobIdType, tuple[int, int]],
         ewt_map: Mapping[JobIdType, int],
         twt_map: Mapping[JobIdType, int],
+        *,
+        time_factor: int = 1,
+        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> None:
         """Insert idle time on the last stage to minimise earliness-tardiness.
 
@@ -1578,9 +1663,38 @@ class FFcSchedule:
           starting position is re-evaluated with updated completion times
           (sets S_E/S_D/S_T may have changed, or S_M grew by merging with
           the next block when delta == delta2).
+
+        When ``time_factor > 1``, the schedule lives on a coarse time grid and
+        the due window belongs to the original (fine) scale. The partition
+        (``K * c < lo`` → S_E, ``K * c >= hi`` → S_T, else S_D — the
+        Multiplication form, exact, no rounding) is shared by all three
+        ``idle_mode`` values; only the shift breakpoint Δ₁ (and whether the
+        shift is unconditional) differs:
+
+        - ``"flooring"`` (default): Δ₁ uses **floor** (``lo // K`` /
+          ``hi // K``), overshoot-safe (no early job is pushed past its
+          sub-grid due window into tardiness). When Δ₁ == 0 the shift stalls
+          and ``j`` is decremented to make progress. This is byte-identical
+          to the original (pre-idle_mode) behaviour.
+        - ``"ceiling"``: Δ₁ uses **ceil** (``-(-lo // K)`` / ``-(-hi // K)``).
+          Δ₁ >= 1 always (see plan §1.1), so the shift is unconditional —
+          never stalls.
+        - ``"lookahead"``: computes the floor-based candidate Δ_a and the
+          Δ_a + 1 candidate Δ_b (each capped by delta2), and picks whichever
+          minimises the block's local E/T objective (``block_obj``). Falls
+          back to the flooring stall rule (``j -= 1``) when the chosen shift
+          is 0.
+
+        At ``time_factor == 1``, floor equals ceil and all three modes are
+        byte-identical to the no-factor path — a true no-op for all existing
+        (non-CSR) callers.
+
+        Termination guard: when the chosen shift is 0 (flooring/lookahead),
+        ``j`` is decremented to avoid an infinite loop.
         """
         last_stage_id = self.stages[-1]
         INF = 10**9
+        K = time_factor
 
         for mc_id in self.machines_per_stage[last_stage_id]:
             seq = self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id]
@@ -1607,10 +1721,10 @@ class FFcSchedule:
                 s_e, s_t, s_d = [], [], []
                 for i in range(j, block_end + 1):
                     d_lo, d_hi = due_window_map[job_ids[i]]
-                    c = ends[i]
-                    if c < d_lo:
+                    KC_j = K * ends[i]
+                    if KC_j < d_lo:
                         s_e.append(i)
-                    elif c >= d_hi:
+                    elif KC_j >= d_hi:
                         s_t.append(i)
                     else:
                         s_d.append(i)
@@ -1618,17 +1732,70 @@ class FFcSchedule:
                 sum_e = sum(ewt_map.get(job_ids[i], 1) for i in s_e)
                 sum_t = sum(twt_map.get(job_ids[i], 1) for i in s_t)
 
-                if sum_e > sum_t:
-                    delta1_vals = [due_window_map[job_ids[i]][0] - ends[i] for i in s_e]
-                    delta1_vals += [
-                        due_window_map[job_ids[i]][1] - ends[i] for i in s_d
-                    ]
-                    delta1 = min(delta1_vals) if delta1_vals else INF
-                    delta = min(delta1, delta2)
+                def block_obj(shift: int) -> int:
+                    total = 0
                     for i in range(j, block_end + 1):
-                        starts[i] += delta
-                        ends[i] += delta
-                    # j stays fixed — re-evaluate same position with updated times
+                        d_lo, d_hi = due_window_map[job_ids[i]]
+                        c = ends[i] + shift
+                        ewt = ewt_map.get(job_ids[i], 1)
+                        twt = twt_map.get(job_ids[i], 1)
+                        total += ewt * max(0, d_lo - K * c) + twt * max(0, K * c - d_hi)
+                    return total
+
+                if sum_e > sum_t:
+                    if idle_mode == "flooring":
+                        delta1_vals: list[int] = []
+                        for i in s_e:
+                            d_lo, _ = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_lo // K - ends[i])
+                        for i in s_d:
+                            _, d_hi = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_hi // K - ends[i])
+                        delta1 = min(delta1_vals) if delta1_vals else INF
+                        delta = min(delta1, delta2)
+                        if delta > 0:
+                            for i in range(j, block_end + 1):
+                                starts[i] += delta
+                                ends[i] += delta
+                        else:
+                            j -= 1
+                    elif idle_mode == "ceiling":
+                        delta1_vals = []
+                        for i in s_e:
+                            d_lo, _ = due_window_map[job_ids[i]]
+                            delta1_vals.append(-(-d_lo // K) - ends[i])  # ceil(d_lo/K)
+                        for i in s_d:
+                            _, d_hi = due_window_map[job_ids[i]]
+                            delta1_vals.append(-(-d_hi // K) - ends[i])  # ceil(d_hi/K)
+                        delta1 = min(delta1_vals) if delta1_vals else INF
+                        delta = min(
+                            delta1, delta2
+                        )  # >= 1 always -> unconditional shift
+                        for i in range(j, block_end + 1):
+                            starts[i] += delta
+                            ends[i] += delta
+                    elif idle_mode == "lookahead":
+                        delta1_vals = []
+                        for i in s_e:
+                            d_lo, _ = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_lo // K - ends[i])
+                        for i in s_d:
+                            _, d_hi = due_window_map[job_ids[i]]
+                            delta1_vals.append(d_hi // K - ends[i])
+                        delta1 = min(delta1_vals) if delta1_vals else INF
+                        da = min(delta1, delta2)
+                        db = min(delta1 + 1, delta2)
+                        best = (
+                            db if (db != da and block_obj(db) < block_obj(da)) else da
+                        )
+                        if best > 0:
+                            for i in range(j, block_end + 1):
+                                starts[i] += best
+                                ends[i] += best
+                        else:
+                            j -= 1
+                    else:
+                        raise ValueError(f"unknown idle_mode: {idle_mode!r}")
                 else:
                     j -= 1
 

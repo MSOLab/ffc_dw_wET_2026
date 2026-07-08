@@ -134,7 +134,7 @@ scenarios:
         skip_pf_below_obj: "makespan"
         make_semi_active_after_cp: true
         minimize_makespan_lex: false
-      - method: incremental_pw_cp
+      - method: incremental_sw_cp
         solver_thread_cnt: 8
         batch_size: "m"
         step_size: 1

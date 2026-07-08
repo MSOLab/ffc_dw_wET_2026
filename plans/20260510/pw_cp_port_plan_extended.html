@@ -189,16 +189,16 @@
 
 <nav class="toc">
   <div class="title">PW-CP Port — Gap Analysis</div>
-  <div class="crumb">plans/20260510/pw_cp_port_plan_extended.md</div>
+  <div class="crumb">plans/20260510/sw_cp_port_plan_extended.md</div>
 
   <div class="label">Peers</div>
-  <a class="peer" href="pw_cp_port_plan.html">→ Port plan (main)</a>
-  <a class="peer" href="pw_cp_port_plan_detail.html">→ Detail decisions</a>
+  <a class="peer" href="sw_cp_port_plan.html">→ Port plan (main)</a>
+  <a class="peer" href="sw_cp_port_plan_detail.html">→ Detail decisions</a>
 
   <div class="label">Sections</div>
   <a href="#tldr">TL;DR</a>
   <a href="#a">A. Beyond plan (scope+)</a>
-  <a class="sub" href="#a1">A.1 incremental_pw_cp</a>
+  <a class="sub" href="#a1">A.1 incremental_sw_cp</a>
   <a class="sub" href="#a2">A.2 horizon multiplier</a>
   <a class="sub" href="#a3">A.3 log_search_progress</a>
   <a class="sub" href="#a4">A.4 main.py</a>
@@ -231,25 +231,25 @@
 
 <h1>PW-CP Port — Plan vs. Uncommitted Code Gap Analysis</h1>
 <div class="meta">
-  <span>plans/20260510/pw_cp_port_plan_extended.md</span> ·
-  <span>Companion to <a href="pw_cp_port_plan.html">pw_cp_port_plan</a> + <a href="pw_cp_port_plan_detail.html">_detail</a></span> ·
+  <span>plans/20260510/sw_cp_port_plan_extended.md</span> ·
+  <span>Companion to <a href="sw_cp_port_plan.html">sw_cp_port_plan</a> + <a href="sw_cp_port_plan_detail.html">_detail</a></span> ·
   <span>2026-05-11</span>
 </div>
 
-<p>Companion to <code>pw_cp_port_plan.md</code> and <code>pw_cp_port_plan_detail.md</code>. This
+<p>Companion to <code>sw_cp_port_plan.md</code> and <code>sw_cp_port_plan_detail.md</code>. This
 file captures every point where the current uncommitted change set
 diverges from the two plan documents, as of 2026-05-11. Read together
 with the two plan files; on conflict this file describes <i>what the code
 actually does</i>, while the original plans describe <i>what was intended</i>.</p>
 
-<p>The plan HTMLs (<code>pw_cp_port_plan.html</code>, <code>pw_cp_port_plan_detail.html</code>)
+<p>The plan HTMLs (<code>sw_cp_port_plan.html</code>, <code>sw_cp_port_plan_detail.html</code>)
 are direct renders of the same-named MDs, so the comparison below is
 against the MD bodies.</p>
 
 <section id="tldr" class="tldr">
   <h4>At a glance</h4>
   <ul>
-    <li><b>Scope additions (§A)</b> — three substantive features in code with zero plan coverage: <code>incremental_pw_cp</code> composite step, <code>horizon_makespan_multiplier</code> (touches <code>cpsat_adapter.py</code> outside plan scope), <code>log_search_progress</code> + its debug scenario.</li>
+    <li><b>Scope additions (§A)</b> — three substantive features in code with zero plan coverage: <code>incremental_sw_cp</code> composite step, <code>horizon_makespan_multiplier</code> (touches <code>cpsat_adapter.py</code> outside plan scope), <code>log_search_progress</code> + its debug scenario.</li>
     <li><b>Shape differences (§B)</b> — four minor implementation deltas (field rename + extras, tuple return, helper extraction, public partition builder).</li>
     <li><b>Plan items not done (§C)</b> — one missing TODO entry; one plan instruction (<code>test_algorithm_contracts.py</code> registration) based on an incorrect mental model.</li>
     <li><b>Test coverage hardened (§C.3, applied 2026-05-11)</b> — 4 invariants from §Risks 1 added as tests; 5 → 9 tests, all pass, no algorithm change.</li>
@@ -259,28 +259,28 @@ against the MD bodies.</p>
 
 <h2 id="a">A. Code goes beyond plan (scope additions)</h2>
 
-<h3 id="a1">A.1. <code>incremental_pw_cp</code> composite step <span class="badge danger">no plan coverage</span></h3>
+<h3 id="a1">A.1. <code>incremental_sw_cp</code> composite step <span class="badge danger">no plan coverage</span></h3>
 
 <div class="grid-2">
   <div class="card not-template">
     <h4>What the code does</h4>
-    <p class="path">src/ffc_ddw_sum_et/orchestration/controller.py:2295-2417 (~137 lines)<br>metadata/20260510/incremental_pw_cp.yaml</p>
-    <p>Iterates <code>unfixed_batch_count</code> from <code>unfixed_batch_count_min</code> to <code>unfixed_batch_count_max</code>. Each inner <code>pw_cp</code> call registers its own report; the composite does not register itself. Uses <code>temporarily_extended_context</code> to disambiguate per-iteration step-log paths.</p>
+    <p class="path">src/ffc_ddw_sum_et/orchestration/controller.py:2295-2417 (~137 lines)<br>metadata/20260510/incremental_sw_cp.yaml</p>
+    <p>Iterates <code>unfixed_batch_count</code> from <code>unfixed_batch_count_min</code> to <code>unfixed_batch_count_max</code>. Each inner <code>sw_cp</code> call registers its own report; the composite does not register itself. Uses <code>temporarily_extended_context</code> to disambiguate per-iteration step-log paths.</p>
   </div>
   <div class="card plan">
     <h4>What the plans cover</h4>
-    <p>None. Both plan files describe only the single <code>pw_cp</code> step method.</p>
+    <p>None. Both plan files describe only the single <code>sw_cp</code> step method.</p>
   </div>
 </div>
 
 <div class="grid-2" style="margin-top: 6px;">
   <div class="card">
     <h4>Policy: <code>"always"</code></h4>
-    <p>Single <code>pw_cp</code> pass per <code>count</code>, advancing to <code>count+1</code> regardless of outcome.</p>
+    <p>Single <code>sw_cp</code> pass per <code>count</code>, advancing to <code>count+1</code> regardless of outcome.</p>
   </div>
   <div class="card">
     <h4>Policy: <code>"if_no_improvement"</code></h4>
-    <p>Repeats <code>pw_cp</code> at the current count until a pass leaves the incumbent's weighted E+T unchanged, then advances.</p>
+    <p>Repeats <code>sw_cp</code> at the current count until a pass leaves the incumbent's weighted E+T unchanged, then advances.</p>
   </div>
 </div>
 
@@ -303,9 +303,9 @@ declared scope.</p>
       </marker>
     </defs>
 
-    <!-- Zone A: in-plan-scope (pw_cp package) -->
+    <!-- Zone A: in-plan-scope (sw_cp package) -->
     <rect x="20" y="20" width="340" height="200" fill="#f4faee" stroke="#c2d5b5" rx="6"/>
-    <text x="190" y="40" font-size="12" font-weight="700" text-anchor="middle" fill="#1e7a3a" font-family="system-ui">IN PLAN SCOPE — algorithm/pw_cp/</text>
+    <text x="190" y="40" font-size="12" font-weight="700" text-anchor="middle" fill="#1e7a3a" font-family="system-ui">IN PLAN SCOPE — algorithm/sw_cp/</text>
 
     <rect x="40" y="56" width="300" height="40" fill="#fff" stroke="#2454b8" rx="4"/>
     <text x="190" y="74" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">option.py:51-57, 92-97</text>
@@ -317,7 +317,7 @@ declared scope.</p>
 
     <rect x="40" y="160" width="300" height="40" fill="#fff" stroke="#2454b8" rx="4"/>
     <text x="190" y="178" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">orchestration/controller.py</text>
-    <text x="190" y="194" font-size="10.5" text-anchor="middle" fill="#5e5e58" font-family="system-ui">pw_cp() exposes kwarg</text>
+    <text x="190" y="194" font-size="10.5" text-anchor="middle" fill="#5e5e58" font-family="system-ui">sw_cp() exposes kwarg</text>
 
     <!-- Zone B: outside plan scope -->
     <rect x="400" y="20" width="360" height="120" fill="#fbe2e0" stroke="#e08a82" rx="6"/>
@@ -343,7 +343,7 @@ declared scope.</p>
     <text x="580" y="276" font-size="10" text-anchor="middle" fill="#5e5e58" font-family="system-ui">~lines 1608-1640, new kwarg</text>
 
     <rect x="420" y="292" width="320" height="36" fill="#fff" stroke="#a55a07" rx="4"/>
-    <text x="580" y="310" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">controller.pw_cp()</text>
+    <text x="580" y="310" font-size="11.5" text-anchor="middle" font-family="SF Mono, Menlo, monospace">controller.sw_cp()</text>
     <text x="580" y="324" font-size="10" text-anchor="middle" fill="#5e5e58" font-family="system-ui">new step, new kwarg</text>
 
     <!-- Arrows: dispatcher → cpsat_adapter (solid, breach) -->
@@ -358,10 +358,10 @@ declared scope.</p>
 </figure>
 
 <div class="override-banner">
-  <b>Plan coverage.</b> Plan dispatcher pseudocode (<code>pw_cp_port_plan.md:135-136</code>) explicitly uses
+  <b>Plan coverage.</b> Plan dispatcher pseudocode (<code>sw_cp_port_plan.md:135-136</code>) explicitly uses
   <code>params_for_horizon = BaseModelBuilder.make_params(instance); horizon = sum(params_for_horizon.p.values())</code>.
   The <code>cpsat_adapter.py</code> file is not mentioned anywhere in either plan — its declared scope is
-  <code>algorithm/pw_cp/</code> + <code>controller.py</code> + <code>ffc_schedule.py</code> + <code>main.py</code>.
+  <code>algorithm/sw_cp/</code> + <code>controller.py</code> + <code>ffc_schedule.py</code> + <code>main.py</code>.
 </div>
 
 <h3 id="a3">A.3. <code>log_search_progress</code> / <code>log_search_progress_max_steps</code> <span class="badge danger">no plan coverage</span></h3>
@@ -370,19 +370,19 @@ declared scope.</p>
 
 <div class="decisions">
   <div class="decision">
-    <div class="key">pw_cp/option.py:59-71</div>
+    <div class="key">sw_cp/option.py:59-71</div>
     <div class="val">Two new fields on <code>PwCpOption</code>.</div>
   </div>
   <div class="decision">
-    <div class="key">pw_cp/dispatcher.py:187-202</div>
+    <div class="key">sw_cp/dispatcher.py:187-202</div>
     <div class="val">When enabled, sets <code>solver.parameters.log_search_progress = True</code>, <code>log_to_response = True</code>, <code>log_to_stdout = False</code>, then iterates the captured <code>solver.response_proto.solve_log</code> lines into the logger at INFO. <code>max_steps</code> caps capture to the first N steps to avoid log bloat.</div>
   </div>
   <div class="decision">
-    <div class="key">controller.py — pw_cp</div>
+    <div class="key">controller.py — sw_cp</div>
     <div class="val">Exposes both kwargs.</div>
   </div>
   <div class="decision">
-    <div class="key">metadata/20260510/pw_cp_hint_check.yaml</div>
+    <div class="key">metadata/20260510/sw_cp_hint_check.yaml</div>
     <div class="val">Dedicated scenario (single instance, single-thread, <code>log_search_progress_max_steps: 1</code>).</div>
   </div>
 </div>
@@ -392,10 +392,10 @@ declared scope.</p>
 <p>Code change:</p>
 
 <pre><code>-CONFIG_PATH = Path("metadata/20260509/20260509_mcf_lb_best_neh_cp_best_base_cpsat.yaml")
-+CONFIG_PATH = Path("metadata/20260510/pw_cp_hint_check.yaml")</code></pre>
++CONFIG_PATH = Path("metadata/20260510/sw_cp_hint_check.yaml")</code></pre>
 
 <div class="override-banner">
-  <b>Plan vs. reality.</b> Plan body says "wire the new scenario name into the dispatch table (mirror the existing <code>neh_cp</code> / <code>mcf_lb</code> registration)". The repo has <i>no</i> such dispatch table — <code>main.py</code> uses a single <code>CONFIG_PATH</code> constant and YAML's <code>subroutine_flow.method:</code> resolves via <code>getattr</code> (clarified in <code>pw_cp_port_plan_detail.md</code> §"Naming and placement"). The plan's "registration" mental model is incorrect for this repo; the actual change is a single-line <code>CONFIG_PATH</code> redirect, currently aimed at the hint-check scenario rather than the <code>pw_cp_grid.yaml</code> the plan would have implied.
+  <b>Plan vs. reality.</b> Plan body says "wire the new scenario name into the dispatch table (mirror the existing <code>neh_cp</code> / <code>mcf_lb</code> registration)". The repo has <i>no</i> such dispatch table — <code>main.py</code> uses a single <code>CONFIG_PATH</code> constant and YAML's <code>subroutine_flow.method:</code> resolves via <code>getattr</code> (clarified in <code>sw_cp_port_plan_detail.md</code> §"Naming and placement"). The plan's "registration" mental model is incorrect for this repo; the actual change is a single-line <code>CONFIG_PATH</code> redirect, currently aimed at the hint-check scenario rather than the <code>sw_cp_grid.yaml</code> the plan would have implied.
 </div>
 
 <h2 id="b">B. Code differs from plan in shape (intent preserved)</h2>
@@ -404,11 +404,11 @@ declared scope.</p>
 
 <div class="grid-2">
   <div class="card plan">
-    <h4>Plan-listed fields <span class="badge muted">pw_cp_port_plan.md:232-243</span></h4>
+    <h4>Plan-listed fields <span class="badge muted">sw_cp_port_plan.md:232-243</span></h4>
     <p><code>step, unfixed_batch_start_idx, non_time_fixed_op_count, incumbent_obj_before, cp_obj, incumbent_obj_after, accepted, status, applied_tl_seconds, wall_seconds</code></p>
   </div>
   <div class="card code">
-    <h4>Code-actual fields <span class="badge muted">pw_cp/step_log.py</span></h4>
+    <h4>Code-actual fields <span class="badge muted">sw_cp/step_log.py</span></h4>
     <p><b>Renamed:</b> <code>applied_tl_seconds</code> → <code>TL</code>.</p>
     <p><b>Added:</b> <code>elapsed_time</code>, <code>elapsed_portion</code>, <code>sub_job_count</code>, <code>cp_divergence_count</code>.</p>
   </div>
@@ -422,8 +422,8 @@ declared scope.</p>
     <p>Returns a single <code>FFcSchedule</code>.</p>
   </div>
   <div class="card code">
-    <h4>Code <span class="badge muted">pw_cp/cp_model.py:397-457</span></h4>
-    <p>Returns <code>tuple[FFcSchedule, cp_divergence_count: int]</code>. The diagnostic counter measures how many non-time-fixed ops realised a later end than the CP-promised end (cumulative-vs-greedy machine assignment drift, foreseen in <code>pw_cp_port_plan.md:327</code> Risk 3). Logged at DEBUG per step and persisted in <code>PwCpStepEntry</code>.</p>
+    <h4>Code <span class="badge muted">sw_cp/cp_model.py:397-457</span></h4>
+    <p>Returns <code>tuple[FFcSchedule, cp_divergence_count: int]</code>. The diagnostic counter measures how many non-time-fixed ops realised a later end than the CP-promised end (cumulative-vs-greedy machine assignment drift, foreseen in <code>sw_cp_port_plan.md:327</code> Risk 3). Logged at DEBUG per step and persisted in <code>PwCpStepEntry</code>.</p>
   </div>
 </div>
 
@@ -431,7 +431,7 @@ declared scope.</p>
 
 <div class="grid-2">
   <div class="card plan">
-    <h4>Plan <span class="badge muted">pw_cp_port_plan_detail.md:83-102</span></h4>
+    <h4>Plan <span class="badge muted">sw_cp_port_plan_detail.md:83-102</span></h4>
     <p>Pseudocode inlines the per-stage rewrite of <code>__stage_2_mc_2_job_tuple_seq[i][mc_id]</code>.</p>
   </div>
   <div class="card code">
@@ -449,7 +449,7 @@ declared scope.</p>
   </div>
   <div class="card code">
     <h4>Code</h4>
-    <p>Exports it as <code>build_operation_partition</code> and re-exports from <code>algorithm/pw_cp/__init__.py</code> so tests can call it directly.</p>
+    <p>Exports it as <code>build_operation_partition</code> and re-exports from <code>algorithm/sw_cp/__init__.py</code> so tests can call it directly.</p>
   </div>
 </div>
 
@@ -458,17 +458,17 @@ declared scope.</p>
 <div class="risks">
   <div class="risk sev-low" id="c1">
     <div class="hd"><h4>C.1. <code>docs/TODO.md</code> rename note for <code>mcf_lb_phase_schedules</code></h4><span class="badge ok">low</span></div>
-    <div class="body"><code>pw_cp_port_plan_detail.md</code> §"Per-step Gantt" states "a TODO entry should track renaming the container to a generic <code>phase_schedules</code>". No such entry exists in <code>docs/TODO.md</code>.</div>
+    <div class="body"><code>sw_cp_port_plan_detail.md</code> §"Per-step Gantt" states "a TODO entry should track renaming the container to a generic <code>phase_schedules</code>". No such entry exists in <code>docs/TODO.md</code>.</div>
   </div>
   <div class="risk sev-low" id="c2">
-    <div class="hd"><h4>C.2. <code>pw_cp</code> registration in <code>tests/algorithm/test_algorithm_contracts.py</code></h4><span class="badge muted">moot</span></div>
-    <div class="body">Plan §Verification 2 (<code>pw_cp_port_plan.md:305</code>): "register <code>pw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks run". In practice the file does not have an algorithm registry — it tests the generic <code>AlgSpec</code>/<code>AlgRecord</code> shapes against a toy instance with no algorithm-specific hooks. The plan's mental model of a per-algorithm registration slot is incorrect; no code change is actually required, but the plan instruction stands unresolved in literal terms.</div>
+    <div class="hd"><h4>C.2. <code>sw_cp</code> registration in <code>tests/algorithm/test_algorithm_contracts.py</code></h4><span class="badge muted">moot</span></div>
+    <div class="body">Plan §Verification 2 (<code>sw_cp_port_plan.md:305</code>): "register <code>sw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks run". In practice the file does not have an algorithm registry — it tests the generic <code>AlgSpec</code>/<code>AlgRecord</code> shapes against a toy instance with no algorithm-specific hooks. The plan's mental model of a per-algorithm registration slot is incorrect; no code change is actually required, but the plan instruction stands unresolved in literal terms.</div>
   </div>
 </div>
 
 <h3 id="c3">C.3. Test coverage of right-justification invariants <span class="badge ok">applied 2026-05-11</span></h3>
 
-<p>The plan's §Risks 1 (<code>pw_cp_port_plan.md:323</code>) enumerates the
+<p>The plan's §Risks 1 (<code>sw_cp_port_plan.md:323</code>) enumerates the
 correctness invariants for <code>delay_job_latest_leq_obj_contrib_all_stages</code>
 and lists them as test targets. Pre-existing tests in
 <code>tests/solution/test_ffc_schedule_delay_all_stages.py</code> already
@@ -525,15 +525,15 @@ were added:</p>
 <div class="invariants">
   <h4>In place &amp; matching the plan</h4>
   <ul>
-    <li><code>delay_job_latest_leq_obj_contrib_all_stages</code> (two-pass right-justification, invariants per <code>pw_cp_port_plan_detail.md:104-114</code>).</li>
+    <li><code>delay_job_latest_leq_obj_contrib_all_stages</code> (two-pass right-justification, invariants per <code>sw_cp_port_plan_detail.md:104-114</code>).</li>
     <li><code>PwCpOption</code> base field set (all plan fields present; extras in §A.2, §A.3 above).</li>
     <li>Five-region operation partition + <code>promote_job_contained_ops</code> + <code>validate_and_get_batch_count</code>.</li>
     <li>Partition-aware <code>PwCpModelBuilder</code>: non-time-fixed-only op vars, fixed left/right dummy bars sourced from <code>rj_schedule</code>, cumulative capacity, profile-fix precedence via existing <code>add_stage_ops_precedence_constraints_after_dispatch_from_schedule</code>, partial weighted-E/T objective with <code>et_offset_partial</code> for last-stage time-fixed jobs.</li>
     <li>Dispatcher accept/reject loop with semi-active + idle-time insertion pre-CP and post-merge.</li>
-    <li>Two-phase Gantt via <code>_record_mcf_lb_phase("pw_cp_before" / "_after")</code>.</li>
+    <li>Two-phase Gantt via <code>_record_mcf_lb_phase("sw_cp_before" / "_after")</code>.</li>
     <li><code>_step_log.yaml</code> artifact via <code>try_get_file_path_for_subroutine</code>.</li>
     <li>All six plan-mandated test files plus <code>tests/solution/test_ffc_schedule_delay_all_stages.py</code>.</li>
-    <li><code>pw_cp_grid.yaml</code> 4-scenario grid (u∈{2,3} × pf∈{PF0,PF1}).</li>
+    <li><code>sw_cp_grid.yaml</code> 4-scenario grid (u∈{2,3} × pf∈{PF0,PF1}).</li>
   </ul>
 </div>
 
@@ -546,7 +546,7 @@ were added:</p>
 <div class="decisions">
   <div class="decision">
     <div class="key">1. Add subsection</div>
-    <div class="val">Add §"Composite step: <code>incremental_pw_cp</code>" to <code>pw_cp_port_plan_detail.md</code> describing the two policies and the per-iteration <code>temporarily_extended_context</code> tagging.</div>
+    <div class="val">Add §"Composite step: <code>incremental_sw_cp</code>" to <code>sw_cp_port_plan_detail.md</code> describing the two policies and the per-iteration <code>temporarily_extended_context</code> tagging.</div>
   </div>
   <div class="decision">
     <div class="key">2. Replace horizon formula</div>
@@ -554,15 +554,15 @@ were added:</p>
   </div>
   <div class="decision">
     <div class="key">3. Document logging knobs</div>
-    <div class="val">Document <code>log_search_progress</code> / <code>log_search_progress_max_steps</code> on <code>PwCpOption</code> and the <code>pw_cp_hint_check.yaml</code> debug scenario.</div>
+    <div class="val">Document <code>log_search_progress</code> / <code>log_search_progress_max_steps</code> on <code>PwCpOption</code> and the <code>sw_cp_hint_check.yaml</code> debug scenario.</div>
   </div>
   <div class="decision">
     <div class="key">4. Fix "dispatch table" wording</div>
-    <div class="val">Correct <code>pw_cp_port_plan.md</code> §"File layout" to match <code>pw_cp_port_plan_detail.md</code> §"Naming and placement" (YAML <code>method:</code> → <code>getattr</code> on controller).</div>
+    <div class="val">Correct <code>sw_cp_port_plan.md</code> §"File layout" to match <code>sw_cp_port_plan_detail.md</code> §"Naming and placement" (YAML <code>method:</code> → <code>getattr</code> on controller).</div>
   </div>
   <div class="decision">
     <div class="key">5. Update step-entry fields</div>
-    <div class="val">Update <code>PwCpStepEntry</code> field list in <code>pw_cp_port_plan.md</code> to match <code>pw_cp/step_log.py</code> (rename <code>applied_tl_seconds</code> → <code>TL</code>; add <code>elapsed_time</code>, <code>elapsed_portion</code>, <code>sub_job_count</code>, <code>cp_divergence_count</code>).</div>
+    <div class="val">Update <code>PwCpStepEntry</code> field list in <code>sw_cp_port_plan.md</code> to match <code>sw_cp/step_log.py</code> (rename <code>applied_tl_seconds</code> → <code>TL</code>; add <code>elapsed_time</code>, <code>elapsed_portion</code>, <code>sub_job_count</code>, <code>cp_divergence_count</code>).</div>
   </div>
   <div class="decision">
     <div class="key">6. Note tuple return</div>
@@ -585,21 +585,21 @@ revert / extraction to a follow-up plan:</p>
 
 <div class="decisions">
   <div class="decision deferred">
-    <div class="key">§A.1 incremental_pw_cp</div>
+    <div class="key">§A.1 incremental_sw_cp</div>
     <div class="val">Extract to a follow-up plan; ~137 controller lines + 1 YAML.</div>
   </div>
   <div class="decision deferred">
     <div class="key">§A.2 horizon multiplier</div>
-    <div class="val"><b>At minimum</b> the <code>cpsat_adapter.py</code> portion, since it touches a file outside the plan's declared scope. The <code>pw_cp</code> dispatcher portion is debatable but currently undocumented.</div>
+    <div class="val"><b>At minimum</b> the <code>cpsat_adapter.py</code> portion, since it touches a file outside the plan's declared scope. The <code>sw_cp</code> dispatcher portion is debatable but currently undocumented.</div>
   </div>
   <div class="decision deferred">
     <div class="key">§A.3 log_search_progress</div>
-    <div class="val">Two option fields + dispatcher log capture + <code>pw_cp_hint_check.yaml</code>. Cleanly isolated and easy to revert.</div>
+    <div class="val">Two option fields + dispatcher log capture + <code>sw_cp_hint_check.yaml</code>. Cleanly isolated and easy to revert.</div>
   </div>
 </div>
 
 <hr>
-<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/pw_cp_port_plan_extended.md</code> (markdown remains authoritative; this HTML is a spatial view).</p>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/sw_cp_port_plan_extended.md</code> (markdown remains authoritative; this HTML is a spatial view).</p>
 
 </main>
 </div>

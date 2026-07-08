@@ -1,3 +1,4 @@
+# isort: skip_file
 # Import order matters here.
 #
 # Several modules in ``parameters/`` and ``algorithm/`` reach back into this

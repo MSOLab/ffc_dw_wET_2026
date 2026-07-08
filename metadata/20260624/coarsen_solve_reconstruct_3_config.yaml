@@ -1,0 +1,195 @@
+# coarsen_solve_reconstruct seed-dispatch comparison config.
+#
+# Sweeps coarsen factor {64, 32, 16, 8, 4, 2, 1} crossed with the warm-start
+# seed strategy, holding all other knobs fixed so the seed effect is isolated:
+#   csr<factor>_mixed     — seed_dispatch=mixed (best np-list candidate by wET).
+#   csr<factor>_job_wise  — seed_dispatch=job_wise (single job-wise dispatch).
+# factor=1 is the no-coarsen (full resolution) baseline.
+#
+# draw_gantt / emit_phase_schedules / draw_cp_trajectory are enabled so each
+# CSR run emits the 3-Gantt artifact and the CP UB/LB trajectory line graph.
+#
+# See plans/20260624/coarsen_solve_reconstruct_dispatch_hint.md.
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260624
+
+instance_worker_cnt: 12
+
+draw_gantt: true
+painter_thread_cnt: 96
+
+scenarios:
+  - name: csr64_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr64_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 64
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr32_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr32_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 32
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr16_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr16_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 16
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr8_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr8_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 8
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr4_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr4_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 4
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr2_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr2_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 2
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr1_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr1_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 1
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr64_job_wise
+    timelimit: "0.09nc"
+    output_subdir: csr64_job_wise
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 64
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr32_job_wise
+    timelimit: "0.09nc"
+    output_subdir: csr32_job_wise
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 32
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr16_job_wise
+    timelimit: "0.09nc"
+    output_subdir: csr16_job_wise
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 16
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr8_job_wise
+    timelimit: "0.09nc"
+    output_subdir: csr8_job_wise
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 8
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr4_job_wise
+    timelimit: "0.09nc"
+    output_subdir: csr4_job_wise
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 4
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr2_job_wise
+    timelimit: "0.09nc"
+    output_subdir: csr2_job_wise
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 2
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true
+
+  - name: csr1_job_wise
+    timelimit: "0.09nc"
+    output_subdir: csr1_job_wise
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: job_wise
+        factor: 1
+        timelimit: "0.0045nc"
+        solver_thread_cnt: 8
+        emit_phase_schedules: true
+        draw_cp_trajectory: true

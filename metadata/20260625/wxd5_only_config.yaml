@@ -1,0 +1,25 @@
+# wxd5-only run: dispatch_sequence_full_sweep_config 와 동일 설정(large 전체,
+#   0.09nc timelimit)으로 sd_wxd5 / rd_wxd5 두 scenario 만 실행한다.
+#   기존 full sweep run(output/20260625/20260625T002044_922234)의
+#   sd_wxd2~4 / rd_wxd2~4 RPDf 와 동일 조건에서 비교하기 위함.
+#   - wxd5: wxd2 골격 + d̄ = max(중점평균, min_j r_j + Σ_j p_last / (m_last·2))
+# See plans/20260625/wxd5_dispatch.md
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+output_dir: output/20260625
+instance_worker_cnt: 96
+draw_gantt: false
+painter_thread_cnt: 96
+
+scenarios:
+  - name: sd_wxd5
+    timelimit: "0.09nc"
+    output_subdir: sd_wxd5
+    subroutine_flow: [{ method: initialize_by_simple_dispatch, sequence: wxd5 }]
+  - name: rd_wxd5
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd5
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd5 }]

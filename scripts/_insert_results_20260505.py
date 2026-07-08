@@ -14,24 +14,42 @@ DOC = REPO / "docs" / "reviews" / "20260505_weekly_experiments.md"
 AGG = REPO / "analysis" / "results_index_20260505_agg.json"
 
 RUN_TS = {
-    1: "20260429T233115_006438", 2: "20260430T110852_547352",
-    3: "20260501T162650_028232", 4: "20260502T002742_596323",
-    5: "20260502T025451_273045", 6: "20260502T032313_670203",
-    7: "20260502T131546_402074", 8: "20260502T133412_116270",
-    9: "20260502T145150_590013", 10: "20260502T165007_640181",
-    11: "20260502T184531_518809", 12: "20260502T193831_290902",
-    13: "20260503T022442_340817", 14: "20260503T170549_147724",
-    15: "20260503T170658_834025", 16: "20260503T181635_000784",
-    17: "20260503T191906_135722", 18: "20260503T215803_006004",
-    19: "20260503T230126_683476", 20: "20260504T003732_433340",
-    21: "20260504T004917_785558", 22: "20260504T010002_965646",
-    23: "20260504T030753_945843", 24: "20260504T031049_337896",
-    25: "20260504T031422_467379", 26: "20260504T032002_269531",
-    27: "20260504T032732_697925", 28: "20260504T082749_666067",
-    29: "20260504T093058_016949", 30: "20260504T135233_268173",
-    31: "20260504T142221_504713", 32: "20260505T014813_804225",
-    33: "20260505T025805_689859", 34: "20260505T102202_582058",
-    35: "20260505T191440_984385", 36: "20260505T192009_887337",
+    1: "20260429T233115_006438",
+    2: "20260430T110852_547352",
+    3: "20260501T162650_028232",
+    4: "20260502T002742_596323",
+    5: "20260502T025451_273045",
+    6: "20260502T032313_670203",
+    7: "20260502T131546_402074",
+    8: "20260502T133412_116270",
+    9: "20260502T145150_590013",
+    10: "20260502T165007_640181",
+    11: "20260502T184531_518809",
+    12: "20260502T193831_290902",
+    13: "20260503T022442_340817",
+    14: "20260503T170549_147724",
+    15: "20260503T170658_834025",
+    16: "20260503T181635_000784",
+    17: "20260503T191906_135722",
+    18: "20260503T215803_006004",
+    19: "20260503T230126_683476",
+    20: "20260504T003732_433340",
+    21: "20260504T004917_785558",
+    22: "20260504T010002_965646",
+    23: "20260504T030753_945843",
+    24: "20260504T031049_337896",
+    25: "20260504T031422_467379",
+    26: "20260504T032002_269531",
+    27: "20260504T032732_697925",
+    28: "20260504T082749_666067",
+    29: "20260504T093058_016949",
+    30: "20260504T135233_268173",
+    31: "20260504T142221_504713",
+    32: "20260505T014813_804225",
+    33: "20260505T025805_689859",
+    34: "20260505T102202_582058",
+    35: "20260505T191440_984385",
+    36: "20260505T192009_887337",
 }
 
 
@@ -42,13 +60,15 @@ def fmt_int(x):
 def per_run_table(records: list[dict]) -> str:
     metrics = {r["metric"] for r in records}
     if metrics == {"mcfLb (no incumbent)"}:
-        rows = [f"  | {r['scen']} | {fmt_int(r['mean_value'])} | {r['n']} |" for r in records]
+        rows = [
+            f"  | {r['scen']} | {fmt_int(r['mean_value'])} | {r['n']} |"
+            for r in records
+        ]
         return (
             "- **결과** *(no incumbent — algorithm did not register a full schedule;"
             " only `mcfLb` populated)*:\n\n"
             "  | scenarioName | mean mcfLb | n |\n"
-            "  |---|---|---|\n"
-            + "\n".join(rows)
+            "  |---|---|---|\n" + "\n".join(rows)
         )
     rows = []
     for r in records:
@@ -62,8 +82,7 @@ def per_run_table(records: list[dict]) -> str:
     return (
         "- **결과**:\n\n"
         "  | scenarioName | mean RPDf | mean bestObj | n |\n"
-        "  |---|---|---|---|\n"
-        + "\n".join(rows)
+        "  |---|---|---|---|\n" + "\n".join(rows)
     )
 
 
@@ -86,7 +105,9 @@ def build_summary(records: list[dict]) -> str:
     ]
     for i, r in enumerate(with_obj[:20], 1):
         ts = RUN_TS.get(r["run"], "?")
-        lines.append(f"| {i} | {r['run']} | `{ts}` | `{r['scen']}` | {r['mean_RPDf']:.4f} | {fmt_int(r['mean_value'])} |")
+        lines.append(
+            f"| {i} | {r['run']} | `{ts}` | `{r['scen']}` | {r['mean_RPDf']:.4f} | {fmt_int(r['mean_value'])} |"
+        )
 
     lines += [
         "",
@@ -96,7 +117,9 @@ def build_summary(records: list[dict]) -> str:
         "|---|---|---|---|---|",
     ]
     for i, r in enumerate(with_obj[-10:][::-1], 1):
-        lines.append(f"| {i} | {r['run']} | `{r['scen']}` | {r['mean_RPDf']:.4f} | {fmt_int(r['mean_value'])} |")
+        lines.append(
+            f"| {i} | {r['run']} | `{r['scen']}` | {r['mean_RPDf']:.4f} | {fmt_int(r['mean_value'])} |"
+        )
 
     lines += [
         "",
@@ -111,7 +134,9 @@ def build_summary(records: list[dict]) -> str:
             by_run[r["run"]] = r
     for run in sorted(by_run.keys()):
         r = by_run[run]
-        lines.append(f"| {run} | `{r['scen']}` | {r['mean_RPDf']:.4f} | {fmt_int(r['mean_value'])} |")
+        lines.append(
+            f"| {run} | `{r['scen']}` | {r['mean_RPDf']:.4f} | {fmt_int(r['mean_value'])} |"
+        )
 
     if no_inc:
         lines += [
@@ -130,7 +155,7 @@ def build_summary(records: list[dict]) -> str:
         "### 주요 관찰",
         "",
         f"- **최우수**: RUN {best['run']} `{best['scen']}` — mean RPDf {best['mean_RPDf']:.4f} (전주 best-of NEH-CP+MCF-LB 직렬 재현).",
-        f"- **이번 주 알고리즘 라인의 최우수**: RUN {best_new['run']} `{best_new['scen']}` — mean RPDf {best_new['mean_RPDf']:.4f}. 전주 `best` 대비 약 +{best_new['mean_RPDf']-best['mean_RPDf']:.2f} RPDf — 신규 `apply_lb_by_mcf → heuristic_last_stage → build_full_sch + adjust_*` 라인은 아직 NEH-CP+MCF-LB 직렬에 못 미침.",
+        f"- **이번 주 알고리즘 라인의 최우수**: RUN {best_new['run']} `{best_new['scen']}` — mean RPDf {best_new['mean_RPDf']:.4f}. 전주 `best` 대비 약 +{best_new['mean_RPDf'] - best['mean_RPDf']:.2f} RPDf — 신규 `apply_lb_by_mcf → heuristic_last_stage → build_full_sch + adjust_*` 라인은 아직 NEH-CP+MCF-LB 직렬에 못 미침.",
         "- **Last-stage-only 단독 vs full-schedule 격차**: last-stage-only obj는 80.2%(1155/1440) 인스턴스에서 BKS 이김 (algorithms doc Q1 참고), full-schedule wET는 ~14% 인스턴스로 감소 — reverse-dispatch 단계의 손실이 알고리즘의 주된 약점.",
         "- **`mcf_lb_then_neh_cp` 통합 step (RUN 3, RPDf 0.7330)**: 분리된 직렬 (RUN 1·2 `best`, RPDf 0.27)보다 훨씬 나쁨 — controller-level 통합이 NEH-CP에 넘기는 sequence/seed 정보를 일부 잃은 것으로 추정.",
         "- **p_increment 효과** (RUNs 13/14/16): p_inc 0→8 까지는 RPDf 미세 개선, 16부터 turnaround, 64에서 RPDf 1.06 폭락.",

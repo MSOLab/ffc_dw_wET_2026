@@ -33,7 +33,9 @@ def main() -> int:
     n_runs = df["runId"].nunique()
     n_instances = df["instanceName"].nunique()
     n_scenarios = df["scenarioName"].nunique()
-    print(f"runs={n_runs}  instances={n_instances}  scenarios={n_scenarios}  rows={len(df)}")
+    print(
+        f"runs={n_runs}  instances={n_instances}  scenarios={n_scenarios}  rows={len(df)}"
+    )
     print(f"expected rows = {n_runs * n_instances * n_scenarios}")
 
     group_cols = ["instanceName", "scenarioName"]

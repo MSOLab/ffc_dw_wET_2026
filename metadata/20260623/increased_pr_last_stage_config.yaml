@@ -1,0 +1,57 @@
+# MCF-LB pipeline pinned to the "increased_pr" round-2 last-stage policy.
+#
+# Single scenario that runs ``calc_mcf_lb_and_derive_full_sch`` with
+# ``last_stage_rebuild_config: "increased_pr"`` — round 2 generates the
+# last-stage schedule with the *increased* p/r, then rebuilds it back to the
+# original last-stage processing times (completion times fixed, inter-op gaps
+# appear) before reverse-dispatch. This is the historical / default behaviour
+# (the "modified" solution in earlier discussion). A base CP-SAT solve follows
+# so the run produces a complete, validated incumbent.
+#
+# See plans/20260623/last_stage_rebuild_config.md.
+
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [0]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260623
+
+instance_worker_cnt: 96
+
+draw_gantt: true
+painter_thread_cnt: 16
+
+scenarios:
+  - name: mcf_lb_increased_pr
+    timelimit: "0.09nc"
+    output_subdir: mcf_lb_increased_pr
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        emit_phase_schedules: true
+        draw_pmtn_sch_heatmap: true
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        last_stage_rebuild_config: "increased_pr"
+        proceed_r2_when_nonpositive_cmax: true
+  - name: mcf_lb_original_pr
+    timelimit: "0.09nc"
+    output_subdir: mcf_lb_original_pr
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        emit_phase_schedules: true
+        draw_pmtn_sch_heatmap: true
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        last_stage_rebuild_config: "original_pr"
+        proceed_r2_when_nonpositive_cmax: true

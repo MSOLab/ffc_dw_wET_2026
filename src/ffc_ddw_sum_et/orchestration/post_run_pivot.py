@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from routix.io import ArtifactLayout
@@ -50,6 +52,256 @@ _INSTANCE_META_COLUMNS: tuple[str, ...] = (
     "W",
 )
 
+CP_GAP_COMPARISON_COLUMNS: tuple[str, ...] = (
+    "insIndex",
+    "scenarioName",
+    "factor",
+    "n",
+    "c",
+    "totalMcCount",
+    "T",
+    "R",
+    "W",
+    "cp_ub",
+    "cp_lb",
+    "lb_gap",
+    "solver_gap",
+    "cp_elapsed",
+)
+
+
+def _merge_instance_meta(
+    df: pd.DataFrame,
+    hybrid_match_csv: Path,
+    bks_table_csv: Path,
+    *,
+    how: str = "left",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Merge df (must contain instanceName) with insIndex + instance metadata + BKS_data.
+
+    Returns (meta_df, bks_df) where:
+      - meta_df has instanceName + insIndex + _INSTANCE_META_COLUMNS
+      - bks_df has insIndex + BKS_data
+
+    ``how`` controls the join strategy: ``"left"`` keeps all rows (metadata
+    columns will be NaN for unmatched rows); ``"inner"`` drops unmatched rows.
+    """
+    match = pd.read_csv(hybrid_match_csv, dtype={"insIndex": str})
+    match["instanceName"] = match["ffc_ddw_sum_et_filename"].str.removesuffix(".txt")
+    match = match[["instanceName", "insIndex"]]
+
+    bks = pd.read_csv(bks_table_csv, dtype={"insIndex": str})
+    bks = bks[["insIndex", *_INSTANCE_META_COLUMNS, "BKS_data"]]
+
+    meta_df = df.merge(match, on="instanceName", how=how)
+    bks_df = meta_df.merge(bks, on="insIndex", how=how)
+    return meta_df, bks_df
+
+
+def read_csr_cp_trajectory_endpoint(
+    path: Path,
+) -> tuple[float | None, float | None, float | None]:
+    """Read the final UB, LB, and elapsed from a CSR CP trajectory JSON.
+
+    ``ub`` = last non-null value in ``obj_value`` (None if empty/all-null).
+    ``lb`` = last value in ``obj_bound`` (None if empty).
+    ``elapsed`` = last value in ``elapsed_sec`` (None if missing).
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf8"))
+    except (OSError, json.JSONDecodeError):
+        return (None, None, None)
+
+    obj_value: list[Any] = data.get("obj_value", []) or []
+    obj_bound: list[Any] = data.get("obj_bound", []) or []
+    elapsed_sec: list[Any] = data.get("elapsed_sec", []) or []
+
+    ub = None
+    for v in obj_value:
+        if v is not None:
+            ub = v
+    lb = obj_bound[-1] if obj_bound else None
+    elapsed = elapsed_sec[-1] if elapsed_sec else None
+
+    return (ub, lb, elapsed)
+
+
+def compute_cp_gaps(
+    ub: float | None, lb: float | None
+) -> tuple[float | None, float | None]:
+    """Compute lb_gap and solver_gap from coarsened UB/LB.
+
+    Rules:
+      - ub is None → (None, None)  (no-solution trajectory)
+      - lb is None → (None, None)  (no bound logged; gaps undefined)
+      - ub == 0 and lb == 0 → (0.0, 0.0)
+      - lb != 0 → lb_gap = (ub-lb)/lb
+      - lb == 0 and ub > 0 → lb_gap is None (blank)
+      - solver_gap = (ub-lb)/ub when ub != 0, else None
+    """
+    if ub is None or lb is None:
+        return (None, None)
+    if ub == 0 and lb == 0:
+        return (0.0, 0.0)
+    lb_gap = (ub - lb) / lb if lb != 0 else None
+    solver_gap = (ub - lb) / ub if ub != 0 else None
+    return (lb_gap, solver_gap)
+
+
+def collect_cp_gap_rows(
+    run_root: Path,
+    *,
+    init_filter: str | None = "v3",
+) -> pd.DataFrame:
+    """Scan run_root for CSR CP trajectory JSONs and return long-format rows.
+
+    Glob pattern: ``*/*/progress/*_csr_cp_trajectory.json``.
+    Path parts: scenario = parts[-4], instance = parts[-3].
+
+    ``init_filter`` selects scenarios ending with ``_{init_filter}``
+    (default ``"v3"``; ``None`` accepts all).
+
+    Returns a DataFrame with columns:
+      instanceName, scenarioName, cp_ub, cp_lb, cp_elapsed, factor, init
+    """
+    import glob as glob_mod
+
+    pattern = str(run_root / "*" / "*" / "progress" / "*_csr_cp_trajectory.json")
+    rows: list[dict[str, Any]] = []
+
+    for traj_path_str in sorted(glob_mod.glob(pattern)):
+        traj_path = Path(traj_path_str)
+        parts = traj_path.parts
+        if len(parts) < 6:
+            continue
+        scenario = parts[-4]
+        instance = parts[-3]
+
+        if init_filter is not None:
+            if not scenario.endswith(f"_{init_filter}"):
+                continue
+
+        ub, lb, elapsed = read_csr_cp_trajectory_endpoint(traj_path)
+
+        # Parse factor from scenario name (e.g. "csr16_v3" → factor=16, init="v3")
+        m = re.search(r"csr(\d+)", scenario)
+        factor = int(m.group(1)) if m else None
+        init = scenario.rsplit("_", 1)[-1] if "_" in scenario else "unknown"
+
+        rows.append(
+            {
+                "instanceName": instance,
+                "scenarioName": scenario,
+                "cp_ub": ub,
+                "cp_lb": lb,
+                "cp_elapsed": elapsed,
+                "factor": factor,
+                "init": init,
+            }
+        )
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "instanceName",
+            "scenarioName",
+            "cp_ub",
+            "cp_lb",
+            "cp_elapsed",
+            "factor",
+            "init",
+        ],
+    )
+
+
+def build_cp_gap_comparison_df(
+    run_root: Path,
+    hybrid_match_csv: Path,
+    bks_table_csv: Path,
+    *,
+    init_filter: str | None = "v3",
+) -> pd.DataFrame:
+    """Build the CSR CP gap comparison DataFrame.
+
+    Joins trajectory endpoints with instance metadata via left merges,
+    computes gap columns, and returns a DataFrame sorted by (insIndex, scenarioName).
+
+    Unlike ``build_rpdf_comparison_df``, unmatched rows are kept (left join)
+    so that CP gap is reported even when benchmark metadata is missing.
+    """
+    traj_df = collect_cp_gap_rows(run_root, init_filter=init_filter)
+
+    if traj_df.empty:
+        return pd.DataFrame(columns=[*CP_GAP_COMPARISON_COLUMNS, "BKS_data"])
+
+    # Compute gap columns on traj_df first, then merge metadata so the whole
+    # result lives on a single frame. This avoids cross-frame column assignment
+    # (which would silently misalign if a left merge expanded rows, e.g. a
+    # duplicate instanceName in the hybrid match).
+    gaps = traj_df.apply(
+        lambda row: pd.Series(
+            compute_cp_gaps(row["cp_ub"], row["cp_lb"]),
+            index=["lb_gap", "solver_gap"],
+        ),
+        axis=1,
+    )
+    traj_df = pd.concat([traj_df, gaps], axis=1)
+
+    _, merged = _merge_instance_meta(traj_df, hybrid_match_csv, bks_table_csv)
+
+    return (
+        merged[list(CP_GAP_COMPARISON_COLUMNS) + ["BKS_data"]]
+        .sort_values(["insIndex", "scenarioName"])
+        .reset_index(drop=True)
+    )
+
+
+def write_cp_gap_artifacts(
+    run_root: Path,
+    layout: ArtifactLayout,
+    hybrid_match_csv: Path,
+    bks_table_csv: Path,
+    *,
+    init_filter: str | None = "v3",
+) -> None:
+    """Build the CP gap comparison CSV and PivotTable.js dashboard.
+
+    Skips silently (writes nothing) when no CSR CP trajectory rows are found,
+    e.g. on a non-CSR run. Instance metadata is left-merged, so unmatched
+    instances keep their CP gap rows with empty metadata columns rather than
+    being dropped.
+    """
+    comp_df = build_cp_gap_comparison_df(
+        run_root, hybrid_match_csv, bks_table_csv, init_filter=init_filter
+    )
+
+    if comp_df.empty:
+        logger.info("CP gap: no trajectory rows found; skipping artifacts.")
+        return
+
+    comp_path = layout.artifact_path("cp_gap_comparison_csv")
+    comp_df.to_csv(comp_path, index=False)
+    logger.info("Wrote %s (%d rows)", comp_path, len(comp_df))
+
+    dashboard_path = layout.artifact_path("cp_gap_dashboard")
+    # Default to solver_gap: it is bounded to [0, 1] so the heatmap reads
+    # cleanly. lb_gap = (UB-LB)/LB can explode when LB is small, so it is
+    # kept as a selectable value rather than the default.
+    initial_state = {
+        "rows": ["scenarioName", "R"],
+        "cols": ["T"],
+        "vals": ["solver_gap"],
+        "aggregatorName": "Average",
+        "rendererName": "Heatmap",
+    }
+    write_pivot_html(
+        comp_df,
+        dashboard_path,
+        initial_state=initial_state,
+        aggregators_js=PERCENT_AGGREGATORS_JS,
+        title="CP gap Pivot",
+    )
+
 
 def build_rpdf_comparison_df(
     summary_df: pd.DataFrame,
@@ -70,16 +322,8 @@ def build_rpdf_comparison_df(
     if "error" in df.columns:
         df = df[df["error"].isna() | (df["error"] == "")]
 
-    match = pd.read_csv(hybrid_match_csv, dtype={"insIndex": str})
-    match["instanceName"] = match["ffc_ddw_sum_et_filename"].str.removesuffix(".txt")
-    match = match[["instanceName", "insIndex"]]
+    _, merged = _merge_instance_meta(df, hybrid_match_csv, bks_table_csv, how="inner")
 
-    bks = pd.read_csv(bks_table_csv, dtype={"insIndex": str})
-    bks = bks[["insIndex", *_INSTANCE_META_COLUMNS, "BKS_data"]]
-
-    merged = df.merge(match, on="instanceName", how="inner").merge(
-        bks, on="insIndex", how="inner"
-    )
     merged["RPDf_BKS_data"] = [
         rpd_f(b, k) for b, k in zip(merged["bestObj"], merged["BKS_data"], strict=True)
     ]

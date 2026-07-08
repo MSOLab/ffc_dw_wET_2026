@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plan: Port pw_cp into ffc_ddw_sum_et</title>
+<title>Plan: Port sw_cp into ffc_ddw_sum_et</title>
 <style>
   :root {
     --bg: #fafaf7;
@@ -171,7 +171,7 @@
 <nav class="toc">
   <div class="title">PW-CP Port Plan</div>
   <div class="crumb">plans/20260510/</div>
-  <a href="pw_cp_port_plan_detail.html" style="color: var(--accent); font-size: 12.5px;">→ Detail companion</a>
+  <a href="sw_cp_port_plan_detail.html" style="color: var(--accent); font-size: 12.5px;">→ Detail companion</a>
 
   <div class="label">Sections</div>
   <a href="#tldr">TL;DR</a>
@@ -199,10 +199,10 @@
 
 <main>
 
-<h1>Plan: Port <code>pw_cp</code> into <code>ffc_ddw_sum_et</code></h1>
+<h1>Plan: Port <code>sw_cp</code> into <code>ffc_ddw_sum_et</code></h1>
 <div class="meta">
-  <span>plans/20260510/pw_cp_port_plan.md</span> ·
-  <span>Companion: <a class="peer" href="pw_cp_port_plan_detail.html">pw_cp_port_plan_detail.html</a></span> ·
+  <span>plans/20260510/sw_cp_port_plan.md</span> ·
+  <span>Companion: <a class="peer" href="sw_cp_port_plan_detail.html">sw_cp_port_plan_detail.html</a></span> ·
   <span>Branch: <code>20260509_cp_lns</code></span>
 </div>
 
@@ -210,9 +210,9 @@
   <h4>At a glance</h4>
   <ul>
     <li>Port a <b>sliding-window CP refiner</b> from hybridflowshop into ffc_ddw_sum_et, refining an FFcDDW incumbent by re-solving an <em>unfixed</em> window + profile-fixed buffer batch-by-batch, directly minimising weighted E/T over the sub-window.</li>
-    <li>Structural template: <code>hybridflowshop/.../pw_cp.py</code> (5-region, cumulative + dummy bars). <b>Not</b> the flowshop_tardiness variant (incompatible with parallel machines per stage).</li>
+    <li>Structural template: <code>hybridflowshop/.../sw_cp.py</code> (5-region, cumulative + dummy bars). <b>Not</b> the flowshop_tardiness variant (incompatible with parallel machines per stage).</li>
     <li>Load-bearing solution-layer addition: <code>FFcSchedule.delay_job_latest_leq_obj_contrib_all_stages</code> — objective-preserving right-justification extended to every stage.</li>
-    <li>One algorithm package <code>algorithm/pw_cp/</code>, one new subroutine method <code>pw_cp</code> on the controller, one experiment YAML, two-phase Gantt + per-step CSV.</li>
+    <li>One algorithm package <code>algorithm/sw_cp/</code>, one new subroutine method <code>sw_cp</code> on the controller, one experiment YAML, two-phase Gantt + per-step CSV.</li>
   </ul>
 </section>
 
@@ -223,12 +223,12 @@
 <div class="grid-2">
   <div class="card not-template">
     <h4>✗ Not the template <span class="badge warn">single-permutation</span></h4>
-    <div class="path">/home/hjt/code/flowshop-tardiness/<br>flowshop_tardiness/controller/pw_cp.py</div>
+    <div class="path">/home/hjt/code/flowshop-tardiness/<br>flowshop_tardiness/controller/sw_cp.py</div>
     <p>Permutation flowshop, indirect-precedence CP. Assumes one permutation per stage — <b>incompatible</b> with parallel machines per stage.</p>
   </div>
   <div class="card template">
     <h4>✓ Structural template <span class="badge ok">5-region, cumulative</span></h4>
-    <div class="path">/home/hjt/code/hybridflowshop/<br>hybridflowshop/controller/pw_cp.py (<code>PwCpConstructor</code>)</div>
+    <div class="path">/home/hjt/code/hybridflowshop/<br>hybridflowshop/controller/sw_cp.py (<code>PwCpConstructor</code>)</div>
     <p>Hybrid flowshop, 5-region sliding window (ltf | lpf | unfixed | rpf | rtf), cumulative + dummy-bar CP. Mirror this.</p>
   </div>
 </div>
@@ -283,7 +283,7 @@
 <div class="decisions">
   <div class="decision">
     <div class="key">Algorithm name</div>
-    <div class="val"><code>pw_cp</code> (single variant)</div>
+    <div class="val"><code>sw_cp</code> (single variant)</div>
   </div>
   <div class="decision">
     <div class="key">Non-final batch obj</div>
@@ -312,7 +312,7 @@
 </div>
 
 <h2 id="goal">Goal</h2>
-<p>Add a sliding-window CP refiner that improves an FFcDDW incumbent by re-solving an unfixed window plus a profile-fixed buffer at each step, directly minimising weighted E/T over the sub-window. Algorithm id: <code>"pw_cp"</code>. Self-contained under <code>src/ffc_ddw_sum_et/algorithm/pw_cp/</code>.</p>
+<p>Add a sliding-window CP refiner that improves an FFcDDW incumbent by re-solving an unfixed window plus a profile-fixed buffer at each step, directly minimising weighted E/T over the sub-window. Algorithm id: <code>"sw_cp"</code>. Self-contained under <code>src/ffc_ddw_sum_et/algorithm/sw_cp/</code>.</p>
 
 <h2 id="filelayout">File layout</h2>
 
@@ -327,7 +327,7 @@
 </details>
 
 <h3>Algorithm core <span class="badge ok">new package</span></h3>
-<p>Under <code>src/ffc_ddw_sum_et/algorithm/pw_cp/</code>:</p>
+<p>Under <code>src/ffc_ddw_sum_et/algorithm/sw_cp/</code>:</p>
 
 <figure class="modmap">
   <svg viewBox="0 0 720 280" width="100%" style="max-width: 700px; display:block; margin:0 auto;" xmlns="http://www.w3.org/2000/svg">
@@ -402,14 +402,14 @@
 <h3>Subroutine integration</h3>
 <p>Mirrors existing <code>mcf_lb</code>/<code>neh_cp</code> step methods on the controller:</p>
 <ul>
-  <li><code>src/ffc_ddw_sum_et/orchestration/controller.py</code> — add <code>run_pw_cp(self, ...)</code>. Build <code>AlgSpec(instance, option=PwCpOption(**kwargs), ref_solution=current_incumbent, alg_root=self.subroutine_dir, logger=self.logger, stop_predicate=self.stop_predicate)</code>, call <code>PwCpDispatcher().run(spec)</code>, register via <code>self._register(report, sol)</code>. Two-phase Gantt: emit before/after PNGs around the call, gated on <code>draw_gantt</code> flag. <b>Per CLAUDE.md contract:</b> single <code>_register</code> per call; <code>elapsed_time = time.monotonic() - start_elapsed</code> measured immediately before report construction, no work between measurement and <code>_register</code>.</li>
+  <li><code>src/ffc_ddw_sum_et/orchestration/controller.py</code> — add <code>run_sw_cp(self, ...)</code>. Build <code>AlgSpec(instance, option=PwCpOption(**kwargs), ref_solution=current_incumbent, alg_root=self.subroutine_dir, logger=self.logger, stop_predicate=self.stop_predicate)</code>, call <code>PwCpDispatcher().run(spec)</code>, register via <code>self._register(report, sol)</code>. Two-phase Gantt: emit before/after PNGs around the call, gated on <code>draw_gantt</code> flag. <b>Per CLAUDE.md contract:</b> single <code>_register</code> per call; <code>elapsed_time = time.monotonic() - start_elapsed</code> measured immediately before report construction, no work between measurement and <code>_register</code>.</li>
   <li><code>ffcddw_single_instance_runner.py</code> — no change required if existing <code>_save_obj_log</code> aggregator already re-bases trajectories per step (verify during implementation).</li>
-  <li><code>configs/pw_cp/&lt;scenario&gt;.yaml</code> — new scenario invoking <code>run_pw_cp</code> with defaults + small grid (<code>unfixed_batch_count ∈ {2,3}</code>, <code>pf_method ∈ {"PF0","PF1"}</code>). <span class="badge warn">see detail</span> <a href="pw_cp_port_plan_detail.html#scenarios">scenarios live under <code>metadata/&lt;date&gt;/</code></a></li>
+  <li><code>configs/sw_cp/&lt;scenario&gt;.yaml</code> — new scenario invoking <code>run_sw_cp</code> with defaults + small grid (<code>unfixed_batch_count ∈ {2,3}</code>, <code>pf_method ∈ {"PF0","PF1"}</code>). <span class="badge warn">see detail</span> <a href="sw_cp_port_plan_detail.html#scenarios">scenarios live under <code>metadata/&lt;date&gt;/</code></a></li>
   <li><code>main.py</code> — wire the new scenario name into the dispatch table (mirror <code>neh_cp</code>/<code>mcf_lb</code>). The <code>add-subroutine</code> skill is the canonical executor.</li>
 </ul>
 
 <h3>Tests</h3>
-<p>Under <code>tests/algorithm/pw_cp/</code> (shape mirrored from <code>tests/algorithm/neh_cp/</code>).</p>
+<p>Under <code>tests/algorithm/sw_cp/</code> (shape mirrored from <code>tests/algorithm/neh_cp/</code>).</p>
 
 <h3>Reuse without copy from <code>algorithm/</code></h3>
 <ul>
@@ -443,7 +443,7 @@ class PwCpOption(AlgOption):
 <p><b>Skipped intentionally (deferred):</b> <code>tighten_ranges</code>, <code>use_lns_only</code>, <code>non_time_fixed_op_time_limit_multiplier</code>, <code>minimize_makespan_lex</code>, <code>cp_tl_2nd_obj_seconds</code>, lex/common_spacing toggles.</p>
 
 <h2 id="cpmodel">CP model (<code>PwCpModelBuilder</code>)</h2>
-<p>Cannot reuse <code>BaseModelBuilder.build</code> directly because it creates op vars for every <code>(j, i)</code>. PW-CP needs partition-aware variable creation. New builder, with shapes deliberately mirroring hybridflowshop's <code>cpsat_model_2/pw_cp.py:PwCpModelBuilder</code>.</p>
+<p>Cannot reuse <code>BaseModelBuilder.build</code> directly because it creates op vars for every <code>(j, i)</code>. PW-CP needs partition-aware variable creation. New builder, with shapes deliberately mirroring hybridflowshop's <code>cpsat_model_2/sw_cp.py:PwCpModelBuilder</code>.</p>
 
 <div class="tldr" style="background: var(--accent-soft); border-color: #c9d8f0;">
   <h4 style="color: var(--accent);">Reference schedule</h4>
@@ -512,7 +512,7 @@ class PwCpOption(AlgOption):
 <pre><code>run(spec):
   instance = _validate_instance(spec)              # FFcDDWParameters
   if spec.ref_solution is None:
-      raise ValueError("pw_cp requires spec.ref_solution")
+      raise ValueError("sw_cp requires spec.ref_solution")
   option   = _resolve_option(spec)                  # PwCpOption()
   logger   = spec.logger or logging.getLogger(__name__)
 
@@ -647,7 +647,7 @@ class PwCpOption(AlgOption):
   return AlgRecord(
       work_status=WorkStatus.FEASIBLE,
       instance_id=instance.name,
-      algorithm_id="pw_cp",
+      algorithm_id="sw_cp",
       option=option,
       result=AlgResult(schedule=incumbent, obj_value=obj_value,
                        obj_bound=None, metrics=metrics),
@@ -661,9 +661,9 @@ class PwCpOption(AlgOption):
 <p>Reconstructs a full <code>FFcSchedule</code> by:</p>
 <ol>
   <li>Starting from <code>rj_schedule.deepcopy()</code> and removing all non-time-fixed <code>(j, i, k)</code> ops via <code>FFcSchedule.remove_operations</code>.</li>
-  <li>For each non-time-fixed <code>(j, i)</code>, dispatching the op back with <code>op_start = solver.Value(op_vars.op_start[j,i])</code> and <code>op_end = solver.Value(op_vars.op_end[j,i])</code> via <code>FFcSchedule.add_ops_times_2_mc(stage_id=i, mc_id=k, job_id=j, start, end)</code> where <code>k</code> is the assigned machine — chosen by <b>earliest free machine on stage <code>i</code> at time <code>start</code></b> within the machines listed in <code>instance.stage_2_machines_map[i]</code> (matches hybridflowshop's <code>create_pw_cp_schedule</code> policy).</li>
+  <li>For each non-time-fixed <code>(j, i)</code>, dispatching the op back with <code>op_start = solver.Value(op_vars.op_start[j,i])</code> and <code>op_end = solver.Value(op_vars.op_end[j,i])</code> via <code>FFcSchedule.add_ops_times_2_mc(stage_id=i, mc_id=k, job_id=j, start, end)</code> where <code>k</code> is the assigned machine — chosen by <b>earliest free machine on stage <code>i</code> at time <code>start</code></b> within the machines listed in <code>instance.stage_2_machines_map[i]</code> (matches hybridflowshop's <code>create_sw_cp_schedule</code> policy).</li>
 </ol>
-<p style="color: var(--muted); font-size: 13px;">→ Detail companion refines this with the <code>add_operation_2_stage</code> dispatch + assertion approach: <a href="pw_cp_port_plan_detail.html#machine-reassign">machine reassignment policy</a>.</p>
+<p style="color: var(--muted); font-size: 13px;">→ Detail companion refines this with the <code>add_operation_2_stage</code> dispatch + assertion approach: <a href="sw_cp_port_plan_detail.html#machine-reassign">machine reassignment policy</a>.</p>
 
 <h2 id="helpers">Reused helpers (with paths)</h2>
 <div class="helpers">
@@ -685,14 +685,14 @@ class PwCpOption(AlgOption):
     <tr><td><code>ObjectiveValueRecorder</code></td><td>algorithm/cpsat_callbacks/obj_value_recorder.py</td></tr>
     <tr><td><code>AlgSpec, AlgRecord, AlgResult, ProgressLogEntry, WorkStatus, TerminationReason, AlgOption</code></td><td>algorithm/base/</td></tr>
     <tr><td>Reference: TL/deadline plumbing, semi-active gating, accept/reject, AlgRecord assembly</td><td>algorithm/neh_cp/dispatcher.py:120-280, 339-371, 480-582</td></tr>
-    <tr><td>Reference: partition / dummy bars / capacity / non-fixed-precedence</td><td>hybridflowshop/cpsat_model_2/pw_cp.py (<code>PwCpModelBuilder</code>); controller/pw_cp.py (sliding loop)</td></tr>
+    <tr><td>Reference: partition / dummy bars / capacity / non-fixed-precedence</td><td>hybridflowshop/cpsat_model_2/sw_cp.py (<code>PwCpModelBuilder</code>); controller/sw_cp.py (sliding loop)</td></tr>
   </tbody>
 </table>
 </div>
 
 <h2 id="verify">Verification</h2>
 
-<h3>1. Unit tests under <code>tests/algorithm/pw_cp/</code></h3>
+<h3>1. Unit tests under <code>tests/algorithm/sw_cp/</code></h3>
 <ul>
   <li><b><code>test_option.py</code></b> — defaults, frozen, validation of <code>step_size&gt;=1</code>, <code>unfixed_batch_count&gt;=1</code>.</li>
   <li><b><code>test_partition.py</code></b> — 5-region splits at edge offsets (start, middle, end); <code>enable_promotion_profile_fixed</code> promotes correctly; <code>validate_and_get_batch_count</code> raises on uneven stage batch counts.</li>
@@ -704,11 +704,11 @@ class PwCpOption(AlgOption):
 </ul>
 
 <h3>2. Algorithm contract test</h3>
-<p>Register <code>pw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks (option type, AlgRecord shape, instance-id passthrough) run.</p>
+<p>Register <code>sw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks (option type, AlgRecord shape, instance-id passthrough) run.</p>
 
 <h3>3. Smoke test (algorithm core)</h3>
 <pre><code>uv run python -c "from ffc_ddw_sum_et.algorithm.neh_cp import NehCpDispatcher, NehCpOption; \
-  from ffc_ddw_sum_et.algorithm.pw_cp import PwCpDispatcher, PwCpOption; \
+  from ffc_ddw_sum_et.algorithm.sw_cp import PwCpDispatcher, PwCpOption; \
   ...; rec1 = NehCpDispatcher().run(spec1); \
   spec2 = AlgSpec(instance=ins, option=PwCpOption(unfixed_batch_count=3, cp_tl_seconds=2.0), ref_solution=rec1.result.schedule); \
   rec2 = PwCpDispatcher().run(spec2); print(rec1.result.obj_value, '->', rec2.result.obj_value)"
@@ -716,11 +716,11 @@ class PwCpOption(AlgOption):
 <p>Expect <code>rec2.obj_value &lt;= rec1.obj_value</code>.</p>
 
 <h3>4. Subroutine integration smoke test</h3>
-<p><code>uv run python main.py</code> with the new <code>pw_cp</code> scenario YAML on one small instance. Verify (a) <code>_obj_log.json</code> with monotonic non-increasing E/T, (b) before/after Gantt PNGs in the subroutine output dir, (c) per-step CSV rows appended, (d) run terminates within configured stopping criterion.</p>
+<p><code>uv run python main.py</code> with the new <code>sw_cp</code> scenario YAML on one small instance. Verify (a) <code>_obj_log.json</code> with monotonic non-increasing E/T, (b) before/after Gantt PNGs in the subroutine output dir, (c) per-step CSV rows appended, (d) run terminates within configured stopping criterion.</p>
 
 <h3>5. Lint</h3>
-<pre><code>uv run ruff check src/ffc_ddw_sum_et/algorithm/pw_cp \
-                  tests/algorithm/pw_cp \
+<pre><code>uv run ruff check src/ffc_ddw_sum_et/algorithm/sw_cp \
+                  tests/algorithm/sw_cp \
                   src/ffc_ddw_sum_et/orchestration/controller.py
 uv run ruff format &lt;same paths&gt;
 </code></pre>
@@ -801,7 +801,7 @@ uv run ruff format &lt;same paths&gt;
     <span class="badge danger">high</span>
   </div>
   <div class="body">
-    The CLAUDE.md per-step contract is load-bearing for <code>_obj_log.json</code> re-basing. <code>run_pw_cp</code> must do all work, then measure <code>elapsed = monotonic() - start</code>, then construct the report, then <code>_register</code> — with <b>no</b> intervening work (Gantt PNG emission, CSV row append, etc. happen <em>after</em> <code>_register</code>). The two-phase Gantt's "before" snapshot must be taken <em>before</em> <code>start = monotonic()</code> is captured to avoid skewing the trajectory. Verify by reading <code>_save_obj_log</code> in <code>ffcddw_single_instance_runner.py</code> during implementation.
+    The CLAUDE.md per-step contract is load-bearing for <code>_obj_log.json</code> re-basing. <code>run_sw_cp</code> must do all work, then measure <code>elapsed = monotonic() - start</code>, then construct the report, then <code>_register</code> — with <b>no</b> intervening work (Gantt PNG emission, CSV row append, etc. happen <em>after</em> <code>_register</code>). The two-phase Gantt's "before" snapshot must be taken <em>before</em> <code>start = monotonic()</code> is captured to avoid skewing the trajectory. Verify by reading <code>_save_obj_log</code> in <code>ffcddw_single_instance_runner.py</code> during implementation.
   </div>
 </div>
 
@@ -825,7 +825,7 @@ uv run ruff format &lt;same paths&gt;
 </div>
 
 <hr>
-<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/pw_cp_port_plan.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/20260510/sw_cp_port_plan.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
 
 </main>
 </div>

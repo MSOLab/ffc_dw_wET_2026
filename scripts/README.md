@@ -257,3 +257,46 @@ uv run python scripts/analyze_bestobj_randomness.py
 
 > 입력 파일 경로(`/tmp/new_dirs.txt`)와 base dir(`output/20260423`),
 > 출력 경로 모두 하드코딩이라 다른 배치에 재사용하려면 코드를 직접 수정해야 한다.
+
+### analyze_dispatch_sweep.py
+
+dispatch-sequence sweep 결과(`*_rpdf_comparison.csv`)에 대한 상시 사후 분석.
+dispatch 방법(scenario)을 순위 매기고, 방법 조합의 oracle 성능(인스턴스별
+best 취하기)을 계산한다.
+
+**지표 (`--metric`, 둘 다 최소화)**:
+
+- `rpdf` (기본) — `RPDf_BKS_data`, BKS 대비 상대편차. **scale-free**라
+  인스턴스마다 동등하게 기여 → "방법이 전반적으로 더 좋은가"에 공정한 지표.
+- `obj` — `bestObj`, 절대 weighted E+T 목적값. 총비용 관점에 유용하지만
+  목적값 크기가 인스턴스 규모(n≤200)에 비례해 **평균이 대형 인스턴스에
+  지배**된다. "per-instance 품질"이 아니라 "총비용"으로 읽을 것.
+
+답하는 질문:
+
+- **(1) 단일 방법 best**: 전체 / `--t` 슬라이스 / `--t --r` 슬라이스별
+  평균 metric 최소 방법.
+- **(2) pair best / (3) triple best**: 크기 `k` 조합마다
+  `mean_instance( min_{m∈S} metric )` 를 계산해 가장 상호보완적인 방법 집합
+  선정. `--combo-size`로 크기 지정(기본 `2 3`).
+
+**방법 필터 (`--methods PREFIX`)**: `scenarioName`이 PREFIX로 시작하는
+방법만 후보로 둔다. 예: `--methods sd_` → simple-dispatch만 (한 decode
+계열만 쓰는 논문과의 like-for-like 비교에 유용).
+
+```bash
+# 전체 + T=0.6 + (T=0.6, R=0.2) 슬라이스는 인자만 바꿔 반복 실행 (RPDf)
+uv run python scripts/analyze_dispatch_sweep.py output/<date>/<run_dir>
+uv run python scripts/analyze_dispatch_sweep.py output/<date>/<run_dir> --t 0.6
+uv run python scripts/analyze_dispatch_sweep.py output/<date>/<run_dir> --t 0.6 --r 0.2
+
+# 절대 목적값으로, simple-dispatch만, top-10
+uv run python scripts/analyze_dispatch_sweep.py output/<date>/<run_dir> \
+    --metric obj --methods sd_ --top 10
+```
+
+> 위치 인자는 run 디렉터리(timestamp 폴더) 또는 `*_rpdf_comparison.csv`
+> 직접 경로. 함수(`mean_by_method`, `metric_matrix`, `best_combos`,
+> `oracle_value`, `marginal_contribution`)는 노트북/다른 스크립트에서
+> import해 재사용 가능. 특정 baseline 조합(예: 2017 논문 triple)을 best와
+> 동일 기준으로 채점하려면 `oracle_value(mat, combo)` 사용.

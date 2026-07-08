@@ -1,4 +1,4 @@
-"""FAM subroutine controller for routix-based experiment orchestration."""
+"""FFcDWwET subroutine controller for routix-based experiment orchestration."""
 
 from __future__ import annotations
 
@@ -107,6 +107,13 @@ class FFcDDWSubroutineControllerCore(
         # 2_last_stage_only_init, ..., 7_final). Only populated entries
         # are appended so early returns retain partial progress.
         self.mcf_lb_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
+        # Ordered (name, schedule) pairs per CSR phase (3-Gantt artifact).
+        # Populated only when coarsen_solve_reconstruct is called with
+        # emit_phase_schedules=True and a solution is found.
+        self.csr_phase_schedules: list[tuple[str, FFcSchedule]] = []
+        # CP-SAT trajectory (coarsened scale) from the last CSR run.
+        # Set only when draw_cp_trajectory=True and a solution is found.
+        self.csr_cp_trajectory: tuple[ProgressLogEntry, ...] | None = None
         # Outer wall-clock around `run()`. Set in the run() override below;
         # the runner reads this for the per-instance summary `elapsedTime`.
         self.total_elapsed_time: float = 0.0  # TODO: apply to routix
@@ -300,6 +307,15 @@ class FFcDDWSubroutineControllerCore(
 
     def _mcf_lb_phase_name(self, local_name: str) -> str:
         return f"{self._get_call_context_of_current_method()}_{local_name}"
+
+    def _record_csr_phase(self, name: str, sched: FFcSchedule) -> None:
+        """Append one ``(name, schedule)`` tuple to ``csr_phase_schedules``,
+        prefixing ``name`` with the current method's call_context so the
+        runner-side artifact filenames sort by subroutine-flow step on disk
+        and don't collide across step calls.
+        """
+        prefixed = f"{self._get_call_context_of_current_method()}_{name}"
+        self.csr_phase_schedules.append((prefixed, sched))
 
     def try_get_file_path_for_subroutine(self, suffix: str) -> Path | None:
         """Like ``get_file_path_for_subroutine`` but returns ``None`` instead

@@ -50,8 +50,47 @@ def test_ffc_progress_kinds_routed_to_progress_zone(tmp_path: Path) -> None:
         instance_name="ins",
         phase_name="1_mcf_preemptive_sch",
     )
-    for p in (diag, phase):
-        assert p.parent.name == "progress", p
+    # ``mcf_lb_diagnostic`` is flat in the progress zone; ``mcf_lb_phase_schedule``
+    # is nested one level under it (``progress/mcf_lb_phase_schedule/``) so its
+    # discovery glob can't over-match sibling flat JSONs.
+    assert diag.parent.name == "progress", diag
+    assert phase.parent.name == "mcf_lb_phase_schedule", phase
+    assert phase.parent.parent.name == "progress", phase
+
+
+def test_find_mcf_lb_phase_schedule_does_not_over_match_siblings(
+    tmp_path: Path,
+) -> None:
+    """``find_artifacts("mcf_lb_phase_schedule")`` must return only MCF-LB phase
+    schedules, not the other flat JSONs that share the ``progress/`` zone.
+
+    Regression for the greedy ``progress/*.json`` glob: ``mcf_lb_phase_schedule``
+    and ``flip_makespan_cp_phase_schedule`` both used a flat ``{phase_name}.json``
+    template, so each kind's glob matched the other's files (and the flat
+    ``csr_cp_trajectory_json``). Nesting each phase-schedule kind under its own
+    subdir scopes the glob to its own files.
+    """
+    layout = _layout(tmp_path)
+    scope = {"scenario_name": "sc", "instance_name": "ins"}
+
+    mcf = layout.artifact_path(
+        "mcf_lb_phase_schedule", phase_name="1_mcf_preemptive_sch", **scope
+    )
+    flip = layout.artifact_path(
+        "flip_makespan_cp_phase_schedule",
+        phase_name="2-run_flip_makespan_cp_01_incumbent",
+        **scope,
+    )
+    traj = layout.artifact_path("csr_cp_trajectory_json", **scope)
+    for p in (mcf, flip, traj):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("{}", encoding="utf-8")
+
+    mcf_hits = layout.find_artifacts("mcf_lb_phase_schedule", **scope)
+    flip_hits = layout.find_artifacts("flip_makespan_cp_phase_schedule", **scope)
+
+    assert mcf_hits == [mcf]
+    assert flip_hits == [flip]
 
 
 def test_ffc_report_kinds_routed_to_report_zone(tmp_path: Path) -> None:

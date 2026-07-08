@@ -9,6 +9,11 @@ can pick up the same architectural intent.
   - Use `uv run python` instead of `python3` or just `python`.
 - Run `uv run ruff check` after code changes.
 - Run `uv run ruff format` when formatting is needed.
+- **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/):
+  - Type: `feat`, `fix`, `refactor`, `docs`, `perf`, `test`, `chore`
+  - Scope: derive from changed files (e.g. `pw_cp.py` → `pw-cp`)
+  - Title: ≤49 chars (including `<type>(<scope>): ` prefix), imperative mood, no trailing period
+  - Body: bullet points (`- ` prefix); each bullet is a **single line** (no hard-wrapping within a bullet)
 
 ## Architecture Docs
 
@@ -20,6 +25,27 @@ can pick up the same architectural intent.
   `docs/algorithm-principles.md`
 - Output directory schema (`ArtifactLayout`) and SC log lifecycle:
   `docs/io/20260429_artifact_manager.md`
+
+### Optimality-judgment field (per-instance result)
+
+When deciding whether a run reached a proven optimum for an instance, read the
+per-instance `<instance>_instance_result.yaml` and compare its two top-level
+fields: **`obj_value`** (final incumbent, the UB) and **`obj_bound`** (best
+lower bound, the LB). Optimal ⇔ `obj_value == obj_bound` (within float
+tolerance). Notes:
+
+- `obj_bound` here is the **global** LB carried by the run (e.g. the MCF LB
+  seeded by `calc_mcf_lb_and_derive_full_sch`), not a per-window sub-CP bound.
+  It is **loose**: across the 1440-instance PRA2017 large grid only ~10 % of
+  instances reach `obj_value == obj_bound`, and non-optimal gaps have a median
+  of ~100 %+. Do not treat a large gap as a solver failure.
+- `work_status` (`optimal` / `feasible` / …) reflects the *last algorithm
+  step's* status, not a global proof; prefer the `obj_value == obj_bound`
+  comparison for a global optimality judgment.
+- The same UB/LB pair is also emitted per progress point in
+  `<instance>_obj_log.json` (`obj_value.data` / `obj_bound.data`) — see the
+  SW-CP TL-policy note in `plans/20260705/sw_cp_tl_policy_investigation.md` for the
+  loader caveat (the structured loader drops LB points that carry no note).
 
 ## Working Agreement
 
@@ -45,7 +71,15 @@ can pick up the same architectural intent.
   `algorithm.base.alg_record`, `algorithm.base.alg_option`,
   `algorithm.base.algorithm`, `algorithm.options.*`, `algorithm.fam`,
   `algorithm.dispatcher.*`, `algorithm.mcf_lb.*`, `algorithm.neh_cp.*`,
-  `algorithm.flip_makespan_cp.*`, `algorithm.pw_cp.*`.
+  `algorithm.flip_makespan_cp.*`, `algorithm.sw_cp.*`.
+- **Naming note:** the algorithm now called `sw_cp` (sliding-window CP,
+  classes `SwCp*`, controller steps `sw_cp` / `incremental_sw_cp`) was
+  formerly named `pw_cp` (`PwCp*`, `incremental_pw_cp`) to match the paper.
+  Older artifacts still carry the old name: on-disk `output/` results,
+  `algorithm_id`/step-labels in historical runs, and file/directory names
+  such as `metadata/**/pw_cp_*.yaml`, `docs/algorithms/pw_cp.*`, and
+  `plans/**/pw_cp_*` were intentionally left unrenamed. When reading old
+  data or docs, treat `pw_cp` as the same algorithm as today's `sw_cp`.
 
 ### Subroutine step contract (controller.py)
 

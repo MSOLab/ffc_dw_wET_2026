@@ -1,6 +1,7 @@
-"""FAM subroutine controller for routix-based experiment orchestration."""
+"""FFcDWwET subroutine controller for routix-based experiment orchestration."""
 
 import csv
+import logging
 import math
 import time
 from pathlib import Path
@@ -12,6 +13,11 @@ from routix.report import SubroutineReport
 
 from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
+from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+    DEFAULT_COARSEN_FACTOR,
+    CoarsenSolveReconstructOption,
+    run_coarsen_solve_reconstruct,
+)
 from ffc_ddw_sum_et.algorithm.cpsat_adapter import CpsatAdapter, CpsatOption
 from ffc_ddw_sum_et.algorithm.cumulative import (
     BaseModelBuilder,
@@ -22,6 +28,10 @@ from ffc_ddw_sum_et.algorithm.dispatcher import (
     BN2DDispatcher,
     BN2DOption,
     MixedDispatcher,
+    build_v3_paired_dispatch_schedule,
+    build_v4_paired_dispatch_schedule,
+    dispatch_forward_with_iit,
+    dispatch_reversed_with_iit,
 )
 from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.flip_makespan_cp import (
@@ -56,21 +66,30 @@ from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpOption,
 )
 from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
-from ffc_ddw_sum_et.algorithm.pw_cp import (
-    PwCpDispatcher,
-    PwCpOption,
-)
 from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
+from ffc_ddw_sum_et.algorithm.sw_cp import (
+    SwCpDispatcher,
+    SwCpOption,
+)
 from ffc_ddw_sum_et.io import dump_preemptive_schedule_json, dump_solution_json
 from ffc_ddw_sum_et.io.parallel_mc_cost_heatmap import HeatmapSort
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+from ffc_ddw_sum_et.parameters.sorter import (
+    V3_PRIORITY_SET,
+    V4_PRIORITY_SET,
+    DispatchSeqKey,
+    dispatch_seq_job_sequence,
+)
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 from ffc_ddw_sum_et.solution.mcf_preemptive_schedule import MCFPreemptiveSchedule
 from ffc_ddw_sum_et.solution.objectives import (
     compute_phase_obj_value,
     compute_weighted_earliness_tardiness,
 )
-from ffc_ddw_sum_et.solution.schedule_build import build_schedule_from_op_starts
+from ffc_ddw_sum_et.solution.schedule_build import (
+    build_schedule_from_op_starts,
+    reconstruct_coarse_schedule,
+)
 
 from .controller_core import FFcDDWSubroutineControllerCore, MCFLBPhaseSchedule
 from .mcf_lb_phase_labels import (
@@ -1152,6 +1171,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         adjust_r: bool = False,
         p_adjust_coeff: float = 1.0,
         r_adjust_coeff: float = 0.5,
+        last_stage_rebuild_config: Literal[
+            "original_pr", "increased_pr", "best"
+        ] = "increased_pr",
         proceed_r2_when_nonpositive_cmax: bool = False,
         emit_phase_schedules: bool = False,
     ) -> SubroutineReport:
@@ -1227,6 +1249,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             r_adjust_coeff: Coefficient on ``makespan_delta`` used in
                 the ``adjust_r`` formula. Default ``0.5`` reproduces the
                 historical ``ceil(delta / 2)`` factor.
+            last_stage_rebuild_config: Round-2 last-stage generation
+                policy. ``"increased_pr"`` (default) generates the
+                last-stage schedule with the increased p/r and rebuilds it
+                to original ``p`` (preserving completion times) before
+                reverse-dispatch — the historical behaviour.
+                ``"original_pr"`` generates with the original p/r and
+                reverse-dispatches directly. ``"best"`` runs both and keeps
+                the smaller pre-unflip makespan.
             proceed_r2_when_nonpositive_cmax: When False (default),
                 preserves the historical ``delta_le_0`` skip — round 2
                 is skipped whenever the signed delta is ``<= 0``. When
@@ -1270,6 +1300,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             adjust_r=adjust_r,
             p_adjust_coeff=p_adjust_coeff,
             r_adjust_coeff=r_adjust_coeff,
+            last_stage_rebuild_config=last_stage_rebuild_config,
             proceed_r2_when_nonpositive_cmax=proceed_r2_when_nonpositive_cmax,
             stop_predicate=self.is_stopping_condition,
             logger=self.logger,
@@ -1301,6 +1332,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         c_diag.makespan_delta = result.makespan_delta
         if result.makespan_delta is not None:
             c_diag.makespan_delta_ref_used = makespan_delta_ref
+        if result.r2_ran:
+            c_diag.last_stage_rebuild_config_used = last_stage_rebuild_config
         c_diag.r2_ran = result.r2_ran
         c_diag.r2_skip_reason = result.r2_skip_reason
         if result.r2_apply is not None:
@@ -1419,91 +1452,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         return schedule, obj_value
 
-    def _dispatch_by_reversed_sequence_with_iit(
+    def _dispatch_by_simple_sequence_with_iit(
         self, job_sequence: Sequence[str]
     ) -> tuple[FFcSchedule, float]:
-        """Dispatch ``job_sequence`` via the reverse-instance + IIT pipeline.
+        """sd pipeline thin wrapper → dispatch_forward_with_iit(self.instance, ...)."""
+        return dispatch_forward_with_iit(self.instance, job_sequence, self.logger)
 
-        Steps: stage-reverse the instance, dispatch ``reversed(job_sequence)``
-        with :meth:`MixedDispatcher.get_best_mixed_schedule_by_sequence`
-        minimising makespan, unflip the result with
-        :meth:`FFcSchedule.as_reversed`, push left to semi-active form, then
-        insert idle time on the last stage.
-        """
-        instance = self.instance
-        reversed_instance = FFcDDWParameters.reverse_stages(instance)
-        rev_seq = list(reversed(job_sequence))
-
-        rev_dispatcher = MixedDispatcher(reversed_instance, logger=self.logger)
-        reversed_full_1 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
-            rev_seq,
-            machine_then_job=True,
-            criteria="makespan",
+    def _dispatch_by_reversed_sequence_with_iit(
+        self,
+        job_sequence: Sequence[str],
+        instance: FFcDDWParameters | None = None,
+    ) -> tuple[FFcSchedule, float]:
+        """rd pipeline thin wrapper → dispatch_reversed_with_iit(instance or self.instance, ...)."""
+        return dispatch_reversed_with_iit(
+            instance or self.instance, job_sequence, self.logger
         )
-        reversed_full_2 = rev_dispatcher.get_best_mixed_schedule_by_sequence(
-            rev_seq,
-            machine_then_job=False,
-            criteria="makespan",
-        )
-        if reversed_full_1 is None and reversed_full_2 is None:
-            raise RuntimeError(
-                f"_dispatch_by_reversed_sequence_with_iit: MixedDispatcher "
-                f"produced no schedule for {instance.name}"
-            )
-        if reversed_full_1 is not None:
-            schedule_1 = reversed_full_1.as_reversed()
-        else:
-            schedule_1 = None
-        if reversed_full_2 is not None:
-            schedule_2 = reversed_full_2.as_reversed()
-        else:
-            schedule_2 = None
-
-        if schedule_1 is not None and schedule_2 is not None:
-            sum_e_1, sum_t_1 = compute_weighted_earliness_tardiness(
-                schedule_1, instance
-            )
-            obj_1 = float(sum_e_1 + sum_t_1)
-
-            sum_e_2, sum_t_2 = compute_weighted_earliness_tardiness(
-                schedule_2, instance
-            )
-            obj_2 = float(sum_e_2 + sum_t_2)
-
-            if obj_1 <= obj_2:
-                schedule = schedule_1
-                self.logger.info(
-                    "_dispatch_by_reversed_sequence_with_iit: "
-                    "machine_then_job=True better (obj=%s) than "
-                    "machine_then_job=False (obj=%s)",
-                    obj_1,
-                    obj_2,
-                )
-            else:
-                schedule = schedule_2
-                self.logger.info(
-                    "_dispatch_by_reversed_sequence_with_iit: "
-                    "machine_then_job=False better (obj=%s) than "
-                    "machine_then_job=True (obj=%s)",
-                    obj_2,
-                    obj_1,
-                )
-        else:
-            schedule = schedule_1 or schedule_2
-
-        if schedule is None:
-            raise RuntimeError(
-                f"_dispatch_by_reversed_sequence_with_iit: no schedule after "
-                f"unflipping for {instance.name}"
-            )
-        schedule.make_semi_active(instance.stage_2_job_2_p_map)
-        schedule.insert_idle_time(
-            instance.job_2_due_window_map,
-            instance.job_2_ewt_map,
-            instance.job_2_twt_map,
-        )
-        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
-        return schedule, float(sum_e + sum_t)
 
     def initialize_by_edd(
         self,
@@ -1545,8 +1508,49 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
         return report
 
+    def _log_dispatch_seed_diagnostics(self, label: str, schedule: FFcSchedule) -> None:
+        """DEBUG-log the E/T balance of a dispatch seed schedule.
+
+        Records weighted earliness/tardiness, the tardiness share
+        ``T/(E+T)``, and the early/on-time/tardy job counts on the last stage.
+        Used to characterise *why* a job-priority rule wins in a given regime
+        (e.g. confirming the ``T=0.6, R=0.2`` region is tardiness-dominated and
+        observing how a WSPT-style rule shifts the balance). Called after
+        ``_register`` so it adds no work to the step's timed trajectory.
+        """
+        if not self.logger.isEnabledFor(logging.DEBUG):
+            return
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
+        last_stage_id = self.instance.stage_id_list[-1]
+        ddw = self.instance.job_2_due_window_map
+        n_early = n_ontime = n_tardy = 0
+        for job_id in self.instance.job_id_list:
+            ct = schedule.get_job_end_time(last_stage_id, job_id)
+            d_lower, d_upper = ddw[job_id]
+            if ct < d_lower:
+                n_early += 1
+            elif ct > d_upper:
+                n_tardy += 1
+            else:
+                n_ontime += 1
+        n = self.instance.job_count
+        self.logger.debug(
+            "dispatch-seed[%s]: wE=%d wT=%d T/(E+T)=%.3f | "
+            "early=%d ontime=%d tardy=%d tardy%%=%.1f",
+            label,
+            sum_e,
+            sum_t,
+            sum_t / max(sum_e + sum_t, 1),
+            n_early,
+            n_ontime,
+            n_tardy,
+            100.0 * n_tardy / n,
+        )
+
     def _initialize_by_reversed_sequence(
-        self, sequence_getter: Callable[[], Sequence[str]]
+        self,
+        sequence_getter: Callable[[], Sequence[str]],
+        diag_label: str | None = None,
     ) -> SubroutineReport:
         """Time ``sequence_getter()``, dispatch via the reverse-instance + IIT
         pipeline (:meth:`_dispatch_by_reversed_sequence_with_iit`), then
@@ -1565,6 +1569,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report,
             FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
         )
+        if diag_label is not None:
+            self._log_dispatch_seed_diagnostics(diag_label, schedule)
         return report
 
     def initialize_by_due2_weight_pos(self) -> SubroutineReport:
@@ -1609,6 +1615,140 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return self._initialize_by_reversed_sequence(
             self.instance.get_wxd2_job_sequence
         )
+
+    def initialize_by_eddub_twt(self, factor: int = 1) -> SubroutineReport:
+        """Step method: seed an incumbent by dispatching jobs in EDDUB+w⁺ order.
+
+        Sort by ``(d⁺_j asc, w⁺_j desc, position asc)``
+        (:meth:`FFcDDWParameters.get_eddub_twt_job_sequence`). Feed that
+        sequence into the reverse-instance + IIT pipeline
+        (:meth:`_dispatch_by_reversed_sequence_with_iit`) — i.e. flip stages,
+        mixed-dispatch in reverse priority order, un-flip, and apply
+        ``make_semi_active`` → ``insert_idle_time``. Same family as
+        ``initialize_by_w1`` / ``initialize_by_wxd*``; the pipeline differs
+        from the forward-dispatch ``initialize_by_edd``.
+
+        When ``factor > 1``, the instance is coarsened (time units divided by
+        ``factor``) before dispatch, then the coarse schedule is reconstructed
+        onto the original scale via :func:`reconstruct_coarse_schedule`.
+        ``factor == 1`` is identical to the no-factor path.
+        """
+        if factor == 1:
+            return self._initialize_by_reversed_sequence(
+                self.instance.get_eddub_twt_job_sequence
+            )
+
+        start_elapsed = time.monotonic()
+
+        coarsened = FFcDDWParameters.coarsen_processing_times(self.instance, factor)
+        coarse_sched, _coarse_obj = self._dispatch_by_reversed_sequence_with_iit(
+            coarsened.get_eddub_twt_job_sequence(), instance=coarsened
+        )
+        schedule = reconstruct_coarse_schedule(coarse_sched, self.instance, factor)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, self.instance)
+        obj_value = float(sum_e + sum_t)
+
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
+        )
+        return report
+
+    def initialize_by_reversed_dispatch(
+        self, sequence: DispatchSeqKey
+    ) -> SubroutineReport:
+        """Step: ``sequence`` 규칙으로 정렬한 뒤 reverse-instance + IIT pipeline
+        (:meth:`_dispatch_by_reversed_sequence_with_iit`)으로 incumbent를 seed한다.
+
+        디코더(stage-flip → mixed dispatch(역순) → un-flip → make_semi_active →
+        insert_idle_time)는 고정이고 정렬 규칙만 ``sequence`` 로 바뀐다. 키는
+        :func:`dispatch_seq_job_sequence` 참조. ``initialize_by_w1`` /
+        ``initialize_by_eddub_twt`` 와 같은 reverse 계열이며, 이들을 단일 진입점으로
+        일반화한 것이다.
+        """
+        return self._initialize_by_reversed_sequence(
+            lambda: dispatch_seq_job_sequence(self.instance, sequence),
+            diag_label=f"rd:{sequence}",
+        )
+
+    def initialize_by_simple_dispatch(
+        self, sequence: DispatchSeqKey
+    ) -> SubroutineReport:
+        """Step: seed an incumbent by a single job-centric MixedDispatcher decode.
+
+        ``sequence`` 를 forward 우선순위로 정렬한 뒤, 모든 job을 전 stage에 걸쳐
+        job-centric으로 한 번에 dispatch한다
+        (:meth:`MixedDispatcher.get_job_centric_schedule_by_sequence`,
+        ``np = job_count`` head). decode 후 :meth:`FFcSchedule.make_semi_active` +
+        :meth:`FFcSchedule.insert_idle_time` 으로 E/T timing 보정하며, reverse
+        파이프라인(:meth:`_dispatch_by_reversed_sequence_with_iit`)과 동일한
+        보정을 공유한다. 정렬 키는 :func:`dispatch_seq_job_sequence` 와 동일
+        레지스트리를 쓴다(디코더 무관, sequence만 제공).
+        """
+        start_elapsed = time.monotonic()
+        job_sequence = dispatch_seq_job_sequence(self.instance, sequence)
+        schedule, obj_value = self._dispatch_by_simple_sequence_with_iit(job_sequence)
+
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed, obj_value=obj_value, obj_bound=None
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=schedule, obj_value=obj_value, obj_bound=None),
+        )
+        self._log_dispatch_seed_diagnostics(f"sd:{sequence}", schedule)
+        return report
+
+    def initialize_by_dispatch_v3(
+        self, priorities: Sequence[DispatchSeqKey] = V3_PRIORITY_SET
+    ) -> SubroutineReport:
+        """Step: justification-v3 paired dispatch pool. 각 priority 를 sd/rd 두
+        방향으로 디코드(2·len(priorities) 스케줄)한 뒤 weighted-ET 최소 incumbent
+        하나만 register — history 에 점 하나. 기본 P* = {edd, wspt_twt, wxd2}.
+        """
+        start_elapsed = time.monotonic()
+        best_sch, best_obj, best_label = build_v3_paired_dispatch_schedule(
+            self.instance, priorities, self.logger
+        )
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed, obj_value=best_obj, obj_bound=None
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
+        )
+        self._log_dispatch_seed_diagnostics(f"v3:{best_label}", best_sch)
+        return report
+
+    def initialize_by_dispatch_v4(
+        self, priorities: Sequence[DispatchSeqKey] = V4_PRIORITY_SET
+    ) -> SubroutineReport:
+        """Step: justification-v4 paired dispatch pool. 각 priority 를 sd/rd 두
+        방향으로 디코드(2·len(priorities) 스케줄)한 뒤 weighted-ET 최소 incumbent
+        하나만 register — history 에 점 하나. 기본 P* = {wxd2, wspt_twt, wxd7}.
+        """
+        start_elapsed = time.monotonic()
+        best_sch, best_obj, best_label = build_v4_paired_dispatch_schedule(
+            self.instance, priorities, self.logger
+        )
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed, obj_value=best_obj, obj_bound=None
+        )
+        self._register(
+            report,
+            FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
+        )
+        self._log_dispatch_seed_diagnostics(f"v4:{best_label}", best_sch)
+        return report
 
     def run_profile_fixed_ns(
         self,
@@ -2125,7 +2265,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         return report
 
-    def pw_cp(
+    def sw_cp(
         self,
         solver_thread_cnt: int = 1,
         batch_size: int | float | str = "m",
@@ -2139,6 +2279,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         total_timelimit: float | str | None = None,
         batch_tl_mode: BatchTlMode = "constant",
         batch_tl_offset_seconds: float = 0.01,
+        non_time_fixed_op_time_limit_multiplier: float | None = None,
         apply_cumulative_tl: bool = False,
         error_if_infeasible: bool = False,
         keep_step_schedules: bool = False,
@@ -2148,12 +2289,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         debug_partition_gantt_max_steps: int | None = None,
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
+        rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
     ) -> SubroutineReport:
-        """Step method: refine the incumbent via :class:`PwCpDispatcher`.
+        """Step method: refine the incumbent via :class:`SwCpDispatcher`.
 
         Resolves expression-grammar inputs (``cp_tl`` / ``total_timelimit``)
-        into pre-resolved scalars, hands them to :class:`PwCpOption`,
-        dispatches via :class:`PwCpDispatcher` (with the controller-level
+        into pre-resolved scalars, hands them to :class:`SwCpOption`,
+        dispatches via :class:`SwCpDispatcher` (with the controller-level
         wall-clock deadline and stop predicate threaded in), then
         registers the resulting schedule and emits the per-step
         ``_step_log.yaml`` next to the controller's working directory.
@@ -2174,7 +2316,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         incumbent = self.solution_manager.get_incumbent()
         if incumbent is None or incumbent.schedule is None:
             raise RuntimeError(
-                "pw_cp requires an incumbent schedule; chain it after a "
+                "sw_cp requires an incumbent schedule; chain it after a "
                 "seeding subroutine such as calc_mcf_lb_and_derive_full_sch."
             )
 
@@ -2191,7 +2333,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             1, int(math.ceil(resolve_value_expr(batch_size, n, c, m)))
         )
         self.logger.info(
-            "pw_cp: batch_size=%r -> %d (n=%d, c=%d, m=%d)",
+            "sw_cp: batch_size=%r -> %d (n=%d, c=%d, m=%d)",
             batch_size,
             batch_size_resolved,
             n,
@@ -2203,14 +2345,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         wall_clock_deadline_sec = time.monotonic() + remaining_sec
 
         if draw_gantt:
-            self._record_mcf_lb_phase(("pw_cp_before", incumbent.schedule.deepcopy()))
+            self._record_mcf_lb_phase(("sw_cp_before", incumbent.schedule.deepcopy()))
 
         debug_partition_gantt_path_getter = None
         if debug_partition_gantt:
 
-            def _gantt_path(step_idx: int) -> Path | None:
+            def _gantt_path(step_idx: int, phase: str) -> Path | None:
                 p = self.try_get_file_path_for_subroutine(
-                    f"step_{step_idx:03d}_partition.svg"
+                    f"step_{step_idx:03d}_partition_{phase}.svg"
                 )
                 if p is not None:
                     p.parent.mkdir(parents=True, exist_ok=True)
@@ -2218,7 +2360,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
             debug_partition_gantt_path_getter = _gantt_path
 
-        option = PwCpOption(
+        option = SwCpOption(
             solver_thread_cnt=solver_thread_cnt,
             batch_size=batch_size_resolved,
             step_size=step_size,
@@ -2231,6 +2373,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             total_timelimit_seconds=total_timelimit_seconds,
             batch_tl_mode=batch_tl_mode,
             batch_tl_offset_seconds=batch_tl_offset_seconds,
+            non_time_fixed_op_time_limit_multiplier=non_time_fixed_op_time_limit_multiplier,
             apply_cumulative_tl=apply_cumulative_tl,
             wall_clock_deadline_sec=wall_clock_deadline_sec,
             error_if_infeasible=error_if_infeasible,
@@ -2241,6 +2384,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             debug_partition_gantt_max_steps=debug_partition_gantt_max_steps,
             debug_partition_gantt_path_getter=debug_partition_gantt_path_getter,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
+            rj_right_justify_scope=rj_right_justify_scope,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2249,7 +2393,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             logger=self.logger,
             stop_predicate=self.is_stopping_condition,
         )
-        record = PwCpDispatcher().run(spec)
+        record = SwCpDispatcher().run(spec)
 
         elapsed = time.monotonic() - start_elapsed
         result = record.result
@@ -2275,7 +2419,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         # Post-register diagnostics (per contract: after _register, not before).
         if draw_gantt and result is not None and result.schedule is not None:
-            self._record_mcf_lb_phase(("pw_cp_after", result.schedule.deepcopy()))
+            self._record_mcf_lb_phase(("sw_cp_after", result.schedule.deepcopy()))
 
         if result is not None and result.metrics is not None:
             step_log = result.metrics.get("step_log")
@@ -2289,7 +2433,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         return report
 
-    def incremental_pw_cp(
+    def incremental_sw_cp(
         self,
         solver_thread_cnt: int = 1,
         batch_size: int | float | str = "m",
@@ -2307,6 +2451,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         total_timelimit: float | str | None = None,
         batch_tl_mode: BatchTlMode = "constant",
         batch_tl_offset_seconds: float = 0.01,
+        non_time_fixed_op_time_limit_multiplier: float | None = None,
         apply_cumulative_tl: bool = False,
         error_if_infeasible: bool = False,
         keep_step_schedules: bool = False,
@@ -2314,21 +2459,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         log_search_progress_max_steps: int | None = None,
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
+        rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
     ) -> None:
-        """Composite step: iterate :meth:`pw_cp` over a range of
+        """Composite step: iterate :meth:`sw_cp` over a range of
         ``unfixed_batch_count`` values.
 
         Mirrors ``hybridflowshop/controller/hfs_cp_lns.py:incremental_pw_cp``.
         For each ``count`` in ``[unfixed_batch_count_min, unfixed_batch_count_max]``:
 
-        - ``"always"``: invoke ``self.pw_cp(unfixed_batch_count=count, ...)``
+        - ``"always"``: invoke ``self.sw_cp(unfixed_batch_count=count, ...)``
           once.
-        - ``"if_no_improvement"``: invoke ``self.pw_cp(...)`` repeatedly at
+        - ``"if_no_improvement"``: invoke ``self.sw_cp(...)`` repeatedly at
           this count until a pass produces no improvement on the incumbent's
           weighted E+T (FFcDDW's primary objective, replacing
           hybridflowshop's makespan criterion).
 
-        Each inner ``pw_cp`` call registers its own report in the standard
+        Each inner ``sw_cp`` call registers its own report in the standard
         way; this composite does not register itself. Per-iteration
         ``temporarily_extended_context`` tags each inner call's
         ``call_context`` so per-instance step-log paths don't collide
@@ -2350,7 +2496,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         incumbent = self.solution_manager.get_incumbent()
         if incumbent is None or incumbent.schedule is None:
             raise RuntimeError(
-                "incremental_pw_cp requires an incumbent schedule; chain it "
+                "incremental_sw_cp requires an incumbent schedule; chain it "
                 "after a seeding subroutine such as "
                 "calc_mcf_lb_and_derive_full_sch."
             )
@@ -2370,7 +2516,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             ),
         )
         self.logger.info(
-            "incremental_pw_cp: batch_size=%r -> %d (m=%d)",
+            "incremental_sw_cp: batch_size=%r -> %d (m=%d)",
             batch_size,
             batch_size_resolved,
             instance.last_stage_mc_count,
@@ -2388,6 +2534,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             total_timelimit=total_timelimit,
             batch_tl_mode=batch_tl_mode,
             batch_tl_offset_seconds=batch_tl_offset_seconds,
+            non_time_fixed_op_time_limit_multiplier=non_time_fixed_op_time_limit_multiplier,
             apply_cumulative_tl=apply_cumulative_tl,
             error_if_infeasible=error_if_infeasible,
             keep_step_schedules=keep_step_schedules,
@@ -2395,10 +2542,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             log_search_progress_max_steps=log_search_progress_max_steps,
             draw_gantt=draw_gantt,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
+            rj_right_justify_scope=rj_right_justify_scope,
         )
 
         self.logger.info(
-            "incremental_pw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
+            "incremental_sw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
             increment_unfixed_batch_count_flag,
             unfixed_batch_count_min,
             unfixed_batch_count_max,
@@ -2409,7 +2557,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ):
             if self.is_stopping_condition():
                 self.logger.info(
-                    "incremental_pw_cp: stopping condition met before "
+                    "incremental_sw_cp: stopping condition met before "
                     "unfixed_batch_count=%d",
                     unfixed_batch_count,
                 )
@@ -2419,14 +2567,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             with self.temporarily_extended_context(context_name):
                 if increment_unfixed_batch_count_flag == "if_no_improvement":
                     self.logger.info(
-                        "incremental_pw_cp[count=%d]: repeat-until-no-improvement.",
+                        "incremental_sw_cp[count=%d]: repeat-until-no-improvement.",
                         unfixed_batch_count,
                     )
                     rep = 0
                     while True:
                         if self.is_stopping_condition():
                             self.logger.info(
-                                "incremental_pw_cp[count=%d]: stop after rep=%d.",
+                                "incremental_sw_cp[count=%d]: stop after rep=%d.",
                                 unfixed_batch_count,
                                 rep,
                             )
@@ -2434,7 +2582,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         rep += 1
                         obj_before = self.solution_manager.best_obj_value
                         with self.temporarily_extended_context(f"reps_{rep:03d}"):
-                            self.pw_cp(
+                            self.sw_cp(
                                 unfixed_batch_count=unfixed_batch_count,
                                 **base_kwargs,
                             )
@@ -2445,7 +2593,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                             or obj_after >= obj_before
                         ):
                             self.logger.info(
-                                "incremental_pw_cp[count=%d]: no improvement "
+                                "incremental_sw_cp[count=%d]: no improvement "
                                 "(%s -> %s); advancing to next count.",
                                 unfixed_batch_count,
                                 f"{obj_before:.0f}"
@@ -2455,7 +2603,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                             )
                             break
                         self.logger.info(
-                            "incremental_pw_cp[count=%d, rep=%d]: improved "
+                            "incremental_sw_cp[count=%d, rep=%d]: improved "
                             "%.0f -> %.0f; repeating.",
                             unfixed_batch_count,
                             rep,
@@ -2464,7 +2612,153 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         )
                 else:
                     self.logger.info(
-                        "incremental_pw_cp[count=%d]: single pass.",
+                        "incremental_sw_cp[count=%d]: single pass.",
                         unfixed_batch_count,
                     )
-                    self.pw_cp(unfixed_batch_count=unfixed_batch_count, **base_kwargs)
+                    self.sw_cp(unfixed_batch_count=unfixed_batch_count, **base_kwargs)
+
+    def coarsen_solve_reconstruct(
+        self,
+        factor: int = DEFAULT_COARSEN_FACTOR,
+        timelimit: float | str | None = None,
+        solver_thread_cnt: int = 1,
+        log_search_progress: bool = False,
+        error_if_infeasible: bool = False,
+        seed_dispatch: str = "mixed",
+        solve: bool = True,
+        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
+        draw_gantt: bool = False,
+        emit_phase_schedules: bool = False,
+        draw_cp_trajectory: bool = False,
+    ) -> SubroutineReport:
+        """Step method: coarsen the instance, solve the base CP, and
+        reconstruct to the original scale.
+
+        Coarsens all processing times and due-window bounds by ``factor``
+        via ``ceil(value / factor)``, solves the coarsened model via
+        :func:`run_coarsen_solve_reconstruct`, then inflates the raw
+        coarse start times back to original scale and restores original
+        processing times. Post-processing (``make_semi_active`` →
+        ``insert_idle_time``) and objective evaluation are done against
+        the original instance.
+
+        ``timelimit`` is the user-specified per-call cap (absolute seconds,
+        or any expression supported by :func:`resolve_value_expr`). The
+        actual time budget passed to the algorithm is the strict-min of
+        ``timelimit`` and the controller's remaining global time.
+        ``timelimit=None`` means "no per-call cap" — only the global time
+        limit is enforced.
+
+        ``seed_dispatch`` selects the dispatch seed strategy for warm-start
+        hints before solving: ``"job_wise"`` (single job-wise dispatch),
+        ``"mixed"`` (best among mixed-dispatch np-list candidates),
+        ``"v3"`` (v3 paired-dispatch pool: priority×{sd,rd} min-wET on
+        coarsened scale), or ``"v4"`` (v4 paired-dispatch with expanded
+        priority set). Default is ``"mixed"``.
+
+        ``solve``: when ``False``, skip the CP-SAT solve and use the dispatch
+        seed directly as the coarse schedule (seed-only deterministic mode).
+        The output equals the reconstruct of the seed — no CP noise, no
+        re-run variance. ``cp_progress_log`` is empty; ``coarsened_status``
+        is ``"SEED_ONLY"``. Default is ``True`` (preserve existing behavior).
+
+        ``idle_mode`` selects the ``insert_idle_time`` breakpoint rule used
+        when building the coarse-grid dispatch seed: ``"flooring"``
+        (default, byte-identical to prior behavior), ``"ceiling"``, or
+        ``"lookahead"``. Does not affect the final original-scale
+        post-process (always standard flooring).
+
+        ``draw_gantt`` is accepted for API consistency but does not
+        currently render a Gantt chart; any post-work would be placed after
+        ``_register``.
+
+        ``emit_phase_schedules``: when ``True`` and the solve finds a
+        solution, records three schedule snapshots onto
+        ``self.csr_phase_schedules`` (1_coarse_solver_result,
+        2_reconstructed_raw, 3_final) via ``_record_csr_phase``.
+
+        ``draw_cp_trajectory``: when ``True`` and the solve finds a
+        solution, captures the coarsened-scale CP-SAT UB/LB trajectory
+        into ``self.csr_cp_trajectory``. The trajectory is NOT inserted
+        into the report's ``progress_log`` (kept as a dedicated artifact
+        only, separate from the shared obj_log).
+
+        The two flags are independent — any combination is valid.
+
+        Per CLAUDE.md subroutine step contract: a single ``_register`` per
+        call, ``elapsed_time`` measured immediately before report
+        construction with no work in between.
+        """
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
+
+        instance = self.instance
+        timelimit_resolved = resolve_value_expr(
+            timelimit,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        eff_timelimit_sec = (
+            min(timelimit_resolved, remaining_sec)
+            if timelimit_resolved is not None
+            else remaining_sec
+        )
+
+        self.logger.info(
+            "coarsen_solve_reconstruct: factor=%d, effective=%.3fs "
+            "(timelimit=%s, remaining=%.3fs)",
+            factor,
+            eff_timelimit_sec,
+            f"{timelimit_resolved:.3f}s" if timelimit_resolved is not None else "None",
+            remaining_sec,
+        )
+
+        option = CoarsenSolveReconstructOption(
+            factor=factor,
+            timelimit_sec=eff_timelimit_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            log_search_progress=log_search_progress,
+            error_if_infeasible=error_if_infeasible,
+            seed_dispatch=seed_dispatch,
+            solve=solve,
+            idle_mode=idle_mode,
+        )
+        trace = run_coarsen_solve_reconstruct(instance, option, self.logger)
+
+        elapsed = time.monotonic() - start_elapsed
+        obj_value = float(trace.obj_value) if trace.obj_value is not None else None
+        obj_bound = None  # CSR does not produce a valid global lower bound
+
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound,
+        )
+        if trace.final_schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(
+                    schedule=trace.final_schedule,
+                    obj_value=obj_value,
+                    obj_bound=obj_bound,
+                ),
+            )
+        else:
+            self._register(report, None)
+
+        # Post-register artifact work (per contract: after _register, not before).
+        # The two flags are evaluated independently so either can be used alone.
+        if trace.final_schedule is not None:
+            if emit_phase_schedules:
+                self._record_csr_phase("1_coarse_solver_result", trace.coarse_schedule)
+                self._record_csr_phase(
+                    "2_reconstructed_raw", trace.reconstructed_raw_schedule
+                )
+                self._record_csr_phase("3_final", trace.final_schedule)
+            if draw_cp_trajectory:
+                self.csr_cp_trajectory = trace.cp_progress_log
+
+        return report

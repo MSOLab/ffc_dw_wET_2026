@@ -8,9 +8,14 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
-from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule, validate_schedule
-from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
+from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters  # noqa: E402
+from ffc_ddw_sum_et.solution.ffc_schedule import (  # noqa: E402
+    FFcSchedule,
+    validate_schedule,
+)
+from ffc_ddw_sum_et.solution.objectives import (  # noqa: E402
+    compute_weighted_earliness_tardiness,
+)
 
 INSTANCE_FILE = ROOT / "benchmarks/PRA2017/large/Instance_50_5_3_0,2_0,2_10_Rep0.txt"
 BEST_SEQ_FILE = (
@@ -70,7 +75,6 @@ def main() -> None:
     sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
     obj = sum_e + sum_t
 
-    last_stage = stage_ids[-1]
     header = (
         f"{'Job':>4} | "
         + " | ".join(f"C{i}" for i in range(len(stage_ids)))

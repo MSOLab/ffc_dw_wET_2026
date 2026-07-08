@@ -1,4 +1,4 @@
-"""Single-instance runner for FAM experiment orchestration."""
+"""Single-instance runner for FFcDWwET experiment orchestration."""
 
 from __future__ import annotations
 
@@ -368,6 +368,8 @@ class FFcDDWSingleInstanceRunner(
                     "Error saving %s json for %s", name, self.ins_name
                 )
 
+        self._emit_csr_artifacts(controller, layout, scope)
+
         def _diag_to_dict(attr_name: str) -> dict[str, Any] | None:
             d = getattr(controller, attr_name, None)
             return asdict(d) if d is not None else None
@@ -574,3 +576,63 @@ class FFcDDWSingleInstanceRunner(
         )
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)
+
+    def _emit_csr_artifacts(
+        self,
+        controller: Any,
+        layout: ArtifactLayout,
+        scope: dict[str, str],
+    ) -> None:
+        """Emit CSR (coarsen_solve_reconstruct) phase schedule JSONs and the
+        CP trajectory JSON if the controller captured them.
+
+        Mirrors the mcf_lb phase loop: each emission is wrapped in its own
+        try/except so one failure does not block other artifacts.
+        """
+        # --- CSR phase schedules (3 snapshots) ---
+        csr_phases = getattr(controller, "csr_phase_schedules", None) or []
+        for name, sched in csr_phases:
+            if sched is None:
+                continue
+            try:
+                json_path = layout.artifact_path(
+                    "csr_phase_schedule", phase_name=name, **scope
+                )
+                # The coarse_solver_result snapshot is on the coarsened time
+                # scale — an original-instance objective is meaningless there.
+                # Pass obj_value=None so only the makespan is shown in the title.
+                if name.endswith("1_coarse_solver_result"):
+                    phase_obj = None
+                else:
+                    phase_obj = compute_phase_obj_value(sched, self.instance)
+                dump_solution_json(
+                    sched,
+                    json_path,
+                    instance_name=self.ins_name,
+                    obj_value=phase_obj,
+                    compact=True,
+                )
+            except Exception:
+                self.logger.exception(
+                    "Error saving CSR phase schedule %s json for %s",
+                    name,
+                    self.ins_name,
+                )
+
+        # --- CSR CP trajectory JSON ---
+        traj = getattr(controller, "csr_cp_trajectory", None)
+        if traj:
+            try:
+                traj_path = layout.artifact_path("csr_cp_trajectory_json", **scope)
+                payload = {
+                    "elapsed_sec": [e.elapsed_sec for e in traj],
+                    "obj_value": [e.obj_value for e in traj],
+                    "obj_bound": [e.obj_bound for e in traj],
+                }
+                traj_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(traj_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)
+            except Exception:
+                self.logger.exception(
+                    "Error saving CSR CP trajectory json for %s", self.ins_name
+                )

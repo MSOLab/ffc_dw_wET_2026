@@ -73,6 +73,14 @@ class NehCpOption(AlgOption):
     tight. ``None`` (default) preserves today's behavior.
     """
 
+    def __post_init__(self) -> None:
+        if self.batch_tl_mode == "proportional":
+            raise ValueError(
+                "batch_tl_mode='proportional' is not supported by NehCpOption "
+                "(NEH-CP has no per-op time-limit multiplier); "
+                "use 'constant' or 'linear'."
+            )
+
     @classmethod
     def coerce_skip_pf_below_obj(
         cls, value: str | float | None

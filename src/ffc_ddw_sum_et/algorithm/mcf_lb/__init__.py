@@ -18,8 +18,8 @@ from .last_stage_sch_builder import (
 )
 from .lb_last_stage_pmtn import (
     ApplyLbByMcfResult,
-    MCFLBStopRequested,
     McfLbResult,
+    MCFLBStopRequested,
     apply_lb_by_mcf,
     solve_mcf_lb,
 )

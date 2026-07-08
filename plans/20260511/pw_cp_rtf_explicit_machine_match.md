@@ -3,7 +3,7 @@
 ## 목표
 
 `build_full_schedule_from_cp`의 RTF 처리를 hybridflowshop의
-`cpsat_model_2/pw_cp.py:create_pw_cp_schedule` Phase 3 방식 — **source-mc → target-mc
+`cpsat_model_2/sw_cp.py:create_sw_cp_schedule` Phase 3 방식 — **source-mc → target-mc
 명시적 매칭 + `add_ops_times_2_mc`로 시간·머신 강제** — 으로 강화한다.
 hybridflowshop의 `AssertionError`는 채택하지 않고 divergence 카운터만 유지한다.
 
@@ -22,11 +22,11 @@ greedy로 함께 replay하도록 바꿨다. 3 시나리오 (n=50/m, n=50/2m, n=2
 ## 범위
 
 - 변경 파일
-  - `src/ffc_ddw_sum_et/algorithm/pw_cp/cp_model.py` — `build_full_schedule_from_cp` 함수 +
+  - `src/ffc_ddw_sum_et/algorithm/sw_cp/cp_model.py` — `build_full_schedule_from_cp` 함수 +
     헬퍼 2개로 분리.
-  - `src/ffc_ddw_sum_et/algorithm/pw_cp/step_log.py` — `cp_divergence_count` docstring 한 줄 갱신.
-- 호출부 (`pw_cp/dispatcher.py:219`) 영향 없음 — 시그니처 유지.
-- 새 단위 테스트는 작성하지 않음. 기존 dispatcher-level 테스트 (`tests/algorithm/pw_cp/`)로 회귀
+  - `src/ffc_ddw_sum_et/algorithm/sw_cp/step_log.py` — `cp_divergence_count` docstring 한 줄 갱신.
+- 호출부 (`sw_cp/dispatcher.py:219`) 영향 없음 — 시그니처 유지.
+- 새 단위 테스트는 작성하지 않음. 기존 dispatcher-level 테스트 (`tests/algorithm/sw_cp/`)로 회귀
   확인.
 
 ## 설계
@@ -150,8 +150,8 @@ def _replay_right_time_fixed(result, full_instance, stage_2_partition, rj_schedu
 
 ## 검증
 
-1. `uv run ruff check src/ffc_ddw_sum_et/algorithm/pw_cp/`
-2. `uv run pytest tests/algorithm/pw_cp/` (22개 회귀)
+1. `uv run ruff check src/ffc_ddw_sum_et/algorithm/sw_cp/`
+2. `uv run pytest tests/algorithm/sw_cp/` (22개 회귀)
 3. 직전 RTF refactor를 검증한 동일 3 시나리오 재실행 — divergence 0 유지 확인 (Phase A로 분리된
    NTF가 이미 0이었으므로 회귀 없으면 그대로 0).
 4. 더 빡센 케이스 (n=200, batch=m) 한 번 보기 — fallback이 발동되더라도 schedule은 feasible해야
@@ -166,6 +166,6 @@ def _replay_right_time_fixed(result, full_instance, stage_2_partition, rj_schedu
 
 ## 참고
 
-- 출발점 구현: `hybridflowshop/cpsat_model_2/pw_cp.py:create_pw_cp_schedule` L462-597
+- 출발점 구현: `hybridflowshop/cpsat_model_2/sw_cp.py:create_sw_cp_schedule` L462-597
   (Phase 1 LTF, Phase 2 NTF, Phase 3 RTF matching).
 - 직전 refactor 커밋: `2e88664 refactor(pw-cp): free RTF machine in merge replay`.

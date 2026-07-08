@@ -1,0 +1,329 @@
+"""Debugging gantt visualisation for sw_cp's five-region partition.
+
+Renders a per-machine SVG gantt chart where every operation bar is
+coloured by its partition region (LTF, LPF, Unfixed, RPF, RTF),
+per-machine left/right time boundaries are drawn as vertical dashed
+lines, and reserved-capacity zones are shown as background bands.
+"""
+
+from __future__ import annotations
+
+import io
+
+# Must set backend before importing pyplot.
+import matplotlib
+
+matplotlib.use("Agg")
+matplotlib.rcParams["svg.fonttype"] = "none"  # Use <text> not font paths
+import matplotlib.patches as mpatches  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+
+from ...solution.ffc_schedule import FFcSchedule, JobIdType, StageIdType  # noqa: E402
+from .partition import OperationPartition  # noqa: E402
+
+__all__ = ["REGION_COLORS", "render_partition_gantt_svg"]
+
+REGION_COLORS: dict[str, str] = {
+    "LTF": "#90A4AE",
+    "LPF": "#FFCC80",
+    "UNFIXED": "#81C784",
+    "RPF": "#FF9800",
+    "RTF": "#607D8B",
+}
+"""Hex colours for each partition region — blue-grays for time-fixed,
+ambers for profile-fixed, green for the unfixed window."""
+
+_REGION_ORDER = ("LTF", "LPF", "UNFIXED", "RPF", "RTF")
+
+_REGION_ATTRS: dict[str, str] = {
+    "LTF": "left_time_fixed",
+    "LPF": "left_profile_fixed",
+    "UNFIXED": "unfixed",
+    "RPF": "right_profile_fixed",
+    "RTF": "right_time_fixed",
+}
+
+
+def render_partition_gantt_svg(
+    schedule: FFcSchedule,
+    stage_2_partition: dict[StageIdType, OperationPartition],
+    stage_id_list: list[str],
+    machines_per_stage: dict[str, list[str]],
+    horizon: int,
+    *,
+    step: int,
+    unfixed_start: int,
+    unfixed_batch_count: int,
+    phase_label: str | None = None,
+    ref_schedule: FFcSchedule | None = None,
+) -> str:
+    """Render one sw_cp step's five-region partition as an SVG string.
+
+    Parameters
+    ----------
+    schedule : FFcSchedule
+        The schedule whose ``(job, stage, machine) -> start/end`` maps
+        drive bar placement. May be the before-CP reference schedule
+        (``rj_schedule`` in the dispatcher) or the after-CP solved
+        schedule (``cand``).
+    stage_2_partition : dict
+        The per-stage :class:`OperationPartition` for this step.
+    stage_id_list : list[str]
+        Ordered stage IDs (from the full instance).
+    machines_per_stage : dict
+        Mapping ``stage_id -> [machine_id, ...]``.
+    horizon : int
+        CP-SAT horizon for the x-axis upper bound.
+    step : int
+        Zero-based step index.
+    unfixed_start : int
+        Batch index where the unfixed window starts.
+    unfixed_batch_count : int
+        Number of batches in the unfixed window.
+    phase_label : str | None
+        Optional "before CP"/"after CP" label appended to the plot title.
+    ref_schedule : FFcSchedule | None
+        Optional reference schedule used to compute the per-machine
+        left/right boundary lines (the LTF/RTF positions). When ``None``
+        (default), ``schedule`` itself is used. Pass the same
+        ``rj_schedule`` here across the before/after renders to keep the
+        boundary lines pinned to the reference frame so the displacement
+        of RTF ops is visually comparable across phases.
+
+    Returns
+    -------
+    str
+        Self-contained SVG document.
+    """
+    # ── 1. machine lanes ────────────────────────────────────────────
+    lanes: list[tuple[str, str]] = []
+    lane_labels: list[str] = []
+    for s_id in stage_id_list:
+        for mc in machines_per_stage.get(s_id, []):
+            lanes.append((s_id, mc))
+            lane_labels.append(f"{s_id}-{mc}")
+    n_lanes = len(lanes)
+    if n_lanes == 0:
+        return "<svg xmlns='http://www.w3.org/2000/svg'/>"
+
+    # Reference schedule supplies the boundary positions; the rendered
+    # schedule supplies the actual op bars (which may live on a different
+    # machine lane than the incumbent ``k`` recorded in the partition —
+    # CP-SAT is free to reassign non-time-fixed ops across machines).
+    ref = ref_schedule if ref_schedule is not None else schedule
+    ref_start_map = ref.get_jik_2_start_time_map()
+    ref_end_map = ref.get_jik_2_end_time_map()
+    src_start_map = schedule.get_jik_2_start_time_map()
+    src_end_map = schedule.get_jik_2_end_time_map()
+
+    # Per-stage ``job -> region_name`` index (a job occupies exactly one
+    # region per stage; machine ``k`` in the partition tuple is the
+    # incumbent machine, not necessarily the one CP assigns now).
+    stage_2_job_2_region: dict[StageIdType, dict[JobIdType, str]] = {}
+    for s_id, part in stage_2_partition.items():
+        j2r: dict[JobIdType, str] = {}
+        for rname in _REGION_ORDER:
+            for job, _k in getattr(part, _REGION_ATTRS[rname]):
+                if job in j2r and j2r[job] != rname:
+                    raise AssertionError(
+                        f"partition invariant violated: job {job!r} in "
+                        f"multiple regions on stage {s_id!r} "
+                        f"({j2r[job]} and {rname})"
+                    )
+                j2r[job] = rname
+        stage_2_job_2_region[s_id] = j2r
+
+    lane_set: set[tuple[str, str]] = set(lanes)
+
+    # ── 2. per-machine boundaries (from ref) + ops (from schedule) ───
+    lane_boundaries: dict[tuple[str, str], tuple[int, int]] = {}
+    lane_ops: dict[tuple[str, str], list[tuple[str, int, int, str]]] = {
+        lane: [] for lane in lanes
+    }
+
+    for s_id, mc in lanes:
+        partition = stage_2_partition.get(s_id)
+        ltf_ends: list[int] = []
+        rtf_starts: list[int] = []
+
+        if partition is not None:
+            for job, k in partition.left_time_fixed:
+                if k == mc:
+                    e = ref_end_map.get((job, s_id, k))
+                    if e is not None:
+                        ltf_ends.append(e)
+            for job, k in partition.right_time_fixed:
+                if k == mc:
+                    s = ref_start_map.get((job, s_id, k))
+                    if s is not None:
+                        rtf_starts.append(s)
+
+        left_b = max(ltf_ends) if ltf_ends else 0
+        right_b = min(rtf_starts) if rtf_starts else horizon
+        lane_boundaries[(s_id, mc)] = (left_b, right_b)
+
+    # Op bars: iterate the schedule's actual operations and place each on
+    # its actual machine lane, coloured by the partition region of
+    # ``(job, stage)``. This avoids the previous incumbent-``k`` lookup
+    # which dropped bars when CP reassigned an op to another machine.
+    for (job, s_id, mc), s in src_start_map.items():
+        if (s_id, mc) not in lane_set:
+            continue
+        if s_id not in stage_2_partition:
+            continue
+        rname = stage_2_job_2_region.get(s_id, {}).get(job)
+        if rname is None:
+            continue
+        e = src_end_map.get((job, s_id, mc))
+        if e is None or e <= s:
+            continue
+        lane_ops[(s_id, mc)].append((job, s, e, rname))
+
+    # ── 3. draw ─────────────────────────────────────────────────────
+    machine_height = 1.0
+    bar_height = 0.8
+    fig_height = max(4.0, 1.5 + n_lanes * 0.55)
+
+    fig, ax = plt.subplots(figsize=(14.0, fig_height))
+
+    # 3a. background bands
+    for idx, (s_id, mc) in enumerate(lanes):
+        y = float(idx)
+        left_b, right_b = lane_boundaries[(s_id, mc)]
+
+        if left_b > 0:
+            ax.add_patch(
+                mpatches.Rectangle(
+                    (0, y),
+                    left_b,
+                    machine_height,
+                    facecolor=REGION_COLORS["LTF"],
+                    alpha=0.07,
+                    edgecolor="none",
+                )
+            )
+        if right_b > left_b:
+            ax.add_patch(
+                mpatches.Rectangle(
+                    (left_b, y),
+                    right_b - left_b,
+                    machine_height,
+                    facecolor=REGION_COLORS["UNFIXED"],
+                    alpha=0.04,
+                    edgecolor="none",
+                )
+            )
+        if right_b < horizon:
+            ax.add_patch(
+                mpatches.Rectangle(
+                    (right_b, y),
+                    horizon - right_b,
+                    machine_height,
+                    facecolor=REGION_COLORS["RTF"],
+                    alpha=0.07,
+                    edgecolor="none",
+                )
+            )
+
+    # 3b. operation bars
+    for idx, (s_id, mc) in enumerate(lanes):
+        y = float(idx)
+        bar_bottom = y + 0.1
+        for job, s, e, rname in lane_ops[(s_id, mc)]:
+            dur = e - s
+            if dur <= 0:
+                continue
+            color = REGION_COLORS[rname]
+            unfixed = rname == "UNFIXED"
+            alpha_val = 1.0 if unfixed else 0.72
+            lw = 2.0 if unfixed else 1.0
+
+            ax.add_patch(
+                mpatches.Rectangle(
+                    (s, bar_bottom),
+                    dur,
+                    bar_height,
+                    facecolor=color,
+                    edgecolor="black",
+                    alpha=alpha_val,
+                    linewidth=lw,
+                )
+            )
+            mid = s + dur / 2.0
+            ax.text(
+                mid,
+                bar_bottom + bar_height / 2.0,
+                job,
+                ha="center",
+                va="center",
+                fontsize=7,
+                color="black",
+            )
+            ax.text(
+                mid,
+                bar_bottom + bar_height - 0.05,
+                str(dur),
+                ha="center",
+                va="bottom",
+                fontsize=6,
+                color="gray",
+            )
+
+    # 3c. boundary lines (data coords, per-lane vertical segment)
+    for idx, (s_id, mc) in enumerate(lanes):
+        y = float(idx)
+        left_b, right_b = lane_boundaries[(s_id, mc)]
+        if left_b > 0:
+            ax.plot(
+                [left_b, left_b],
+                [y, y + machine_height],
+                color="#37474F",
+                linestyle=(0, (6, 4)),
+                linewidth=1.2,
+            )
+        if right_b < horizon:
+            ax.plot(
+                [right_b, right_b],
+                [y, y + machine_height],
+                color="#37474F",
+                linestyle=(0, (6, 4)),
+                linewidth=1.2,
+            )
+
+    # ── 4. axes ─────────────────────────────────────────────────────
+    ax.set_yticks([i + 0.5 for i in range(n_lanes)])
+    ax.set_yticklabels(lane_labels)
+    ax.set_ylim(-0.5, float(n_lanes) + 0.5)
+    ax.set_xlim(0, horizon + 1)
+    ax.set_xlabel("Time")
+    ax.invert_yaxis()
+    ax.grid(True, axis="x", linestyle="--", alpha=0.3)
+
+    title = (
+        f"sw_cp  step={step}  "
+        f"unfixed=[{unfixed_start},{unfixed_start + unfixed_batch_count})  "
+        f"horizon={horizon}"
+    )
+    if phase_label:
+        title += f"  ({phase_label})"
+    ax.set_title(title, fontsize=11, fontweight="bold")
+
+    # 4a. region legend
+    legend_patches = [
+        mpatches.Patch(color=REGION_COLORS[r], label=r) for r in _REGION_ORDER
+    ]
+    ax.legend(
+        handles=legend_patches,
+        loc="upper right",
+        fontsize=8,
+        ncol=5,
+        framealpha=0.7,
+    )
+
+    plt.tight_layout()
+
+    # ── 5. export SVG string ────────────────────────────────────────
+    buf = io.BytesIO()
+    fig.savefig(buf, format="svg", bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue().decode("utf-8")

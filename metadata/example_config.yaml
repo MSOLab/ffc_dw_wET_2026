@@ -1,4 +1,4 @@
-# FAM experiment orchestration configuration
+# FFcDWwET experiment orchestration configuration
 # Ref: hybridflowshop/main.py orchestration pattern
 
 run_mode: FULL_RUN        # FULL_RUN | RESUME | POST_PROCESS_ONLY

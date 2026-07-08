@@ -1,8 +1,10 @@
 from io import StringIO
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
+from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.ffc_params import FFcParameters
 
@@ -330,3 +332,389 @@ def test_with_stage_processing_time_increment_rejects_non_ddw_instance() -> None
     minimal = FFcParameters.__new__(FFcParameters)
     with pytest.raises(TypeError, match="requires FFcDDWParameters"):
         FFcDDWParameters.with_stage_processing_time_increment(minimal, "i0", 1)
+
+
+# -----------------------------------------------------------------------------
+# coarsen_processing_times
+# -----------------------------------------------------------------------------
+
+
+def _make_small_instance() -> FFcDDWParameters:
+    """Construct a minimal 2-job × 2-stage instance for coarsen tests."""
+    import pandas as pd
+
+    from ffc_ddw_sum_et.parameters.base.job_stage_p import (
+        JobStageProcessingTimeManager,
+    )
+
+    # p values: job0=[10, 20], job1=[30, 40]
+    df = pd.DataFrame([[10, 20], [30, 40]])
+    p_manager = JobStageProcessingTimeManager("test_p", df)
+    return FFcDDWParameters(
+        name="test_instance",
+        job_id_list=["j0", "j1"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=p_manager,
+        job_2_due_window_map={"j0": (96, 749), "j1": (100, 200)},
+        job_2_ewt_map={"j0": 2, "j1": 3},
+        job_2_twt_map={"j0": 4, "j1": 5},
+        generation_params=None,
+    )
+
+
+def test_coarsen_processing_times_applies_ceil_to_processing_times() -> None:
+    instance = _make_small_instance()
+    factor = 7
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
+
+    import math
+
+    for job_id in instance.job_id_list:
+        for stage_id in instance.stage_id_list:
+            original_p = instance.job_2_stage_2_p_map[job_id][stage_id]
+            expected = math.ceil(original_p / factor)
+            assert coarsened.job_2_stage_2_p_map[job_id][stage_id] == expected
+
+
+def test_coarsen_processing_times_preserves_due_windows() -> None:
+    """Due windows must be preserved at the original scale."""
+    instance = _make_small_instance()
+    factor = 50
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
+
+    assert coarsened.job_2_due_window_map["j0"] == (96, 749)
+    assert coarsened.job_2_due_window_map["j1"] == (100, 200)
+
+
+def test_coarsen_processing_times_all_p_ge_1() -> None:
+    """All coarsened processing times must be >= 1 when originals are > 0."""
+    instance = _make_small_instance()
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50)
+
+    for job_id in coarsened.job_id_list:
+        for stage_id in coarsened.stage_id_list:
+            assert coarsened.job_2_stage_2_p_map[job_id][stage_id] >= 1
+
+
+def test_coarsen_processing_times_lower_le_upper_preserved() -> None:
+    instance = _make_small_instance()
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50)
+
+    for job_id in coarsened.job_id_list:
+        lower, upper = coarsened.job_2_due_window_map[job_id]
+        assert lower <= upper
+
+
+def test_coarsen_processing_times_preserves_weights_and_layout() -> None:
+    instance = _make_small_instance()
+    factor = 50
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, factor)
+
+    assert coarsened.job_2_ewt_map == instance.job_2_ewt_map
+    assert coarsened.job_2_twt_map == instance.job_2_twt_map
+    assert coarsened.job_id_list == instance.job_id_list
+    assert coarsened.stage_id_list == instance.stage_id_list
+    assert coarsened.stage_2_machines_map == instance.stage_2_machines_map
+    assert coarsened.generation_params == instance.generation_params
+
+
+def test_coarsen_processing_times_name_has_coarsenp_suffix() -> None:
+    instance = _make_small_instance()
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50)
+
+    assert coarsened.name == "test_instance_coarsenp50"
+
+
+def test_coarsen_processing_times_raises_value_error_for_zero_factor() -> None:
+    instance = _make_small_instance()
+
+    with pytest.raises(ValueError):
+        FFcDDWParameters.coarsen_processing_times(instance, 0)
+
+
+def test_coarsen_processing_times_raises_value_error_for_negative_factor() -> None:
+    instance = _make_small_instance()
+
+    with pytest.raises(ValueError):
+        FFcDDWParameters.coarsen_processing_times(instance, -1)
+
+
+def test_coarsen_processing_times_raises_type_error_for_non_ddw_instance() -> None:
+    minimal = FFcParameters.__new__(FFcParameters)
+
+    with pytest.raises(TypeError, match="requires FFcDDWParameters"):
+        FFcDDWParameters.coarsen_processing_times(minimal, 50)
+
+
+def test_coarsen_processing_times_does_not_mutate_original() -> None:
+    instance = _make_small_instance()
+    original_p = {
+        j: {s: instance.job_2_stage_2_p_map[j][s] for s in instance.stage_id_list}
+        for j in instance.job_id_list
+    }
+    original_dw = instance.job_2_due_window_map.copy()
+
+    FFcDDWParameters.coarsen_processing_times(instance, 50)
+
+    for j in instance.job_id_list:
+        for s in instance.stage_id_list:
+            assert instance.job_2_stage_2_p_map[j][s] == original_p[j][s]
+    assert instance.job_2_due_window_map == original_dw
+
+
+# -----------------------------------------------------------------------------
+# get_eddub_twt_job_sequence
+# -----------------------------------------------------------------------------
+
+
+def _make_eddub_twt_instance() -> FFcDDWParameters:
+    """3-job × 1-stage instance with controlled d⁺/w⁺ values.
+
+    job0: d⁺=100, w⁺=5, pos=0
+    job1: d⁺=100, w⁺=3,  pos=1
+    job2: d⁺=200, w⁺=8,  pos=2
+    Expected order: (d⁺ asc, w⁺ desc, pos asc) → [job0, job1, job2]
+    """
+    return FFcDDWParameters(
+        name="eddub_twt_test",
+        job_id_list=["job0", "job1", "job2"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="eddub_twt_p", df=pd.DataFrame([[10], [20], [30]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (80, 100), "job2": (150, 200)},
+        job_2_ewt_map={"job0": 1, "job1": 1, "job2": 1},
+        job_2_twt_map={"job0": 5, "job1": 3, "job2": 8},
+    )
+
+
+def test_get_eddub_twt_job_sequence_d_plus_asc() -> None:
+    instance = _make_eddub_twt_instance()
+    seq = instance.get_eddub_twt_job_sequence()
+    assert seq == ["job0", "job1", "job2"]
+
+
+def test_get_eddub_twt_job_sequence_w_plus_desc_tiebreak() -> None:
+    """Same d⁺: higher w⁺ must come first."""
+    instance = FFcDDWParameters(
+        name="eddub_twt_tie",
+        job_id_list=["a", "b", "c"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="tie_p", df=pd.DataFrame([[1], [1], [1]])
+        ),
+        job_2_due_window_map={"a": (0, 10), "b": (0, 10), "c": (0, 10)},
+        job_2_ewt_map={"a": 1, "b": 1, "c": 1},
+        job_2_twt_map={"a": 2, "b": 5, "c": 3},
+    )
+    seq = instance.get_eddub_twt_job_sequence()
+    assert seq == ["b", "c", "a"]  # w⁺ desc: 5, 3, 2
+
+
+def test_get_eddub_twt_job_sequence_position_tiebreak() -> None:
+    """Same d⁺ and w⁺: preserve given (native) order."""
+    instance = FFcDDWParameters(
+        name="eddub_twt_pos",
+        job_id_list=["x", "y", "z"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="pos_p", df=pd.DataFrame([[1], [1], [1]])
+        ),
+        job_2_due_window_map={"x": (0, 10), "y": (0, 10), "z": (0, 10)},
+        job_2_ewt_map={"x": 1, "y": 1, "z": 1},
+        job_2_twt_map={"x": 5, "y": 5, "z": 5},
+    )
+    seq = instance.get_eddub_twt_job_sequence()
+    assert seq == ["x", "y", "z"]  # native position order
+
+
+def test_get_eddub_twt_job_sequence_all_jobs_included() -> None:
+    instance = _make_eddub_twt_instance()
+    seq = instance.get_eddub_twt_job_sequence()
+    assert set(seq) == set(instance.job_id_list)
+    assert len(seq) == len(instance.job_id_list)
+
+
+# -------------------------------------------------------------------
+# get_lsl_job_sequence
+# -------------------------------------------------------------------
+
+
+def _make_lsl_instance() -> FFcDDWParameters:
+    """3-job × 2-stage instance with controlled d⁺ and p_last values.
+
+    job0: d⁺=100, p_last=10 → slack=90, pos=0
+    job1: d⁺=200, p_last=30 → slack=170, pos=1
+    job2: d⁺=100, p_last=20 → slack=80,  pos=2
+    Expected LSL order (slack asc, pos tie-break): [job2, job0, job1]
+    """
+    return FFcDDWParameters(
+        name="lsl_test",
+        job_id_list=["job0", "job1", "job2"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="lsl_p", df=pd.DataFrame([[10, 10], [20, 30], [30, 20]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (150, 200), "job2": (50, 100)},
+        job_2_ewt_map={"job0": 1, "job1": 1, "job2": 1},
+        job_2_twt_map={"job0": 1, "job1": 1, "job2": 1},
+    )
+
+
+def test_get_lsl_job_sequence_slack_asc() -> None:
+    instance = _make_lsl_instance()
+    seq = instance.get_lsl_job_sequence()
+    assert seq == ["job2", "job0", "job1"]  # slack: 80, 90, 170
+
+
+def test_get_lsl_job_sequence_position_tiebreak() -> None:
+    """Same slack: preserve native position order."""
+    instance = FFcDDWParameters(
+        name="lsl_tie",
+        job_id_list=["a", "b", "c"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="lsl_tie_p", df=pd.DataFrame([[5, 10], [10, 10], [15, 10]])
+        ),
+        job_2_due_window_map={"a": (50, 100), "b": (50, 100), "c": (50, 100)},
+        job_2_ewt_map={"a": 1, "b": 1, "c": 1},
+        job_2_twt_map={"a": 1, "b": 1, "c": 1},
+    )
+    # All three have p_last=10, d⁺=100 → slack=90 for all
+    # Tie-break by position → [a, b, c]
+    seq = instance.get_lsl_job_sequence()
+    assert seq == ["a", "b", "c"]
+
+
+def test_get_lsl_job_sequence_all_jobs_included() -> None:
+    instance = _make_lsl_instance()
+    seq = instance.get_lsl_job_sequence()
+    assert set(seq) == set(instance.job_id_list)
+    assert len(seq) == len(instance.job_id_list)
+
+
+def test_get_lsl_no_clamp_vs_due_weight_pos() -> None:
+    """LSL must NOT apply max(0, ...) clamp — negative slack jobs should
+    sort before non-negative ones, unlike get_due_weight_pos_job_sequence."""
+    instance = FFcDDWParameters(
+        name="lsl_neg",
+        job_id_list=["a", "b"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="lsl_neg_p", df=pd.DataFrame([[5, 100], [5, 10]])
+        ),
+        job_2_due_window_map={"a": (50, 50), "b": (50, 100)},
+        job_2_ewt_map={"a": 1, "b": 1},
+        job_2_twt_map={"a": 1, "b": 1},
+    )
+    # a: slack = 50-100 = -50, b: slack = 100-10 = 90
+    lsl_seq = instance.get_lsl_job_sequence()
+    assert lsl_seq == ["a", "b"]  # -50 < 90, no clamp
+
+
+# -------------------------------------------------------------------
+# get_osl_job_sequence
+# -------------------------------------------------------------------
+
+
+def _make_osl_instance() -> FFcDDWParameters:
+    """3-job × 2-stage instance with controlled d⁺ and total p values.
+
+    job0: d⁺=100, total_p=10+10=20 → OSL=80,  pos=0
+    job1: d⁺=200, total_p=20+30=50 → OSL=150, pos=1
+    job2: d⁺=100, total_p=30+20=50 → OSL=50,  pos=2
+    Expected OSL order (slack asc, pos tie-break): [job2, job0, job1]
+    """
+    return FFcDDWParameters(
+        name="osl_test",
+        job_id_list=["job0", "job1", "job2"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="osl_p", df=pd.DataFrame([[10, 10], [20, 30], [30, 20]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (150, 200), "job2": (50, 100)},
+        job_2_ewt_map={"job0": 1, "job1": 1, "job2": 1},
+        job_2_twt_map={"job0": 1, "job1": 1, "job2": 1},
+    )
+
+
+def test_get_osl_job_sequence_osl_asc() -> None:
+    instance = _make_osl_instance()
+    seq = instance.get_osl_job_sequence()
+    assert seq == ["job2", "job0", "job1"]  # OSL: 50, 80, 150
+
+
+def test_get_osl_job_sequence_position_tiebreak() -> None:
+    """Same OSL: preserve native position order."""
+    instance = FFcDDWParameters(
+        name="osl_tie",
+        job_id_list=["a", "b", "c"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="osl_tie_p", df=pd.DataFrame([[5, 5], [10, 0], [15, 0]])
+        ),
+        job_2_due_window_map={"a": (50, 100), "b": (50, 100), "c": (50, 100)},
+        job_2_ewt_map={"a": 1, "b": 1, "c": 1},
+        job_2_twt_map={"a": 1, "b": 1, "c": 1},
+    )
+    # OSL: a=90, b=90, c=85 → c first, then a, b by position
+    seq = instance.get_osl_job_sequence()
+    assert seq == ["c", "a", "b"]
+
+
+def test_get_osl_job_sequence_all_jobs_included() -> None:
+    instance = _make_osl_instance()
+    seq = instance.get_osl_job_sequence()
+    assert set(seq) == set(instance.job_id_list)
+    assert len(seq) == len(instance.job_id_list)
+
+
+def test_get_osl_differs_from_lsl() -> None:
+    """OSL uses total p across all stages; LSL uses only last stage.
+    When per-job stage distributions differ, the orders must differ."""
+    # job0: d⁺=100, total_p=10+10=20, p_last=10 → OSL=80, LSL=90
+    # job1: d⁺=100, total_p=5+15=20, p_last=15 → OSL=80, LSL=85
+    # OSL: both 80 → tie by position → [job0, job1]
+    # LSL: job1=85 < job0=90 → [job1, job0]
+    instance = FFcDDWParameters(
+        name="osl_vs_lsl",
+        job_id_list=["job0", "job1"],
+        stage_id_list=["i0", "i1"],
+        stage_2_machines_map={"i0": ["i0_0"], "i1": ["i1_0"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="osl_vs_lsl_p", df=pd.DataFrame([[10, 10], [5, 15]])
+        ),
+        job_2_due_window_map={"job0": (50, 100), "job1": (50, 100)},
+        job_2_ewt_map={"job0": 1, "job1": 1},
+        job_2_twt_map={"job0": 1, "job1": 1},
+    )
+    osl_seq = instance.get_osl_job_sequence()
+    lsl_seq = instance.get_lsl_job_sequence()
+    assert osl_seq != lsl_seq
+    assert osl_seq == ["job0", "job1"]  # OSL tie → position
+    assert lsl_seq == ["job1", "job0"]  # LSL: 85 < 90
+
+
+def test_get_osl_uses_existing_map() -> None:
+    """get_osl_job_sequence must reuse get_job_2_due_date_ub_minus_p_map."""
+    instance = _make_osl_instance()
+    osl_map = instance.get_job_2_due_date_ub_minus_p_map()
+    seq = instance.get_osl_job_sequence()
+    # The sequence must be sorted by osl_map values
+    positions = [osl_map[j] for j in seq]
+    assert positions == sorted(positions)

@@ -273,12 +273,19 @@ class BuildFullSchResult:
     when ``schedule is None``; for ``stage_count == 1`` instances only
     ``"fullS_after_sa_iti"`` is included, since the reverse-dispatch is
     skipped.
+
+    ``before_unflip_makespan`` is the makespan of the reversed-instance
+    full schedule *before* it is unflipped (``Phase3State.full_sch_before_unflip``).
+    ``None`` for ``stage_count == 1`` (no reverse-dispatch) or when the
+    build failed. Used by the round-2 ``last_stage_rebuild_config="best"``
+    selector to pick the seed whose pre-unflip makespan is smaller.
     """
 
     schedule: FFcSchedule | None
     dispatched_obj: float | None
     full_sch_makespan: int | None
     dispatch_sec: float
+    before_unflip_makespan: int | None = None
     intermediate_schedules: list[tuple[str, FFcSchedule]] = field(default_factory=list)
 
 
@@ -342,10 +349,17 @@ def build_full_sch_from_last_stage_only_sch(
         intermediates.append(("fullS_after_unflip", state.full_sch_after_unflip))
     intermediates.append(("fullS_after_sa_iti", state.full_sch_from_ls_only_sch))
 
+    before_unflip_makespan = (
+        int(state.full_sch_before_unflip.makespan)
+        if state.full_sch_before_unflip is not None
+        else None
+    )
+
     return BuildFullSchResult(
         schedule=state.full_sch_from_ls_only_sch,
         dispatched_obj=state.dispatched_obj,
         full_sch_makespan=int(state.full_sch_from_ls_only_sch.makespan),
         dispatch_sec=elapsed,
+        before_unflip_makespan=before_unflip_makespan,
         intermediate_schedules=intermediates,
     )

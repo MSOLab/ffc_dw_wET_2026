@@ -12,9 +12,9 @@ instance에서는 step이 "마지막 실행된 method의 종료 시각에서 0�
 
 `output/20260511/20260511T221827_515269/.../_2m_*` 9 instance 중
 
-- 8개: 마지막 note = `incremental_pw_cp.4-batch_005` (norm ≈ 1.0)
+- 8개: 마지막 note = `incremental_sw_cp.4-batch_005` (norm ≈ 1.0)
 - 1개: 마지막 note = `solve_base_model_cpsat` (norm = 0.3033),
-  그 직전에 `incremental_pw_cp.5-batch_006` (0.2782)
+  그 직전에 `incremental_sw_cp.5-batch_006` (0.2782)
 
 현재 `multi_scenario_method_chart._build_scenario_mean_series` 의 guide_df는
 

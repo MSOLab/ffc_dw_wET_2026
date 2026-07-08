@@ -21,7 +21,7 @@ Computational experiments 절에 들어갈 **구성 요소별 기여도(ablation
    (iterative tightening 포함).
 2. `run_flip_makespan_cp_from_incumbent` — flip-makespan CP.
 3. `neh_cp` — CP 기반 다중삽입 재구성.
-4. `incremental_pw_cp` — 점증 슬라이딩 윈도우 CP (ISW-CP).
+4. `incremental_sw_cp` — 점증 슬라이딩 윈도우 CP (ISW-CP).
 5. `solve_base_model_cpsat` — 최종 base-CP refinement.
 
 P2(FFm‖Cmax) 챕터처럼 각 구성 요소가 최종 해 품질에 주는 한계 기여를

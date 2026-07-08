@@ -7,7 +7,7 @@ from typing import Literal
 
 __all__ = ["BatchTlMode", "resolve_per_step_tl"]
 
-BatchTlMode = Literal["constant", "linear"]
+BatchTlMode = Literal["constant", "linear", "proportional"]
 
 
 def resolve_per_step_tl(
@@ -32,6 +32,12 @@ def resolve_per_step_tl(
     constant ``total_seconds / batch_count`` when the offset would consume
     the whole budget.
     """
+    if batch_tl_mode == "proportional":
+        # dispatcher calculates proportional TL per window: ``kappa * ntf``;
+        # resolver is not involved. (When ``total_seconds`` is given,
+        # this will be handled by the dispatcher, so we don't need to do anything here.)
+        return None
+
     if total_seconds is None:
         if cp_tl_from_arg is None:
             return None

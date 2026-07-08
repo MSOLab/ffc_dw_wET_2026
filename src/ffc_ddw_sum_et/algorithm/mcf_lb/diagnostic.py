@@ -124,6 +124,9 @@ class CalcMcfLbAndDeriveFullSchDiagnostic:
     # When r2 did not run, why: "delta_le_0" | "stop_guard" | "no_adjust"
     # | "s1_none" | None (None when r2 ran).
     r2_skip_reason: str | None = None
+    # Round-2 last-stage seed policy actually used:
+    # "original_pr" | "increased_pr" | "best" | None (None when r2 did not run).
+    last_stage_rebuild_config_used: str | None = None
     # r2 fields populated only when r2 actually ran.
     r2_mcf_lb: float | None = None
     r2_mcf_solve_sec: float | None = None

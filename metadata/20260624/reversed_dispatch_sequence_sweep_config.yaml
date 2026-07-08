@@ -1,0 +1,95 @@
+# Reverse-dispatch sequence sweep: 모든 instance-기반 job sequence를 동일한
+# _dispatch_by_reversed_sequence_with_iit pipeline에 흘려 incumbent wET 비교.
+# See plans/20260624/lsl_osl_reversed_dispatch_sequence_sweep.md
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+output_dir: output/20260624
+instance_worker_cnt: 16
+draw_gantt: false
+painter_thread_cnt: 16
+
+scenarios:
+  - name: rd_edd # Pan et al. (2017) EDD
+    timelimit: "0.09nc"
+    output_subdir: rd_edd
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: edd }]
+  - name: rd_lsl # Pan et al. (2017) LSL (신규)
+    timelimit: "0.09nc"
+    output_subdir: rd_lsl
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: lsl }]
+  - name: rd_osl # Pan et al. (2017) OSL (신규)
+    timelimit: "0.09nc"
+    output_subdir: rd_osl
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: osl }]
+  - name: rd_eddub_twt
+    timelimit: "0.09nc"
+    output_subdir: rd_eddub_twt
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: eddub_twt }]
+  - name: rd_w1
+    timelimit: "0.09nc"
+    output_subdir: rd_w1
+    subroutine_flow: [{ method: initialize_by_reversed_dispatch, sequence: w1 }]
+  - name: rd_wxd1
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd1
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd1 }]
+  - name: rd_wxd2
+    timelimit: "0.09nc"
+    output_subdir: rd_wxd2
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: wxd2 }]
+  - name: rd_weight_due_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_weight_due_pos
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: weight_due_pos }]
+  - name: rd_due_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_due_weight_pos
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: due_weight_pos }]
+  - name: rd_due2_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_due2_weight_pos
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: due2_weight_pos }]
+  - name: rd_due_star_weight_pos
+    timelimit: "0.09nc"
+    output_subdir: rd_due_star_weight_pos
+    subroutine_flow:
+      [
+        {
+          method: initialize_by_reversed_dispatch,
+          sequence: due_star_weight_pos,
+        },
+      ]
+  - name: rd_cpd_mean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_mean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_mean }]
+  - name: rd_cpd_wmean
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_wmean
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_wmean }]
+  - name: rd_cpd_median
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_median
+    subroutine_flow:
+      [{ method: initialize_by_reversed_dispatch, sequence: cpd_median }]
+  - name: rd_cpd_best
+    timelimit: "0.09nc"
+    output_subdir: rd_cpd_best
+    subroutine_flow:
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_mean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_wmean }
+      - { method: initialize_by_reversed_dispatch, sequence: cpd_median }

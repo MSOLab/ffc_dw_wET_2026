@@ -152,9 +152,7 @@ def main() -> None:
 
     # --- MCF-LB step: every per-round intermediate schedule -----------------
     # progress/<inst>/calc_mcf_lb_and_derive_full_sch/<round>/<index>_<label>.json
-    mcflb_phases = sorted(
-        run_dir.glob("**/calc_mcf_lb_and_derive_full_sch/*/*_*.json")
-    )
+    mcflb_phases = sorted(run_dir.glob("**/calc_mcf_lb_and_derive_full_sch/*/*_*.json"))
     if not mcflb_phases:
         logger.warning(
             "No MCF-LB phase JSONs found; was calc_mcf_lb_and_derive_full_sch "
@@ -165,8 +163,7 @@ def main() -> None:
         # instance name is the dir three levels up: <inst>/progress/<step>/<round>
         instance_name = json_path.parent.parent.parent.parent.name
         out_path = (
-            args.output_dir
-            / f"{instance_name}_mcflb_{round_part}_{json_path.stem}.svg"
+            args.output_dir / f"{instance_name}_mcflb_{round_part}_{json_path.stem}.svg"
         )
         _render_phase_gantt_from_json(json_path, out_path)
         logger.info("Wrote %s (from %s/%s)", out_path, round_part, json_path.name)
@@ -184,7 +181,11 @@ def main() -> None:
         # stem ".._r1_C_heatmap"; pull the "rN" round token for the label.
         stem = yaml_path.stem
         round_tag = next(
-            (tok for tok in stem.split("_") if tok and tok[0] == "r" and tok[1:].isdigit()),
+            (
+                tok
+                for tok in stem.split("_")
+                if tok and tok[0] == "r" and tok[1:].isdigit()
+            ),
             "r",
         )
         out_path = args.output_dir / f"{instance_name}_mcflb_{round_tag}_C_heatmap.svg"

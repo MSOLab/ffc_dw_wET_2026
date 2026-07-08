@@ -1,0 +1,75 @@
+# SW-CP time-limit profiling experiment.
+#
+# Goal: gather evidence for a size-aware per-sub-CP time-limit policy
+# TL = a*(#unfixed_ops) + b*(#profile_fixed_ops) + c, by running SW-CP with a
+# generous *uniform* per-sub-CP cap (cp_tl=120s, "enough time") while recording
+# the full within-sub-CP UB/LB trajectory into the standard
+# `<instance>_obj_log.json` (obj_value = UB, obj_bound = LB). Offline analysis
+# then asks "if each sub-CP had been cut at TL=f(#unfixed,#pfixed), how much of
+# the generous-cap objective improvement would remain?".
+#
+# Window scenarios (REDUCED): vary only #unfixed at fixed #pfixed=2/2:
+#   u2_pf2 (unfixed=2) / u4_pf2 (unfixed=4).
+#
+# THREAD8, BIG-N stage: solver_thread_cnt=8 and instance_worker_cnt=12
+# (12*8 = 96 PHYSICAL cores; MUST match the n=50 t8 baseline exactly -- do NOT
+# raise to 192 logical/hyperthreaded cores, that makes timings non-comparable).
+# Extends the n=50 t8 run (20260706T015554_738214) to n in {100,150,200} so the
+# k-for-capture table (A/B1/B2 x p) can be built on the full (n,c,T,R,m,W) grid.
+run_mode: FULL_RUN
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# Representative n in {100,150,200} stage (rep0, non-optimal), from
+# scripts/select_representative_instances.py (190 instances).
+ins_index: [360, 365, 370, 375, 380, 390, 395, 400, 405, 410, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 480, 485, 490, 495, 500, 505, 510, 515, 520, 525, 530, 535, 540, 545, 550, 555, 570, 575, 580, 585, 590, 595, 600, 605, 610, 615, 620, 625, 630, 635, 640, 650, 660, 665, 670, 675, 680, 685, 690, 695, 700, 705, 710, 715, 720, 725, 730, 735, 750, 755, 760, 765, 770, 780, 785, 790, 795, 800, 805, 810, 815, 820, 825, 840, 845, 850, 855, 860, 865, 870, 875, 880, 885, 890, 895, 900, 905, 910, 915, 930, 935, 940, 945, 950, 955, 960, 965, 970, 975, 980, 985, 990, 995, 1000, 1005, 1020, 1025, 1030, 1035, 1040, 1045, 1050, 1055, 1060, 1065, 1070, 1075, 1080, 1085, 1090, 1095, 1110, 1115, 1120, 1125, 1130, 1140, 1145, 1150, 1155, 1160, 1165, 1170, 1175, 1180, 1185, 1200, 1205, 1210, 1215, 1220, 1225, 1230, 1235, 1240, 1245, 1250, 1255, 1260, 1265, 1270, 1275, 1290, 1295, 1300, 1305, 1310, 1315, 1320, 1325, 1330, 1335, 1340, 1345, 1350, 1355, 1360, 1365, 1380, 1385, 1390, 1395, 1400, 1405, 1410, 1415, 1420, 1425, 1430, 1435]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+output_dir: output/20260705_sw_cp_tl_profile_t8_bigN
+instance_worker_cnt: 12
+draw_gantt: false
+scenarios:
+  - name: u2_pf2
+    timelimit: 100000.0
+    output_subdir: u2_pf2
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 8
+        batch_size: "m"
+        step_size: 1
+        unfixed_batch_count: 2
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 120.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false
+  - name: u4_pf2
+    timelimit: 100000.0
+    output_subdir: u4_pf2
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        adjust_p: false
+        adjust_r: false
+      - method: sw_cp
+        rj_right_justify_scope: "rtf_only"
+        solver_thread_cnt: 8
+        batch_size: "m"
+        step_size: 1
+        unfixed_batch_count: 4
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        pf_method: "PF1"
+        cp_tl: 120.0
+        batch_tl_mode: "constant"
+        keep_step_schedules: false
+        debug_partition_gantt: false

@@ -1,4 +1,4 @@
-"""Scenario runner and reporting for FAM experiment orchestration."""
+"""Scenario runner and reporting for FFcDWwET experiment orchestration."""
 
 import csv
 import json
@@ -7,6 +7,7 @@ import os
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -183,7 +184,12 @@ def _render_heatmap_from_yaml(yaml_path: Path, html_path: Path) -> None:
         logger.exception("Failed to render heatmap for %s", yaml_path)
 
 
-def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
+def _render_phase_gantt_from_json(
+    json_path: Path,
+    png_path: Path,
+    force_start: int | None = None,
+    force_end: int | None = None,
+) -> None:
     """Render a phase Gantt PNG from a compact-JSON phase schedule.
 
     Auto-detects regular vs preemptive content from the top-level keys
@@ -193,6 +199,11 @@ def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
     1. instance name (from ``instanceName``)
     2. PNG filename
     3. ``obj=<v>, makespan=<m>``
+
+    ``force_start`` / ``force_end`` pin the x-axis horizon (passed through
+    to the plotter). Callers use this to render a family of phase Gantts on
+    a shared ``0..max_makespan`` time axis so phases are visually
+    comparable; the title still reports each phase's own makespan.
 
     Module-level so it's picklable by ``ProcessPoolExecutor``.
     """
@@ -244,6 +255,8 @@ def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
                 machines=machines,
                 jobs=jobs,
                 all_jobs=all_jobs,
+                force_start=force_start,
+                force_end=force_end,
                 title=title,
             )
         else:
@@ -266,10 +279,98 @@ def _render_phase_gantt_from_json(json_path: Path, png_path: Path) -> None:
                 stage_list=data.get(K.STAGES),
                 machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
                 all_job_list=data.get(K.JOBS),
+                force_start=force_start,
+                force_end=force_end,
                 title=title,
             )
     except Exception:
         logger.exception("Failed to render Gantt for %s", json_path)
+
+
+def _phase_makespan_from_json(json_path: Path) -> int | None:
+    """Return a phase schedule's makespan (max end time) from its compact
+    JSON, or ``None`` if unreadable/empty. Used to size a shared
+    ``0..max_makespan`` x-axis horizon across a family of phase Gantts."""
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("Failed to load phase json %s for horizon", json_path)
+        return None
+    if K.SEGMENTS in data:
+        ends = [int(seg[K.OP_END]) for seg in (data.get(K.SEGMENTS) or [])]
+    else:
+        ends = [int(op[K.OP_END]) for op in (data.get(K.OPERATIONS) or [])]
+    return max(ends) if ends else None
+
+
+def _render_csr_cp_trajectory_line(json_path: Path, png_path: Path) -> None:
+    """Render a UB/LB-vs-time line graph from a CSR CP trajectory JSON.
+
+    Loads ``{"elapsed_sec":[...], "obj_value":[...], "obj_bound":[...]}``
+    (parallel arrays; ``None`` entries are skipped per-series) and plots
+    two step-style lines: UB from ``obj_value`` and LB from ``obj_bound``.
+
+    y-axis represents the **coarsened-scale** objective (the solve was run
+    on a coarsened instance, so these values are NOT directly comparable to
+    the original-scale objectives in ``_obj_log.json``).
+
+    Module-level so it's picklable by ``ProcessPoolExecutor``.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not available, skipping %s", json_path)
+        return
+
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("Failed to load CSR trajectory json %s", json_path)
+        return
+
+    elapsed = data.get("elapsed_sec") or []
+    ub_raw = data.get("obj_value") or []
+    lb_raw = data.get("obj_bound") or []
+
+    # Filter each series to pairs where the value is not None.
+    ub_points = [(t, v) for t, v in zip(elapsed, ub_raw) if v is not None]
+    lb_points = [(t, v) for t, v in zip(elapsed, lb_raw) if v is not None]
+
+    if not ub_points and not lb_points:
+        # Nothing to plot; skip file creation.
+        return
+
+    # Derive instance label from filename for the title.
+    stem = png_path.stem  # e.g. "MyInstance_csr_cp_trajectory"
+    instance_label = stem.replace("_csr_cp_trajectory", "")
+
+    try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots()
+
+        if ub_points:
+            t_ub, v_ub = zip(*ub_points)
+            ax.step(t_ub, v_ub, where="post", label="UB (obj_value)")
+
+        if lb_points:
+            t_lb, v_lb = zip(*lb_points)
+            ax.step(t_lb, v_lb, where="post", label="LB (obj_bound)", linestyle="--")
+
+        ax.set_xlabel("solve elapsed (s)")
+        ax.set_ylabel("coarsened objective")
+        ax.set_title(f"{instance_label}\ncoarsened-scale UB/LB trajectory")
+        ax.legend()
+
+        fig.tight_layout()
+        fig.savefig(str(png_path))
+        plt.close(fig)
+    except Exception:
+        logger.exception("Failed to render CSR trajectory for %s", json_path)
 
 
 @dataclass
@@ -574,6 +675,7 @@ class FFcDDWReporter:
         self._write_statistics_yaml()
         self._write_excel_report()
         self._write_post_run_pivot_artifacts()
+        self._write_cp_gap_artifacts()
         self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
 
@@ -594,6 +696,27 @@ class FFcDDWReporter:
             layout=self.layout,
             hybrid_match_csv=self.ins_index_source,
             bks_table_csv=self.bks_table_csv_path,
+        )
+
+    def _write_cp_gap_artifacts(self) -> None:
+        """Emit CSR CP gap comparison CSV + PivotTable.js dashboard.
+
+        Skips silently when trajectory files are absent (non-CSR runs).
+        """
+        from .post_run_pivot import write_cp_gap_artifacts
+
+        if not self.ins_index_source or not self.ins_index_source.exists():
+            return
+        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
+            return
+
+        run_root = Path(self.layout.run_dir())
+        write_cp_gap_artifacts(
+            run_root,
+            self.layout,
+            self.ins_index_source,
+            self.bks_table_csv_path,
+            init_filter="v3",
         )
 
     def _write_post_run_subroutine_chart_artifacts(self) -> None:
@@ -1002,7 +1125,9 @@ class FFcDDWReporter:
                     instance_name=ir.instance_name,
                 )
                 r2_present = r2_path.exists()
-                r2_data: dict[str, Any] = (load_yaml(r2_path) or {}) if r2_present else {}
+                r2_data: dict[str, Any] = (
+                    (load_yaml(r2_path) or {}) if r2_present else {}
+                )
 
                 ins_idx = self._resolve_ins_index(ir.instance_name)
                 meta = (
@@ -1048,9 +1173,7 @@ class FFcDDWReporter:
 
         if not rows:
             return
-        rows.sort(
-            key=lambda r: (r[0], r[1] if r[1] is not None else -1, r[2])
-        )
+        rows.sort(key=lambda r: (r[0], r[1] if r[1] is not None else -1, r[2]))
         path = self.layout.artifact_path("calc_mcf_lb_run_summary_csv")
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
@@ -1572,6 +1695,24 @@ class FFcDDWReporter:
             return
 
         jobs: list[tuple[Any, Path, Path]] = []
+        # MCF-LB phase Gantts (flat ``mcf_lb_phase_schedule`` + round-nested
+        # ``calc_mcf_lb_phase_schedule``) share a single ``0..max_makespan``
+        # x-axis per instance so every phase / round / scenario chart for that
+        # instance is drawn on the same time scale and is directly comparable.
+        # Collected here keyed by instance name; the shared horizon is the max
+        # makespan across all of that instance's MCF-LB phase schedules.
+        mcf_phase_entries: dict[str, list[tuple[Path, Path]]] = defaultdict(list)
+        mcf_phase_horizon: dict[str, int] = {}
+
+        def _add_mcf_phase(ins_name: str, src: Path, dst: Path) -> None:
+            mcf_phase_entries[ins_name].append((src, dst))
+            makespan = _phase_makespan_from_json(src)
+            if makespan is not None:
+                prev = mcf_phase_horizon.get(ins_name)
+                mcf_phase_horizon[ins_name] = (
+                    makespan if prev is None else max(prev, makespan)
+                )
+
         for sc in self.scenario_results:
             for ir in sc.instance_results:
                 ins = ir.instance_name
@@ -1588,28 +1729,42 @@ class FFcDDWReporter:
                             self.layout.artifact_path("gantt_png", **scope),
                         )
                     )
-                for phase_kind in (
+                # MCF-LB phase schedules (run_mcf_lb): unified horizon. Nested
+                # under ``progress/mcf_lb_phase_schedule/`` so this glob is
+                # scoped to its own files and no longer over-matches other flat
+                # JSONs (flip phase schedules, CSR trajectory) in ``progress/``.
+                for phase_json in self.layout.find_artifacts(
                     "mcf_lb_phase_schedule",
-                    "flip_makespan_cp_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
                 ):
-                    for phase_json in self.layout.find_artifacts(
-                        phase_kind,
-                        scenario_name=sc.name,
-                        instance_name=ins,
-                    ):
-                        # phase_name == file stem (template is "{phase_name}.json")
-                        phase_name = phase_json.stem
-                        jobs.append(
-                            (
-                                _render_phase_gantt_from_json,
-                                phase_json,
-                                self.layout.artifact_path(
-                                    "phase_gantt_png",
-                                    phase_name=phase_name,
-                                    **scope,
-                                ),
-                            )
+                    # phase_name == file stem (template is
+                    # "mcf_lb_phase_schedule/{phase_name}.json")
+                    phase_name = phase_json.stem
+                    _add_mcf_phase(
+                        ins,
+                        phase_json,
+                        self.layout.artifact_path(
+                            "phase_gantt_png", phase_name=phase_name, **scope
+                        ),
+                    )
+                # ``flip_makespan_cp`` phase schedules are not MCF-LB charts;
+                # keep their own per-chart auto horizon.
+                for phase_json in self.layout.find_artifacts(
+                    "flip_makespan_cp_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
+                ):
+                    phase_name = phase_json.stem
+                    jobs.append(
+                        (
+                            _render_phase_gantt_from_json,
+                            phase_json,
+                            self.layout.artifact_path(
+                                "phase_gantt_png", phase_name=phase_name, **scope
+                            ),
                         )
+                    )
                 # Round-nested ``calc_mcf_lb_phase_schedule`` JSONs live under
                 # ``progress/<inst>/calc_mcf_lb_and_derive_full_sch/<round>/<n>_<label>.json``.
                 # ``find_artifacts`` substitutes ``*`` for the unspecified
@@ -1628,21 +1783,127 @@ class FFcDDWReporter:
                     if sep <= 0:
                         continue
                     index_str, label = stem[:sep], stem[sep + 1 :]
-                    jobs.append(
-                        (
-                            _render_phase_gantt_from_json,
-                            phase_json,
-                            self.layout.artifact_path(
-                                "calc_mcf_lb_phase_gantt_png",
-                                round=round_part,
-                                index=index_str,
-                                label=label,
-                                **scope,
-                            ),
-                        )
+                    _add_mcf_phase(
+                        ins,
+                        phase_json,
+                        self.layout.artifact_path(
+                            "calc_mcf_lb_phase_gantt_png",
+                            round=round_part,
+                            index=index_str,
+                            label=label,
+                            **scope,
+                        ),
                     )
 
+        # Emit MCF-LB phase jobs, pinning each instance's charts to a shared
+        # ``0..max_makespan`` horizon via a bound ``force_start`` / ``force_end``.
+        for ins_name, entries in mcf_phase_entries.items():
+            horizon = mcf_phase_horizon.get(ins_name)
+            render_fn = (
+                partial(_render_phase_gantt_from_json, force_start=0, force_end=horizon)
+                if horizon is not None
+                else _render_phase_gantt_from_json
+            )
+            for src, dst in entries:
+                jobs.append((render_fn, src, dst))
+
+        # CSR phase Gantts: up to 3 snapshots per instance, discovered via
+        # ``find_artifacts`` because the on-disk ``phase_name`` carries the
+        # step's call_context prefix (e.g.
+        # ``1-coarsen_solve_reconstruct_2_reconstructed_raw``); we classify each
+        # file by its name suffix. ``2_reconstructed_raw`` and ``3_final`` share
+        # a common original-scale x-axis (0..max of their two makespans) so they
+        # are directly comparable. ``1_coarse_solver_result`` is on a coarsened
+        # time axis, pinned to ``0 .. its own makespan``.
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {
+                    "scenario_name": sc.name,
+                    "instance_name": ins,
+                }
+                coarse_json: Path | None = None
+                raw_json: Path | None = None
+                final_json: Path | None = None
+                for pj in self.layout.find_artifacts(
+                    "csr_phase_schedule",
+                    scenario_name=sc.name,
+                    instance_name=ins,
+                ):
+                    if pj.stem.endswith("1_coarse_solver_result"):
+                        coarse_json = pj
+                    elif pj.stem.endswith("2_reconstructed_raw"):
+                        raw_json = pj
+                    elif pj.stem.endswith("3_final"):
+                        final_json = pj
+                # Shared original-scale horizon for raw + final.
+                shared_horizon: int | None = None
+                for phase_json in (raw_json, final_json):
+                    if phase_json is not None:
+                        ms = _phase_makespan_from_json(phase_json)
+                        if ms is not None:
+                            shared_horizon = (
+                                ms
+                                if shared_horizon is None
+                                else max(shared_horizon, ms)
+                            )
+                shared_render_fn = (
+                    partial(
+                        _render_phase_gantt_from_json,
+                        force_start=0,
+                        force_end=shared_horizon,
+                    )
+                    if shared_horizon is not None
+                    else _render_phase_gantt_from_json
+                )
+                # ``1_coarse_solver_result`` pinned to 0 .. its own makespan.
+                coarse_makespan = (
+                    _phase_makespan_from_json(coarse_json)
+                    if coarse_json is not None
+                    else None
+                )
+                coarse_render_fn = (
+                    partial(
+                        _render_phase_gantt_from_json,
+                        force_start=0,
+                        force_end=coarse_makespan,
+                    )
+                    if coarse_makespan is not None
+                    else _render_phase_gantt_from_json
+                )
+                for phase_json, render_fn in (
+                    (raw_json, shared_render_fn),
+                    (final_json, shared_render_fn),
+                    (coarse_json, coarse_render_fn),
+                ):
+                    if phase_json is not None:
+                        jobs.append(
+                            (
+                                render_fn,
+                                phase_json,
+                                self.layout.artifact_path(
+                                    "phase_gantt_png",
+                                    phase_name=phase_json.stem,
+                                    **scope,
+                                ),
+                            )
+                        )
+
         gantt_count = len(jobs)
+        # CSR CP trajectory line graphs (coarsened UB/LB vs time).
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {"scenario_name": sc.name, "instance_name": ins}
+                traj_json = self.layout.artifact_path("csr_cp_trajectory_json", **scope)
+                if traj_json.exists():
+                    jobs.append(
+                        (
+                            _render_csr_cp_trajectory_line,
+                            traj_json,
+                            self.layout.artifact_path("csr_cp_trajectory_png", **scope),
+                        )
+                    )
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the
         # progress zone per (scenario, instance) and route the HTML output
         # into the same instance's report zone.

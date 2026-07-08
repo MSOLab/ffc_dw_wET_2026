@@ -1,18 +1,18 @@
-# PW-CP Port — Detail Decisions (companion to `pw_cp_port_plan.md`)
+# PW-CP Port — Detail Decisions (companion to `sw_cp_port_plan.md`)
 
 This file freezes the user-confirmed implementation decisions surfaced
 during the planning conversation on 2026-05-10. Read together with
-`pw_cp_port_plan.md`; this file overrides any conflicting wording.
+`sw_cp_port_plan.md`; this file overrides any conflicting wording.
 
 ## Naming and placement
 
-- **Controller step method**: `pw_cp` (no `run_` prefix). Matches the
+- **Controller step method**: `sw_cp` (no `run_` prefix). Matches the
   `neh_cp` peer. The `subroutine_flow.method:` key in YAML resolves
   directly to this attribute.
-- **Algorithm package path**: `src/ffc_ddw_sum_et/algorithm/pw_cp/`
+- **Algorithm package path**: `src/ffc_ddw_sum_et/algorithm/sw_cp/`
   (`__init__`, `option`, `step_log`, `partition`, `cp_model`,
   `dispatcher`).
-- **Experiment YAML**: `metadata/20260510/pw_cp_grid.yaml`. The
+- **Experiment YAML**: `metadata/20260510/sw_cp_grid.yaml`. The
   `configs/` path mentioned in the plan does not exist in this repo —
   every scenario YAML lives under `metadata/<date>/`.
 
@@ -25,7 +25,7 @@ a fully-feasible incumbent) and refines via PW-CP:
 subroutine_flow:
   - method: calc_mcf_lb_and_derive_full_sch
     # …default seeding params (mirror 20260507_*)
-  - method: pw_cp
+  - method: sw_cp
     # …PW-CP option fields below
 ```
 
@@ -40,7 +40,7 @@ Grid (single YAML, 4 scenarios):
 
 ## Wall-clock plumbing (controller → dispatcher)
 
-`pw_cp` step method computes `wall_clock_deadline_sec = time.monotonic()
+`sw_cp` step method computes `wall_clock_deadline_sec = time.monotonic()
 + self.timer.get_remaining_sec(self.stopping_criteria.timelimit)` and
 threads it through `PwCpOption.wall_clock_deadline_sec`. The dispatcher
 clamps each batch's CP-SAT `max_time_in_seconds` by the remaining
@@ -52,8 +52,8 @@ or the controller-managed stop predicate.
 
 ## `_build_full_schedule_from_cp` — machine reassignment policy
 
-Use hybridflowshop's validated pattern (`create_pw_cp_schedule` in
-`/home/hjt/code/hybridflowshop/.../cpsat_model_2/pw_cp.py`):
+Use hybridflowshop's validated pattern (`create_sw_cp_schedule` in
+`/home/hjt/code/hybridflowshop/.../cpsat_model_2/sw_cp.py`):
 
 1. Start from `rj_schedule.deepcopy()` and remove every non-time-fixed
    `(j, i, k)` op via `FFcSchedule.remove_operations`.
@@ -135,13 +135,13 @@ analysis pick it up unchanged.
 
 ## Per-step Gantt
 
-`pw_cp` accepts a per-call `draw_gantt: bool = False` kwarg. When True,
+`sw_cp` accepts a per-call `draw_gantt: bool = False` kwarg. When True,
 the controller appends two snapshots to the existing
 `mcf_lb_phase_schedules` list (the mechanism is generic despite the
 name):
 
-- `(self._mcf_lb_phase_name("pw_cp_before"), incumbent.schedule.deepcopy())`
-- `(self._mcf_lb_phase_name("pw_cp_after"), result.schedule.deepcopy())`
+- `(self._mcf_lb_phase_name("sw_cp_before"), incumbent.schedule.deepcopy())`
+- `(self._mcf_lb_phase_name("sw_cp_after"), result.schedule.deepcopy())`
 
 The post-run reporter renders these into PNGs alongside MCF-LB phase
 PNGs. Naming is deliberately misleading (`mcf_lb_phase_schedules`
@@ -183,14 +183,14 @@ sub_jobs: continue" early exit).
 
 Plan-mandated 5 unit-test files plus the schedule-method test:
 
-1. `tests/algorithm/pw_cp/test_option.py`
-2. `tests/algorithm/pw_cp/test_partition.py`
-3. `tests/algorithm/pw_cp/test_cp_model.py`
-4. `tests/algorithm/pw_cp/test_dispatcher.py`
-5. `tests/algorithm/pw_cp/test_dispatcher_stop.py`
-6. `tests/algorithm/pw_cp/test_dispatcher_no_ref_solution.py`
+1. `tests/algorithm/sw_cp/test_option.py`
+2. `tests/algorithm/sw_cp/test_partition.py`
+3. `tests/algorithm/sw_cp/test_cp_model.py`
+4. `tests/algorithm/sw_cp/test_dispatcher.py`
+5. `tests/algorithm/sw_cp/test_dispatcher_stop.py`
+6. `tests/algorithm/sw_cp/test_dispatcher_no_ref_solution.py`
 7. `tests/solution/test_ffc_schedule_delay_all_stages.py`
-8. Register `pw_cp` in
+8. Register `sw_cp` in
    `tests/algorithm/test_algorithm_contracts.py` so the shared
    AlgRecord shape-checks run.
 

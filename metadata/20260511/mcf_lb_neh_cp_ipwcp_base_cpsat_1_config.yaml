@@ -1,7 +1,7 @@
 # Pipeline: MCF-LB → NEH-CP → incremental PW-CP → base CPSAT
 #
 # Anchored on metadata/20260509/20260509_mcf_lb_best_neh_cp_best_base_cpsat.yaml.
-# Adds an incremental_pw_cp refinement stage between NEH-CP and base CPSAT,
+# Adds an incremental_sw_cp refinement stage between NEH-CP and base CPSAT,
 # spending ~1/5 of the scenario budget on PW-CP sliding-window sweeps.
 #
 # Two scenarios vary batch_size over the n/c/m vocabulary:
@@ -9,10 +9,10 @@
 #   - batch_size: "2m" → 2 × last-stage machine count
 # Resolved to int (ceil) by the controller; PwCpOption receives the int.
 #
-# incremental_pw_cp timelimit semantics:
-#   total_timelimit is per *inner* pw_cp invocation (split across that
+# incremental_sw_cp timelimit semantics:
+#   total_timelimit is per *inner* sw_cp invocation (split across that
 #   sweep's batches). With increment_unfixed_batch_count_flag="always" and
-#   unfixed_batch_count_min=2, max=8, pw_cp is invoked 7 times, so the
+#   unfixed_batch_count_min=2, max=8, sw_cp is invoked 7 times, so the
 #   PW-CP stage spends up to 7 × 0.018nc = 0.126nc in CP — capped in
 #   practice by the scenario-level 0.09nc wall-clock deadline.
 
@@ -31,9 +31,9 @@ draw_gantt: false
 painter_thread_cnt: 16
 
 scenarios:
-  - name: mcf_lb_neh_cp_incremental_pw_cp_m_base_cpsat
+  - name: mcf_lb_neh_cp_incremental_sw_cp_m_base_cpsat
     timelimit: "0.09nc"
-    output_subdir: mcf_lb_neh_cp_incremental_pw_cp_m_base_cpsat
+    output_subdir: mcf_lb_neh_cp_incremental_sw_cp_m_base_cpsat
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
         draw_pmtn_sch_heatmap: false
@@ -55,7 +55,7 @@ scenarios:
         skip_pf_below_obj: "makespan"
         make_semi_active_after_cp: true
         minimize_makespan_lex: false
-      - method: incremental_pw_cp
+      - method: incremental_sw_cp
         solver_thread_cnt: 8
         batch_size: "m"
         step_size: 1
@@ -71,9 +71,9 @@ scenarios:
       - method: solve_base_model_cpsat
         solver_thread_cnt: 8
 
-  - name: mcf_lb_neh_cp_incremental_pw_cp_2m_base_cpsat
+  - name: mcf_lb_neh_cp_incremental_sw_cp_2m_base_cpsat
     timelimit: "0.09nc"
-    output_subdir: mcf_lb_neh_cp_incremental_pw_cp_2m_base_cpsat
+    output_subdir: mcf_lb_neh_cp_incremental_sw_cp_2m_base_cpsat
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
         draw_pmtn_sch_heatmap: false
@@ -95,7 +95,7 @@ scenarios:
         skip_pf_below_obj: "makespan"
         make_semi_active_after_cp: true
         minimize_makespan_lex: false
-      - method: incremental_pw_cp
+      - method: incremental_sw_cp
         solver_thread_cnt: 8
         batch_size: "2m"
         step_size: 1

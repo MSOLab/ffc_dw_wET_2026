@@ -232,5 +232,10 @@ def test_delay_all_stages_single_stage_equivalent_to_last_stage_helper() -> None
         single_stage_instance.job_2_dw_ub_map
     )
 
-    assert sched_all.get_jik_2_start_time_map() == sched_last_only.get_jik_2_start_time_map()
-    assert sched_all.get_jik_2_end_time_map() == sched_last_only.get_jik_2_end_time_map()
+    assert (
+        sched_all.get_jik_2_start_time_map()
+        == sched_last_only.get_jik_2_start_time_map()
+    )
+    assert (
+        sched_all.get_jik_2_end_time_map() == sched_last_only.get_jik_2_end_time_map()
+    )

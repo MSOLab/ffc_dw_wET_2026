@@ -1,0 +1,134 @@
+run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248] # 10-instance smoke subset
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260629
+
+instance_worker_cnt: 12
+
+draw_gantt: true
+painter_thread_cnt: 96
+
+scenarios:
+  - name: csr32_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr32_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 32
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr32_v4
+    timelimit: "0.09nc"
+    output_subdir: csr32_v4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 32
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr16_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr16_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 16
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr16_v4
+    timelimit: "0.09nc"
+    output_subdir: csr16_v4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 16
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr8_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr8_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 8
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr8_v4
+    timelimit: "0.09nc"
+    output_subdir: csr8_v4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 8
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr4_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr4_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 4
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr4_v4
+    timelimit: "0.09nc"
+    output_subdir: csr4_v4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 4
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr2_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr2_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 2
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr2_v4
+    timelimit: "0.09nc"
+    output_subdir: csr2_v4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 2
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr1_mixed
+    timelimit: "0.09nc"
+    output_subdir: csr1_mixed
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: mixed
+        factor: 1
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
+
+  - name: csr1_v4
+    timelimit: "0.09nc"
+    output_subdir: csr1_v4
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        seed_dispatch: v4
+        factor: 1
+        timelimit: "0.018nc"
+        solver_thread_cnt: 8
