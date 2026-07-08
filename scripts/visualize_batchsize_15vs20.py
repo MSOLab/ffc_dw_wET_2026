@@ -16,6 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from matplotlib.patches import Patch
 
 # ------------------------------------------------------------------
 # Config
@@ -233,8 +234,6 @@ ax1d.set_xlim(-0.5, len(hm_rec.columns) - 0.5)
 ax1d.set_ylim(len(hm_rec) - 0.5, -0.5)
 
 # Legend for colors
-from matplotlib.patches import Patch
-
 legend_elements = [
     Patch(facecolor=BS_COLORS[bs], edgecolor="white", label=f"bs={bs}")
     for bs in batch_sizes
