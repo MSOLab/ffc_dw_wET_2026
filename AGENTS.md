@@ -9,6 +9,11 @@ can pick up the same architectural intent.
   - Use `uv run python` instead of `python3` or just `python`.
 - Run `uv run ruff check` after code changes.
 - Run `uv run ruff format` when formatting is needed.
+- **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/):
+  - Type: `feat`, `fix`, `refactor`, `docs`, `perf`, `test`, `chore`
+  - Scope: derive from changed files (e.g. `pw_cp.py` → `pw-cp`)
+  - Title: ≤49 chars (including `<type>(<scope>): ` prefix), imperative mood, no trailing period
+  - Body: bullet points (`- ` prefix); each bullet is a **single line** (no hard-wrapping within a bullet)
 
 ## Architecture Docs
 
