@@ -27,10 +27,59 @@ def _build_timelimit_map(
 
 def load_method_mean_metrics(
     progressions: list[InstanceProgression],
-    *,
     baseline_obj_by_instance: dict[str, float],
-    drop_non_improving_methods: bool = True,
+    *,
+    drop_non_improving_methods: bool = False,
 ) -> list[dict[str, Any]]:
+    """Per-method mean ``(Time%, RPDf)`` points for the method-mean scatter chart.
+
+    Builds the data behind
+    ``<run_id>_multi_scenario_method_mean_rpdf_and_mean_norm_time_scatter.html``:
+    each controller step (top-level method) becomes one averaged point so the
+    chart can trace the quality/time trade-off along the controller flow. Called
+    by :func:`~.post_run_chart_writer.write_post_run_subroutine_chart_artifacts`
+    during post-run reporting — after the run has finished and every instance's
+    ``<instance>_obj_log.json`` is on disk — and by
+    ``scripts/build_subroutine_flow_charts.py`` to regenerate charts from an
+    existing run without re-running experiments.
+
+    Averages use **carry-forward (intent-to-treat)**: an instance that did not
+    reach a later method (e.g. the final ``solve_base_model_cpsat`` cut off by
+    tight TL) keeps its last observed ``(time, rpdf, obj)`` in that method's
+    average instead of being dropped. The endpoint therefore equals the
+    full-sample mean rather than the mean over reachers only — matching the
+    ``analysis_wide`` / ``analysis_long`` sheets of ``*_report.xlsx``.
+
+    Instances with no baseline ref, non-positive timelimit, or all-NaN rpdf are
+    excluded from every point; a method that no instance reached is skipped
+    (its carry-forward point would duplicate the previous one).
+
+    Args:
+        progressions (list[InstanceProgression]): one
+            :class:`~.obj_log_loader.InstanceProgression` per instance (from
+            :func:`~.obj_log_loader.iter_scenario_instance_progressions`); each
+            carries the decoded ``obj_log`` trajectory and the manifest's
+            ``timelimit_sec``.
+        baseline_obj_by_instance (dict[str, float]): ``instance_id -> ref_obj``
+            map; the reference objective for RPDf (typically ``BKS_data`` from
+            ``benchmarks/PRA2017/pra2017_bks_table.csv``). Instances missing
+            from this map are excluded from every point. Built upstream by
+            :func:`~.post_run_chart_writer._build_baseline_map`.
+        drop_non_improving_methods (bool, optional): opt-in noise filter.
+            ``False`` (default) keeps non-improving methods as flat horizontal
+            segments — a useful "time wasted" signal. ``True`` drops them,
+            keeping the first method and the flow's last method regardless.
+            Defaults to False.
+
+    Returns:
+        list[dict[str, Any]]: ``{method, mean_time_pct, mean_rpdf,
+        instance_count}`` dicts in ``call_index`` order. ``mean_time_pct`` is
+        ``global_end_sec / timelimit_sec`` in ``[0, 1]``; ``mean_rpdf`` is the
+        mean of ``rpd_f(obj, ref) = 2*(obj-ref)/(obj+ref)``;
+        ``instance_count`` is the carry-forward total (active instances), not
+        the reacher count. Empty list when ``progressions`` is empty or the
+        decoded endpoint DataFrame has no rows.
+    """
     if not progressions:
         return []
 
@@ -69,26 +118,52 @@ def load_method_mean_metrics(
                 method_order[ci] = name
     sorted_ci = sorted(method_order)
 
-    prev_obj_by_instance: dict[str, float] = {}
+    # Per-instance last observed (time_pct, rpdf, obj) — carry-forward source.
+    prev_state_by_instance: dict[str, tuple[float, float, float]] = {}
+    # Instances that entered the flow at least once (carry-forward eligible).
+    active_instances: set[str] = set()
     candidates: list[dict[str, Any]] = []
     for ci in sorted_ci:
         method_name = method_order[ci]
-        contributions: list[tuple[str, float, float, float]] = []
+        reached: list[tuple[str, float, float, float]] = []
         improves = False
         for ins_id, methods in instance_data.items():
+            found: tuple[float, float, float] | None = None
             for m_ci, m_name, t_pct, r, obj in methods:
                 if m_ci == ci:
-                    prior = prev_obj_by_instance.get(ins_id)
-                    if prior is None or obj < prior:
-                        improves = True
-                    contributions.append((ins_id, t_pct, r, obj))
+                    found = (t_pct, r, obj)
                     break
-        if not contributions:
+            if found is not None:
+                t_pct, r, obj = found
+                prior_state = prev_state_by_instance.get(ins_id)
+                prior_obj = prior_state[2] if prior_state is not None else None
+                if prior_obj is None or obj < prior_obj:
+                    improves = True
+                reached.append((ins_id, t_pct, r, obj))
+                active_instances.add(ins_id)
+        if not reached:
+            # No instance reached this method → a carry-forward point would
+            # duplicate the previous point exactly (same obj/time/rpdf for
+            # every active instance). Skip to avoid duplicate dots. This is
+            # distinct from a "non-improving but reached" method, which does
+            # produce a new (later time, same rpdf) horizontal segment.
             continue
-        for ins_id, _, _, obj in contributions:
-            prev_obj_by_instance[ins_id] = obj
-        time_pcts = [t for _, t, _, _ in contributions]
-        rpdfs = [r for _, _, r, _ in contributions]
+        # Carry-forward average: reached values + prev_state for unreached active
+        # instances. Update prev_state for reached instances first, then carry
+        # forward the rest — no double-count, no read-after-write hazard.
+        time_pcts: list[float] = []
+        rpdfs: list[float] = []
+        reached_ids = {ins_id for ins_id, _, _, _ in reached}
+        for ins_id, t_pct, r, obj in reached:
+            time_pcts.append(t_pct)
+            rpdfs.append(r)
+            prev_state_by_instance[ins_id] = (t_pct, r, obj)
+        for ins_id in active_instances:
+            if ins_id not in reached_ids:
+                ps = prev_state_by_instance.get(ins_id)
+                if ps is not None:
+                    time_pcts.append(ps[0])
+                    rpdfs.append(ps[1])
         candidates.append(
             {
                 "method": method_name,
