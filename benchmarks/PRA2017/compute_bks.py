@@ -10,9 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT.parent / "src"))
 
-from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
-from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
-from ffc_ddw_sum_et.solution.objectives import compute_weighted_earliness_tardiness
+from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters  # noqa: E402
+from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule  # noqa: E402
+from ffc_ddw_sum_et.solution.objectives import (  # noqa: E402
+    compute_weighted_earliness_tardiness,
+)
 
 LARGE_DIR = ROOT / "large"
 BEST_SEQ_DIR = ROOT / "best_seq_large"
@@ -85,7 +87,7 @@ def main() -> None:
     ins_index_map: dict[str, str] = {}
     with MATCH_CSV.open(newline="") as f:
         reader = csv.reader(f)
-        header = next(reader)
+        next(reader)  # skip header
         for row in reader:
             ins_idx = row[0].strip()
             filename = row[1].strip().strip('"')
