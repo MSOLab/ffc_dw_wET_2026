@@ -2465,7 +2465,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``unfixed_batch_count`` values.
 
         Mirrors ``hybridflowshop/controller/hfs_cp_lns.py:incremental_pw_cp``.
-        For each ``count`` in ``[unfixed_batch_count_min, unfixed_batch_count_max]``:
+        ``unfixed_batch_count_max`` is clamped to the instance's actual batch
+        count (``ceil(job_count / batch_size)``) so that iterations above
+        ``batch_count`` — which are guaranteed dispatcher no-ops — are skipped.
+
+        For each ``count`` in ``[unfixed_batch_count_min, effective_max]``:
 
         - ``"always"``: invoke ``self.sw_cp(unfixed_batch_count=count, ...)``
           once.
@@ -2545,16 +2549,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             rj_right_justify_scope=rj_right_justify_scope,
         )
 
+        batch_count = math.ceil(instance.job_count / batch_size_resolved)
+        effective_max = min(unfixed_batch_count_max, batch_count)
         self.logger.info(
-            "incremental_sw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
+            "incremental_sw_cp: policy=%s, unfixed_batch_count=[%d, %d] "
+            "(requested_max=%d, batch_count=%d)",
             increment_unfixed_batch_count_flag,
             unfixed_batch_count_min,
+            effective_max,
             unfixed_batch_count_max,
+            batch_count,
         )
 
-        for unfixed_batch_count in range(
-            unfixed_batch_count_min, unfixed_batch_count_max + 1
-        ):
+        for unfixed_batch_count in range(unfixed_batch_count_min, effective_max + 1):
             if self.is_stopping_condition():
                 self.logger.info(
                     "incremental_sw_cp: stopping condition met before "
