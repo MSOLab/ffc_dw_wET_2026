@@ -70,14 +70,6 @@ def main() -> None:
         run_root = init_run_root(base_output_dir=base_output_dir)
         shutil.copy2(config_path, run_root.path / config_path.name)
 
-    # RESUME: resolve the base scenario dir and load its cached flow so each
-    # scenario's prefix can be validated and its resume index derived.
-    resume_dir: Path | None = None
-    base_flow: list | None = None
-    if mode == RunMode.RESUME:
-        resume_dir = _resolve_resume_dir(config)
-        base_flow = load_yaml(resume_dir / SUBROUTINE_FLOW_CACHE_FN)
-
     _validate_scenario_uniqueness(config.get("scenarios", []))
     if mode == RunMode.POST_PROCESS_ONLY:
         layout = restore_layout_from_run_dir(run_root)
@@ -93,6 +85,15 @@ def main() -> None:
         logger.info("Post-processing existing output directory: %s", run_root.path)
     else:
         logger.info("Run output directory: %s", run_root.path)
+
+    # RESUME: resolve the base scenario dir and load its cached flow so each
+    # scenario's prefix can be validated and its resume index derived.
+    resume_dir: Path | None = None
+    base_flow: list | None = None
+    if mode == RunMode.RESUME:
+        resume_dir = _resolve_resume_dir(config, base_output_dir)
+        logger.info("RESUME: resolved base scenario dir: %s", resume_dir)
+        base_flow = load_yaml(resume_dir / SUBROUTINE_FLOW_CACHE_FN)
 
     instance_worker_cnt = config.get("instance_worker_cnt", 1)
     draw_gantt = bool(config.get("draw_gantt", True))
@@ -133,6 +134,14 @@ def main() -> None:
                 DynamicDataObject.from_obj(base_flow),
                 DynamicDataObject.from_obj(sc["subroutine_flow"]),
             )
+            step_cnt = len(sc["subroutine_flow"])
+            if flow_resume_idx >= step_cnt:
+                raise ValueError(
+                    f"RESUME: scenario {scenario_name!r} would run no steps — its "
+                    f"{step_cnt}-step flow is fully covered by the base flow at "
+                    f"resume_dir ({resume_dir}). Point resume_dir at the base "
+                    "(prefix) run, not a run of the case scenarios themselves."
+                )
             scenario_config["flow_resume_idx"] = flow_resume_idx
             logger.info(
                 "RESUME: scenario %s resumes at flow index %d (base prefix of %d "
@@ -245,18 +254,45 @@ def _resolve_post_process_dir(config: dict[str, Any], base_output_dir: Path) -> 
     )
 
 
-def _resolve_resume_dir(config: dict[str, Any]) -> Path:
+_LATEST_PREFIX = "latest:"
+
+
+def _resolve_resume_dir(config: dict[str, Any], base_output_dir: Path) -> Path:
     """Resolve the base **scenario** directory to resume from (RunMode.RESUME).
 
-    Requires ``resume_dir`` in the config: a path to a prior run's scenario dir
-    holding per-instance ``<ins>/<ins>_solution.json`` +
-    ``<ins>_instance_result.yaml`` and a ``subroutine_flow.yaml`` flow cache.
+    Requires ``resume_dir`` in the config. Two accepted forms:
+
+    1. An explicit **scenario dir** that directly holds ``subroutine_flow.yaml``
+       (plus per-instance ``<ins>/<ins>_solution.json`` /
+       ``<ins>_instance_result.yaml``) — used verbatim.
+    2. ``latest:<scenario_name>`` — the newest run dir under ``base_output_dir``
+       that contains ``<scenario_name>/subroutine_flow.yaml``. Saves re-pointing
+       the config at each fresh timestamped base run.
+
+    Form 2 **requires the scenario name**: a *case* run's scenario dir also
+    carries a flow cache and resume artifacts, so an unqualified "newest flow
+    cache anywhere" search can silently resolve to a case run — whose flow fully
+    covers each case scenario, yielding a run that skips every step. Naming the
+    base scenario (case scenarios are named differently) makes that impossible.
     """
     resume_dir_str = config.get("resume_dir")
     if not resume_dir_str:
         raise ValueError(
-            "RESUME requires 'resume_dir' in the config YAML (path to the base "
-            "run's scenario directory)."
+            "RESUME requires 'resume_dir' in the config YAML (a base scenario "
+            "dir, or 'latest:<base_scenario_name>')."
+        )
+    if resume_dir_str.startswith(_LATEST_PREFIX):
+        scenario_name = resume_dir_str[len(_LATEST_PREFIX) :].strip()
+        if not scenario_name:
+            raise ValueError(
+                "resume_dir 'latest:' requires the base scenario name, e.g. "
+                "'latest:mcf_lb_fmm_neh_cp'."
+            )
+        return _resolve_latest_scenario_dir(base_output_dir, scenario_name)
+    if resume_dir_str == "latest":
+        raise ValueError(
+            "resume_dir 'latest' is ambiguous; name the base scenario instead: "
+            "'latest:<base_scenario_name>' (e.g. 'latest:mcf_lb_fmm_neh_cp')."
         )
     path = Path(resume_dir_str).expanduser()
     if not path.is_dir():
@@ -268,6 +304,29 @@ def _resolve_resume_dir(config: dict[str, Any]) -> Path:
             f"{flow_cache}. Was the base run produced by the current code?"
         )
     return path
+
+
+def _resolve_latest_scenario_dir(base_output_dir: Path, scenario_name: str) -> Path:
+    """Newest run dir under ``base_output_dir`` holding ``scenario_name``'s flow cache.
+
+    Run dir names are timestamps minted by ``init_run_root``
+    (``YYYYmmddTHHMMSS_microseconds``), so lexicographic order == chronological.
+    """
+    if not base_output_dir.is_dir():
+        raise FileNotFoundError(f"output_dir does not exist: {base_output_dir}")
+    candidates = [
+        run_dir / scenario_name
+        for run_dir in base_output_dir.iterdir()
+        if run_dir.is_dir()
+        and (run_dir / scenario_name / SUBROUTINE_FLOW_CACHE_FN).is_file()
+    ]
+    if not candidates:
+        raise FileNotFoundError(
+            f"RESUME: no run under {base_output_dir} has a scenario "
+            f"{scenario_name!r} with a {SUBROUTINE_FLOW_CACHE_FN}. Run the base "
+            "config first, or name the scenario that the base run emits."
+        )
+    return max(candidates, key=lambda scenario_dir: scenario_dir.parent.name)
 
 
 def _validate_scenario_uniqueness(scenarios: list[dict[str, Any]]) -> None:

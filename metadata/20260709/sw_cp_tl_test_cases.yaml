@@ -12,7 +12,12 @@ output_dir: output/20260709_sw_cp_tl_test
 # prefix and derives flow_resume_idx=3, so only incremental_sw_cp +
 # solve_base_model_cpsat re-run, seeded from the base incumbent.
 # See plans/20260709/resume_from_base.md.
-resume_dir: output/20260709_sw_cp_tl_test/20260709T195447_334017/mcf_lb_fmm_neh_cp
+# `latest:<base_scenario_name>` auto-resolves the newest run under output_dir
+# that emitted that scenario, so there is no need to re-point at each fresh base
+# run. The scenario name is required: a *case* run's scenario dir also carries a
+# flow cache, and resuming from one would skip every step. A full scenario dir
+# path also still works.
+resume_dir: latest:mcf_lb_fmm_neh_cp
 # POST_PROCESS_ONLY target
 # analysis_dir_path: output/20260708_sw_cp_tl_test/20260708T214619_571767
 

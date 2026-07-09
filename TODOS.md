@@ -243,3 +243,64 @@ to_dict objects) instead of duplicating it inline at every compact-JSON call sit
 
 **When to act:** When a second compact-JSON site appears in ffc_ddw_sum_et, or when
 routix is being tidied up and the change can be bundled in.
+
+## Persistent controller `obj_store` instead of merging base obj_log on RESUME
+
+The RunMode.RESUME path (commit `feat(resume): seed tail from base run incumbent`)
+reconstructs the full prefix+tail progress trajectory by **re-reading and merging**
+the base run's `<ins>_obj_log.json` at persist time
+(`ffcddw_single_instance_runner._merge_base_obj_log`). This works, but it duplicates
+knowledge of the obj_log JSON schema (`{obj_value:{data,notes}, obj_bound:{...}}`)
+across the writer (`_save_obj_log`) and the reader (`_merge_base_obj_log`), and it
+exists only because FFcDDW **derives** the obj_log from `solution_manager.history` at
+save time rather than accumulating it as it runs.
+
+The sibling repo `../hybridflowshop` instead gives its controller a persistent
+`obj_store` (`ObjValueBoundStore`) that accumulates across the whole run; on resume it
+simply installs the base run's `obj_store` (`self.ctrlr.obj_store = self.resume_obj_store`)
+and the tail appends to it — the full trajectory is present with no file re-merge and no
+duplicated schema.
+
+**Change (if acted on):** introduce a persistent obj_store on
+`FFcDDWSubroutineControllerCore`, have `_register` append to it, and replace both the
+derive-at-save `_save_obj_log` reconstruction and the RESUME `_merge_base_obj_log`
+re-read with a single store install + dump.
+
+**Why:** DRY (single obj_log schema owner) and removes the RESUME file-remerge
+workaround. Deferred because it is a broad change to how *every* run (not just resume)
+produces its obj_log — YAGNI while the merge works and obj_log handling is otherwise
+stable.
+
+**When to act:** When obj_log handling needs another feature (a third producer/consumer
+of the JSON schema appears), or when aligning FFcDDW's controller with hybridflowshop's
+obj_store model for other reasons.
+
+## Upstream the RESUME flow-skip loop into routix
+
+Both `../hybridflowshop` and FFcDDW override the controller's `run()` to implement the
+`flow_resume_idx` prefix-skip (routix's base `SubroutineController.run()` is just
+`_run_flow(flow); post_run_process()` and does **not** honour `flow_resume_idx` itself,
+even though the *runner* classes carry the attribute and `set_flow_resume_idx`). The two
+overrides are **divergent copies** of the same idea:
+
+- FFcDDW (`orchestration/controller_core.py::run`) — slice-based
+  (`flow[:idx]` skipped, `flow[idx:]` run), back-dates the clock **once** from the base
+  manifest's real `elapsed_time` (in `_apply_resume`, before `run`). Cleaner + more
+  correct.
+- hybridflowshop (`hybridflowshop/controller/controller_core.py::run`) — enumerate with
+  `idx < flow_resume_idx`, and re-times skipped no-ops with an `ElapsedTimer` accumulator
+  (near-zero) to re-adjust the clock. More convoluted.
+
+There is already a `# TODO: apply to routix` on FFcDDW's outer wall-clock wrapper in the
+same method; the resume-skip belongs in the same upstream change.
+
+**Change (if acted on):** move the flow-skip loop (honouring
+`method_names_to_run_before_resume`) and the wall-clock wrapper into routix's
+`SubroutineController.run(flow_resume_idx=-1)`, adopting FFcDDW's slice + single-back-date
+form. Both repos then drop their override.
+
+**Why:** single implementation shared by both repos instead of two copies that can drift;
+FFcDDW's better timer handling becomes the shared baseline.
+
+**When to act:** When routix (vendored dependency) is open for changes and the wall-clock
+`# TODO: apply to routix` is being addressed — bundle the two together.
