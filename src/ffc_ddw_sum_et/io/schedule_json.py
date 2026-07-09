@@ -27,6 +27,52 @@ def _json_default(obj):
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def load_schedule_json(
+    path: Path | PathLike[str] | str,
+) -> tuple[FFcSchedule, float | None, float | None]:
+    """Load a solution schedule from a JSON file.
+
+    Rebuilds an :class:`FFcSchedule` from the ``operations`` list (exact
+    machine + start/end times preserved) and returns it together with the
+    stored ``objValue`` / ``objBound`` (each ``None`` when absent). Used by the
+    resume-from-base path to restore a prior run's incumbent.
+
+    Args:
+        path (Path | PathLike[str] | str): Path to the JSON file.
+
+    Returns:
+        tuple[FFcSchedule, float | None, float | None]: The loaded schedule and
+            its objective value and bound.
+    """
+    with open(path) as f:
+        data = json.load(f)
+
+    jobs = list(data[K.JOBS])
+    stages = list(data[K.STAGES])
+    machines_per_stage = {
+        stage: list(mcs) for stage, mcs in data[K.MACHINES_PER_STAGE].items()
+    }
+    schedule = FFcSchedule(
+        jobs=jobs, stages=stages, machines_per_stage=machines_per_stage
+    )
+    for op in data[K.OPERATIONS]:
+        schedule.add_ops_times_2_mc(
+            stage_id=op[K.OP_STAGE],
+            mc_id=op[K.OP_MACHINE],
+            job_id=op[K.OP_JOB],
+            start_time=int(op[K.OP_START]),
+            end_time=int(op[K.OP_END]),
+        )
+
+    obj_value = data.get(K.OBJ_VALUE)
+    obj_bound = data.get(K.OBJ_BOUND)
+    return (
+        schedule,
+        None if obj_value is None else float(obj_value),
+        None if obj_bound is None else float(obj_bound),
+    )
+
+
 def _extract_operations(schedule: FFcSchedule) -> list[dict]:
     start_map = schedule.get_jik_2_start_time_map()
     end_map = schedule.get_jik_2_end_time_map()

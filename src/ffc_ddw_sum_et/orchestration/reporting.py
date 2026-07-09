@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from routix.io import ArtifactLayout, load_yaml
+from routix.io import ArtifactLayout, dump_yaml, load_yaml
 from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
@@ -26,6 +26,11 @@ from .mcf_lb_phase_labels import MCF_LB_R1_LABEL_ORDER, MCF_LB_R2_LABEL_ORDER
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
 
 logger = logging.getLogger(__name__)
+
+SUBROUTINE_FLOW_CACHE_FN = "subroutine_flow.yaml"
+"""Per-scenario cache of the executed subroutine flow. Written on every run so a
+later ``RunMode.RESUME`` run can validate its flow prefix against the base run's
+flow (see main.py + plans/20260709/resume_from_base.md)."""
 
 # TODO: Consider making this a parameter or deriving it from the observed solve times.
 TIMELIMIT_NC_MULTIPLIER = 0.09
@@ -594,6 +599,18 @@ class FFcDDWMultiScenarioRunner(
                 else f"scenario_{i + 1}"
             )
             scenario_output_dir = layout.scenario_dir(scenario_name)
+            # Cache the executed flow so a later RESUME run can prefix-validate
+            # against it (see main.py RESUME plumbing).
+            try:
+                scenario_output_dir.mkdir(parents=True, exist_ok=True)
+                dump_yaml(
+                    subroutine_flow,
+                    scenario_output_dir / SUBROUTINE_FLOW_CACHE_FN,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to cache subroutine_flow for scenario %s", scenario_name
+                )
             multi_instance_runner = self.m_i_runner_class(
                 s_i_runner_class=self.s_i_runner_class,
                 instances=self.instances,

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from routix.constants import SubroutineFlowKeys
 from routix.dynamic_data_object import DynamicDataObject
 from routix.report import SubroutineReport
 from routix.stopping_criteria import StoppingCriteria
@@ -32,6 +33,12 @@ from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
 from .subroutine_report import FFcDDWSubroutineReport
 
 MCFLBPhaseSchedule = FFcSchedule | MCFPreemptiveSchedule
+
+RESUME_SEED_STEP_NAME = "resume_seed"
+"""Method-context name pushed around the RunMode.RESUME incumbent registration
+(see ``seed_resume_incumbent``). Produces a valid ``<idx>-resume_seed`` obj_log
+step_label; the single-instance runner suppresses this note when it has merged
+the base run's obj_log (whose real prefix-end note already marks the join)."""
 
 
 def _to_ddo(data: Any) -> Any:
@@ -76,6 +83,12 @@ class FFcDDWSubroutineControllerCore(
         )
         self.instance = instance
         self.solution_manager = FFcDDWSolutionManager()
+        # Prefix step methods that must still run before a resume point (e.g.
+        # pure setup that produces state not captured by the restored
+        # incumbent). Empty today: the current prefix (mcf_lb / flip / neh_cp)
+        # only produces the incumbent + global LB, both restored on resume.
+        # See plans/20260709/resume_from_base.md § 2 "Safety assumption".
+        self.method_names_to_run_before_resume: set[str] = set()
         self._define_states()
 
     def _define_states(self) -> None:
@@ -264,6 +277,34 @@ class FFcDDWSubroutineControllerCore(
         wrapped = self._wrap_report(report, progress_log=progress_log)
         return self.solution_manager.register(wrapped, solution)
 
+    def seed_resume_incumbent(
+        self,
+        solution: FFcDDWSolution,
+        *,
+        obj_value: float | None,
+        obj_bound: float | None,
+    ) -> None:
+        """Register a base run's restored incumbent as the starting solution of
+        a RunMode.RESUME run.
+
+        Wrapped in a pushed method context so the synthesized history entry
+        carries a valid ``<idx>-resume_seed`` step_label (an empty context
+        would yield ``"ROOT"``, which the obj_log loader rejects). ``elapsed_time
+        = 0`` anchors the seed at the current (back-dated) controller clock.
+        """
+        self._method_context_mgr.push(RESUME_SEED_STEP_NAME)
+        try:
+            self._register(
+                SubroutineReport(
+                    elapsed_time=0.0,
+                    obj_value=obj_value,
+                    obj_bound=obj_bound,
+                ),
+                solution,
+            )
+        finally:
+            self._method_context_mgr.pop()
+
     def get_file_path_for_subroutine(self, filename_suffix: str) -> Path:
         """Override: when an `ArtifactLayout` is bound, route per-call-context
         paths into the instance's `progress/` zone instead of the working
@@ -329,11 +370,29 @@ class FFcDDWSubroutineControllerCore(
             return None
         return self.get_file_path_for_subroutine(suffix)
 
-    def run(self) -> None:
-        """Wrap routix's run loop with an outer wall-clock measurement."""
+    def run(self, flow_resume_idx: int = -1) -> None:
+        """Wrap routix's run loop with an outer wall-clock measurement.
+
+        When ``flow_resume_idx > 0`` this is a resume run: the first
+        ``flow_resume_idx`` steps are skipped (their outcome was restored from a
+        base run's incumbent), except any step whose method is in
+        ``method_names_to_run_before_resume``, which is re-run. Steps from
+        ``flow_resume_idx`` onward run normally. See
+        plans/20260709/resume_from_base.md.
+        """
         start = time.monotonic()
         try:
-            super().run()
+            flow = self._subroutine_flow
+            is_seq = isinstance(flow, Sequence) and not isinstance(flow, (str, bytes))
+            if flow_resume_idx > 0 and is_seq:
+                for step in flow[:flow_resume_idx]:
+                    method_name, _ = SubroutineFlowKeys.parse_step(step.to_obj())
+                    run_before = method_name in self.method_names_to_run_before_resume
+                    self._run_flow(step, skip_method_call=not run_before)
+                self._run_flow(flow[flow_resume_idx:])
+                self.post_run_process()
+            else:
+                super().run()
         finally:  # TODO: apply to routix
             self.total_elapsed_time = time.monotonic() - start
 

@@ -1,0 +1,47 @@
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+ins_index: [60, 61, 63]
+# ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260709_sw_cp_tl_test
+# POST_PROCESS_ONLY target
+# analysis_dir_path: output/20260708_sw_cp_tl_test/20260708T214619_571767
+
+instance_worker_cnt: 12
+draw_gantt: false
+draw_progress_plot: true
+painter_thread_cnt: 96
+
+scenarios:
+  - name: mcf_lb_fmm_neh_cp
+    timelimit: "0.09nc"
+    output_subdir: mcf_lb_fmm_neh_cp
+    subroutine_flow:
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.009nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.027nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false

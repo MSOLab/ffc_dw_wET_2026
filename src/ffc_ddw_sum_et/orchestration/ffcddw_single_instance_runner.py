@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import json
 import logging
 import os
 import traceback
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 from routix.io import ArtifactLayout, dump_yaml, load_yaml
@@ -30,6 +32,7 @@ from ..solution.objectives import (
     compute_weighted_earliness_tardiness,
 )
 from .controller import FFcDDWSubroutineController
+from .controller_core import RESUME_SEED_STEP_NAME
 from .solution_manager import FFcDDWSolution
 from .subroutine_report import FFcDDWSubroutineReport
 from .value_resolver import resolve_value_expr
@@ -99,6 +102,15 @@ class FFcDDWSingleInstanceRunner(
     SingleInstanceRunner[FFcDDWParameters, FFcDDWSubroutineController]
 ):
     """Runs on one FFcDDW instance and saves results."""
+
+    # RunMode.RESUME: injected by FFcDDWMultiInstanceRunner._load_resume_data
+    # from the base run's per-instance artifacts. `resume_solution` carries the
+    # restored incumbent schedule plus obj_value/obj_bound taken from the base
+    # `instance_result.yaml` (the solution JSON's objBound is usually None; the
+    # global LB lives in the manifest). `flow_resume_idx` is inherited from the
+    # routix base runner and set via set_flow_resume_idx.
+    resume_solution: FFcDDWSolution | None = None
+    resume_elapsed_time: float | None = None
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._setup_logging_args = kwargs.pop("setup_logging_args", None)
@@ -183,7 +195,8 @@ class FFcDDWSingleInstanceRunner(
         restore_logging = False
         sc_logger_name = f"{_SC_LOGGER_PREFIX}.{self._ins_name}"
 
-        if self.mode == RunMode.FULL_RUN and self._setup_logging_args is not None:
+        runs_controller = self.mode in (RunMode.FULL_RUN, RunMode.RESUME)
+        if runs_controller and self._setup_logging_args is not None:
             _, quiet, verbose = self._setup_logging_args
             sir_log_path = self._layout.log_path(
                 "single_instance_runner",
@@ -195,7 +208,7 @@ class FFcDDWSingleInstanceRunner(
             restore_logging = True
 
         try:
-            if self.mode == RunMode.FULL_RUN:
+            if runs_controller:
                 sc_log_path = self._layout.log_path(
                     "subroutine_controller",
                     scenario_name=self._scenario_name,
@@ -210,7 +223,11 @@ class FFcDDWSingleInstanceRunner(
                         instance_name=self._ins_name,
                     )
                     self.ctrlr.set_working_dir(self.working_dir)
-                    self.ctrlr.run()
+                    if self.mode == RunMode.RESUME:
+                        self._apply_resume()
+                        self.ctrlr.run(flow_resume_idx=self.flow_resume_idx)
+                    else:
+                        self.ctrlr.run()
                 finally:
                     detach_fh_from_logger(sc_logger_name)
         except Exception:
@@ -251,9 +268,50 @@ class FFcDDWSingleInstanceRunner(
             stopping_criteria=self.stopping_criteria,
         )
 
+    def _apply_resume(self) -> None:
+        """Seed the controller from the base run's restored incumbent, then
+        back-date the controller clock so the ``timelimit`` stopping criterion
+        charges the base prefix's wall time (the tail gets
+        ``timelimit - prefix_elapsed``). Called before
+        ``ctrlr.run(flow_resume_idx=...)`` on RunMode.RESUME.
+        """
+        if self.resume_solution is None:
+            raise RuntimeError(
+                f"RESUME: no base incumbent loaded for instance "
+                f"{self._ins_name!r}; _load_resume_data did not inject it "
+                "(check resume_root and base artifacts)."
+            )
+        elapsed = float(self.resume_elapsed_time or 0.0)
+        # Back-date the clock: timer.elapsed_sec ≈ elapsed at register time.
+        self.ctrlr.timer.set_start_time(
+            datetime.datetime.now() - datetime.timedelta(seconds=elapsed)
+        )
+        # Structural feasibility guard on the restored schedule.
+        self.ctrlr.check_feasibility(
+            self.resume_solution.schedule.get_jik_2_start_time_map()
+        )
+        # Register the restored incumbent: obj_value drives the incumbent, and
+        # obj_bound (base global MCF LB) seeds solution_manager.best_obj_bound.
+        self.ctrlr.seed_resume_incumbent(
+            self.resume_solution,
+            obj_value=self.resume_solution.obj_value,
+            obj_bound=self.resume_solution.obj_bound,
+        )
+        self.logger.info(
+            "RESUME: seeded %s from base incumbent obj_value=%s obj_bound=%s "
+            "elapsed=%.3fs, resuming flow at idx %d",
+            self._ins_name,
+            self.resume_solution.obj_value,
+            self.resume_solution.obj_bound,
+            elapsed,
+            self.flow_resume_idx,
+        )
+
     def post_run_process(self) -> InstanceResult:
         try:
-            if self.mode == RunMode.FULL_RUN and getattr(self, "ctrlr", None):
+            if self.mode in (RunMode.FULL_RUN, RunMode.RESUME) and getattr(
+                self, "ctrlr", None
+            ):
                 return self._persist_run_artifacts(self.ctrlr)
             return self._load_instance_result()
         except Exception:
@@ -529,6 +587,18 @@ class FFcDDWSingleInstanceRunner(
         bound_data: dict[str, float] = {}
         bound_notes: dict[str, str] = {}
 
+        # RESUME: prepend the base run's full prefix trajectory so the resume
+        # obj_log (and its progress plot) shows the whole run from t=0, mirroring
+        # hybridflowshop (which installs the base obj_store before the tail).
+        # Base controller-frame timestamps live in [0, prefix_elapsed] and the
+        # tail (back-dated clock) continues from prefix_elapsed, so the two
+        # series concatenate into one continuous trajectory.
+        merged_base = False
+        if self.mode == RunMode.RESUME:
+            merged_base = self._merge_base_obj_log(
+                value_data, value_notes, bound_data, bound_notes
+            )
+
         for record in history:
             report = record.report
             if not isinstance(report, FFcDDWSubroutineReport):
@@ -545,6 +615,11 @@ class FFcDDWSingleInstanceRunner(
             end_global = report.start_time + report.elapsed_time
             end_key = repr(end_global)
             label = report.step_label or ""
+            # When the base history is merged, its real prefix-end note (e.g.
+            # "3-neh_cp") already marks the join, so drop the redundant
+            # resume_seed marker (keep its data point for line continuity).
+            if merged_base and label.rsplit("-", 1)[-1] == RESUME_SEED_STEP_NAME:
+                label = ""
             if report.obj_value is not None:
                 value_data.setdefault(end_key, float(report.obj_value))
                 if label:
@@ -576,6 +651,57 @@ class FFcDDWSingleInstanceRunner(
         )
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)
+
+    def _merge_base_obj_log(
+        self,
+        value_data: dict[str, float],
+        value_notes: dict[str, str],
+        bound_data: dict[str, float],
+        bound_notes: dict[str, str],
+    ) -> bool:
+        """RESUME: merge the base run's ``<ins>_obj_log.json`` (the prefix
+        trajectory) into the accumulating obj_log maps. Returns True on success.
+
+        Best-effort: a missing/unreadable base obj_log logs a warning and returns
+        False (the resume run then keeps just its own tail + the resume_seed
+        marker). Uses ``setdefault`` so any resume point wins on a key collision;
+        in practice base (``t <= prefix_elapsed``) and tail (``t >=
+        prefix_elapsed``) timestamps are disjoint.
+        """
+        resume_root = self.output_metadata.get("resume_root")
+        if not resume_root:
+            return False
+        base_path = (
+            Path(resume_root) / self._ins_name / f"{self._ins_name}_obj_log.json"
+        )
+        if not base_path.is_file():
+            self.logger.warning(
+                "RESUME: base obj_log not found for %s: %s (plot will start at "
+                "the resume seed)",
+                self._ins_name,
+                base_path,
+            )
+            return False
+        try:
+            with open(base_path, encoding="utf-8") as f:
+                base = json.load(f)
+        except Exception:
+            self.logger.exception(
+                "RESUME: failed to read base obj_log %s", base_path
+            )
+            return False
+
+        for series_key, data_dict, notes_dict in (
+            ("obj_value", value_data, value_notes),
+            ("obj_bound", bound_data, bound_notes),
+        ):
+            block = base.get(series_key) or {}
+            for k, v in (block.get("data") or {}).items():
+                if v is not None:
+                    data_dict.setdefault(k, float(v))
+            for k, lbl in (block.get("notes") or {}).items():
+                notes_dict.setdefault(k, str(lbl))
+        return True
 
     def _emit_csr_artifacts(
         self,
