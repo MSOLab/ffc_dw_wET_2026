@@ -6,7 +6,7 @@ ins_index: [60, 61, 63]
 # ins_index: [60, 61, 63, 64, 68, 150, 152, 155, 246, 248]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
-output_dir: output/20260709_sw_cp_tl_test
+output_dir: output
 # POST_PROCESS_ONLY target
 # analysis_dir_path: output/20260708_sw_cp_tl_test/20260708T214619_571767
 

@@ -17,7 +17,7 @@ output_dir: output/20260709_sw_cp_tl_test
 # run. The scenario name is required: a *case* run's scenario dir also carries a
 # flow cache, and resuming from one would skip every step. A full scenario dir
 # path also still works.
-resume_dir: latest:mcf_lb_fmm_neh_cp
+resume_dir: output/20260709T230314_292059/mcf_lb_fmm_neh_cp
 # POST_PROCESS_ONLY target
 # analysis_dir_path: output/20260708_sw_cp_tl_test/20260708T214619_571767
 
