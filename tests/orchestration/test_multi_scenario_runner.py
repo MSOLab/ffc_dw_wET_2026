@@ -19,6 +19,7 @@ def _bare_runner(tmp_path: Path) -> FFcDDWMultiScenarioRunner:
     runner.results = []
     runner.mode = RunMode.FULL_RUN
     runner.draw_gantt = False
+    runner.draw_progress_plot = False
     runner.painter_thread_cnt = 1
     runner.ins_index_source = None
     runner.bks_table_csv_path = None
