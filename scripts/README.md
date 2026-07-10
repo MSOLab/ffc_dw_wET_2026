@@ -168,7 +168,11 @@ uv run python scripts/build_results_index_20260505.py
 위 두 스크립트가 만든 long-form CSV를 읽어 `(RUN, scenario)` 요약으로 집약.
 `metric` 필드는 full-schedule wET가 있으면 `bestObj`, 없으면(예: `mcf_lb_only`)
 `mcfLb (no incumbent)`로 표기되며 후자는 `mean_RPDf`가 `None`이다.
-BKS=0 인스턴스는 RPDf 불안정성 때문에 집약에서 제외된다.
+모든 인스턴스가 집약에 포함된다. RPDf는 대칭형
+`(bestObj - BKS) / ((bestObj + BKS) / 2)` 라 [-2, +2]로 유계이므로 BKS=0도
+특별 취급이 필요 없다: `BKS=0 < bestObj` 는 RPDf가 정확히 `+2`(대칭거리 최대)로
+고정되어 실제 신호로 평균에 반영되고, `bestObj=BKS=0` 은 build 스크립트가
+`0.0`으로 정의한다.
 
 **출력**:
 

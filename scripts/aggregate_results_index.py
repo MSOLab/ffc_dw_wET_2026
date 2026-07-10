@@ -12,8 +12,11 @@ typically ``mcf_lb_only`` or new-step-introduction RUNs where controller
 integration is incomplete; in that case ``mean_value`` falls back to
 ``mcfLb`` and ``mean_RPDf`` is ``None``).
 
-Aggregation is restricted to instances with ``BKS_data > 0`` (RPDf is
-unstable when BKS=0).
+Aggregation covers **every** instance -- nothing is dropped. RPDf is the
+symmetric ``(bestObj - BKS) / ((bestObj + BKS) / 2)``, bounded on [-2, +2], so
+``BKS = 0`` needs no special handling: ``BKS = 0 < bestObj`` pins RPDf to +2
+(max symmetric distance, averaged in as real signal), and ``bestObj = BKS = 0``
+is defined as 0 by the build script.
 
 Usage:
     uv run python scripts/aggregate_results_index.py analysis/results_index_<date>.csv
