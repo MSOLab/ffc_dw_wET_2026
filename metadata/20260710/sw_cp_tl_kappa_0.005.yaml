@@ -2,7 +2,7 @@ run_mode: RESUME
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [60, 61, 63]
+# ins_index: [60, 61, 63]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260710_sw_cp_tl_kappa_0.005
