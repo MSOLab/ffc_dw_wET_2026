@@ -120,8 +120,17 @@ def resolve_slices(t: float | None, r: float | None) -> list[tuple[str, dict]]:
 
 
 def apply_slice(df: pd.DataFrame, spec: dict[str, float]) -> pd.DataFrame:
+    """Narrow to the instances matching every key in ``spec`` (empty spec = all).
+
+    Keys are compared with float ``==``. That holds today because ``T``/``R`` are
+    parsed from the benchmark CSV as the same doubles as the literals here, but a
+    spec that matches nothing must fail loudly: an empty frame would aggregate to
+    a NaN mean and read like a real result.
+    """
     for column, value in spec.items():
         df = df[df[column] == value]
+    if spec and df.empty:
+        raise ValueError(f"slice {spec} matched no instances")
     return df
 
 
