@@ -274,6 +274,43 @@ The benchmark-CSV defaults and override flags (`--bks-csv` /
 `--hybrid-match-csv` / `--instance-table-csv`) are the same as in
 `build_subroutine_flow_charts.py`.
 
+### build_merged_run_dir.py
+
+Assembles a synthetic run directory that merges scenarios owned by several runs,
+so `RunMode.POST_PROCESS_ONLY` can regenerate the **full** run-level report set
+across them. `build_cross_run_flow_chart.py` spans runs but draws only the flow
+comparison; this route additionally yields the method-mean scatter, the win/tie
+and RPDf dashboards, `*_rpdf_comparison.csv`, and `*_report.xlsx`.
+
+**Input**: N scenario directories (positional), each `<run_dir>/<scenario_name>`,
+optionally suffixed `=<label>` to rename the scenario. Labels must be unique —
+they become the subdir names, and `main._validate_scenario_uniqueness` rejects
+duplicates. Instance sets must match unless `--allow-instance-mismatch` is given.
+
+**Output**: `<--dest>/<run_id>/` holding one subdir per label, each filled with
+**symlinks** to the source instance dirs, plus a transplanted
+`<run_id>_artifact_layout.yaml` (its templates are keyed on `{run_id}`, so any
+source run's stamp works). Symlinks keep the merged dir at a few MB; the reporter
+only reads instance dirs, so the source runs are never written to.
+
+```bash
+uv run python scripts/build_merged_run_dir.py \
+    --dest output/20260711_merge_base_p25_p50 \
+    output/20260704/20260704T164349_114896/s0_c5_base \
+    output/20260707_sw_cp_tl_p25_p50/20260708T014624_039386/s0_c5_p25 \
+    output/20260707_sw_cp_tl_p25_p50/20260708T014624_039386/s0_c5_p50
+```
+
+Then point a POST_PROCESS_ONLY config at the printed run dir
+(`analysis_dir_path`), give it one `scenarios` entry per label carrying that
+scenario's `subroutine_flow` copied from the source run's config, and run
+`uv run python main.py --config <config>`. A worked example lives in
+`metadata/20260711/merged_base_p25_p50.yaml`.
+
+> Keep `draw_gantt: false` and `draw_progress_plot: false`. Those painters write
+> *inside* instance dirs, which would reach through the symlinks and pollute the
+> source runs. Every other artifact lands in the merged dir.
+
 ## 4. Other Analysis Utilities
 
 ### analyze_bestobj_randomness.py
