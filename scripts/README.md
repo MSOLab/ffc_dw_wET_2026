@@ -300,3 +300,46 @@ uv run python scripts/analyze_dispatch_sweep.py output/<date>/<run_dir> \
 > `oracle_value`, `marginal_contribution`)는 노트북/다른 스크립트에서
 > import해 재사용 가능. 특정 baseline 조합(예: 2017 논문 triple)을 best와
 > 동일 기준으로 채점하려면 `oracle_value(mat, combo)` 사용.
+
+---
+
+## 5. 실험 설정 검증
+
+### validate_resume_config.py
+
+`RunMode.RESUME` 설정이 **의도한 지점에서 재개되는지** 실험을 띄우기 전에
+확인하는 dry-run 검증기. `main.main()`이 config 로드와 runner 생성 사이에서
+수행하는 검사를 그대로 재현한다.
+
+`main` 모듈을 `entrypoint` 별칭으로 import해 네 개의 헬퍼
+(`_load_config`, `_parse_run_mode`, `_resolve_resume_dir`,
+`_validate_scenario_uniqueness`)를 **재구현하지 않고 그대로 호출**한다.
+검증 로직이 실제 엔트리포인트와 조용히 어긋나는 것을 막기 위함이다
+(→ `TODOS.md`의 "Promote `main.py` config helpers to a public API").
+
+검사 항목:
+
+1. **`resume_dir` 해석** — 명시적 scenario 디렉터리 또는 `latest:<scenario_name>`.
+2. **flow prefix 검증** — 시나리오별 `flow_resume_idx` 도출. 불일치 시
+   기본값까지 채워진 거대한 step dict 전체가 아니라 **실제로 다른 키만** 출력.
+3. **`flow_resume_idx >= step_cnt` 가드** — `resume_dir`이 base run이 아니라
+   *case* run을 가리켜 **모든 step을 skip**하게 되는 사고를 잡아낸다.
+   이 경우 exit code 1.
+
+`--check-artifacts`를 주면 실행 대상 인스턴스 전부가 `resume_dir` 아래에
+base incumbent(`<ins>_solution.json` + `<ins>_instance_result.yaml`)를
+가지고 있는지도 확인한다. 이 검사가 없으면 실험 시작 후에야
+`FFcDDWMultiInstanceRunner._load_resume_data`의 RuntimeError로 드러난다.
+
+```bash
+# prefix / 가드만 검사 (빠름)
+uv run python scripts/validate_resume_config.py metadata/20260710/sw_cp_tl_kappa_0.005.yaml
+
+# base incumbent 존재 여부까지 검사
+uv run python scripts/validate_resume_config.py <config> --check-artifacts
+```
+
+정상 재개 가능하면 exit 0, 아니면 1. RESUME이 아닌 config는 검사 없이 0을 반환한다.
+
+> 테스트: `tests/scripts/test_validate_resume_config.py`. 스크립트를 경로로
+> import하므로 위 네 헬퍼의 이름 변경이 테스트 실패로 즉시 드러난다.

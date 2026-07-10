@@ -304,3 +304,26 @@ FFcDDW's better timer handling becomes the shared baseline.
 
 **When to act:** When routix (vendored dependency) is open for changes and the wall-clock
 `# TODO: apply to routix` is being addressed — bundle the two together.
+
+## Promote `main.py` config helpers to a public API
+
+`scripts/validate_resume_config.py` (via `import main as entrypoint`) and
+`tests/test_scenario_uniqueness.py` both reach into `main`'s private helpers:
+`_load_config`, `_parse_run_mode`, `_resolve_resume_dir`, and
+`_validate_scenario_uniqueness`.
+
+Re-implementing them in the validator would defeat its purpose — it exists to
+answer "will `main.main()` resume where I think it will?" using the *same* code
+paths the entrypoint uses, so duplicated logic that silently drifts is a worse
+failure than an underscore import.
+
+**Change (if acted on):** extract the four into a `config_resolution` module
+(or promote them to public names on `main`), and update both consumers.
+
+**Why deferred:** only two in-repo consumers, both covered by tests that fail
+loudly if any of the four is renamed (`tests/scripts/test_validate_resume_config.py`
+pins them transitively by importing the script). Extracting a module today buys
+no decoupling that the tests do not already provide.
+
+**When to act:** when a third consumer appears, or when any of the four grows
+logic a caller wants to *override* rather than reuse.
