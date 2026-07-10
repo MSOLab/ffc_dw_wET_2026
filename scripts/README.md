@@ -307,6 +307,55 @@ uv run python scripts/analyze_dispatch_sweep.py output/<date>/<run_dir> \
 
 ---
 
+### analyze_kappa_sweep.py
+
+여러 RUN에 흩어진 SW-CP TL-policy 시나리오를 **하나의 κ 스윕**으로 합쳐
+mean RPDf를 슬라이스별로 비교한다. 시나리오 이름이 겹치지 않고 인스턴스 격자가
+같은 run들이면 `<ts>_summary.csv`를 concat하는 것만으로 단일 스윕이 된다
+(겹치면 에러로 중단).
+
+`kappa_*` 시나리오는 size-proportional TL
+(`non_time_fixed_op_time_limit_multiplier`), `p50`/`p60`/`p70`은 percentile TL
+베이스라인이다. 후자는 κ 축 위에 있지 않으므로 스윕 점이 아니라 **기준선**으로
+그려진다.
+
+BKS 조인과 RPDf 계산은 `build_results_index.py`에서 import한다 — 주간 리뷰
+파이프라인과 어긋날 수 없게 하기 위함이며, `aggregate_results_index.py`와
+동일하게 **모든 인스턴스를 채점**한다(제외 없음).
+
+**슬라이스**: 기본으로 세 기준을 모두 낸다 — `all`(1440) / `T=0.6`(480) /
+`T=0.6,R=0.2`(160). `--t` / `--r` 를 주면 그 조합 하나만 계산한다
+(플래그 이름은 `analyze_dispatch_sweep.py`와 동일).
+
+> **facet 주의**: `timelimit`은 `0.09 × n × c`로 파생된 값이라 `TL=45`에
+> `(n=50,c=10)`과 `(n=100,c=5)`가 섞인다. 소형 다중 plot은 항상 `(n, c)`로
+> 자르며 `timelimit`으로 자르지 않는다.
+
+**출력** (`--outdir`, 기본 `analysis/kappa_sweep_20260710/`):
+
+- `kappa_sweep_long.csv` — `(run, scenario, instance)` 한 행
+- `kappa_sweep_by_scenario.csv` — `(slice, scenario)` 한 행
+- `kappa_sweep_by_scenario_nc.csv` — `(slice, scenario, n, c)` 한 행
+- `kappa_sweep_by_slice.png` — 슬라이스별 한 패널, κ vs mean RPDf
+- `kappa_sweep_rpdf_<slice>.png` — 슬라이스마다 `(n,c)` 8패널 소형 다중
+
+```bash
+# 두 run을 합쳐 세 슬라이스 모두 분석
+uv run python scripts/analyze_kappa_sweep.py \
+    output/20260709_sw_cp_tl_test/20260710T003128_565779 \
+    output/20260710_sw_cp_tl_kappa_0.005/20260710T165804_500924
+
+# 커스텀 단일 슬라이스
+uv run python scripts/analyze_kappa_sweep.py <run_dir> ... --t 0.6 --r 0.2
+```
+
+> 결론은 `plans/20260705/sw_cp_tl_policy_investigation.md` §3.4에 기록되어
+> 있다: 어떤 κ도 `p60`을 이기지 못하며, `T=0.6`에서 `kappa_0.006`은 오히려
+> 유의하게 나쁘다. 전체 평균만 보면 `kappa_0.005`가 1위로 보이므로 **반드시
+> 슬라이스별로** 읽을 것.
+
+---
+
 ## 5. 실험 설정 검증
 
 ### validate_resume_config.py
