@@ -28,7 +28,8 @@ from ffc_ddw_sum_et.orchestration import (
 )
 
 # CONFIG_PATH = Path("metadata/20260709/mcf_lb_fmm_neh_cp.yaml")
-CONFIG_PATH = Path("metadata/20260709/sw_cp_tl_test_cases.yaml")
+# CONFIG_PATH = Path("metadata/20260709/sw_cp_tl_test_cases.yaml")
+CONFIG_PATH = Path("metadata/20260710/sw_cp_tl_kappa_0.005.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
