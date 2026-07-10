@@ -12,15 +12,29 @@ continue the analysis without re-deriving anything. Read top to bottom.
 (TL) policy for SW-CP: `TL = f(#unfixed_ops, #profile_fixed_ops)`, replacing the
 current size-independent constant/linear policy.
 
-**Status (2026-07-06):** instrumentation done + unit-tested; analysis tool built
-(`analyze_tl_policy.py`); **n=50 representative stage run (1- and 8-thread) and
-analysed.** Preliminary n=50 result: **size-proportional TL shows no benefit
-over constant** at equal budget (§3.2) — but this is *sample-only* and must be
-confirmed on the full (n,c,T,R) grid before concluding. Thread count 1→8 is a
-real lever (+10.7 % UB); **solver_thread_cnt=8 adopted**. No git add/commit (per
-user); all changes unstaged. **Next up:** expand the sweep to the (n,c,T,R) grid
-(8-thread) to firm up / overturn the size-vs-difficulty finding; optionally
-re-run the analysis on the 8-thread trajectories.
+**Status (2026-07-10): DECIDED — `non_time_fixed_op_time_limit_multiplier = 0.005`.**
+The full-grid end-to-end A/B (§3.4, 1440 instances × 8 scenarios) sweeps κ over
+`0.002 / 0.004 / 0.005 / 0.006 / 0.008`. **κ = 0.005 is the argmin of mean RPDf on
+all three instance slices**, beats every other κ at p ≤ 0.022 on the full grid,
+and never loses on the harder subsets. Thread count 1→8 is a real lever
+(+10.7 % UB); **solver_thread_cnt=8 adopted**.
+
+Two caveats the decision does not erase (§3.4 "Caveats"):
+
+- κ = 0.005 is **statistically indistinguishable from the `p60` percentile
+  baseline** on every slice (p=0.265 / 0.698 / 0.543). It is the best κ, not a
+  gain over `p60`.
+- **κ = 0.006 is significantly *worse* than `p60`** on the hard `T=0.6` slice
+  (p=0.0058), confirming §3.3's prediction that a size-only κ under-budgets hard
+  windows. Do not raise κ above 0.005 "to be safe".
+
+Any future TL claim must be reported **per slice**, never on the 1440 mean alone:
+on the full grid κ=0.005 also *appears* to beat `p60`, and that appearance is
+carried entirely by the easy `T ∈ {0.2, 0.4}` instances.
+
+Earlier status (2026-07-06), still accurate: instrumentation done + unit-tested;
+analysis tool built (`analyze_tl_policy.py`); n=50 representative stage run
+(1- and 8-thread) and analysed.
 
 ---
 
@@ -269,6 +283,113 @@ p ≥ 95 implies TL@med ≥ 120 s (beyond the cap, "cannot reduce"): not a
 trustworthy TL-reduction target. Real proof still requires the end-to-end A/B
 (§8 item 5) — these are offline-replay, directional.
 
+### 3.4 Full-grid end-to-end A/B (2026-07-10) — κ = 0.005 selected
+
+§8 item 5 is **done**. Two RESUME runs off one shared 3-step base incumbent,
+1440 PRA2017-large instances each, 8 scenarios total, no overlap:
+
+- `output/20260709_sw_cp_tl_test/20260710T003128_565779/` — `p50`, `p60`, `p70`,
+  `kappa_0.002`, `kappa_0.004`, `kappa_0.006`, `kappa_0.008`
+- `output/20260710_sw_cp_tl_kappa_0.005/20260710T165804_500924/` — `kappa_0.005`
+
+`kappa_*` = size-proportional TL (`non_time_fixed_op_time_limit_multiplier`);
+`pNN` = the percentile TL baselines. Merge + analysis:
+`scripts/analyze_kappa_sweep.py` → `analysis/kappa_sweep_20260710/`.
+
+**mean RPDf (lower = better), by instance slice:**
+
+| scenario | all (1440) | T=0.6 (480) | T=0.6, R=0.2 (160) |
+|---|---:|---:|---:|
+| `kappa_0.002` | -0.1046 | 0.1542 | 0.2001 |
+| `kappa_0.004` | -0.1145 | 0.1427 | 0.1911 |
+| `kappa_0.005` | **-0.1162** | 0.1407 | 0.1900 |
+| `kappa_0.006` | -0.1148 | 0.1437 | 0.1905 |
+| `kappa_0.008` | -0.1119 | 0.1441 | 0.1912 |
+| `p50` | -0.1018 | 0.1562 | 0.2011 |
+| `p60` | -0.1150 | **0.1407** | **0.1886** |
+| `p70` | -0.0916 | 0.1672 | 0.2069 |
+
+**Paired Wilcoxon vs `p60`** (per-instance, signed-rank):
+
+| challenger | all | T=0.6 | T=0.6, R=0.2 |
+|---|---|---|---|
+| `kappa_0.004` | p=0.124 | p=0.096 | p=0.131 |
+| `kappa_0.005` | p=0.265 | p=0.698 | p=0.543 |
+| `kappa_0.006` | p=0.294 | **p=0.0058 (p60 better)** | p=0.488 |
+
+### DECISION: κ = 0.005
+
+The purpose of the sweep was to **select a `0.00x` multiplier**. `kappa_0.005` is
+the argmin of mean RPDf on **all three slices**, and it is the only κ that is
+never beaten by another κ anywhere:
+
+| slice | κ ranking (best → worst) |
+|---|---|
+| all | **0.005** < 0.006 < 0.004 < 0.008 < 0.002 |
+| T=0.6 | **0.005** < 0.004 < 0.006 < 0.008 < 0.002 |
+| T=0.6, R=0.2 | **0.005** < 0.006 < 0.004 < 0.008 < 0.002 |
+
+**Paired Wilcoxon, `kappa_0.005` vs each other κ** (positive mean diff = 0.005 is
+better):
+
+| vs | all | T=0.6 | T=0.6, R=0.2 |
+|---|---|---|---|
+| `0.002` | **p<1e-4** | **p<1e-4** | **p<1e-4** |
+| `0.004` | **p=0.021** | p=0.106 | p=0.707 |
+| `0.006` | **p=0.006** | **p=0.0007** | p=0.894 |
+| `0.008` | **p<1e-4** | **p=0.002** | p=0.600 |
+
+On the full grid `kappa_0.005` beats **every** other κ at p ≤ 0.022. On the
+harder subsets it never loses: it stays significantly ahead of 0.002 / 0.006 /
+0.008, and merely becomes indistinguishable from 0.004 (p=0.106 / 0.707) where
+the sample is smaller. **`non_time_fixed_op_time_limit_multiplier = 0.005`
+adopted.** The runner-up if 0.005 were ever unavailable is 0.004, not 0.006 —
+0.006 loses significantly on `T=0.6`.
+
+The interior optimum is itself informative: RPDf falls from κ=0.002 to κ=0.005
+and rises again by κ=0.008 on every slice. Too little time per unfixed op
+starves the window; too much steals budget from later windows at a fixed total.
+
+Mean elapsed time is flat across scenarios within each slice (`all` 44.75–44.88 s,
+`T=0.6` 48.25–48.28 s, `T=0.6,R=0.2` 48.22–48.25 s), so no κ bought its result
+with extra budget — the comparison is at equal cost.
+
+### Caveats the decision does not erase
+
+**κ = 0.005 does not beat the `p60` percentile baseline.** Against `p60` it is
+statistically indistinguishable on every slice (p=0.265 / 0.698 / 0.543; on `all`
+its record is 664 W / 158 T / 618 L). Adopting 0.005 is therefore **safe but not
+a gain over `p60`** — it is the best member of the κ family, not the best TL
+policy known. If a later change makes `p60` cheaper or simpler to maintain, there
+is no evidence cost to preferring it.
+
+**§3.3's prediction is confirmed at the top of the κ range.** The one place a κ is
+*significantly worse than `p60`* is `kappa_0.006` on the hard `T=0.6` slice
+(p=0.0058) — exactly the "size-proportional under-budgets hard (high-T)
+instances" failure §3.3 anticipated. This is why the ceiling of the usable κ
+range sits just above 0.005, and why raising κ "to be safe" is the wrong instinct.
+
+**Report per-slice, never on the 1440 mean alone.** On the full grid
+`kappa_0.005` also looks like it beats `p60`; on `T=0.6` `p60` is in fact ahead
+by 1.06e-05 mean RPDf (the `0.1407` tie in the table above is display rounding,
+not a true tie), and on `T=0.6, R=0.2` `p60` wins outright. That apparent
+full-grid win is carried by the easy `T ∈ {0.2, 0.4}` instances. The κ-vs-κ
+selection above survives slicing; a κ-vs-`p60` claim would not.
+
+**The difficulty-aware hypothesis stays alive.** `p60` — a percentile of the
+observed per-window time distribution — adapts to difficulty implicitly, which is
+the leading explanation for why no *size*-only κ can pull ahead of it. A
+`TL = f(#unfixed, #pfixed, T)` policy remains the open direction (§8 item 6).
+
+**Methodology note (do not re-derive).** `BKS_data = 0` instances are **kept**.
+RPDf is symmetric, bounded on [-2, +2]; `BKS = 0 < bestObj` pins it to +2 and
+`bestObj = BKS = 0` is defined as 0. On this grid all 58 such instances have
+`bestObj = 0` under every scenario — every policy solves them to optimality — so
+they contribute an identical 0 to every mean and only add ties to the paired
+tests. A stale docstring in `aggregate_results_index.py` claimed they were
+dropped as "RPDf unstable"; the code never dropped them, and the docstring +
+`scripts/README.md` were corrected on 2026-07-10.
+
 ---
 
 ## 4. Instrumentation — what changed (final form)
@@ -479,11 +600,22 @@ with `..._obj_log.json`, `progress/<N>-sw_cp_step_log.yaml`, etc.
      (needs the 120 s curves so proportional can give big windows > constant
      baseline). This is the headline evidence.
    - Aggregate per (n,c,T,R); emit CSV + HTML.
-5. If evidence supports it: implement a **size-proportional TL mode** in
-   `step_tl_resolver.py`/dispatcher (port hybridflowshop's op-count policy,
-   possibly two-coefficient), then **end-to-end A/B** (constant vs proportional at
-   equal total budget) measuring final objective.
-6. ~~Expand from the smoke cluster to a real representative grid.~~ **Decided
+5. ~~Implement a **size-proportional TL mode**, then **end-to-end A/B** at equal
+   total budget, and select the multiplier.~~ **Done — κ = 0.005 selected**
+   (§3.4). The mode is implemented (`batch_tl_mode: "proportional"` +
+   `non_time_fixed_op_time_limit_multiplier`) and the A/B ran on the full
+   1440-instance grid. κ=0.005 is the argmin on every slice and beats every other
+   κ at p ≤ 0.022 on the full grid. **Do not sweep κ again** — the optimum is
+   interior and bracketed by 0.004 and 0.006.
+6. **Difficulty-aware TL (the open direction).** κ=0.005 only *matches* `p60`; no
+   size-only policy pulls ahead of it, and κ=0.006 is significantly worse on
+   `T=0.6`. Design a policy keyed on window *hardness* rather than size — the
+   per-window time-to-p% regression of §3.3 already showed the residual is
+   T-structured. `p60` is the incumbent to beat. Any candidate must be evaluated
+   **per slice** (`all` / `T=0.6` / `T=0.6,R=0.2`) with a paired test against
+   `p60` — the full-grid mean alone would have declared `kappa_0.005` a winner
+   over `p60` (§3.4).
+7. ~~Expand from the smoke cluster to a real representative grid.~~ **Decided
    & folded into step 3** — see §6 "Representative-grid selection" (one per
    `(n,c,T,R,m,W)` cell, rep0, drop optimal).
 
@@ -528,5 +660,9 @@ with `..._obj_log.json`, `progress/<N>-sw_cp_step_log.yaml`, etc.
 | `src/.../orchestration/ffcddw_single_instance_runner.py` | `_save_obj_log` (L515) — writes obj_value/obj_bound |
 | `src/.../report/obj_log_loader.py` | structured obj_log reader (UB ok; LB dropped — see caveat) |
 | `metadata/20260705/sw_cp_tl_profile{,_smoke}.yaml` | experiment configs |
+| `metadata/20260710/sw_cp_tl_kappa_0.005.yaml` | the κ=0.005 RESUME config (§3.4) |
+| `scripts/analyze_kappa_sweep.py` | merges the two A/B runs; per-slice RPDf + plots (§3.4) |
+| `analysis/kappa_sweep_20260710/` | §3.4 outputs: 3 CSVs + 4 plots |
+| `scripts/validate_resume_config.py` | dry-run check that a RESUME config resumes where intended |
 | `../hybridflowshop/.../controller/pw_cp.py` | reference op-count TL policy to port |
 | `plans/20260705/sw_cp_tl_policy_investigation.md` | **this doc** |
