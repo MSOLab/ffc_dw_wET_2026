@@ -294,3 +294,65 @@ Deviations / decisions made during implementation (deltas from the plan text):
   candidates, same winner source). Both `obj_bound` None. Candidates CSV
   emitted to `<instance>/progress/<instance>_csr_candidates.csv`; parent
   obj_log carried only the original-scale winner (no coarse leakage).
+
+## 10. Recommended reading order (understanding the code change)
+
+Two equivalent paths; line numbers are as of commit `cb5d31c` (2026-07-11).
+
+**Path A — commit by commit.** The 8 commits on `20260711_csr_subalg` are
+dependency-ordered and each is a self-contained reviewable unit:
+`5884a65` docs(plans) → `1a8f7df` feat(sw-cp) → `a1c46b9` feat(neh-cp) →
+`7667637` feat(flip-makespan-cp) → `24de340` feat(mcf-lb) →
+`14877c8` feat(cpsat-adapter) → `580f40a` feat(csr) → `cb5d31c` chore(config).
+Read each with `git show <sha>`; the four algorithm commits are variations of
+one pattern, so after sw-cp the next three skim quickly.
+
+**Path B — concept order (recommended for a first pass):**
+
+1. **What the feature looks like:** `metadata/20260711/csr_subalg.yaml` —
+   the annotated user-facing schema (`solve_flow` inside the
+   `coarsen_solve_reconstruct` step). Then §2-§4 of this document.
+2. **The pre-existing `time_factor` reference semantics:**
+   `algorithm/cumulative.py` `BaseModelBuilder` (`time_factor` field, E/T
+   objective terms). Everything else copies this convention; internalize
+   `E_j = max(0, d^- − k·C^c)`, `T_j = max(0, k·C^c − d^+)` here first.
+3. **Smallest new threading example:** `algorithm/cpsat_adapter.py` — one
+   screenful showing the whole pattern: option field → `build(time_factor=)`
+   → `insert_idle_time(time_factor=)` → wET scoring.
+4. **The deepest algorithm change, sw_cp:** `algorithm/sw_cp/option.py`
+   (field + validation) → `cp_model.py` `_define_partial_et_objective`
+   (l.154; scaled completion, T-bound, time-fixed offset) → `dispatcher.py`
+   (objective evals, and the `d^+ // k` floor-divided right-justify map —
+   the trick used to avoid touching read-only `FFcSchedule`).
+5. **The three variations:** `neh_cp/dispatcher.py` (same pattern, many call
+   sites), `flip_makespan_cp/dispatcher.py` (makespan model is scale-free —
+   only scoring + the `d^+ // k` right-shift cap change),
+   `mcf_lb/mcf_lb_pipeline.py` (the `time_factor > 1` ⇒ LB `None` fallback,
+   `lb_suppressed_by_time_factor`; threading in `last_stage_sch_builder.py`
+   and `full_sch_builder.py`).
+6. **Pure candidate helpers:** `algorithm/coarsen_solve_reconstruct.py` —
+   `CsrCandidate` (l.76), `schedule_sequence_signature` (l.91),
+   `dedup_candidates` (l.126). No orchestration imports; unit-tested directly.
+7. **Orchestration state:** `orchestration/controller_core.py` — ctor
+   `time_factor` (l.68, attr l.95), `csr_candidate_rows` (l.141),
+   `_record_csr_candidate`.
+8. **The heart:** `orchestration/controller.py` —
+   `coarsen_solve_reconstruct` (l.2640, `solve_flow` branch + legacy path),
+   `_coarsen_solve_reconstruct_via_flow` (l.2816: child controller, harvest,
+   dedup, restore-all-pick-best, single `_register` with `obj_bound=None`),
+   `_synthesize_csr_trajectory` (l.3017). Also the six `self.time_factor`
+   threading sites into step options.
+9. **Artifact plumbing:** `orchestration/ffcddw_single_instance_runner.py`
+   (`csr_candidates_csv` emit, l.769) +
+   `metadata/artifact_layout/ffc_ddw_sum_et_v1.yaml`.
+10. **Tests as executable documentation:**
+    `tests/orchestration/test_csr_solve_flow.py` (full 5-step integration,
+    dedup, argmin selection, legacy-path regression); then the per-package
+    `test_*time_factor*` files when diving into a specific algorithm.
+
+Evidence the candidate store matters (first real run,
+`output/20260711_csr_subalg/20260711T212342_577417`): on BOTH instances the
+winner was NOT the last (coarse-best) candidate — Rep0 coarse 99570 restored
+to 66414 while the earlier 99870 restored to 64883; Rep1's coarse-better
+batch_003 restored worse (46246 vs 46036). Restore-all-pick-best beat
+take-last on its first outing.
