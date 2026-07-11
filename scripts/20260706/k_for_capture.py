@@ -23,15 +23,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import analyze_tl_policy  # noqa: E402
 from analyze_tl_policy import captured_at, collect_rows  # noqa: E402
 
-P_LEVELS = (50, 80, 90, 95, 99)
+DEFAULT_P_LEVELS = (50, 80, 90, 95, 99)
 
 
 def find_k(func, target: float, hi: float = 8.0) -> float:
@@ -66,7 +68,31 @@ def main(argv: list[str] | None = None) -> int:
             "scenario-specific table. Default: pool every scenario found."
         ),
     )
+    parser.add_argument(
+        "--p-levels",
+        default=",".join(str(p) for p in DEFAULT_P_LEVELS),
+        help=(
+            "Comma-separated capture-target percentiles (each 0-100). "
+            f"Default: {','.join(str(p) for p in DEFAULT_P_LEVELS)}. "
+            "The B1 basis needs a per-window time-to-p%% curve point, so this "
+            "list also drives analyze_tl_policy.P_LEVELS during collection."
+        ),
+    )
+    parser.add_argument(
+        "--csv",
+        default=None,
+        help=(
+            "If set, also write the pooled table to this CSV path "
+            "(same columns as k_for_capture_270_u2_pooled.csv)."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    p_levels = tuple(int(x) for x in args.p_levels.split(",") if x.strip())
+    # The B1 basis reads a precomputed t_{p}_abs per window; compute_metrics
+    # iterates the module-global P_LEVELS at call time, so set it before
+    # collect_rows so the requested percentiles are actually materialized.
+    analyze_tl_policy.P_LEVELS = p_levels
 
     all_rows = collect_rows(args.run_dirs)
     found_scenarios = sorted({r["scenario"] for r in all_rows})
@@ -120,7 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(header)
     print("-" * len(header))
-    for p in P_LEVELS:
+    csv_rows: list[dict[str, float | int]] = []
+    for p in p_levels:
         tgt = p / 100.0
         k_a = find_k(cap_a, tgt)
         k_b2 = find_k(cap_b2, tgt)
@@ -140,6 +167,31 @@ def main(argv: list[str] | None = None) -> int:
             f"{k_b2:>7.3f} {k_b2 * ntf_med:>10.1f} | "
             f"{med_k:>8.3f} {p75_k:>8.3f} {p90_k:>8.3f} {p90_k * ntf_med:>15.1f}"
         )
+        csv_rows.append(
+            {
+                "p_pct": p,
+                "A_k": k_a,
+                "A_TL_at_medNtf": k_a * ntf_med,
+                "B2_k": k_b2,
+                "B2_TL_at_medNtf": k_b2 * ntf_med,
+                "B1_med_k": med_k,
+                "B1_P75_k": p75_k,
+                "B1_P90_k": p90_k,
+                "B1_TL_at_medNtf_P90": p90_k * ntf_med,
+                "median_ntf": ntf_med,
+                "n_windows": len(rows),
+                "n_instances": n_inst,
+            }
+        )
+
+    if args.csv:
+        out_path = Path(args.csv)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(csv_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(csv_rows)
+        print(f"\nwrote pooled table: {out_path}")
 
     return 0
 
