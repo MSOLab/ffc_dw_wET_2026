@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import dataclasses
 import datetime
 import json
@@ -686,9 +687,7 @@ class FFcDDWSingleInstanceRunner(
             with open(base_path, encoding="utf-8") as f:
                 base = json.load(f)
         except Exception:
-            self.logger.exception(
-                "RESUME: failed to read base obj_log %s", base_path
-            )
+            self.logger.exception("RESUME: failed to read base obj_log %s", base_path)
             return False
 
         for series_key, data_dict, notes_dict in (
@@ -761,4 +760,28 @@ class FFcDDWSingleInstanceRunner(
             except Exception:
                 self.logger.exception(
                     "Error saving CSR CP trajectory json for %s", self.ins_name
+                )
+
+        # --- CSR solve_flow candidates CSV (one row per candidate) ---
+        candidate_rows = getattr(controller, "csr_candidate_rows", None) or []
+        if candidate_rows:
+            try:
+                csv_path = layout.artifact_path("csr_candidates_csv", **scope)
+                csv_path.parent.mkdir(parents=True, exist_ok=True)
+                fieldnames = [
+                    "source",
+                    "coarse_obj",
+                    "coarse_bound",
+                    "restored_obj",
+                    "valid",
+                    "elapsed_sec",
+                ]
+                with open(csv_path, "w", encoding="utf-8", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for row in candidate_rows:
+                        writer.writerow({k: row.get(k) for k in fieldnames})
+            except Exception:
+                self.logger.exception(
+                    "Error saving CSR candidates csv for %s", self.ins_name
                 )

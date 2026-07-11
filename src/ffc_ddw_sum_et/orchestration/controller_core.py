@@ -65,7 +65,10 @@ class FFcDDWSubroutineControllerCore(
         | Sequence[dict]
         | dict,
         stopping_criteria: StoppingCriteria | dict,
+        time_factor: int = 1,
     ):
+        if time_factor < 1:
+            raise ValueError(f"time_factor must be >= 1, got {time_factor}")
         self._instance_name = instance.name
         self.logger = logging.getLogger(
             f"ffc_ddw_sum_et.orchestration.controller.{self._instance_name}"
@@ -82,6 +85,14 @@ class FFcDDWSubroutineControllerCore(
             logger=self.logger,
         )
         self.instance = instance
+        # CSR coarse-mode scale bridge. ``1`` for every parent controller
+        # (bit-for-bit unchanged behaviour); only the child controller spawned
+        # by ``coarsen_solve_reconstruct`` with a ``solve_flow`` sets this to
+        # the coarsening ``factor`` so its step methods interpret a coarse
+        # completion ``C^c`` as original-scale ``time_factor * C^c`` when they
+        # build option payloads / the base CP model. See
+        # plans/20260711/csr_solve_flow.md §3.
+        self.time_factor = time_factor
         self.solution_manager = FFcDDWSolutionManager()
         # Prefix step methods that must still run before a resume point (e.g.
         # pure setup that produces state not captured by the restored
@@ -124,6 +135,15 @@ class FFcDDWSubroutineControllerCore(
         # Populated only when coarsen_solve_reconstruct is called with
         # emit_phase_schedules=True and a solution is found.
         self.csr_phase_schedules: list[tuple[str, FFcSchedule]] = []
+        # Per-candidate rows from a CSR solve_flow run (one dict per
+        # candidate × reconstruction). Emitted by the single-instance runner
+        # as ``<instance>_csr_candidates.csv``. Empty in the legacy CSR path.
+        self.csr_candidate_rows: list[dict[str, object]] = []
+        # Compact summary of the last CSR solve_flow run (candidate/dedup/drop
+        # counts + winner source & objectives). ``None`` in the legacy path.
+        # Kept small on purpose (Rules 12/14): bulk per-candidate detail lives
+        # in ``csr_candidate_rows`` / the candidates CSV, not here.
+        self.csr_solve_flow_summary: dict[str, object] | None = None
         # CP-SAT trajectory (coarsened scale) from the last CSR run.
         # Set only when draw_cp_trajectory=True and a solution is found.
         self.csr_cp_trajectory: tuple[ProgressLogEntry, ...] | None = None
@@ -357,6 +377,17 @@ class FFcDDWSubroutineControllerCore(
         """
         prefixed = f"{self._get_call_context_of_current_method()}_{name}"
         self.csr_phase_schedules.append((prefixed, sched))
+
+    def _record_csr_candidate(self, row: dict[str, object]) -> None:
+        """Append one CSR solve_flow candidate row to ``csr_candidate_rows``.
+
+        Each row describes a single (candidate × reconstruction):
+        ``source``, ``coarse_obj``, ``coarse_bound``, ``restored_obj``
+        (``None`` when dropped), ``valid`` flag, and reconstruction
+        ``elapsed_sec``. The single-instance runner emits the accumulated
+        rows as ``<instance>_csr_candidates.csv``.
+        """
+        self.csr_candidate_rows.append(row)
 
     def try_get_file_path_for_subroutine(self, suffix: str) -> Path | None:
         """Like ``get_file_path_for_subroutine`` but returns ``None`` instead

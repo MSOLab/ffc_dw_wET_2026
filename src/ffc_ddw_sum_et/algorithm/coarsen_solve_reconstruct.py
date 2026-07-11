@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, Sequence
 
 from ortools.sat.python import cp_model
 
@@ -63,10 +63,82 @@ __all__ = [
     "CoarsenSolveReconstructAdapter",
     "CoarsenSolveReconstructOption",
     "CoarsenSolveReconstructTrace",
+    "CsrCandidate",
+    "dedup_candidates",
     "run_coarsen_solve_reconstruct",
+    "schedule_sequence_signature",
 ]
 
 DEFAULT_COARSEN_FACTOR: int = 50
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CsrCandidate:
+    """One coarse-scale candidate schedule harvested from a CSR ``solve_flow``.
+
+    ``source`` is the child controller's per-registration step label / call
+    context (e.g. ``"4-neh_cp"``). ``coarse_schedule`` lives on the coarsened
+    time grid; ``coarse_obj`` / ``coarse_bound`` are the child's reported
+    objective / bound in coarse-scale units (both may be ``None``).
+    """
+
+    source: str
+    coarse_schedule: FFcSchedule
+    coarse_obj: float | None
+    coarse_bound: float | None
+
+
+def schedule_sequence_signature(schedule: FFcSchedule) -> tuple[tuple[Any, ...], ...]:
+    """Structural signature of a schedule for candidate de-duplication.
+
+    Port of hybridflowshop ``hfs_cp_lns._schedule_sequence_signature`` adapted
+    to :class:`FFcSchedule`. Two schedules with the same per-machine job
+    sequences AND the same per-stage time-ordered job order share a signature.
+    The signature ignores absolute timing (only ordering matters), so two
+    reconstructions that place the same operations in the same relative order
+    collapse to one candidate.
+
+    ``FFcSchedule.get_job_sequence(stage, machine)`` returns
+    ``(job_id, start, end)`` tuples (note the ordering differs from
+    hybridflowshop's ``(start, end, job_id)``).
+    """
+    machine_parts: list[tuple[Any, ...]] = []
+    stage_parts: list[tuple[Any, ...]] = []
+    job_index = {job_id: idx for idx, job_id in enumerate(schedule.jobs)}
+
+    for stage_id in schedule.stages:
+        stage_ops: list[tuple[int, int, int, Any]] = []
+        for machine_id in schedule.machines_per_stage[stage_id]:
+            seq = schedule.get_job_sequence(stage_id, machine_id)
+            machine_seq = tuple(job_id for job_id, _s, _e in seq)
+            machine_parts.append(("m", stage_id, machine_id, machine_seq))
+            for job_id, start_time, end_time in seq:
+                stage_ops.append(
+                    (int(start_time), int(end_time), job_index[job_id], job_id)
+                )
+        stage_parts.append(
+            ("s", stage_id, tuple(job_id for *_unused, job_id in sorted(stage_ops)))
+        )
+
+    return tuple(machine_parts + stage_parts)
+
+
+def dedup_candidates(candidates: Sequence[CsrCandidate]) -> list[CsrCandidate]:
+    """Return candidates with duplicate structural signatures collapsed.
+
+    Iterates in order and keeps the FIRST candidate for each signature
+    (earlier registrations win). This makes the downstream winner tie-break
+    ("earlier candidate wins") deterministic and stable.
+    """
+    seen: set[tuple[tuple[Any, ...], ...]] = set()
+    out: list[CsrCandidate] = []
+    for cand in candidates:
+        sig = schedule_sequence_signature(cand.coarse_schedule)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append(cand)
+    return out
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

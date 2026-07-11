@@ -117,6 +117,14 @@ artifacts:
     zone: progress
     kind: csr_cp_trajectory_png
     file_template: "{instance_name}_csr_cp_trajectory.png"
+  # Per-candidate table from a CSR solve_flow run: one row per
+  # (candidate × reconstruction) — source, coarse_obj, coarse_bound,
+  # restored_obj (blank if dropped), valid, elapsed_sec. Offline analysis of
+  # which sub-step produced the winning coarse schedule.
+  - scope: instance
+    zone: progress
+    kind: csr_candidates_csv
+    file_template: "{instance_name}_csr_candidates.csv"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
