@@ -62,6 +62,7 @@ def reverse_dispatch_full_schedule(
     last_stage_id: str | None = None,
     job_2_pos: dict[str, int] | None = None,
     rebuild_last_stage_with_original_p: bool = False,
+    time_factor: int = 1,
     logger: logging.Logger | None = None,
 ) -> Phase3State | None:
     """Build the full dispatched schedule via reverse-dispatch + unflip.
@@ -112,11 +113,26 @@ def reverse_dispatch_full_schedule(
             ``p_increment != 0``) so downstream consumers operate on a
             problem-feasible schedule. The rebuilt schedule is exposed
             on ``Phase3State.ls_only_sch_before_delay``.
+        time_factor: CSR coarse-grid scale ``>= 1``. When ``> 1``, a coarse
+            completion ``C^c`` is interpreted as original-scale
+            ``time_factor * C^c`` against the (original-scale) due window.
+            Threaded into (1) the pre-flip ``delay_job_latest_leq_obj_contrib``
+            cap — the last-stage delay target ``d_plus`` is scaled to the
+            effective coarse bound ``floor(d_plus / time_factor)`` so a delayed
+            op stays on-time (``time_factor * end <= d_plus``); (2) the final
+            ``insert_idle_time`` ET-alignment pass; and (3) the
+            ``compute_weighted_earliness_tardiness`` score. The reverse-dispatch
+            machinery (makespan flip, ``make_semi_active`` left-shift, reversed
+            MixedDispatcher) is scale-free — it never compares a completion
+            against a due window. ``1`` (default) reproduces current behaviour
+            exactly (``floor(d_plus / 1) == d_plus``).
         logger: Optional logger; warnings are emitted on dispatcher failure.
 
     Returns ``None`` if both reversed-dispatcher attempts fail (a warning
     is logged via ``logger`` when supplied).
     """
+    if time_factor < 1:
+        raise ValueError(f"time_factor must be >= 1, got {time_factor}")
     if last_stage_id is None:
         last_stage_id = instance.stage_id_list[-1]
     if job_2_pos is None:
@@ -165,7 +181,18 @@ def reverse_dispatch_full_schedule(
         # worsen per-job ET contribution. Operates on a copy so the caller's
         # input schedule stays untouched.
         ls_only_sch_delayed = init_schedule.deepcopy()
-        ls_only_sch_delayed.delay_job_latest_leq_obj_contrib(instance.job_2_dw_ub_map)
+        # Cap each last-stage op at the latest end that keeps it on-time. With
+        # a coarse grid, on-time means ``time_factor * end <= d_plus`` i.e.
+        # ``end <= floor(d_plus / time_factor)``, so the delay cap is the
+        # effective coarse due-upper bound (== d_plus at time_factor == 1).
+        if time_factor == 1:
+            delay_dw_ub_map = instance.job_2_dw_ub_map
+        else:
+            delay_dw_ub_map = {
+                j: d_plus // time_factor
+                for j, d_plus in instance.job_2_dw_ub_map.items()
+            }
+        ls_only_sch_delayed.delay_job_latest_leq_obj_contrib(delay_dw_ub_map)
         delayed_makespan = ls_only_sch_delayed.makespan
 
         last_stage_end_map: dict[str, int] = {}
@@ -241,10 +268,11 @@ def reverse_dispatch_full_schedule(
             instance.job_2_due_window_map,
             instance.job_2_ewt_map,
             instance.job_2_twt_map,
+            time_factor=time_factor,
         )
 
     sum_e, sum_t = compute_weighted_earliness_tardiness(
-        full_sch_from_ls_only_sch, instance
+        full_sch_from_ls_only_sch, instance, time_factor=time_factor
     )
     dispatched_obj = float(sum_e + sum_t)
 
@@ -294,6 +322,7 @@ def build_full_sch_from_last_stage_only_sch(
     last_stage_only_schedule: FFcSchedule,
     *,
     rebuild_last_stage_with_original_p: bool = False,
+    time_factor: int = 1,
     logger: logging.Logger | None = None,
 ) -> BuildFullSchResult:
     """Build the full schedule from a last-stage-only schedule.
@@ -313,6 +342,11 @@ def build_full_sch_from_last_stage_only_sch(
             input was produced under inflated last-stage durations (e.g.
             by ``heuristic_last_stage_only_from_mcf_lb`` invoked with
             ``p_increment != 0``).
+        time_factor: CSR coarse-grid scale ``>= 1``; forwarded to
+            ``reverse_dispatch_full_schedule`` (pre-flip delay cap,
+            ``insert_idle_time``, and the final objective score are computed
+            as if a coarse completion ``C^c`` were ``time_factor * C^c``).
+            ``1`` (default) reproduces current behaviour.
         logger: Optional logger; warnings are emitted on dispatcher failure.
 
     Returns:
@@ -325,6 +359,7 @@ def build_full_sch_from_last_stage_only_sch(
         instance,
         last_stage_only_schedule,
         rebuild_last_stage_with_original_p=rebuild_last_stage_with_original_p,
+        time_factor=time_factor,
         logger=logger,
     )
     elapsed = time.monotonic() - start_elapsed

@@ -65,6 +65,7 @@ def heuristic_last_stage_only_from_mcf_lb(
     p_increment: int = 0,
     r_multiplier: float = 1.0,
     r_increment: int = 0,
+    time_factor: int = 1,
 ) -> HeuristicLastStageOnlyResult:
     """Build a midpoint warm-start across all jobs from the MCF preemptive
     LB and refine it heuristically (no CP solve): left-shift via
@@ -95,6 +96,17 @@ def heuristic_last_stage_only_from_mcf_lb(
             *after* the ``r_multiplier`` scaling, so the effective
             release becomes ``ceil(r_j * r_multiplier) + r_increment``.
             ``0`` (default) preserves the current behaviour.
+        time_factor: CSR coarse-grid scale ``>= 1``. When ``> 1``, the
+            schedule lives on a coarse time grid and a coarse completion
+            ``C^c`` is interpreted as original-scale ``time_factor * C^c``
+            when compared against the (original-scale) due window. Threaded
+            into the midpoint placement's ET tie-break (``contrib``), the
+            ``insert_idle_time`` idle-alignment pass, and the final
+            ``compute_weighted_earliness_tardiness`` score. Placement is
+            otherwise on the coarse grid (durations, releases, and the MCF
+            preemptive window are all coarse), so those parts are
+            scale-free. ``1`` (default) reproduces the current behaviour
+            exactly (``time_factor * C^c == C^c``).
     """
     if p_increment < 0:
         raise ValueError(
@@ -106,6 +118,8 @@ def heuristic_last_stage_only_from_mcf_lb(
         raise ValueError(
             f"r_increment must be 0 or a positive integer; got {r_increment}."
         )
+    if time_factor < 1:
+        raise ValueError(f"time_factor must be >= 1, got {time_factor}")
     log = logger or logging.getLogger(__name__)
     start = time.monotonic()
 
@@ -147,6 +161,7 @@ def heuristic_last_stage_only_from_mcf_lb(
         window_map=window_map,
         appended=job_sequence,
         placement_priority=placement_priority,
+        time_factor=time_factor,
     )
     before_sa_iti = schedule.deepcopy()
 
@@ -159,9 +174,12 @@ def heuristic_last_stage_only_from_mcf_lb(
         instance_for_solve.job_2_due_window_map,
         instance_for_solve.job_2_ewt_map,
         instance_for_solve.job_2_twt_map,
+        time_factor=time_factor,
     )
 
-    sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance_for_solve)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(
+        schedule, instance_for_solve, time_factor=time_factor
+    )
     obj_value = float(sum_e + sum_t)
 
     elapsed = time.monotonic() - start
@@ -186,6 +204,7 @@ def _insert_jobs_at_desired_starts(
     window_map: Mapping[str, tuple[int, int] | None],
     appended: Sequence[str],
     placement_priority: Literal["contrib", "dist"] = "contrib",
+    time_factor: int = 1,
 ) -> FFcSchedule:
     """Build a fresh FFcSchedule on ``instance_for_extension``'s job set,
     copy ``base_sch``'s last-stage operations (when provided), then place
@@ -211,6 +230,14 @@ def _insert_jobs_at_desired_starts(
 
     Jobs whose ``window_map[j]`` is ``None`` skip the desired-start logic
     and are appended via greedy tail-dispatch at the end.
+
+    ``time_factor`` (CSR coarse-grid scale, ``>= 1``) affects only the
+    ``weighted_ET_contrib`` term of the ``contrib`` / ``dist`` tie-break:
+    a candidate end ``e`` is scored against the due window as if the real
+    completion were ``time_factor * e``. The desired-start midpoint,
+    start-distance, and machine-slot feasibility are all on the coarse grid
+    (durations / releases / MCF window) and stay scale-free. ``1`` (default)
+    reproduces the current behaviour exactly.
     """
     if placement_priority not in ("contrib", "dist"):
         raise ValueError(
@@ -307,14 +334,23 @@ def _insert_jobs_at_desired_starts(
         ewt = ewt_map[job_id]
         twt = twt_map[job_id]
         d_lo, d_hi = due_map[job_id]
-        contrib_a = ewt * max(d_lo - end_a, 0) + twt * max(end_a - d_hi, 0)
+        # Score coarse end ``e`` against the (original-scale) due window as if
+        # the real completion were ``time_factor * e`` (identical to ``e`` at
+        # time_factor == 1).
+        scaled_end_a = time_factor * end_a
+        contrib_a = ewt * max(d_lo - scaled_end_a, 0) + twt * max(
+            scaled_end_a - d_hi, 0
+        )
         dist_a = abs(es_start - desired_start)
 
         if le_best is None:
             chosen_start, chosen_end, chosen_mc = es_start, end_a, es_mc
         else:
             _, _, le_start, le_end, le_mc = le_best
-            contrib_b = ewt * max(d_lo - le_end, 0) + twt * max(le_end - d_hi, 0)
+            scaled_le_end = time_factor * le_end
+            contrib_b = ewt * max(d_lo - scaled_le_end, 0) + twt * max(
+                scaled_le_end - d_hi, 0
+            )
             dist_b = abs(le_start - desired_start)
             if placement_priority == "contrib":
                 criteria_a = (contrib_a, dist_a)
