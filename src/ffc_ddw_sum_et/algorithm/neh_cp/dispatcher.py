@@ -159,7 +159,10 @@ class NehCpDispatcher:
                     obj_lb_for_build,
                 )
             mdl, params, op_vars, et_vars = builder.build(
-                sub_instance, horizon=horizon, obj_lb=obj_lb_for_build
+                sub_instance,
+                horizon=horizon,
+                obj_lb=obj_lb_for_build,
+                time_factor=option.time_factor,
             )
             skip_pf = False
             if option.skip_pf_below_obj is not None:
@@ -209,9 +212,11 @@ class NehCpDispatcher:
                 for j in batch:
                     dispatched.dispatch_job_by_stages(j, job_2_stage_2_p[j])
             dispatched.make_semi_active(stage_2_job_2_p)
-            dispatched.insert_idle_time(due_window_map, ewt_map, twt_map)
+            dispatched.insert_idle_time(
+                due_window_map, ewt_map, twt_map, time_factor=option.time_factor
+            )
             se_dis, st_dis = compute_weighted_earliness_tardiness(
-                dispatched, sub_instance
+                dispatched, sub_instance, time_factor=option.time_factor
             )
             dispatched_obj = float(se_dis + st_dis)
             dispatched_snapshot = (
@@ -332,7 +337,7 @@ class NehCpDispatcher:
                     instance, j_i_2_start, j_i_2_end, jobs=current_jobs
                 )
                 se_new, st_new = compute_weighted_earliness_tardiness(
-                    cp_sch, sub_instance
+                    cp_sch, sub_instance, time_factor=option.time_factor
                 )
                 cp_obj = float(se_new + st_new)
                 if option.keep_step_schedules:
@@ -344,9 +349,11 @@ class NehCpDispatcher:
                     apply_semi_active = option.make_semi_active_after_cp
                 if apply_semi_active:
                     cp_sch.make_semi_active(stage_2_job_2_p)
-                    cp_sch.insert_idle_time(due_window_map, ewt_map, twt_map)
+                    cp_sch.insert_idle_time(
+                        due_window_map, ewt_map, twt_map, time_factor=option.time_factor
+                    )
                     se_tidy, st_tidy = compute_weighted_earliness_tardiness(
-                        cp_sch, sub_instance
+                        cp_sch, sub_instance, time_factor=option.time_factor
                     )
                     semi_active_obj = float(se_tidy + st_tidy)
                     if option.keep_step_schedules:
@@ -385,7 +392,7 @@ class NehCpDispatcher:
                 )
 
             se_stage1, st_stage1 = compute_weighted_earliness_tardiness(
-                partial_sol, sub_instance
+                partial_sol, sub_instance, time_factor=option.time_factor
             )
             stage1_obj = se_stage1 + st_stage1
 
@@ -397,6 +404,7 @@ class NehCpDispatcher:
                     horizon=horizon_2,
                     minimize_makespan_lex=True,
                     et_ub=stage1_obj,
+                    time_factor=option.time_factor,
                 )
                 by_machine, stride_set = decode_pf_method(option.pf_method)
                 BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
@@ -465,7 +473,9 @@ class NehCpDispatcher:
                         solver_2.StatusName(status_2),
                     )
 
-            se, st = compute_weighted_earliness_tardiness(partial_sol, sub_instance)
+            se, st = compute_weighted_earliness_tardiness(
+                partial_sol, sub_instance, time_factor=option.time_factor
+            )
             ub = float(se + st)
             if sub_obj_lb == 0:
                 gap: float | None = 0.0 if ub == 0 else None
@@ -543,11 +553,13 @@ class NehCpDispatcher:
                 for j in remaining_jobs:
                     partial_sol.dispatch_job_by_stages(j, job_2_stage_2_p[j])
                 partial_sol.make_semi_active(stage_2_job_2_p)
-                partial_sol.insert_idle_time(due_window_map, ewt_map, twt_map)
+                partial_sol.insert_idle_time(
+                    due_window_map, ewt_map, twt_map, time_factor=option.time_factor
+                )
 
             assert partial_sol is not None
             sum_e_stop, sum_t_stop = compute_weighted_earliness_tardiness(
-                partial_sol, instance
+                partial_sol, instance, time_factor=option.time_factor
             )
             obj_value_stop = float(sum_e_stop + sum_t_stop)
             progress_entries.append(
@@ -587,7 +599,9 @@ class NehCpDispatcher:
         )
 
         final = partial_sol
-        sum_e, sum_t = compute_weighted_earliness_tardiness(final, instance)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            final, instance, time_factor=option.time_factor
+        )
         obj_value = float(sum_e + sum_t)
         progress_entries.append(
             ProgressLogEntry(
