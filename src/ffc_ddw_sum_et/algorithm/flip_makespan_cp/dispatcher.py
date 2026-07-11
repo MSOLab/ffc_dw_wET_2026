@@ -104,8 +104,18 @@ class FlipMakespanCpDispatcher:
         )
 
         # Right-shift the incumbent's last stage in-place on a deep copy.
+        # In CSR coarse mode (time_factor > 1) the incumbent lives on a coarse
+        # grid while the due-window upper bound d^+ is original-scale. The
+        # latest coarse end keeping tardiness at 0 is floor(d^+ / time_factor)
+        # (the largest c with time_factor * c <= d^+), so scale the d^+ map
+        # down before the comparison. At time_factor=1 this is d^+ unchanged.
         init_sched = spec.ref_solution.deepcopy()
-        init_sched.delay_job_latest_leq_obj_contrib(instance.job_2_dw_ub_map)
+        dw_ub_map = instance.job_2_dw_ub_map
+        if option.time_factor > 1:
+            dw_ub_map = {
+                job_id: d_ub // option.time_factor for job_id, d_ub in dw_ub_map.items()
+            }
+        init_sched.delay_job_latest_leq_obj_contrib(dw_ub_map)
         delayed_makespan = int(init_sched.makespan)
         self._maybe_emit_phase(
             option,
@@ -138,6 +148,11 @@ class FlipMakespanCpDispatcher:
             option, logger, "04_flipped_compacted", flipped_seed, instance.name
         )
 
+        # objective="makespan" builds a pure coarse-time makespan model with no
+        # E/T variables and no due-window constraints, so it is scale-free: it
+        # never needs time_factor. The warm-start hints and the frozen first
+        # stage below are also coarse-time throughout, so they stay
+        # scale-consistent with the coarse instance without any scaling.
         builder = BaseModelBuilder()
         mdl, params, op_vars, _et_vars = builder.build(
             reversed_instance, horizon=cp_horizon, objective="makespan"
@@ -273,6 +288,7 @@ class FlipMakespanCpDispatcher:
             instance.job_2_due_window_map,
             instance.job_2_ewt_map,
             instance.job_2_twt_map,
+            time_factor=option.time_factor,
         )
         self._maybe_emit_phase(
             option,
@@ -283,7 +299,9 @@ class FlipMakespanCpDispatcher:
             et_instance=instance,
         )
 
-        sum_e, sum_t = compute_weighted_earliness_tardiness(unflipped, instance)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            unflipped, instance, time_factor=option.time_factor
+        )
         obj_value = float(sum_e + sum_t)
         cp_makespan = float(solver.objective_value)
         cp_bound = float(solver.best_objective_bound)
@@ -430,7 +448,7 @@ class FlipMakespanCpDispatcher:
         if et_instance is not None:
             try:
                 sum_e, sum_t = compute_weighted_earliness_tardiness(
-                    schedule, et_instance
+                    schedule, et_instance, time_factor=option.time_factor
                 )
                 obj_value = float(sum_e + sum_t)
             except (KeyError, AttributeError):

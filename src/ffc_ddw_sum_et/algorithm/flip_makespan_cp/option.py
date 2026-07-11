@@ -34,6 +34,15 @@ class FlipMakespanCpOption(AlgOption):
     phase_name=..., scenario_name=..., instance_name=...)`` so the
     reporter can pick the files up via ``find_artifacts``. Tests may
     pass any callable returning a writable path.
+
+    ``time_factor`` is the CSR coarse-mode scale bridge. When the
+    dispatcher runs on a coarsened instance (``coarsen_processing_times``,
+    which keeps due windows at the ORIGINAL scale), a coarse completion
+    ``C^c`` must be interpreted as ``time_factor * C^c`` against the
+    original due window. The makespan CP model itself is scale-free, but
+    the right-shift, ``insert_idle_time`` post-process, and every wET
+    evaluation run at this factor. ``time_factor=1`` (default) reproduces
+    the ordinary same-scale behaviour exactly.
     """
 
     cp_tl_seconds: float | None = None
@@ -42,3 +51,8 @@ class FlipMakespanCpOption(AlgOption):
     solver_log_path_getter: Callable[[str], PathLike[str] | str] | None = None
     emit_phase_schedules: bool = False
     phase_schedule_path_getter: Callable[[str], PathLike[str] | str] | None = None
+    time_factor: int = 1
+
+    def __post_init__(self) -> None:
+        if self.time_factor < 1:
+            raise ValueError(f"time_factor must be >= 1; got {self.time_factor!r}.")
