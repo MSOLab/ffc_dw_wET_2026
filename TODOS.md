@@ -327,3 +327,87 @@ no decoupling that the tests do not already provide.
 
 **When to act:** when a third consumer appears, or when any of the four grows
 logic a caller wants to *override* rather than reuse.
+
+## CSR solve_flow — additional candidate sources
+
+`coarsen_solve_reconstruct(solve_flow=...)` (plans/20260711/csr_solve_flow.md)
+v1 harvests exactly one coarse candidate per child sub-step registration
+(the schedule sitting on `solution_manager.history` at each `_register`).
+Two richer sources are deliberately out of v1 scope:
+
+- **CP solution-callback snapshot ring buffer** — capture *intermediate*
+  incumbents a sub-step's CP-SAT solver passes through, not just its final
+  registered schedule. Port hybridflowshop
+  `hfs_cp_lns.py::_FullScheduleSnapshotRecorder` (a bounded ring buffer keyed
+  on distinct objective values) so every improving coarse incumbent becomes a
+  candidate.
+- **Dispatch / NEH side-candidates** — the pre-CP dispatch seeds and per-batch
+  NEH partial schedules are additional coarse schedules that could reconstruct
+  to a better original-scale schedule than the sub-step's final registered one.
+
+**Change (if acted on):** add an opt-in snapshot recorder to the sub-algorithms
+(guarded by an option flag so it stays off by default), harvest its buffer plus
+the dispatch/NEH intermediates into the candidate pool, then dedup/reconstruct
+as today.
+
+**Why deferred:** user decision ("다음에 생각하자", 2026-07-11). v1's
+end-of-step harvest already produces multiple candidates (mcf_lb / flip /
+neh_cp / sw_cp / base-CP), and restore-all-pick-best over those is the first
+thing to validate before widening the pool.
+
+**When to act:** when the per-step winners plateau and profiling shows a
+better coarse schedule was visited mid-solve but discarded, or when a
+dispatch/NEH seed reconstructs better than the CP result on real instances.
+
+## CSR solve_flow — ordering-replay restore modes + post-restore CP polish
+
+v1 reconstructs each coarse candidate with the existing scale-up +
+`make_semi_active` + `insert_idle_time` (`reconstruct_coarse_schedule`, always
+flooring). hybridflowshop's coarsened-CP restore additionally offers
+**ordering-replay** restore modes and a polish pass:
+
+- `machine_sequence` — replay the coarse per-machine job order on the original
+  instance (re-dispatch honouring that permutation) instead of scaling starts.
+- `stage_sequence` — replay the coarse per-stage time-ordered job order.
+- **post-restore CP polish** — a short CP-SAT pass warm-started from the
+  reconstructed schedule to locally repair scale-up artifacts.
+
+**Change (if acted on):** add a `restore_mode` option to the CSR step
+(`scale_up` [today] | `machine_sequence` | `stage_sequence`), each producing a
+candidate, plus an optional bounded polish-CP pass; reconstruct/score all and
+keep the original-scale argmin.
+
+**Why deferred:** the scale-up reconstruction already yields feasible,
+competitive schedules in the smoke run; ordering-replay + polish is an
+optimization on top of a working restore, and each mode multiplies the
+per-candidate reconstruction cost.
+
+**When to act:** when scale-up reconstruction is shown to leave avoidable
+original-scale slack that an ordering replay or a short polish CP removes.
+
+## CSR solve_flow — exact time_factor threading of MCF arc costs
+
+W4 threaded `time_factor` through the MCF-LB pipeline
+(`calc_mcf_lb_and_derive_full_sch(..., time_factor=...)`), but in coarse mode
+(`time_factor > 1`) the pipeline **suppresses** the LB
+(`final_obj_bound=None`, `lb_suppressed_by_time_factor=True`) rather than
+scaling the min-cost-flow arc costs exactly. The parallel-machine preemptive
+LP (`algorithm/mcf_lb/parallel_mc_pmtn.py`) builds arc/slot costs against the
+original-scale due window; making those costs exactly consistent with a coarse
+completion (`time_factor * C^c`) would let the child controller carry a *valid*
+coarse-problem LB for its own optimality logic.
+
+**Change (if acted on):** thread `time_factor` into the slot-cost / penalty
+math in `parallel_mc_pmtn.py` (and the last-stage preemptive builder) so the
+coarse MCF LB is exact on the coarse problem, then drop the
+`lb_suppressed_by_time_factor` fallback.
+
+**Why deferred:** the coarse LB is only ever used *inside* the child controller
+(the parent CSR step always registers `obj_bound=None` — a coarse LB is never a
+valid original-scale bound, plan §3). The suppression fallback is sound and the
+child still derives its full schedule; exactness buys only earlier
+optimality proofs on the coarse sub-problem.
+
+**When to act:** when the child controller's coarse solve is time-bound and an
+exact coarse LB would let CP-SAT prove optimality early enough to matter for the
+overall CSR budget.
