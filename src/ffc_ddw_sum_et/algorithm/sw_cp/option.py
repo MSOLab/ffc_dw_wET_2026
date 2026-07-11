@@ -33,6 +33,14 @@ class SwCpOption(AlgOption):
     batch_size: int = 1
     step_size: int = 1
     unfixed_batch_count: int = 1
+
+    time_factor: int = 1
+    """CSR scaling factor: a coarse last-stage completion ``C^c`` is interpreted
+    as original-scale ``time_factor * C^c`` when scored against the instance's
+    (original-scale) due window. ``1`` (default) is the ordinary same-scale
+    case and reproduces pre-CSR behavior exactly. Only the CSR child controller
+    sets ``time_factor = factor`` on a coarsened instance."""
+
     left_profile_fixed_batch_count: int = 0
     right_profile_fixed_batch_count: int = 0
     enable_promotion_profile_fixed: bool = False
@@ -112,6 +120,8 @@ class SwCpOption(AlgOption):
     """
 
     def __post_init__(self) -> None:
+        if self.time_factor < 1:
+            raise ValueError(f"time_factor must be >= 1, got {self.time_factor}")
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
         if self.step_size < 1:

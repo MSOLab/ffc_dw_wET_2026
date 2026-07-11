@@ -55,11 +55,22 @@ class SwCpModelBuilder:
         *,
         horizon: int,
         pf_method: PFMethod,
+        time_factor: int = 1,
     ) -> SwCpBuildResult:
+        """Build the partition-aware CP-SAT model for one SW-CP batch.
+
+        When ``time_factor > 1`` (CSR coarse mode) a job's coarse last-stage
+        completion ``C^c`` is interpreted as original-scale ``time_factor * C^c``
+        against the sub-instance's (original-scale) due window — mirroring
+        :meth:`BaseModelBuilder._define_objective`. Every downstream helper
+        reads the factor from ``sub_params.time_factor``, so no other signature
+        changes are needed. ``time_factor=1`` (default) is byte-identical to the
+        pre-CSR behavior.
+        """
         mdl = CpModel()
 
-        # Parameters
-        sub_params = BaseModelBuilder.make_params(sub_instance)
+        # Parameters (carry time_factor so all sub_params readers pick it up)
+        sub_params = BaseModelBuilder.make_params(sub_instance, time_factor=time_factor)
 
         # Variables
         op_vars = self._make_non_time_fixed_op_vars(
@@ -160,6 +171,12 @@ class SwCpModelBuilder:
         last_i = sub_params.i_list[-1]
         last_stage_ntf_jobs = {j for j, _ in stage_2_partition[last_i].non_time_fixed}
 
+        # CSR: a coarse completion C^c is interpreted as time_factor * C^c
+        # against the (original-scale) due window. time_factor == 1 leaves every
+        # expression identical to the pre-CSR path.
+        k = sub_params.time_factor
+        t_ub = k * horizon if k > 1 else horizon
+
         E: dict[str, IntVar] = {}
         T: dict[str, IntVar] = {}
         et_terms: list = []
@@ -173,10 +190,10 @@ class SwCpModelBuilder:
             w_t = sub_params.w_t[j]
             if j in last_stage_ntf_jobs:
                 E_j = mdl.new_int_var(0, max(d_lower, 0), f"E_{j}")
-                T_j = mdl.new_int_var(0, horizon, f"T_{j}")
-                C_j = op_vars.op_end[j, last_i]
-                mdl.add_max_equality(E_j, [d_lower - C_j, 0])
-                mdl.add_max_equality(T_j, [C_j - d_upper, 0])
+                T_j = mdl.new_int_var(0, t_ub, f"T_{j}")
+                scaled_C_j = k * op_vars.op_end[j, last_i]
+                mdl.add_max_equality(E_j, [d_lower - scaled_C_j, 0])
+                mdl.add_max_equality(T_j, [scaled_C_j - d_upper, 0])
                 E[j] = E_j
                 T[j] = T_j
                 if w_e:
@@ -186,9 +203,9 @@ class SwCpModelBuilder:
                 objective_jobs.append(j)
             else:
                 # last-stage op time-fixed: C_j is a constant from rj_schedule
-                C_j_const = rj_schedule.get_job_end_time(last_i, j)
-                offset += w_e * max(0, d_lower - C_j_const)
-                offset += w_t * max(0, C_j_const - d_upper)
+                scaled_C_const = k * rj_schedule.get_job_end_time(last_i, j)
+                offset += w_e * max(0, d_lower - scaled_C_const)
+                offset += w_t * max(0, scaled_C_const - d_upper)
 
         if et_terms:
             mdl.minimize(sum(et_terms))
@@ -382,12 +399,18 @@ class SwCpModelBuilder:
         objective_jobs: tuple[str, ...],
         rj_schedule: FFcSchedule,
     ) -> None:
-        """Hint E_j and T_j to their actual values from the reference schedule."""
+        """Hint E_j and T_j to their actual values from the reference schedule.
+
+        Under ``time_factor > 1`` the completion is interpreted as
+        ``time_factor * C^c`` against the original due window, matching the
+        objective terms in :meth:`_define_partial_et_objective`.
+        """
         last_i = sub_params.i_list[-1]
+        k = sub_params.time_factor
         for j in objective_jobs:
-            c_j = rj_schedule.get_job_end_time(last_i, j)
-            e_hint = max(0, sub_params.d_lower[j] - c_j)
-            t_hint = max(0, c_j - sub_params.d_upper[j])
+            scaled_c_j = k * rj_schedule.get_job_end_time(last_i, j)
+            e_hint = max(0, sub_params.d_lower[j] - scaled_c_j)
+            t_hint = max(0, scaled_c_j - sub_params.d_upper[j])
             if j in et_vars.E:
                 mdl.add_hint(et_vars.E[j], e_hint)
             if j in et_vars.T:

@@ -102,7 +102,21 @@ class SwCpDispatcher:
             instance.job_2_due_window_map,
             instance.job_2_ewt_map,
             instance.job_2_twt_map,
+            time_factor=option.time_factor,
         )
+
+        # CSR: in coarse mode (time_factor > 1) a coarse last-stage end e keeps
+        # a job non-tardy iff time_factor * e <= d_plus, i.e. e <= d_plus // K.
+        # The right-justify helpers cap coarse ends at this value, so passing a
+        # floor-divided upper-bound map keeps them objective-non-increasing on
+        # the coarse grid without touching FFcSchedule. K == 1 reuses the
+        # original map object (byte-identical to the pre-CSR path).
+        if option.time_factor > 1:
+            rj_dw_ub_map = {
+                j: v // option.time_factor for j, v in instance.job_2_dw_ub_map.items()
+            }
+        else:
+            rj_dw_ub_map = instance.job_2_dw_ub_map
 
         horizon = max(
             1,
@@ -142,7 +156,7 @@ class SwCpDispatcher:
         logger.info(
             "sw_cp: incumbent E+T=%.0f, batches=%d, iterations=%d, "
             "unfixed=%d, lpf=%d, rpf=%d, pf_method=%s, wall_clock_deadline=%s",
-            self._full_obj(incumbent, instance),
+            self._full_obj(incumbent, instance, option.time_factor),
             max_batch_cnt,
             len(iteration_idxs),
             option.unfixed_batch_count,
@@ -207,9 +221,7 @@ class SwCpDispatcher:
 
             rj_schedule = incumbent.deepcopy()
             if option.rj_right_justify_scope == "all_ops":
-                rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(
-                    instance.job_2_dw_ub_map
-                )
+                rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(rj_dw_ub_map)
             else:  # "rtf_only" — preserve the default dispatcher behavior.
                 rtf_ops = {
                     (j, i, k)
@@ -217,11 +229,11 @@ class SwCpDispatcher:
                     for j, k in part.right_time_fixed
                 }
                 rj_schedule.delay_operations_latest_leq_obj_contrib(
-                    rtf_ops, instance.job_2_dw_ub_map
+                    rtf_ops, rj_dw_ub_map
                 )
 
-            rj_obj = self._full_obj(rj_schedule, instance)
-            inc_obj = self._full_obj(incumbent, instance)
+            rj_obj = self._full_obj(rj_schedule, instance, option.time_factor)
+            inc_obj = self._full_obj(incumbent, instance, option.time_factor)
             assert rj_obj <= inc_obj + _FP_TOLERANCE, (
                 f"rj obj {rj_obj} > incumbent {inc_obj}"
             )
@@ -268,6 +280,7 @@ class SwCpDispatcher:
                 stage_2_partition,
                 horizon=horizon,
                 pf_method=option.pf_method,
+                time_factor=option.time_factor,
             )
 
             solver = cp_model.CpSolver()
@@ -317,7 +330,10 @@ class SwCpDispatcher:
                 # covers jobs that *appear* in the sub-instance — jobs
                 # time-fixed in every stage are missing from it.
                 full_offset = self._compute_full_progress_offset(
-                    instance, rj_schedule, build_result.objective_jobs
+                    instance,
+                    rj_schedule,
+                    build_result.objective_jobs,
+                    option.time_factor,
                 )
                 for t_rec, vb in value_recorder.entries:
                     progress_entries.append(
@@ -350,8 +366,9 @@ class SwCpDispatcher:
                     instance.job_2_due_window_map,
                     instance.job_2_ewt_map,
                     instance.job_2_twt_map,
+                    time_factor=option.time_factor,
                 )
-                cand_obj = self._full_obj(cand, instance)
+                cand_obj = self._full_obj(cand, instance, option.time_factor)
                 if cp_divergence_count:
                     logger.debug(
                         "sw_cp step %d: %d ops realised at later end-time than CP "
@@ -394,7 +411,9 @@ class SwCpDispatcher:
                     ref_schedule=rj_schedule,
                 )
 
-            incumbent_obj_before = self._full_obj(incumbent, instance)
+            incumbent_obj_before = self._full_obj(
+                incumbent, instance, option.time_factor
+            )
             accepted = (
                 cand is not None
                 and cand_obj is not None
@@ -402,7 +421,9 @@ class SwCpDispatcher:
             )
             if accepted:
                 incumbent = cand  # type: ignore[assignment]
-            incumbent_obj_after = self._full_obj(incumbent, instance)
+            incumbent_obj_after = self._full_obj(
+                incumbent, instance, option.time_factor
+            )
 
             if option.keep_step_schedules:
                 step_schedules.append(
@@ -523,8 +544,14 @@ class SwCpDispatcher:
     # ---- helpers ----
 
     @staticmethod
-    def _full_obj(schedule: FFcSchedule, instance: FFcDDWParameters) -> float:
-        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+    def _full_obj(
+        schedule: FFcSchedule,
+        instance: FFcDDWParameters,
+        time_factor: int = 1,
+    ) -> float:
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            schedule, instance, time_factor=time_factor
+        )
         return float(sum_e + sum_t)
 
     @staticmethod
@@ -532,6 +559,7 @@ class SwCpDispatcher:
         instance: FFcDDWParameters,
         rj_schedule: FFcSchedule,
         objective_jobs: tuple[str, ...],
+        time_factor: int = 1,
     ) -> float:
         """Constant to add to a CP-objective callback value to recover the
         candidate's full weighted E+T.
@@ -540,17 +568,24 @@ class SwCpDispatcher:
         other job's last-stage end-time is fixed for the whole batch, so
         their E+T is a constant equal to ``full_obj(rj_schedule)`` minus
         ``rj_schedule``'s contribution from ``objective_jobs``.
+
+        Under ``time_factor > 1`` the CP objective is expressed in the
+        factor-scaled space (``max(0, d - time_factor * C^c)``), so the
+        ``objective_jobs`` contribution subtracted here must scale the coarse
+        completion the same way to stay consistent with ``full``.
         """
-        full = SwCpDispatcher._full_obj(rj_schedule, instance)
+        full = SwCpDispatcher._full_obj(rj_schedule, instance, time_factor)
         last_i = instance.stage_id_list[-1]
         dw = instance.job_2_due_window_map
         ewt = instance.job_2_ewt_map
         twt = instance.job_2_twt_map
         cp_side = 0.0
         for j in objective_jobs:
-            c_j = rj_schedule.get_job_end_time(last_i, j)
+            scaled_c_j = time_factor * rj_schedule.get_job_end_time(last_i, j)
             d_lower, d_upper = dw[j]
-            cp_side += ewt[j] * max(0, d_lower - c_j) + twt[j] * max(0, c_j - d_upper)
+            cp_side += ewt[j] * max(0, d_lower - scaled_c_j) + twt[j] * max(
+                0, scaled_c_j - d_upper
+            )
         return float(full - cp_side)
 
     @staticmethod
@@ -599,7 +634,9 @@ class SwCpDispatcher:
         progress_entries,
         step_schedules,
     ) -> AlgRecord:
-        sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent, instance)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            incumbent, instance, time_factor=option.time_factor
+        )
         obj_value = float(sum_e + sum_t)
         metrics: dict = {
             "sum_earliness": sum_e,
@@ -634,7 +671,9 @@ class SwCpDispatcher:
         step_schedules,
         start_elapsed: float,
     ) -> AlgRecord:
-        sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent, instance)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            incumbent, instance, time_factor=option.time_factor
+        )
         obj_value = float(sum_e + sum_t)
         progress = tuple(progress_entries) + (
             ProgressLogEntry(
