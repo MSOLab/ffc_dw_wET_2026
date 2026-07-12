@@ -6,7 +6,7 @@
 #   * 07_unflipped_final = the flip-makespan-optimized schedule
 #
 # draw_gantt is off: the post-run reporter would render PNGs, but we want
-# vector SVGs, so scripts/render_mcf_lb_flip_makespan_svg.py renders both
+# vector SVGs, so scripts/render_mcf_lb_fmm_svg.py renders both
 # phase JSONs as .svg afterwards.
 #
 # NOTE: the final <ins>_solution.json holds the best-by-wET incumbent, which
@@ -29,9 +29,9 @@ draw_gantt: false
 painter_thread_cnt: 1
 
 scenarios:
-  - name: mcf_lb_flip_makespan
+  - name: mcf_lb_fmm
     timelimit: 90
-    output_subdir: mcf_lb_flip_makespan
+    output_subdir: mcf_lb_fmm
     subroutine_flow:
       - method: calc_mcf_lb_and_derive_full_sch
         draw_pmtn_sch_heatmap: true # emit per-round signed C-cost heatmap YAML

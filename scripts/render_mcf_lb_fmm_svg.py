@@ -31,7 +31,7 @@ the same figures ``benchmarks/PRA2017/visualize_parallel_mc_cost.py`` draws
 
 Usage::
 
-    uv run python scripts/render_mcf_lb_flip_makespan_svg.py \
+    uv run python scripts/render_mcf_lb_fmm_svg.py \
         [--run-dir output/20260611/<timestamp>] \
         [--output-dir analysis/20260611]
 
