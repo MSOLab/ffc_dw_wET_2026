@@ -112,7 +112,7 @@ passes — it tests the resolver directly and is unaffected).
 **Why.** `src/ffc_ddw_sum_et/io/__init__.py` documents (lines 1-8) a deliberate
 **io-internal-first, then cross-package** import order to avoid a partial-init
 `ImportError` (the `parameters → io → algorithm → parameters` cycle documented
-in `TODOS.md`). Enabling isort auto-sorted the file into pure alphabetical,
+in `TODO.md`). Enabling isort auto-sorted the file into pure alphabetical,
 reversing that order — so the comment now *contradicts* the code. It doesn't
 crash today only because `parameters/__init__.py` and `algorithm/__init__.py`
 are import-empty; it will crash the moment any sorter/module gains a
@@ -357,11 +357,11 @@ acceptable to land WP1-WP7 first and do WP8 separately.
 
 ## WP9 — `chore(todos): mark EDDUB-ordering + register-decorator deferrals as triggered`
 
-**Why.** This branch *realized* two deferred `TODOS.md` items. Per project
+**Why.** This branch *realized* two deferred `TODO.md` items. Per project
 `CLAUDE.md`, **do not auto-execute deferred TODOs** — just record that their
 "when to act" trigger is now met, so the user can decide.
 
-**Change.** `TODOS.md`:
+**Change.** `TODO.md`:
 - *"SSOT: consolidate the EDDUB+w⁺ dispatch-seed ordering"* — note both sites now
   exist live and were **verified identical** in the 2026-07-08 review:
   `_dispatch_seed_job_sequence` (`coarsen_solve_reconstruct.py:135`, key
@@ -380,7 +380,7 @@ acceptable to land WP1-WP7 first and do WP8 separately.
 
 ## WP10 (OPTIONAL — user opt-in only) — `refactor(csr): route dispatch seed through get_eddub_twt_job_sequence`
 
-**Only do this if the user explicitly approves** (it is a deferred `TODOS.md`
+**Only do this if the user explicitly approves** (it is a deferred `TODO.md`
 item; `CLAUDE.md` forbids executing those autonomously). The two orderings are
 byte-for-byte equivalent, so this is a pure DRY consolidation guarded by the
 existing CSR tests.
@@ -389,7 +389,7 @@ existing CSR tests.
 delete the module-local `_dispatch_seed_job_sequence` (line 135) and replace its
 call site (line 180, `seq = _dispatch_seed_job_sequence(coarsened)`) with
 `seq = coarsened.get_eddub_twt_job_sequence()`. Then update the corresponding
-`TODOS.md` entry to "done."
+`TODO.md` entry to "done."
 
 **Verify.** `uv run pytest tests/algorithm/test_coarsen_solve_reconstruct.py -q`
 (these tests guard the seed ordering) + full `uv run pytest -q`.

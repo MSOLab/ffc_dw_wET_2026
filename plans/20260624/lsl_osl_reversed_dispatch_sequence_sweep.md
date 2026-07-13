@@ -73,7 +73,7 @@
   파라미터 step 선례), `initialize_by_edd` (`:1535`, **forward** — 대조용).
 - routix `SubroutineController._call_method` — `getattr(self, method_name)(**kwargs)`.
 - `metadata/20260624/init_eddub_twt_config.yaml` — config 헤더/스키마 복사 원본.
-- `TODOS.md` — 충돌하는 deferred 항목 없음.
+- `TODO.md` — 충돌하는 deferred 항목 없음.
 
 ---
 

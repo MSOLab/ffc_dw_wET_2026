@@ -28,7 +28,7 @@ instance via a child controller. Borrowed from hybridflowshop
 - **Candidate store:** keep multiple coarsened schedules — v1 captures the
   schedule registered at the END of each sub-step (harvested from the child
   `solution_manager.history`). CP solution-callback snapshots are deferred
-  (see TODOS.md).
+  (see TODO.md).
 - **Restore-all-pick-best:** reconstruct EVERY stored candidate to the original
   scale and select the argmin original-scale wET (not "latest with fallback").
 - Other adopted practices: structural dedup of candidates, validate-and-drop of
@@ -193,7 +193,7 @@ few seconds; per-package added test runtime target < ~60 s. Run
   soundness fallback rule from §3 if exactness is not attainable.
 - **W5 — orchestration (after W1-W4):** `orchestration/**`,
   `algorithm/coarsen_solve_reconstruct.py`, `solution/**` (only if helpers land
-  there), `metadata/20260711/*.yaml`, integration tests, TODOS.md entry.
+  there), `metadata/20260711/*.yaml`, integration tests, TODO.md entry.
   Child-controller construction, `time_factor` plumbing through step methods,
   `solve_flow` parsing/validation, candidate store + reconstruction + winner
   selection + artifacts, experiment/smoke configs.
@@ -217,7 +217,7 @@ are read-only for them — if a change there seems required, stop and report).
     `metadata/20260710/sw_cp_tl_kappa_0.005.yaml` step options (kappa 0.005,
     `solver_thread_cnt: 8`), `FULL_RUN`.
 
-## 7. Out of scope (v1) — recorded in TODOS.md
+## 7. Out of scope (v1) — recorded in TODO.md
 
 - Additional candidate sources: CP solution-callback snapshot ring buffer,
   dispatch/NEH side-candidates (user: "다음에 생각하자").
@@ -287,7 +287,7 @@ Deviations / decisions made during implementation (deltas from the plan text):
   `orchestration/ffcddw_single_instance_runner.py` (candidates CSV emit),
   `metadata/artifact_layout/ffc_ddw_sum_et_v1.yaml` (`csr_candidates_csv`
   kind), `metadata/20260711/{csr_subalg,csr_subalg_smoke}.yaml`,
-  `tests/orchestration/test_csr_solve_flow.py`, `TODOS.md`.
+  `tests/orchestration/test_csr_solve_flow.py`, `TODO.md`.
 - **Smoke result (metadata/20260711/csr_subalg_smoke.yaml, ~25s wall):**
   Instance 60 (Rep0) final wET 61944 (4 deduped candidates, winner
   `incremental_sw_cp.batch_002`); Instance 61 (Rep1) final wET 48184 (4

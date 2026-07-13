@@ -339,10 +339,10 @@ check — it is informational, not blocking.
 
 ---
 
-## 5. TODOS.md update (optional)
+## 5. TODO.md update (optional)
 
 This change is executed immediately, not deferred, so it is not recorded in
-TODOS.md. However, after introducing carry-forward, if a "reached count vs
+TODO.md. However, after introducing carry-forward, if a "reached count vs
 tracked count" display split (adding a separate `reached_count` column) is
-desired, that is a follow-up that can be recorded in TODOS.md.
+desired, that is a follow-up that can be recorded in TODO.md.
 This scope unifies on a single count (`instance_count` = carry-forward total).

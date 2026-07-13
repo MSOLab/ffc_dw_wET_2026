@@ -32,7 +32,7 @@
   `sum_j w^-_j E_j + w^+_j T_j`.
 - `docs/algorithm-principles.md`: 새 알고리즘 실행 단위는 `AlgSpec -> run -> AlgRecord`
   계약 안에 두고, controller/reporting concern을 algorithm 내부로 끌어오지 않는다.
-- `TODOS.md`: 이번 작업과 충돌하는 deferred TODO 없음.
+- `TODO.md`: 이번 작업과 충돌하는 deferred TODO 없음.
 - `src/ffc_ddw_sum_et/algorithm/cpsat_adapter.py`: full-instance base CP adapter.
 - `src/ffc_ddw_sum_et/algorithm/cumulative.py`: base CP model builder.
 - `src/ffc_ddw_sum_et/orchestration/controller.py`: `solve_base_model_cpsat`,

@@ -64,7 +64,7 @@ CSR(`algorithm/`)은 `orchestration/`을 import할 수 없다(CLAUDE.md). v3 poo
 - `FFcDDWParameters.reverse_stages`, `FFcSchedule.as_reversed`,
   `MixedDispatcher.{get_job_centric_schedule_by_sequence,
   get_best_mixed_schedule_by_sequence}` 모두 존재.
-- `TODOS.md`: 충돌하는 deferred TODO 없음.
+- `TODO.md`: 충돌하는 deferred TODO 없음.
 
 ---
 

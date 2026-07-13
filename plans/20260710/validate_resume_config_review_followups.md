@@ -50,10 +50,10 @@ Two things to do:
 
 - Rewrite the import so the coupling is visible at every call site (see #4 —
   the same edit resolves both).
-- Append a `TODOS.md` entry recording the deferral, per the repo's
+- Append a `TODO.md` entry recording the deferral, per the repo's
   Deferred Design Notes convention.
 
-Proposed `TODOS.md` entry:
+Proposed `TODO.md` entry:
 
 > **Promote `main.py` config helpers to a public API**
 > `scripts/validate_resume_config.py` and `tests/test_scenario_uniqueness.py`
@@ -150,7 +150,7 @@ entrypoint") — but correct "three" to "four", since four are imported.
    sites, fix the "three helpers" → "four helpers" docstring count. (#4, #1)
 2. `uv run ruff check` + `uv run ruff format`.
 3. Write `tests/scripts/test_validate_resume_config.py` red → green. (#3)
-4. Append the `TODOS.md` deferral entry. (#1)
+4. Append the `TODO.md` deferral entry. (#1)
 5. `git add metadata/20260710/ main.py` alongside the script. (#2)
 6. Commit — suggested subject (49 chars incl. prefix):
    `feat(scripts): add resume config dry-run validator`

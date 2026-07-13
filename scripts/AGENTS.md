@@ -442,7 +442,7 @@ It imports the `main` module under the alias `entrypoint` and calls the four
 helpers (`_load_config`, `_parse_run_mode`, `_resolve_resume_dir`,
 `_validate_scenario_uniqueness`) **directly rather than reimplementing them**, so
 the validation logic cannot silently drift from the real entrypoint
-(→ see "Promote `main.py` config helpers to a public API" in `TODOS.md`).
+(→ see "Promote `main.py` config helpers to a public API" in `TODO.md`).
 
 Checks performed:
 

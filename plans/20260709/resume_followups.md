@@ -114,7 +114,7 @@ run the type-narrowing vanishes; if `flow_validator`/`base_flow` were ever `None
 here the failure would surface later as an opaque `AttributeError` instead of a
 clear message. It also trips the repo's standing "assert in production path"
 concern (see `plans/20260705/sw_cp_tl_policy_investigation.md` § 8 code-cleanup and
-`TODOS.md`).
+`TODO.md`).
 
 **Recommended fix (cleanest):** extract the RESUME-specific computation into a
 small helper that takes **non-optional** args, so no narrowing assert is needed and
@@ -214,7 +214,7 @@ anything the port could do better. Recorded here so it isn't re-derived.
   parity-justified but load-bearing on "the tail self-initializes"; W1 must assert a
   bare-seeded tail runs without prefix state.
 
-### Deferred → recorded in `TODOS.md` (do NOT act autonomously)
+### Deferred → recorded in `TODO.md` (do NOT act autonomously)
 
 - **Persistent controller `obj_store` instead of `_merge_base_obj_log`.** The
   resume obj_log is reconstructed by re-reading + merging the base JSON, duplicating

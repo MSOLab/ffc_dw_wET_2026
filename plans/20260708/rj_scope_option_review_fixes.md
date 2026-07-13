@@ -251,5 +251,5 @@ once after Commit B.
   defects. Can be addressed in a follow-up PR.
 - **`docs/algorithms/pw_cp.md` pw_cp→sw_cp renames** — already done in this
   branch.
-- **`TODOS.md` status updates** — already done in this branch (WP9 of the
+- **`TODO.md` status updates** — already done in this branch (WP9 of the
   earlier plan).

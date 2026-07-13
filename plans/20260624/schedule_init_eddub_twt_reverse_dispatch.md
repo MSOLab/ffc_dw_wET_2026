@@ -82,7 +82,7 @@ single source of truth로 두고 CSR이 이를 재사용하도록 정리할 수 
   weight, 목적함수는 마지막 stage 기준 `Σ_j (w⁻_j E_j + w⁺_j T_j)`.
 - `tests/`: `initialize_by_*` step 및 param sequence getter에 대한 **전용 단위
   테스트는 현재 없음**. 새 코드에 한해 최소 단위 테스트를 추가한다(아래 WP-3).
-- `TODOS.md`: 충돌하는 deferred 항목 없음.
+- `TODO.md`: 충돌하는 deferred 항목 없음.
 
 ---
 
@@ -306,10 +306,10 @@ WP-1과 WP-2는 인터페이스(getter 이름)만 합의되면 병렬 가능.
   `reconstruct_raw_coarse_schedule` / `reconstruct_coarse_schedule` contract 검증.
 - **3.4** 신규 13개 테스트 통과, `uv run ruff check` / `ruff format` clean.
 
-### WP-4 — (보류) SSOT 정리: CSR이 새 getter 재사용 → **TODOS.md로 이관**
+### WP-4 — (보류) SSOT 정리: CSR이 새 getter 재사용 → **TODO.md로 이관**
 CSR `_dispatch_seed_job_sequence` 제거 후 `get_eddub_twt_job_sequence`
 재사용은 이번 feature 범위에서 **보류** (사용자 결정 2026-06-24).
-`TODOS.md` → "SSOT: consolidate the EDDUB+w⁺ dispatch-seed ordering" 항목에
+`TODO.md` → "SSOT: consolidate the EDDUB+w⁺ dispatch-seed ordering" 항목에
 Why / When to act와 함께 기록됨. WP-1의 getter가 생긴 뒤 별도로 처리한다.
 
 > **부분적 달성**: CSR의 **reconstruct 블록**은 SSOT 달성 —
@@ -366,7 +366,7 @@ Why / When to act와 함께 기록됨. WP-1의 getter가 생긴 뒤 별도로 �
 - ✅ **coarsen-aware(WP-6) 포함**: 사용자 요구로 포함. core(WP-1~3) → WP-6
   단계적 진행. — 사용자 동의(결정 2).
 - ⏸ **WP-4(SSOT getter 통합) 보류**: CSR `_dispatch_seed_job_sequence` ↔ 새
-  getter 중복 통합은 이번 범위에서 분리. `TODOS.md` 에 Why/When to act와 함께
+  getter 중복 통합은 이번 범위에서 분리. `TODO.md` 에 Why/When to act와 함께
   기록. — 사용자 결정 3.
 - ✅ **reconstruct SSOT 달성**: CSR inline reconstruct 블록 →
   `reconstruct_raw_coarse_schedule` / `reconstruct_coarse_schedule` 추출.
@@ -381,4 +381,3 @@ Why / When to act와 함께 기록됨. WP-1의 getter가 생긴 뒤 별도로 �
   dispatch" 를 충족하므로 추가 변형(np 후보 직접 열거 등)은 YAGNI.
 - **config**: 단독 init 비교용. 후속 CP solve와 결합한 평가가 필요하면 별도
   config로 확장.
-```

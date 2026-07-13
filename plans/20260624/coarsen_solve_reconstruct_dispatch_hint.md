@@ -60,7 +60,7 @@ timelimit에서 비교하려면 옵션 선택이 필요하다.
   `emit_phase_schedules`, ...)가 method kwarg로 전달되어
   `CoarsenSolveReconstructOption(...)`을 구성 → `run_coarsen_solve_reconstruct`.
   새 kwarg를 추가하면 YAML 키로 그대로 선택 가능.
-- `TODOS.md`: 충돌하는 deferred TODO 없음.
+- `TODO.md`: 충돌하는 deferred TODO 없음.
 
 ## Shared Design
 
