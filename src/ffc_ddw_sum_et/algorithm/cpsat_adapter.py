@@ -223,15 +223,33 @@ class CpsatAdapter:
         cp_obj = float(solver.objective_value)
         if obj_value > cp_obj:
             logger.warning(
-                "CpsatAdapter: post-process objective %.3f > CP-SAT objective %.3f",
+                "CpsatAdapter: post-process objective %.3f > CP-SAT objective %.3f "
+                "(gap=%.3f) for instance=%s status=%s time_factor=%d: the "
+                "reconstruction (make_semi_active -> insert_idle_time) did not "
+                "reproduce CP-SAT's completion times. Residual split: "
+                "sum_e=%.3f sum_t=%.3f, makespan=%d.",
                 obj_value,
                 cp_obj,
+                obj_value - cp_obj,
+                instance.name,
+                status_name,
+                option.time_factor,
+                float(sum_e),
+                float(sum_t),
+                schedule.makespan,
             )
         elif obj_value < cp_obj:
             logger.info(
-                "CpsatAdapter: post-process objective %.3f < CP-SAT objective %.3f",
+                "CpsatAdapter: post-process objective %.3f < CP-SAT objective %.3f "
+                "for instance=%s status=%s time_factor=%d "
+                "(sum_e=%.3f sum_t=%.3f)",
                 obj_value,
                 cp_obj,
+                instance.name,
+                status_name,
+                option.time_factor,
+                float(sum_e),
+                float(sum_t),
             )
         obj_bound = float(solver.best_objective_bound)
 
