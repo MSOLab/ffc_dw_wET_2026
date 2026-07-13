@@ -104,6 +104,14 @@ class SwCpOption(AlgOption):
     post-processing), or ``"3_after_sm_iti"``.  Return ``None`` to skip
     writing (e.g. when the controller has no artifact layout bound)."""
 
+    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring"
+    """Idle-time insertion mode forwarded to
+    :meth:`FFcSchedule.insert_idle_time` during incumbent preparation and
+    post-CP re-timing. ``"lookahead"`` matches CSR's coarse-grid
+    idle-mode choice so the dispatcher doesn't silently downgrade to
+    ``"flooring"``. ``"flooring"`` (default) reproduces the pre-field behavior
+    (byte-identical at ``time_factor == 1`` where all modes coincide)."""
+
     rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only"
     """Reference schedule (``rj_schedule``) build scope for right-justify.
 
@@ -150,6 +158,11 @@ class SwCpOption(AlgOption):
             raise ValueError(
                 "rj_right_justify_scope must be one of "
                 f"{{'rtf_only','all_ops'}}, got {self.rj_right_justify_scope!r}"
+            )
+        if self.idle_mode not in {"flooring", "ceiling", "lookahead"}:
+            raise ValueError(
+                "idle_mode must be one of {'flooring','ceiling','lookahead'}, "
+                f"got {self.idle_mode!r}"
             )
         if (
             self.non_time_fixed_op_time_limit_multiplier is not None

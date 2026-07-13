@@ -1721,10 +1721,10 @@ class FFcSchedule:
                 s_e, s_t, s_d = [], [], []
                 for i in range(j, block_end + 1):
                     d_lo, d_hi = due_window_map[job_ids[i]]
-                    KC_j = K * ends[i]
-                    if KC_j < d_lo:
+                    K_times_Cj_plus_single_unit = K * (ends[i] + 1)
+                    if K_times_Cj_plus_single_unit <= d_lo:
                         s_e.append(i)
-                    elif KC_j >= d_hi:
+                    elif d_hi < K_times_Cj_plus_single_unit:
                         s_t.append(i)
                     else:
                         s_d.append(i)
@@ -1786,7 +1786,7 @@ class FFcSchedule:
                         da = min(delta1, delta2)
                         db = min(delta1 + 1, delta2)
                         best = (
-                            db if (db != da and block_obj(db) < block_obj(da)) else da
+                            db if (db != da and block_obj(db) <= block_obj(da)) else da
                         )
                         if best > 0:
                             for i in range(j, block_end + 1):

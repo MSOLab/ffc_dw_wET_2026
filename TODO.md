@@ -411,3 +411,163 @@ optimality proofs on the coarse sub-problem.
 **When to act:** when the child controller's coarse solve is time-bound and an
 exact coarse LB would let CP-SAT prove optimality early enough to matter for the
 overall CSR budget.
+
+## Drop the `idle_mode` knob and hardcode `"lookahead"`
+
+`idle_mode` (`"flooring"` | `"ceiling"` | `"lookahead"`) is configurable across
+the CSR / sw_cp surface:
+
+- `FFcSchedule.insert_idle_time(idle_mode=...)` — the three-branch
+  implementation (`src/ffc_ddw_sum_et/solution/ffc_schedule.py:1746/1762/1777`).
+- `coarsen_solve_reconstruct` — controller param
+  (`orchestration/controller.py:2649`) + option
+  (`algorithm/coarsen_solve_reconstruct.py`), default `"flooring"`.
+- `SwCpOption.idle_mode` (added 2026-07-13) + controller `sw_cp` /
+  `incremental_sw_cp` params + the four `csr_*` scenario keys in
+  `metadata/20260713/csr_init_methods.yaml`.
+
+flooring/ceiling only ever existed as CSR coarse-grid experiments
+(`vault/20260702_진행사항_P3.pdf`). lookahead was shown to be the per-instance
+best there (p.11-12), and the sw_cp RJ-warning investigation
+(`plans/20260713/sw_cp_rj_warning_investigation.md`) confirmed flooring's
+coarse-grid undershoot is what produces the "left E/T on the table" warning
+while lookahead avoids it. Once lookahead is validated as always-preferred, the
+flooring/ceiling branches and the whole `idle_mode` plumbing become dead weight:
+hardcode `"lookahead"` and delete the field/params/scenario keys.
+
+At `time_factor == 1` all three modes are byte-identical, so hardcoding
+lookahead is a no-op for every non-CSR (`K == 1`) caller.
+
+**Why:** YAGNI once one mode wins — the knob multiplies config surface (field,
+validation, controller params, scenario keys) that must stay aligned
+(`SwCpOption.idle_mode` and both controller-step defaults are `"flooring"` as
+of the 195341 run-setting commit; the option docstring still describes
+`"lookahead"` as the CSR-aligned choice). Collapsing to one mode removes that
+divergence surface.
+
+**When to act:** after `idle_mode: "lookahead"` is validated across the full
+grid and higher `K` (8, 16) — i.e. flooring/ceiling are confirmed never
+preferable — so removing them cannot regress any experiment. Do this together
+with dropping the now-unused branches in `insert_idle_time`.
+
+## sw_cp incumbent prep should honour `option.idle_mode`
+
+The sw_cp dispatcher re-times schedules with `insert_idle_time` in two places
+(`src/ffc_ddw_sum_et/algorithm/sw_cp/dispatcher.py`):
+
+- **post-CP candidate re-timing** (~`:367`) — forwards `idle_mode=option.idle_mode`
+  (added in the 195341 commit).
+- **initial incumbent prep** (~`:101`) — still calls `insert_idle_time(...)`
+  **without** `idle_mode`, so it silently uses the `"flooring"` default.
+
+So the initial incumbent is flooring-timed while CP-accepted incumbents follow
+the configured mode. Under a `"lookahead"` scenario this is an asymmetry: the
+step-0 incumbent can carry coarse-grid residual (the very thing the RJ warning
+flags) that the rest of the loop does not.
+
+**Change (if acted on):** pass `idle_mode=option.idle_mode` to the initial-prep
+`insert_idle_time` at `:101` as well, and update the surrounding comment.
+
+**Why:** consistency — the field exists so CSR can pick lookahead; the initial
+incumbent should not silently downgrade to flooring.
+
+**When to act:** next sw_cp touch (low-risk one-liner). No effect at
+`time_factor == 1` (all modes coincide), so non-CSR runs are unaffected.
+
+## Test `insert_idle_time` gate `sum_e > sum_t` → `sum_e >= sum_t`
+
+`ffc_schedule.py:1745` gates the block right-shift on `sum_e > sum_t` (strict —
+shift only when the earliness gain strictly exceeds the tardiness loss, faithful
+to Pan et al. 2017). Changing it to `sum_e >= sum_t` also shifts on ties, which
+pushes blocks **maximally right** (right-justifies on-time and balanced blocks
+that `>` leaves in place).
+
+**Motivation:** on a tie the shift is objective-neutral (equal earliness gain
+and tardiness loss) but lands ops as far right as possible — closer to a full
+right-justify — which can absorb residual earliness that the step-loop op-scoped
+RJ would otherwise recover, reducing/eliminating the "left E/T on the table"
+warning at its source. Known trade-off: this **deviates from the original
+algorithm** and is **not byte-identical at `time_factor == 1`** (pure-`S_D` and
+balanced blocks now shift to the window's right edge; obj unchanged, positions
+differ), so the paper-exactness claim and any position-asserting fine-grid tests
+must be revisited.
+
+**How to test:** matrix experiment (gate `>` vs `>=`) × grid measuring
+(a) warning count, (b) obj non-regression, (c) full test suite incl. K=1
+expectations. Adopt only if obj does not regress and the K=1 position changes
+are acceptable. Pairs naturally with the `K*(C+1)` partition fix already landed.
+
+**When to act:** when tightening the coarse-grid idle insertion further (e.g.
+alongside validating lookahead as the sole mode, or the exact-timing direction
+in `plans/20260713/sw_cp_rj_warning_investigation.md`).
+
+## Refresh the sw_cp RJ-warning investigation plan
+
+`plans/20260713/sw_cp_rj_warning_investigation.md` captures the investigation
+*before* the fix landed. Two parts are now stale:
+
+- §4 ("dispatcher는 내부에서 flooring으로 재-timing한다") describes the pre-fix
+  asymmetry as an open finding.
+- "해결 방향 A" recommends a prep `delay_job_latest_leq_obj_contrib_all_stages`
+  (all-stages RJ) cleanup — that approach was **tried and dropped**; the fix
+  that actually landed (195341 commit) is the `insert_idle_time` partition
+  reformulation to coarse-unit boundaries (`K*(C+1)` vs `d_lo`/`d_hi`), which
+  removes the near-`d_hi` `S_D` op's `Δ1 == 0` stall.
+
+**Change (if acted on):** record the `K*(C+1)` partition fix as the resolution
+(with the `Δ1 == 0` stall mechanism), mark direction A (prep all-stages RJ) as
+superseded/masking, keep direction B (exact coarse-grid timing) as the remaining
+principled option, and fold in the residual-verification status (grid + higher
+`K`).
+
+**Why:** the plan is the durable record of this investigation; the stale
+diagnosis would lead a future reader to re-apply the abandoned prep-RJ mask
+instead of the partition fix.
+
+**When to act:** when picking the investigation back up (grid validation or the
+exact-timing direction), or as doc hygiene before the branch merges.
+
+## Regression test for the `K*(C+1)` insert_idle_time partition
+
+The 195341 commit changed the `S_E`/`S_D`/`S_T` partition in
+`FFcSchedule.insert_idle_time` (`ffc_schedule.py:~1723`) to coarse-unit
+boundaries but shipped **no test**.
+
+**Change (if acted on):**
+
+- Targeted unit test pinning the coarse behavior: construct a last-stage
+  sequence where the old partition stalled (a near-`d_hi` in-window op giving
+  `Δ1 = d_hi//K - C = 0`) and assert the new partition pushes the block right,
+  reducing weighted earliness. (See the paused test-construction discussion —
+  a small brute-force search over coarse single-machine sequences is the robust
+  way to find a minimal reproducer.)
+- An explicit `time_factor == 1` byte-identity test (partition membership is
+  provably unchanged at `K == 1`).
+- Confirm the full suite passes — `test_ffc_schedule`,
+  `test_coarsen_solve_reconstruct`, and the sw_cp dispatcher tests exercise the
+  coarse path and may carry position expectations that shift.
+
+**Why:** a behavior change to shared timing code with no test is a regression
+risk; the coarse path is exercised by every CSR run.
+
+**When to act:** before relying on the fix in reported results, or before the
+branch merges.
+
+## Isolate the lookahead `<` → `<=` tie-break
+
+The 195341 commit also flipped the lookahead tie-break
+(`ffc_schedule.py:~1789`, `block_obj(db) < ...` → `<=`) in the same change as
+the partition fix. Its independent contribution is **unverified**: `<=` alone
+was previously ineffective, so the `K*(C+1)` partition is the likely sole
+driver. `<=` is also **not** byte-identical at `time_factor == 1` (an
+objective-neutral `+1` position shift on ties).
+
+**Change (if acted on):** revert `<=` → `<`, re-run the warning-heavy
+instance(s) at `K > 1`; if warnings stay at zero, drop `<=` (restores K=1
+lookahead byte-identity and minimizes the diff to the partition fix). Keep `<=`
+only if it demonstrably reduces warnings on its own.
+
+**Why:** minimize deviation from Pan et al. and keep `K == 1` exact unless the
+tie-break earns its place.
+
+**When to act:** same session as the partition regression tests above.
