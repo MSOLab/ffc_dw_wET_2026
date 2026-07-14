@@ -9,7 +9,7 @@
 
 `csr_full_wdp` 시나리오(초기화 비교, tail 없음) 실행 로그에서 발생:
 
-```
+```txt
 CpsatAdapter: post-process objective 149.000 > CP-SAT objective 0.000
 ```
 
@@ -69,7 +69,7 @@ CP-SAT의 배치는 그 시퀀스의 한 feasible 배치이고 그 값이 `cp_ob
 `c36fa5e`가 추가한 TODO 항목들과의 대응:
 
 | TODO 항목 | 본 건과의 관계 |
-|---|---|
+| --- | --- |
 | **sw_cp incumbent prep should honour `option.idle_mode`** (`dispatcher.py:101`) | 동형. CpsatAdapter는 idle_mode 필드조차 없이 flooring 고정 — 같은 "내부 timing이 flooring으로 downgrade" 비대칭. |
 | **Drop the `idle_mode` knob, hardcode `"lookahead"`** | lookahead가 flooring보다 낫지만 자매 문서 §3에 따르면 **coarse 격자 exact가 아님** → lookahead로도 본 불변식(`obj_value ≤ cp_obj`)은 원리적으로 항상 성립하지 않음. 아래 RED 테스트가 이를 falsify. |
 | **coarse-grid exact timing (방향 B)** | 본 건의 **근본 해**. `insert_idle_time`이 고정 시퀀스·K-격자에서 정수 최적을 내면 `obj_value ≤ cp_obj`가 복원됨. |
@@ -160,6 +160,114 @@ CP-SAT의 배치는 그 시퀀스의 한 feasible 배치이고 그 값이 `cp_ob
   - `make_semi_active` `:1024` (좌측 이동 = idle 제거)
 - 테스트: `tests/solution/test_ffc_schedule.py`(RED-1),
   `tests/algorithm/test_cpsat_adapter_coarse_reconstruct.py`(RED-2, 신규)
+
+## 진행 로그 (2026-07-14)
+
+### ✅ 재현 (RED 확정 — 통합 레벨)
+
+`metadata/20260714/csr_init_debug.yaml`(instance 835 =
+`Instance_150_5_5_0,2_1_20_Rep0`, `csr_full_wdp` 단일 시나리오로 축소)로
+`main.py` 실행 → warning 재현 (보강된 로그):
+
+```txt
+CpsatAdapter: post-process objective 149.000 > CP-SAT objective 0.000 (gap=149.000)
+  for instance=..._coarsenp4 status=OPTIMAL time_factor=4:
+  ... Residual split: sum_e=149.000 sum_t=0.000, makespan=510.
+```
+
+- 잔여 149가 **전부 earliness** (`sum_t=0`) — 진단(§27-47)과 일치.
+- 같은 run에 sw_cp RJ warning (`rj obj 30 < incumbent 34` 등) 공존 — 공유 근본.
+
+### ✅ 근본 원인 정밀화 (brute-force 탐색)
+
+`scratchpad/explore_iit.py`: 마지막 스테이지 단일 머신 고정 시퀀스에 대해
+`insert_idle_time` 3-mode 결과 vs **coarse 격자 정수 최적(brute-force)** 비교.
+두 개의 독립 결함을 격리:
+
+1. **`+1` 분류 오류 (모든 mode 공통, `ffc_schedule.py:1724`)** — 파티션이
+   `K*(C+1)`로 s_e/s_d/s_t를 나눔. 실제 완료 `K*C`는 윈도우 아래(early)인데
+   `K*(C+1)`이 윈도우 안이면 **s_d(정시)로 오분류** → shift 게이트(`sum_e>sum_t`)가
+   발화하지 않아 earliness가 방치됨. 이것이 production 149(전부 earliness)의 정체.
+2. **floor delta1 언더슈트 (flooring 전용)** — §43-46. ceiling/lookahead는
+   완화하지만 결함 1 때문에 여전히 비최적.
+
+**최소 반례 (RED-1 핵심, 세 mode 모두 실패):** 단일 job, `K=50`, 윈도우
+`(60,130)`, 좌측압축 `C=1`(real 50). brute 최적 `C=2`(real 100)→ E/T=0. 그러나
+flooring/ceiling/lookahead 모두 `C=1`에 정체 → cost 10. `K=1` 대조군은 세 mode
+모두 최적 유지.
+
+| case | K | 최적 | flooring | ceiling | lookahead |
+| --- | --- | --- | --- | --- | --- |
+| E 단일 job (60,130) C=1 | 50 | 0 | 10 | 10 | 10 |
+| D 2-job 블록(가중 5) | 50 | 0 | 160 | 10 | 10 |
+| B 좁은 윈도우(110,120) | 50 | 10 | 10 | 10 | 10 (이미 최적) |
+
+→ **lookahead도 coarse-exact 아님**을 반례로 확증 = 방향 B 정당화.
+
+### 계획: GREEN = 방향 B (coarse-grid exact block shift)
+
+`insert_idle_time`의 `K>1` 경로를 **블록별 정수 최적 shift**로 교체
+(K==1은 기존 검증된 경로 그대로 → byte-identity·비-CSR 무영향):
+
+- 블록 `[j..block_end]`의 공통 shift δ∈[0, delta2]에 대해 `block_cost(δ)`는
+  **볼록 조각선형** → 후보 breakpoint(`ceil(d_lo_i/K)-C_i`, `floor(d_hi_i/K)-C_i`,
+  0, delta2)에서만 평가해 최소를 취함(동점 시 최소 δ = 불필요한 idle 억제).
+- δ==delta2면 다음 블록과 병합(기존 `j` 고정 재평가 유지). δ==0이면 `j-=1`.
+- brute-force oracle로 무작위 소규모 케이스 전수 검증(회귀 property test).
+
+**Blast radius (K>1 동작 변경 → 결과 개선):** `test_ffc_schedule.py`에서
+suboptimal 배치를 고정한 테스트(`termination_on_delta1_zero`,
+`floor_vs_ceil_divergence_wide_window`, `ceiling_vs_flooring_diverge*`,
+`ceiling_never_stalls*`)는 **exact 최적으로 갱신** 필요. sw_cp/coarsen/dispatcher
+등 K>1 결과가 개선되므로 전체 스위트 재실행으로 실측 후 최종 판단.
+
+### ✅ GREEN 완료 (방향 B — coarse-exact block shift)
+
+`ffc_schedule.py:insert_idle_time`의 `K>1` 경로를 **CSR idle-time-insertion**
+(`vault/20260713_p3_csr.pdf`)로 교체 (`K==1`은 기존 heuristic 그대로 →
+byte-identity 유지, `idle_mode`는 `K>1`에서 무효). 블록별로:
+
+- **Gate (magnitude-aware)**: 한 셀(+K real) 이동 시의 **실제 Δobj**를 계산 —
+  earliness 절감(early job이 창 안에 머물면 `K·w⁻`, 창을 벗어나는 셀은 부분항
+  `w⁻(d_lo−K·C)`) vs tardiness 증가(이미 tardy면 `K·w⁺`, 새로 넘어가는 셀은
+  `w⁺(K(C+1)−d_hi)`). `earliness_saved > tardiness_added`면 shift. **가중치가 아닌
+  magnitude 비교**라, 좁은 윈도우(coarsen으로 in-grid 셀이 사라져 한 셀에 early→
+  tardy로 건너뛰는 경우)도 정확.
+- **Δ1 (jump + unit-step)**: 모든 job이 같은 조각(early/on-time/tardy)에 머무는
+  **full-marginal 구간**만큼 점프(`⌊d_lo/K⌋−C` early, `⌊d_hi/K⌋−C` on-time), 창
+  경계를 넘는 셀에서는 1칸씩(gate 재평가). `delta2`로 캡.
+
+**설계 반복 (효율성 ↔ 정확성) — 복잡도 측정 + brute-force로 도출:**
+
+1. *후보 열거*: 윈도우 edge의 floor·ceil을 후보로 `block_obj` 최소. 정확하지만
+   O(b²)/블록·병합 재평가로 **전체 O(n³)** (slope 3.14, n=800 13.4s).
+2. *marginal weight-gate*: `Σw⁻ > Σw⁺`. O(n²)지만 **비정확** — 좁은 윈도우에서
+   가중치가 magnitude를 오판(brute 3600 중 510 실패). straddler 처리 실패.
+3. *ternary search*: 볼록 `block_obj`를 O(log)회 평가. 정확·O(n²)지만 상수 큼
+   (n=800 2.2s).
+4. *magnitude gate + jump* (**채택**, PDF 알고리즘): gate가 실제 Δobj라 straddler
+   정확, jump는 full-marginal 구간 점프라 O(n²)·상수 작음. **핵심 보정 두 가지:**
+   (a) gate를 weight→magnitude(창 진입/이탈 부분항 대칭 반영), (b) Δ1 target을
+   `⌈d_lo/K⌉`(창 진입, overshoot)이 아니라 `⌊d_lo/K⌋`(마지막 full-marginal 셀)로
+   + 경계 셀은 unit-step. (b)가 없으면 부분 진입 셀에서 marginal이 셀 중간에 바뀌어
+   joint optimum을 지나침 (예: `[1,3]`,K=50,j0(179,274)/j1(22,92) → 832 vs 777).
+
+검증:
+
+- RED-1(단위 + 400-case property, 3-mode) / RED-2(통합) 전부 GREEN.
+- brute-force **10,000+ 케이스**(`n≤4`, `K∈{1..50}`, zero-width 윈도우 포함)
+  **fails=0**. `scratchpad/test_efficient.py`.
+- 복잡도(`scratchpad/complexity2.py`): `K==1` slope 2.0, `K>1` slope ~2.0,
+  n=800에서 133ms (ternary 2.2s·후보열거 13.4s 대비). K=1과 상수 ~2.7×.
+- 전체 스위트 **626 passed**, ruff clean. Blast radius = suboptimal 배치를 고정하던
+  `test_ffc_schedule.py` 4개 → exact 최적으로 갱신(2개는 `coarse_exact_modes_agree`
+  하나로 통합).
+- **E2E:** `main.py`(instance 835, csr_full_wdp) 재실행 → **warning 전무**
+  (CpsatAdapter + sw_cp RJ 동시 소멸), `bestObj 149 → 0.0`(bestBound 0.0, 최적 회수).
+
+대상 코드: `src/ffc_ddw_sum_et/solution/ffc_schedule.py`
+(`insert_idle_time` K>1 branch + docstring). 방향 A(CpsatOption에 idle_mode
+배관)는 **불필요**해짐 — B가 근본 해결이라 CpsatAdapter의 flooring 고정도 무해.
 
 ## 참고
 

@@ -616,8 +616,9 @@ def test_insert_idle_time_overshoot_safety_real_cases() -> None:
 
 
 def test_insert_idle_time_termination_on_delta1_zero() -> None:
-    """Wide window (110,220), K=50, op at C=1: must terminate (no hang).
-    Floor stops at C=2 (real 100), gap=10 from the window."""
+    """Wide window (110,220), K=50, op at C=1: must terminate (no hang) and
+    reach the in-due coarse cell. Direction B (coarse-exact) lands at C=3
+    (real 150, in [110,220], E/T=0); the pre-fix flooring stalled at C=2."""
     sched = _make_iit_schedule_single_job("j0", coarse_c=1)
     dw = {"j0": (110, 220)}
     ewt = {"j0": 1}
@@ -627,25 +628,23 @@ def test_insert_idle_time_termination_on_delta1_zero() -> None:
 
     end_map = sched.get_jik_2_end_time_map()
     final_c = end_map[("j0", "s2", "m2")]
-    assert final_c == 2  # floor says "can't move" at C=1, shifts once to C=2
+    assert final_c == 3  # coarse-exact reaches the in-due cell (real 150)
 
 
-def test_insert_idle_time_floor_vs_ceil_divergence_wide_window() -> None:
-    """Wide window (110,220), K=50: floor leaves residual earliness (lands at C=2,
-    cost w-·10), i.e. does NOT reach the in-due cell C=3. Locks the accepted tradeoff."""
-    sched = _make_iit_schedule_single_job("j0", coarse_c=1)
+def test_insert_idle_time_coarse_exact_reaches_in_due_cell() -> None:
+    """Wide window (110,220), K=50: coarse-exact (direction B) reaches the
+    in-due cell C=3 (real 150, E/T=0), eliminating the residual earliness that
+    the pre-fix flooring left at C=2. idle_mode is irrelevant at K>1."""
     dw = {"j0": (110, 220)}
     ewt = {"j0": 1}
     twt = {"j0": 1}
 
-    sched.insert_idle_time(dw, ewt, twt, time_factor=50)
-
-    end_map = sched.get_jik_2_end_time_map()
-    final_c = end_map[("j0", "s2", "m2")]
-    real_c = 50 * final_c
-    # Floor stops at last-early cell (C=2, real=100), not the in-due cell (C=3, real=150)
-    assert final_c == 2
-    assert real_c == 100  # residual earliness = 110 - 100 = 10
+    for mode in ("flooring", "ceiling", "lookahead"):
+        sched = _make_iit_schedule_single_job("j0", coarse_c=1)
+        sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode=mode)
+        final_c = sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
+        assert final_c == 3, mode  # in-due cell, real 150
+        assert 110 <= 50 * final_c <= 220  # zero E/T
 
 
 # -------------------------------------------------------------------
@@ -685,46 +684,181 @@ def test_insert_idle_time_factor1_all_modes_identical() -> None:
     assert end_maps["flooring"] == end_maps["ceiling"] == end_maps["lookahead"]
 
 
-def test_insert_idle_time_ceiling_vs_flooring_diverge_on_non_multiple_window() -> None:
-    """K=50, window (110,220), single early job at C=1: K does not divide
-    d_lo=110 (floor=2, ceil=3), so ceiling shifts one coarse cell further
-    right than flooring for this early job (C=3 vs C=2)."""
-    dw = {"j0": (110, 220)}
+@pytest.mark.parametrize(
+    "coarse_c,window,expected_c",
+    [
+        # K=50, non-multiple d_lo=110 (floor 2, ceil 3): exact reaches the
+        # in-due cell C=3 for every mode (pre-fix: floor stalled at 2, ceil 3).
+        (1, (110, 220), 3),
+        # K=50, window (105,300), start C=2: pre-fix flooring stalled at C=2
+        # (Δ₁==0); exact shifts to the in-due cell C=3 for every mode.
+        (2, (105, 300), 3),
+    ],
+)
+def test_insert_idle_time_coarse_exact_modes_agree(coarse_c, window, expected_c) -> None:
+    """At K>1 the coarse-exact path ignores idle_mode: flooring/ceiling/
+    lookahead all land on the same optimum (no mode divergence, no stall)."""
+    dw = {"j0": window}
     ewt = {"j0": 1}
     twt = {"j0": 1}
 
-    floor_sched = _make_iit_schedule_single_job("j0", coarse_c=1)
-    floor_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="flooring")
+    ends = {}
+    for mode in ("flooring", "ceiling", "lookahead"):
+        sched = _make_iit_schedule_single_job("j0", coarse_c=coarse_c)
+        sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode=mode)
+        ends[mode] = sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
 
-    ceil_sched = _make_iit_schedule_single_job("j0", coarse_c=1)
-    ceil_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="ceiling")
-
-    floor_end = floor_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
-    ceil_end = ceil_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
-
-    assert floor_end == 2
-    assert ceil_end == 3
+    assert ends["flooring"] == ends["ceiling"] == ends["lookahead"] == expected_c
 
 
-def test_insert_idle_time_ceiling_never_stalls_where_flooring_does() -> None:
-    """K=50, window (105,300), single early job at C=2: flooring hits
-    Delta_1=0 (floor(105/50)=2=C) and stalls (j -= 1, no shift), but ceiling
-    (ceil(105/50)=3) still shifts forward — ceiling never stalls (plan §1.1)."""
-    dw = {"j0": (105, 300)}
-    ewt = {"j0": 1}
-    twt = {"j0": 1}
+# -------------------------------------------------------------------
+# coarse-grid EXACT optimality (RED-1 for plans/20260714/...coarse_et_gap.md)
+#
+# Invariant: on a FIXED last-stage sequence, insert_idle_time must recover the
+# integer coarse-grid optimum for that sequence, so the reconstructed E/T is
+# never worse than any feasible placement (in particular <= CP-SAT's proven
+# obj). flooring undershoots (floor delta1); ceiling/lookahead relax it but the
+# shared `K*(C+1)` partition still misclassifies genuinely-early jobs as
+# on-time (residual earliness == the production sum_e=149 signature). The
+# `time_factor == 1` control stays optimal for every mode (fine grid).
+# -------------------------------------------------------------------
 
-    floor_sched = _make_iit_schedule_single_job("j0", coarse_c=2)
-    floor_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="flooring")
 
-    ceil_sched = _make_iit_schedule_single_job("j0", coarse_c=2)
-    ceil_sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode="ceiling")
+def _make_last_stage_seq(
+    ends: list[int], durs: list[int] | None = None
+) -> FFcSchedule:
+    """Single-stage ('s0') single-machine ('m0') schedule with jobs j0..jN-1
+    placed left-compressed at the given coarse ``ends`` (contiguous unless a
+    gap is baked into ``ends``). ``durs[i]`` defaults to 1."""
+    n = len(ends)
+    durs = durs if durs is not None else [1] * n
+    jobs = [f"j{i}" for i in range(n)]
+    sched = FFcSchedule(
+        jobs=jobs, stages=["s0"], machines_per_stage={"s0": ["m0"]}
+    )
+    for i, (e, d) in enumerate(zip(ends, durs)):
+        sched.add_ops_times_2_mc("s0", "m0", jobs[i], e - d, e)
+    return sched
 
-    floor_end = floor_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
-    ceil_end = ceil_sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
 
-    assert floor_end == 2  # flooring stalls: Delta_1 == 0
-    assert ceil_end == 3  # ceiling still shifts forward
+def _et_cost(
+    ends: dict[str, int], dw, ewt, twt, K: int
+) -> int:
+    total = 0
+    for j, c in ends.items():
+        d_lo, d_hi = dw[j]
+        total += ewt[j] * max(0, d_lo - K * c) + twt[j] * max(0, K * c - d_hi)
+    return total
+
+
+def _brute_optimum(
+    ends0: list[int], durs: list[int], dw, ewt, twt, K: int, horizon: int
+) -> int:
+    """Min weighted E/T over feasible coarse completions for the fixed order
+    (right-shift / idle insertion only, machine order preserved)."""
+    from itertools import product
+
+    jobs = [f"j{i}" for i in range(len(ends0))]
+    best: int | None = None
+    for combo in product(*[range(ends0[i], horizon + 1) for i in range(len(ends0))]):
+        ok = True
+        for i in range(1, len(combo)):
+            if combo[i] - combo[i - 1] < durs[i] or combo[i] < ends0[i]:
+                ok = False
+                break
+        if not ok:
+            continue
+        c = _et_cost({jobs[i]: combo[i] for i in range(len(combo))}, dw, ewt, twt, K)
+        if best is None or c < best:
+            best = c
+    assert best is not None
+    return best
+
+
+# (name, ends, durs, dw, ewt, twt, K) — coarse-grid counterexamples.
+_COARSE_EXACT_CASES = [
+    # E: single job, +1 partition misclassifies -> all modes leave earliness 10.
+    ("single_wide", [1], [1], {"j0": (60, 130)}, {"j0": 1}, {"j0": 1}, 50),
+    # D: two-job block, trailing job heavy -> flooring 160, ceil/lookahead 10.
+    (
+        "two_job_block",
+        [1, 2],
+        [1, 1],
+        {"j0": (60, 130), "j1": (280, 400)},
+        {"j0": 1, "j1": 5},
+        {"j0": 1, "j1": 5},
+        50,
+    ),
+    # B control: narrow window where staying (C=2) IS optimal (10) — guards
+    # against a naive "always advance" fix that would overshoot into tardiness.
+    ("narrow_stay", [2], [2], {"j0": (110, 120)}, {"j0": 1}, {"j0": 1}, 50),
+]
+
+
+@pytest.mark.parametrize("mode", ["flooring", "ceiling", "lookahead"])
+@pytest.mark.parametrize(
+    "name,ends,durs,dw,ewt,twt,K", _COARSE_EXACT_CASES, ids=[c[0] for c in _COARSE_EXACT_CASES]
+)
+def test_insert_idle_time_coarse_exact(name, ends, durs, dw, ewt, twt, K, mode) -> None:
+    """insert_idle_time must reach the coarse-grid optimum for a fixed
+    sequence (RED for flooring/ceiling/lookahead until direction B lands)."""
+    opt = _brute_optimum(ends, durs, dw, ewt, twt, K, horizon=max(ends) + 12)
+    sched = _make_last_stage_seq(ends, durs)
+    sched.insert_idle_time(dw, ewt, twt, time_factor=K, idle_mode=mode)
+    end_map = sched.get_jik_2_end_time_map()
+    got = _et_cost(
+        {f"j{i}": end_map[(f"j{i}", "s0", "m0")] for i in range(len(ends))},
+        dw,
+        ewt,
+        twt,
+        K,
+    )
+    assert got <= opt, f"{name}/{mode}: E/T {got} > coarse optimum {opt}"
+
+
+@pytest.mark.parametrize("mode", ["flooring", "ceiling", "lookahead"])
+def test_insert_idle_time_coarse_exact_random_property(mode) -> None:
+    """Randomised coarse-grid property test: insert_idle_time never exceeds the
+    brute-force optimum across many small fixed sequences (K>1). The brute
+    oracle is the plan's recommended falsifier; this is the strongest RED."""
+    import random
+
+    rng = random.Random(20260714)
+    failures: list[str] = []
+    for _ in range(400):
+        n = rng.randint(1, 3)
+        K = rng.choice([2, 3, 4, 7, 50])
+        durs = [rng.randint(1, 3) for _ in range(n)]
+        # left-compressed contiguous ends starting near 0
+        ends: list[int] = []
+        cur = 0
+        for d in durs:
+            cur += d
+            ends.append(cur)
+        dw, ewt, twt = {}, {}, {}
+        for i in range(n):
+            base = rng.randint(0, K * (max(ends) + 4))
+            width = rng.randint(1, 3 * K)
+            dw[f"j{i}"] = (base, base + width)
+            ewt[f"j{i}"] = rng.randint(1, 5)
+            twt[f"j{i}"] = rng.randint(1, 5)
+        opt = _brute_optimum(ends, durs, dw, ewt, twt, K, horizon=max(ends) + 10)
+        sched = _make_last_stage_seq(ends, durs)
+        sched.insert_idle_time(dw, ewt, twt, time_factor=K, idle_mode=mode)
+        end_map = sched.get_jik_2_end_time_map()
+        got = _et_cost(
+            {f"j{i}": end_map[(f"j{i}", "s0", "m0")] for i in range(n)},
+            dw,
+            ewt,
+            twt,
+            K,
+        )
+        if got > opt:
+            failures.append(f"ends={ends} durs={durs} K={K} dw={dw} got={got} opt={opt}")
+    assert not failures, (
+        f"{len(failures)} coarse-suboptimal cases under {mode}; first: "
+        + (failures[0] if failures else "")
+    )
 
 
 # ---------------------------------------------------------------------------
