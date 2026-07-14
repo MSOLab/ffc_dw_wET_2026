@@ -6,7 +6,7 @@ import argparse
 import logging
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -201,9 +201,9 @@ def main() -> None:
         setup_logging(*main_logging_args, is_main=True)
         time_main_end = time.monotonic()
         logger.info(
-            "Finished main() at %s. Total elapsed time: %f seconds",
+            "Finished main() at %s. Total elapsed time: %s",
             datetime.now(),
-            time_main_end - time_main_start,
+            timedelta(seconds=time_main_end - time_main_start),
         )
 
 
