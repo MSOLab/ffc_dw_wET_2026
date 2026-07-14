@@ -1,0 +1,62 @@
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index omitted -> full 1440-instance grid
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260714_csr_neh_d2wp_full
+
+instance_worker_cnt: 12
+draw_gantt: false
+draw_progress_plot: false
+painter_thread_cnt: 1
+
+# coarse-exact insert_idle_time 검증 run (commit 9b7ad2a)
+#
+# 목적: csr_neh_d2wp 시나리오를 full 1440 grid로 돌려 두 warning
+#   - sw_cp dispatcher: "insert_idle_time left E/T on the table"
+#   - CpsatAdapter: "post-process objective ... > CP-SAT objective"
+# 가 전무함을 확인한다. 확인 후 TODO.md의 idle_mode 관련 항목을 정리.
+#
+# solver 설정은 metadata/20260713/csr_init_methods.yaml 의 csr_neh_d2wp 와
+# 동일. plotting 만 비활성(warning 확인과 무관, 속도).
+scenarios:
+  # ── CSR neh-only (due2-weight-pos): neh→sw_cp→base_cp + 25% TL ──
+  - name: csr_neh_d2wp
+    timelimit: "0.09nc"
+    output_subdir: csr_neh_d2wp
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        factor: 4
+        timelimit: "0.0225nc"
+        idle_mode: "lookahead"
+        solve_flow:
+          - method: neh_cp
+            job_priority: "due2-weight-pos"
+            solver_thread_cnt: 8
+            added_batch_size: 15
+            total_timelimit: "0.00675nc"
+            batch_tl_mode: "linear"
+            apply_cumulative_tl: false
+            pf_method: "PF1"
+            skip_pf_below_obj: "makespan"
+            make_semi_active_after_cp: true
+            minimize_makespan_lex: false
+          - method: incremental_sw_cp
+            solver_thread_cnt: 8
+            batch_size: "m"
+            step_size: 1
+            unfixed_batch_count_min: 2
+            unfixed_batch_count_max: 8
+            increment_unfixed_batch_count_flag: "always"
+            left_profile_fixed_batch_count: 2
+            right_profile_fixed_batch_count: 2
+            enable_promotion_profile_fixed: true
+            pf_method: "PF1"
+            batch_tl_mode: "proportional"
+            non_time_fixed_op_time_limit_multiplier: 0.00125
+            rj_right_justify_scope: "rtf_only"
+            idle_mode: "lookahead"
+          - method: solve_base_model_cpsat
+            solver_thread_cnt: 8

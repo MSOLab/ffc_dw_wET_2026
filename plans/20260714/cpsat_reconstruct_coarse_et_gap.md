@@ -269,6 +269,46 @@ byte-identity 유지, `idle_mode`는 `K>1`에서 무효). 블록별로:
 (`insert_idle_time` K>1 branch + docstring). 방향 A(CpsatOption에 idle_mode
 배관)는 **불필요**해짐 — B가 근본 해결이라 CpsatAdapter의 flooring 고정도 무해.
 
+### ✅ Full-grid 검증 (2026-07-14, csr_neh_d2wp × 1440)
+
+E2E(위)는 instance 835 단건이었으므로, TODO 정리 전 **보수적 게이트**로
+`csr_neh_d2wp` 시나리오를 **full 1440-instance grid**로 재실행해 warning 전무를
+실측 확인했다.
+
+- **Config**: `metadata/20260714/csr_neh_d2wp_full.yaml` (csr_neh_d2wp 단일
+  시나리오, `factor: 4`, solver 설정은 `metadata/20260713/csr_init_methods.yaml`의
+  동명 시나리오와 동일, plotting만 비활성).
+- **Run**: `output/20260714_csr_neh_d2wp_full/20260714T100653_963836/`,
+  12 workers, 1440/1440 정상 완료 (~39분, `Total elapsed 2361s`).
+
+**전/후 비교 (동일 조건 = csr_neh_d2wp, 1440 instances):**
+
+| warning | 수정 전 (`20260713T195341_009592`) | 수정 후 (9b7ad2a, 본 run) |
+| --- | --- | --- |
+| CpsatAdapter `post-process ... > CP-SAT` | **27** | **0** |
+| sw_cp `insert_idle_time left E/T on the table` | 0 | 0 |
+
+- **Positive control**: 수정 전 run 195341의 전 시나리오 합 101건, `csr_neh_d2wp`
+  하위만 27건을 grep으로 검출 — grep 방법론이 유효(경고 있으면 잡힘)함을 확인한 뒤
+  본 run에 적용. (참고로 195341의 다른 CSR 시나리오도 pre-fix warning 보유:
+  csr_full_d2wp=29, csr_full_wdp=19, csr_neh_wdp=26; 모두 같은 근본.)
+- **본 run 전수 검사**: 전체 `.log`(SingleInstanceRunner + SubroutineController
+  각 1440) 대상 `[WARNING]` 라인 0, ERROR/AssertionError/Traceback 0.
+- csr_neh_d2wp는 pre-fix에도 sw_cp RJ가 0(195341의 `K*(C+1)` partition fix가 sw_cp
+  경로는 이미 처리)이므로, 본 시나리오의 의미 있는 delta는 **CpsatAdapter 27→0**.
+  sw_cp RJ 0→0은 무회귀 확인.
+
+**Caveat**: 본 full-grid 검증은 `factor: 4` (K=4) 단일 조건이다. 더 높은
+K(8, 16)의 grid 검증은 아직 안 됐다 — 단, 알고리즘 정확성은 9b7ad2a에 딸린
+brute-force property test(`test_insert_idle_time_coarse_exact_random_property`,
+K∈{1..50}, 10,000+ 케이스 fails=0)가 커버한다.
+
+**TODO 정리 결과** (본 검증 통과 후 실행): `TODO.md`의 idle_mode 관련 6개 중
+2개 삭제(`sw_cp incumbent prep should honour option.idle_mode` — idle_mode가 이제
+모든 K에서 no-op; `Regression test for the K*(C+1) partition` — partition 교체 +
+테스트 이미 shipped), 4개는 `Status (2026-07-14): superseded by 9b7ad2a` 주석 추가
+(K>4 미검증이라 삭제 대신 보존).
+
 ## 참고
 
 - 자매 진단: `plans/20260713/sw_cp_rj_warning_investigation.md` (§2 K=1 최적,
