@@ -458,103 +458,16 @@ byte-identical across modes. The knob is dead everywhere, so the
 longer needs a flooring-vs-lookahead comparison, only the mechanical cleanup of
 the field / params / four `csr_*` scenario keys. No-regression confirmed on the
 `csr_neh_d2wp` 1440-instance full run (K=4; CpsatAdapter warning 27→0, sw_cp RJ
-0→0). Higher-`K` (8, 16) grid still unverified before deleting the branches
-(algorithmic correctness at higher `K` is unit-tested via the brute-force
-property test shipped with 9b7ad2a).
+0→0).
 
-## Test `insert_idle_time` gate `sum_e > sum_t` → `sum_e >= sum_t`
-
-`ffc_schedule.py:1745` gates the block right-shift on `sum_e > sum_t` (strict —
-shift only when the earliness gain strictly exceeds the tardiness loss, faithful
-to Pan et al. 2017). Changing it to `sum_e >= sum_t` also shifts on ties, which
-pushes blocks **maximally right** (right-justifies on-time and balanced blocks
-that `>` leaves in place).
-
-**Motivation:** on a tie the shift is objective-neutral (equal earliness gain
-and tardiness loss) but lands ops as far right as possible — closer to a full
-right-justify — which can absorb residual earliness that the step-loop op-scoped
-RJ would otherwise recover, reducing/eliminating the "left E/T on the table"
-warning at its source. Known trade-off: this **deviates from the original
-algorithm** and is **not byte-identical at `time_factor == 1`** (pure-`S_D` and
-balanced blocks now shift to the window's right edge; obj unchanged, positions
-differ), so the paper-exactness claim and any position-asserting fine-grid tests
-must be revisited.
-
-**How to test:** matrix experiment (gate `>` vs `>=`) × grid measuring
-(a) warning count, (b) obj non-regression, (c) full test suite incl. K=1
-expectations. Adopt only if obj does not regress and the K=1 position changes
-are acceptable. Pairs naturally with the `K*(C+1)` partition fix already landed.
-
-**When to act:** when tightening the coarse-grid idle insertion further (e.g.
-alongside validating lookahead as the sole mode, or the exact-timing direction
-in `plans/20260713/sw_cp_rj_warning_investigation.md`).
-
-**Status (2026-07-14):** The primary motivation — reducing the coarse-grid
-"left E/T on the table" warning at its source — is **moot** after commit
-`9b7ad2a`: the `K > 1` path is now exact and this fine-grid `sum_e > sum_t` gate
-runs only at `K == 1`. The `csr_neh_d2wp` 1440-run confirms 0 sw_cp RJ warnings
-without this change. Only the standalone fine-grid right-justify-on-ties idea
-remains, and it still deviates from Pan et al. 2017 with no current driver.
-
-## Refresh the sw_cp RJ-warning investigation plan
-
-`plans/20260713/sw_cp_rj_warning_investigation.md` captures the investigation
-*before* the fix landed. Two parts are now stale:
-
-- §4 ("dispatcher는 내부에서 flooring으로 재-timing한다") describes the pre-fix
-  asymmetry as an open finding.
-- "해결 방향 A" recommends a prep `delay_job_latest_leq_obj_contrib_all_stages`
-  (all-stages RJ) cleanup — that approach was **tried and dropped**; the fix
-  that actually landed (195341 commit) is the `insert_idle_time` partition
-  reformulation to coarse-unit boundaries (`K*(C+1)` vs `d_lo`/`d_hi`), which
-  removes the near-`d_hi` `S_D` op's `Δ1 == 0` stall.
-
-**Change (if acted on):** record the `K*(C+1)` partition fix as the resolution
-(with the `Δ1 == 0` stall mechanism), mark direction A (prep all-stages RJ) as
-superseded/masking, keep direction B (exact coarse-grid timing) as the remaining
-principled option, and fold in the residual-verification status (grid + higher
-`K`).
-
-**Why:** the plan is the durable record of this investigation; the stale
-diagnosis would lead a future reader to re-apply the abandoned prep-RJ mask
-instead of the partition fix.
-
-**When to act:** when picking the investigation back up (grid validation or the
-exact-timing direction), or as doc hygiene before the branch merges.
-
-**Status (2026-07-14):** The recommended action above (record the `K*(C+1)`
-partition fix as the resolution) is itself **superseded**: commit `9b7ad2a`
-replaced the whole `K > 1` shift with the coarse-exact block shift, and the RJ
-warning is now resolved (`csr_neh_d2wp` 1440-run: 0 occurrences). The sister plan
-`plans/20260714/cpsat_reconstruct_coarse_et_gap.md` is the current durable record
-(same root cause, direction B). If the 20260713 plan is refreshed, cite 9b7ad2a
-as the resolution, not the partition fix. Doc hygiene only.
-
-## Isolate the lookahead `<` → `<=` tie-break
-
-The 195341 commit also flipped the lookahead tie-break
-(`ffc_schedule.py:~1789`, `block_obj(db) < ...` → `<=`) in the same change as
-the partition fix. Its independent contribution is **unverified**: `<=` alone
-was previously ineffective, so the `K*(C+1)` partition is the likely sole
-driver. `<=` is also **not** byte-identical at `time_factor == 1` (an
-objective-neutral `+1` position shift on ties).
-
-**Change (if acted on):** revert `<=` → `<`, re-run the warning-heavy
-instance(s) at `K > 1`; if warnings stay at zero, drop `<=` (restores K=1
-lookahead byte-identity and minimizes the diff to the partition fix). Keep `<=`
-only if it demonstrably reduces warnings on its own.
-
-**Why:** minimize deviation from Pan et al. and keep `K == 1` exact unless the
-tie-break earns its place.
-
-**When to act:** same session as the partition regression tests above.
-
-**Status (2026-07-14):** The proposed action ("re-run the warning-heavy
-instances at `K > 1`") is **no longer possible** after commit `9b7ad2a`: the
-lookahead branch (`<=` tie-break) now runs only at `K == 1`, where
-`test_insert_idle_time_factor1_all_modes_identical` already pins byte-identity
-across modes. The `K > 1` warnings this item wanted to gate on are gone
-(`csr_neh_d2wp` 1440-run: 0). Reduced to a pure `K == 1` minimize-diff cleanup
-with no warning-driven test. (The "partition regression tests above" it referred
-to were removed as obsolete — the `K*(C+1)` partition was replaced by the exact
-block shift and shipped with a brute-force property test.)
+**Status (2026-07-14, higher-K validated → ready to act):** The last blocker —
+"higher-`K` grid unverified" — is now **cleared**. The K-sweep run
+`output/20260714_csr_higher_k_validation/20260714T154426_711694/`
+(`K ∈ {2,4,8,16,32}` × {`csr_neh_d2wp`, `csr_full_d2wp`}, 160 instances, 1600
+runs) shows **0 warnings, 0 crashes, all feasible** — `idle_mode` is confirmed
+dead at every K in scope. The "when to act" condition is satisfied; this item is
+no longer deferred but a **ready mechanical cleanup** (delete the field /
+controller+option params / four `csr_*` scenario keys / the flooring+ceiling
+branches in `insert_idle_time`). Kept (not deleted) because it still tracks real
+uncommitted code work. See `plans/20260714/coarse_exact_higher_k_validation.md`
+§"결과 (실행 후)".

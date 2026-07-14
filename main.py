@@ -27,7 +27,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260714/csr_init_debug.yaml")
+CONFIG_PATH = Path("metadata/20260714/csr_higher_k_validation.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
