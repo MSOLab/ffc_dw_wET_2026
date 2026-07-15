@@ -428,6 +428,41 @@ uv run python scripts/analyze_kappa_sweep.py <run_dir> ... --t 0.6 --r 0.2
 > at `T=0.6` `kappa_0.006` is significantly *worse*. The overall mean alone makes
 > `kappa_0.005` look like the winner, so **always read this per slice**.
 
+### analyze_csr_tl_scaling_sweep.py
+
+Reproduces the **entire** `## 결과 (실행 후)` section of
+`plans/20260714/csr_tl_scaling_sweep.md` in one invocation — the CSR budget-
+fraction sweep over `f ∈ {5,10,15,20,30}%` (+ `f=25%` from the prior fixed-budget
+run) × `K ∈ {1,2,4,8}` × two init flows (`csr_full_d2wp` / `csr_neh_d2wp`).
+
+Reads the run's `<ts>_rpdf_comparison.csv` and uses its precomputed
+`RPDf_BKS_data` verbatim (symmetric RPD), so it cannot drift from
+`post_run_pivot.py`. optimality gap is **not** used for ranking (coarse
+`obj_bound` is loose at K≥2; K=1 is the sole exception and is reported separately).
+
+Seven blocks, all printed to stdout: (1) f→RPDf curve per (flow, K), (2) best f +
+marginal Δ per +5%p (diminishing returns), (3) T-level decomposition, (4)
+`csr_full` vs `csr_neh` paired win/tie/loss by K/f/T, (5) sanity gate re-check
+(two invariant warnings + Traceback/AssertionError file counts), (6) budget-
+starvation (`no feasible`) counts by scenario, (7) K=1 optimality
+(`obj_value==obj_bound`) counts. Blocks 1–4 read the two CSVs; 5–7 scan the sweep
+run dir's `*.log` (via `grep`) and per-instance `*_instance_result.yaml`.
+
+```bash
+# defaults to the 2026-07-14 sweep + its 25% baseline run
+uv run python scripts/analyze_csr_tl_scaling_sweep.py
+
+# explicit run dirs (pass 'none' as the 2nd arg to omit the f=25 column)
+uv run python scripts/analyze_csr_tl_scaling_sweep.py \
+    output/20260714_csr_tl_scaling_sweep/<ts> \
+    output/20260714_csr_full_grid_k248/<ts>
+```
+
+> Conclusion (plan §결론): coarsening hurts at equal budget — `K=1` (no
+> coarsening) is the uniform winner across all f and all T; best combo
+> `csr_full_d2wp_k1 @ f=30%` (mean −5.60%). init-flow is K-dependent (full wins
+> K≤2, neh wins K≥4). best f = 30% (curve not yet saturated).
+
 ---
 
 ## 5. Experiment Config Validation

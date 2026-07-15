@@ -471,3 +471,41 @@ controller+option params / four `csr_*` scenario keys / the flooring+ceiling
 branches in `insert_idle_time`). Kept (not deleted) because it still tracks real
 uncommitted code work. See `plans/20260714/coarse_exact_higher_k_validation.md`
 §"결과 (실행 후)".
+
+## CSR TL-scaling sweep — fill the K=1 × f=25% gap cell
+
+The TL-scaling sweep (`plans/20260714/csr_tl_scaling_sweep.md`, run
+`output/20260714_csr_tl_scaling_sweep/20260714T234921_531156`) reused the prior
+fixed-budget run for the **f=25%** column, but that prior run
+(`csr_full_grid_k248`) only covered `K ∈ {2,4,8}`. So **K=1 has no 25% point**:
+its curve is 5 points (5/10/15/20/30) while every other K has 6. The winner
+`csr_full_d2wp_k1` therefore has a one-cell hole exactly at the interesting knee
+of its curve.
+
+**The gap-fill is tiny and completes the full picture:** run only the two missing
+scenarios — `csr_full_d2wp_k1_tl25` and `csr_neh_d2wp_k1_tl25` (factor 1, CSR
+`0.0225nc`, flip `0.00225nc`, neh `0.00675nc`, kappa `0.00125` — the exact 25%
+base row of the scaling table) — over the full 1440-grid = **2 × 1440 = 2,880
+instance-run** (≈40–50 min at 12×8). No other K or f needed.
+
+**Setting**: copy `metadata/20260714/csr_tl_scaling_sweep.yaml`, keep only those
+two scenarios (naming `..._k1_tl25`), same header / `output_dir:
+output/20260714_csr_tl_scaling_sweep` (a new timestamp dir), plotting off,
+`instance_worker_cnt: 12`. Point `main.py` at it; run background + notify.
+
+**Analysis**: `scripts/analyze_csr_tl_scaling_sweep.py` already ingests multiple
+run dirs and decodes `_tl25` → f=25 automatically — pass the gap-fill run dir as
+a 3rd arg (extend the loader to accept N dirs, currently 2) or merge its
+`rpdf_comparison.csv`. The K=1 f=25 mean/median then drops straight into the
+§결과 curve table (the two `full_k1`/`neh_k1` `f25=--` cells).
+
+**Why:** completeness of the headline result — the best combo's curve currently
+skips its 25% point, and the "best f / diminishing-returns" read for K=1 is
+interpolated across a 20→30 gap instead of measured. Cheap to close (2,880 runs).
+
+**When to act:** only if the K=1 curve's 25% point is needed for a report/paper
+table or to confirm monotonicity there. If the next experiment instead **extends
+f above 30%** (the plan's primary follow-up, since the curve is unsaturated at
+30%), fold `k1_tl25` into that config as one extra scenario rather than running
+it alone. Not urgent — the 5-point K=1 curve already establishes K=1's uniform
+dominance and best-f=30%.
