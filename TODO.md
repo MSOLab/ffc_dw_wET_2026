@@ -509,3 +509,49 @@ f above 30%** (the plan's primary follow-up, since the curve is unsaturated at
 30%), fold `k1_tl25` into that config as one extra scenario rather than running
 it alone. Not urgent — the 5-point K=1 curve already establishes K=1's uniform
 dominance and best-f=30%.
+
+## `make_semi_active` — allow machine reassignment (time-sorted per stage)
+
+`FFcSchedule.make_semi_active`
+([solution/ffc_schedule.py:1024](src/ffc_ddw_sum_et/solution/ffc_schedule.py#L1024))
+today left-shifts each operation **while keeping its machine assignment fixed**:
+it walks each machine's existing job sequence and packs it left within that same
+machine (`ffc_schedule.py:1072-1091`). The machine grouping is taken as given and
+never changed.
+
+A schedule can often be improved further by **also re-choosing which machine each
+operation runs on**. The reassignment must be done per stage on operations
+**sorted in time order**: within a stage, order operations chronologically (by
+start, then end) and greedily place each on the earliest-available machine —
+i.e. list-scheduling / earliest-machine dispatch on the time-sorted operation
+list. Packing left under a *better* grouping reaches positions the fixed-assignment
+left-shift cannot.
+
+The time-sorted greedy is **already implemented** in
+`build_schedule_from_op_starts`
+([solution/schedule_build.py:42](src/ffc_ddw_sum_et/solution/schedule_build.py#L42)):
+it sorts each stage's jobs by `(start, end, job)` and assigns the first machine
+free at the op's start. `reconstruct_coarse_schedule` leans on exactly this
+reassignment before calling `make_semi_active` + `insert_idle_time`, which is why
+the K=1 reconstruct polish never worsened a candidate across 677 sampled
+candidates (see the CSR K=1 monotonicity scan, 2026-07-15). So the building block
+exists — the change is to let `make_semi_active` itself optimize the assignment
+rather than inherit whatever grouping it was handed.
+
+**Change (if acted on):** add a mode (or a sibling method) that, per stage,
+re-derives the machine assignment from the time-sorted operation list before (or
+jointly with) the left-shift, instead of iterating the pre-existing per-machine
+sequences. Preserve the current fixed-assignment behaviour as the default so no
+existing caller's semantics change.
+
+**Why:** a fixed machine grouping can be strictly suboptimal — two operations that
+"want" the same completion window can be stranded on one machine while another
+sits idle. Time-sorted reassignment removes that, tightening makespan and opening
+better `insert_idle_time` placements downstream. It also unifies the assignment
+logic that `build_schedule_from_op_starts` and `make_semi_active` currently split.
+
+**When to act:** when a schedule-improvement pass needs to beat what
+fixed-assignment left-shift achieves (e.g. tightening makespan/E-T beyond the
+current polish), or when the CSR reconstruct's dependence on
+`build_schedule_from_op_starts` for reassignment is folded back into
+`make_semi_active` so the two share one time-sorted assignment implementation.
