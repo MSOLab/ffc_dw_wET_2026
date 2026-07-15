@@ -440,8 +440,12 @@ Reads the run's `<ts>_rpdf_comparison.csv` and uses its precomputed
 `post_run_pivot.py`. optimality gap is **not** used for ranking (coarse
 `obj_bound` is loose at K≥2; K=1 is the sole exception and is reported separately).
 
-Seven blocks, all printed to stdout: (1) f→RPDf curve per (flow, K), (2) best f +
-marginal Δ per +5%p (diminishing returns), (3) T-level decomposition, (4)
+Eight blocks, all printed to stdout: (1) f→RPDf curve per (flow, K), (1.5)
+**equal-budget setting comparison** — mean RPDf% by setting × f, read *down* each
+f-column (same budget → fair setting ranking; `*` marks the column winner), for
+three slices `overall / T=0.6 / (T,R)=(0.6,0.2)` (the meaningful comparison; best
+f is trivially the largest f and is *not* it), (2) best f + marginal Δ per +5%p
+(kept only as a budget-efficiency read), (3) T-level decomposition, (4)
 `csr_full` vs `csr_neh` paired win/tie/loss by K/f/T, (5) sanity gate re-check
 (two invariant warnings + Traceback/AssertionError file counts), (6) budget-
 starvation (`no feasible`) counts by scenario, (7) K=1 optimality

@@ -27,7 +27,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260714/csr_tl_scaling_sweep.yaml")
+CONFIG_PATH = Path("metadata/20260715/csr_tl_scaling_k1_tl25_gapfill.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
