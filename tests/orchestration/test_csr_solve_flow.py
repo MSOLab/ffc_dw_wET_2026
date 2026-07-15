@@ -205,6 +205,13 @@ def test_solve_flow_full_five_steps() -> None:
     assert controller.best_obj_value == min(valid_objs)
     assert summary["winner_original_obj"] == min(valid_objs)
 
+    # (d') every row carries a CSR-only elapsed timestamp, harvested from the
+    #      child report (start_time + elapsed_time), non-decreasing in row order.
+    step_secs = [row["sec_elapsed_step"] for row in controller.csr_candidate_rows]
+    assert all(s is not None for s in step_secs), step_secs
+    assert all(s >= 0.0 for s in step_secs), step_secs
+    assert step_secs == sorted(step_secs), step_secs
+
     # (e) parent record carries obj_bound None (coarse solve is not a global LB).
     assert report.obj_bound is None
     assert controller.solution_manager.best_obj_bound is None
@@ -378,7 +385,8 @@ def test_runner_emits_candidates_csv(tmp_path: Path) -> None:
             "coarse_bound": None,
             "restored_obj": 1.0,
             "valid": True,
-            "elapsed_sec": 0.001,
+            "sec_elapsed_step": 1.17,
+            "sec_elapsed_recon": 0.001,
         },
         {
             "source": "5-solve_base_model_cpsat",
@@ -386,7 +394,8 @@ def test_runner_emits_candidates_csv(tmp_path: Path) -> None:
             "coarse_bound": 3.0,
             "restored_obj": None,
             "valid": False,
-            "elapsed_sec": 0.002,
+            "sec_elapsed_step": 3.48,
+            "sec_elapsed_recon": 0.002,
         },
     ]
     controller = SimpleNamespace(

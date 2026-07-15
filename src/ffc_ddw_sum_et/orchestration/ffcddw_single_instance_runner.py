@@ -774,7 +774,8 @@ class FFcDDWSingleInstanceRunner(
                     "coarse_bound",
                     "restored_obj",
                     "valid",
-                    "elapsed_sec",
+                    "sec_elapsed_step",
+                    "sec_elapsed_recon",
                 ]
                 with open(csv_path, "w", encoding="utf-8", newline="") as f:
                     writer = csv.DictWriter(f, fieldnames=fieldnames)

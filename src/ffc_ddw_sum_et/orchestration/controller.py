@@ -2903,12 +2903,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             if sol is None or sol.schedule is None:
                 continue
             source = getattr(rec.report, "step_label", None) or "unknown"
+            report = rec.report
+            sec_elapsed_step = (
+                getattr(report, "start_time", 0.0) + report.elapsed_time
+                if report is not None
+                else None
+            )
             raw_candidates.append(
                 CsrCandidate(
                     source=source,
                     coarse_schedule=sol.schedule,
                     coarse_obj=sol.obj_value,
                     coarse_bound=sol.obj_bound,
+                    sec_elapsed_step=sec_elapsed_step,
                 )
             )
         deduped = dedup_candidates(raw_candidates)
@@ -2949,7 +2956,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     "coarse_bound": cand.coarse_bound,
                     "restored_obj": restored_obj,
                     "valid": valid,
-                    "elapsed_sec": recon_elapsed,
+                    "sec_elapsed_step": cand.sec_elapsed_step,
+                    "sec_elapsed_recon": recon_elapsed,
                 }
             )
             if valid and (winner_obj is None or restored_obj < winner_obj):

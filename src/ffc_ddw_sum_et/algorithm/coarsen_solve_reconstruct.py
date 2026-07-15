@@ -80,12 +80,16 @@ class CsrCandidate:
     context (e.g. ``"4-neh_cp"``). ``coarse_schedule`` lives on the coarsened
     time grid; ``coarse_obj`` / ``coarse_bound`` are the child's reported
     objective / bound in coarse-scale units (both may be ``None``).
+
+    ``sec_elapsed_step`` is the child controller's wall-clock time (seconds)
+    at registration — measured from the start of the CSR subroutine.
     """
 
     source: str
     coarse_schedule: FFcSchedule
     coarse_obj: float | None
     coarse_bound: float | None
+    sec_elapsed_step: float | None = None
 
 
 def schedule_sequence_signature(schedule: FFcSchedule) -> tuple[tuple[Any, ...], ...]:
