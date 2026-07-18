@@ -56,7 +56,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+# scripts/20260706/<this file> -- two levels of nesting below the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # scripts/ is not an importable package; load the sibling module by path.
 _spec = importlib.util.spec_from_file_location(
@@ -95,7 +96,7 @@ def _parse_args() -> argparse.Namespace:
         "run_dirs",
         type=Path,
         nargs="+",
-        help="timestamped run dirs, each holding <ts>_summary.csv",
+        help="timestamped run dirs holding <ts>_summary.csv, or the CSV itself",
     )
     parser.add_argument(
         "--outdir",
@@ -139,7 +140,14 @@ def slugify(label: str) -> str:
 
 
 def _summary_csv(run_dir: Path) -> Path:
-    """The single <ts>_summary.csv a run dir holds."""
+    """The single <ts>_summary.csv a run dir holds, or the CSV named directly.
+
+    A run that also emits per-step summaries (``<ts>_<step>_summary.csv``) is
+    ambiguous, and guessing which one is run-level would silently score the
+    wrong frame -- so such a run must be passed as an explicit file path.
+    """
+    if run_dir.is_file():
+        return run_dir
     matches = sorted(run_dir.glob("*_summary.csv"))
     if len(matches) != 1:
         raise FileNotFoundError(
