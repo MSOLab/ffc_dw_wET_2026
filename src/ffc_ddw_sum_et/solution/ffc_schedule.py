@@ -1681,7 +1681,7 @@ class FFcSchedule:
         below — **``idle_mode`` has no effect when ``K > 1``** — which undershoot
         on the coarse grid (the ``K*(C+1)`` partition misclassifies
         genuinely-early jobs as on-time, leaving residual earliness). See
-        ``plans/20260714/cpsat_reconstruct_coarse_et_gap.md``.
+        ``plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md``.
 
         At ``time_factor == 1`` (fine grid, the only regime for non-CSR
         callers) the original paper heuristic runs and ``idle_mode`` selects the
@@ -1762,7 +1762,7 @@ class FFcSchedule:
                     # cell, so a cell can leap early->tardy. Shift while the
                     # earliness saved exceeds the tardiness added. ``idle_mode``
                     # is irrelevant here (exact). See
-                    # plans/20260714/cpsat_reconstruct_coarse_et_gap.md.
+                    # plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md.
                     earliness_saved = 0
                     tardiness_added = 0
                     for i in range(j, block_end + 1):

@@ -712,7 +712,7 @@ def test_insert_idle_time_coarse_exact_modes_agree(coarse_c, window, expected_c)
 
 
 # -------------------------------------------------------------------
-# coarse-grid EXACT optimality (RED-1 for plans/20260714/...coarse_et_gap.md)
+# coarse-grid EXACT optimality (RED-1 for plans/experiment/20260714/...coarse_et_gap.md)
 #
 # Invariant: on a FIXED last-stage sequence, insert_idle_time must recover the
 # integer coarse-grid optimum for that sequence, so the reconstructed E/T is

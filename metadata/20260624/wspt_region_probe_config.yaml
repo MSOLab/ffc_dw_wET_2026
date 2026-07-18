@@ -1,6 +1,6 @@
 # WSPT region probe: T=0.6,R=0.2 영역(160 instance)에서 w1 대비
 # WSPT(wspt_twt) 가 w1 대비 우월한지 검증한다.
-# See plans/20260624/wspt_rules_for_tight_narrow_region.md
+# See plans/experiment/20260624/wspt_rules_for_tight_narrow_region.md
 run_mode: FULL_RUN
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv

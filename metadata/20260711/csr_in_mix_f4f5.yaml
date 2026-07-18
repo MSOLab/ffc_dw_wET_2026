@@ -31,7 +31,7 @@ draw_progress_plot: true
 painter_thread_cnt: 96
 
 # CSR-in-mix factor sweep: coarsening factor 4 vs 5
-# (plans/20260711/csr_solve_flow.md).
+# (plans/experiment/20260711/csr_solve_flow.md).
 #
 # Both scenarios are the ORIGINAL 5-step flow (metadata/20260710/
 # sw_cp_tl_kappa_0.005.yaml step kwargs, scenario TL 0.09nc) with ONE extra

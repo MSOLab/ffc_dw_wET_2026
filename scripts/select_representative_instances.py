@@ -1,7 +1,7 @@
 """Select the representative instance grid for the SW-CP TL profiling sweep.
 
 Selection rule (decided 2026-07-05, see
-`plans/20260705/sw_cp_tl_policy_investigation.md` section 6):
+`plans/experiment/20260705/sw_cp_tl_policy_investigation.md` section 6):
 
 - one instance per ``(n, c, T, R, m, W)`` cell, ``rep == 0`` only
   (rep0 uniquely identifies one instance per cell, so no runtime tiebreak);

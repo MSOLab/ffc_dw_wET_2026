@@ -6,7 +6,7 @@
 #                = 12 + int(0.04 * n)   (e.g., n=50 → 14, n=100 → 16, n=200 → 20)
 # total_timelimit: "0.01nc" derives cp_tl per batch.
 # Reported objective: weighted earliness + tardiness.
-# Ref: plans/20260427/neh-cp-extra-batch-size-expr.md
+# Ref: plans/experiment/20260427/neh-cp-extra-batch-size-expr.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

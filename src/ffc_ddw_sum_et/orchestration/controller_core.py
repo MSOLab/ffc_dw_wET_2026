@@ -91,14 +91,14 @@ class FFcDDWSubroutineControllerCore(
         # the coarsening ``factor`` so its step methods interpret a coarse
         # completion ``C^c`` as original-scale ``time_factor * C^c`` when they
         # build option payloads / the base CP model. See
-        # plans/20260711/csr_solve_flow.md §3.
+        # plans/experiment/20260711/csr_solve_flow.md §3.
         self.time_factor = time_factor
         self.solution_manager = FFcDDWSolutionManager()
         # Prefix step methods that must still run before a resume point (e.g.
         # pure setup that produces state not captured by the restored
         # incumbent). Empty today: the current prefix (mcf_lb / flip / neh_cp)
         # only produces the incumbent + global LB, both restored on resume.
-        # See plans/20260709/resume_from_base.md § 2 "Safety assumption".
+        # See plans/experiment/20260709/resume_from_base.md § 2 "Safety assumption".
         self.method_names_to_run_before_resume: set[str] = set()
         self._define_states()
 
@@ -409,7 +409,7 @@ class FFcDDWSubroutineControllerCore(
         base run's incumbent), except any step whose method is in
         ``method_names_to_run_before_resume``, which is re-run. Steps from
         ``flow_resume_idx`` onward run normally. See
-        plans/20260709/resume_from_base.md.
+        plans/experiment/20260709/resume_from_base.md.
         """
         start = time.monotonic()
         try:

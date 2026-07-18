@@ -15,7 +15,7 @@ Usage::
         --instance-index 60 --rule-key wxd2 \\
         [--output output/20260625/priority_viz/0060_wxd2.html]
 
-See plans/20260625/priority_rule_simulator_viz.md for the design.
+See plans/experiment/20260625/priority_rule_simulator_viz.md for the design.
 """
 
 from __future__ import annotations

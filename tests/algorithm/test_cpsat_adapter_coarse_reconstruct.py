@@ -1,4 +1,4 @@
-"""RED-2 for plans/20260714/cpsat_reconstruct_coarse_et_gap.md.
+"""RED-2 for plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md.
 
 Integration-level invariant for the CpsatAdapter coarse-grid (``time_factor > 1``)
 reconstruction: CP-SAT proves a coarse optimum ``cp_obj`` on the coarse grid,

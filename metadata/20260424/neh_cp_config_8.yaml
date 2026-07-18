@@ -6,7 +6,7 @@
 #   profile fix: PF1, PF2
 # cp_tl pair: batch 5 → (0.12c, 0.03c); batch 10 → (0.24c, 0.06c).
 # Reported objective: weighted earliness + tardiness.
-# Ref: plans/20260423/neh_cp.md
+# Ref: plans/experiment/20260423/neh_cp.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

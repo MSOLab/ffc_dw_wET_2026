@@ -1,6 +1,6 @@
 # Schedule-initialization comparison for the EDDUB+w⁺ reverse-dispatch method.
 #
-# See plans/20260624/schedule_init_eddub_twt_reverse_dispatch.md.
+# See plans/experiment/20260624/schedule_init_eddub_twt_reverse_dispatch.md.
 #
 # All scenarios share the same wall-clock budget ("0.09nc") and run a single
 # init step (no follow-up solve), so the registered incumbent's wET is the

@@ -11,7 +11,7 @@ output_dir: output/20260709_sw_cp_tl_test
 # scenario keeps the full 5-step flow; main.py validates the shared 3-step
 # prefix and derives flow_resume_idx=3, so only incremental_sw_cp +
 # solve_base_model_cpsat re-run, seeded from the base incumbent.
-# See plans/20260709/resume_from_base.md.
+# See plans/experiment/20260709/resume_from_base.md.
 # `latest:<base_scenario_name>` auto-resolves the newest run under output_dir
 # that emitted that scenario, so there is no need to re-point at each fresh base
 # run. The scenario name is required: a *case* run's scenario dir also carries a

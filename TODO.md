@@ -330,7 +330,7 @@ logic a caller wants to *override* rather than reuse.
 
 ## CSR solve_flow — additional candidate sources
 
-`coarsen_solve_reconstruct(solve_flow=...)` (plans/20260711/csr_solve_flow.md)
+`coarsen_solve_reconstruct(solve_flow=...)` (plans/experiment/20260711/csr_solve_flow.md)
 v1 harvests exactly one coarse candidate per child sub-step registration
 (the schedule sitting on `solution_manager.history` at each `_register`).
 Two richer sources are deliberately out of v1 scope:
@@ -429,7 +429,7 @@ the CSR / sw_cp surface:
 flooring/ceiling only ever existed as CSR coarse-grid experiments
 (`vault/20260702_진행사항_P3.pdf`). lookahead was shown to be the per-instance
 best there (p.11-12), and the sw_cp RJ-warning investigation
-(`plans/20260713/sw_cp_rj_warning_investigation.md`) confirmed flooring's
+(`plans/experiment/20260713/sw_cp_rj_warning_investigation.md`) confirmed flooring's
 coarse-grid undershoot is what produces the "left E/T on the table" warning
 while lookahead avoids it. Once lookahead is validated as always-preferred, the
 flooring/ceiling branches and the whole `idle_mode` plumbing become dead weight:
@@ -469,7 +469,7 @@ dead at every K in scope. The "when to act" condition is satisfied; this item is
 no longer deferred but a **ready mechanical cleanup** (delete the field /
 controller+option params / four `csr_*` scenario keys / the flooring+ceiling
 branches in `insert_idle_time`). Kept (not deleted) because it still tracks real
-uncommitted code work. See `plans/20260714/coarse_exact_higher_k_validation.md`
+uncommitted code work. See `plans/experiment/20260714/coarse_exact_higher_k_validation.md`
 §"결과 (실행 후)".
 
 ## `make_semi_active` — allow machine reassignment (time-sorted per stage)

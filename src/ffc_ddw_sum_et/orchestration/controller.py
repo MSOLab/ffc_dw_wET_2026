@@ -2723,7 +2723,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         incumbent (``obj_bound=None`` — a coarse solve is never a valid
         original-scale bound). ``seed_dispatch`` / ``solve`` are ignored in
         this mode (a warning is logged if set to non-defaults). See
-        plans/20260711/csr_solve_flow.md §4. v1 solve_flow configs must keep
+        plans/experiment/20260711/csr_solve_flow.md §4. v1 solve_flow configs must keep
         child gantt / emission / log-search flags OFF (the child has no sink).
 
         Per CLAUDE.md subroutine step contract: a single ``_register`` per

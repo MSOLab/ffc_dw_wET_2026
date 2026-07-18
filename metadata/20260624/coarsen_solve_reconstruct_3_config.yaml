@@ -9,7 +9,7 @@
 # draw_gantt / emit_phase_schedules / draw_cp_trajectory are enabled so each
 # CSR run emits the 3-Gantt artifact and the CP UB/LB trajectory line graph.
 #
-# See plans/20260624/coarsen_solve_reconstruct_dispatch_hint.md.
+# See plans/experiment/20260624/coarsen_solve_reconstruct_dispatch_hint.md.
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

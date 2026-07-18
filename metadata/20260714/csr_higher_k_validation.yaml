@@ -30,7 +30,7 @@ draw_progress_plot: false
 painter_thread_cnt: 1
 
 # coarse-exact insert_idle_time — higher-K 검증 run (commit 9b7ad2a)
-# 계획: plans/20260714/coarse_exact_higher_k_validation.md
+# 계획: plans/experiment/20260714/coarse_exact_higher_k_validation.md
 #
 # 목적: K ∈ {2, 4, 8, 16, 32} 전역에서 두 warning
 #   - sw_cp dispatcher: "insert_idle_time left E/T on the table"

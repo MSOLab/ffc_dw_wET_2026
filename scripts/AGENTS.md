@@ -424,14 +424,14 @@ uv run python scripts/analyze_kappa_sweep.py <run_dir> ... --t 0.6 --r 0.2
 ```
 
 > The conclusion is recorded in
-> `plans/20260705/sw_cp_tl_policy_investigation.md` §3.4: no κ beats `p60`, and
+> `plans/experiment/20260705/sw_cp_tl_policy_investigation.md` §3.4: no κ beats `p60`, and
 > at `T=0.6` `kappa_0.006` is significantly *worse*. The overall mean alone makes
 > `kappa_0.005` look like the winner, so **always read this per slice**.
 
 ### analyze_csr_tl_scaling_sweep.py
 
 Reproduces the **entire** `## 결과 (실행 후)` section of
-`plans/20260714/csr_tl_scaling_sweep.md` in one invocation — the CSR budget-
+`plans/experiment/20260714/csr_tl_scaling_sweep.md` in one invocation — the CSR budget-
 fraction sweep over `f ∈ {5,10,15,20,30}%` (+ `f=25%` from the prior fixed-budget
 run) × `K ∈ {1,2,4,8}` × two init flows (`csr_full_d2wp` / `csr_neh_d2wp`).
 

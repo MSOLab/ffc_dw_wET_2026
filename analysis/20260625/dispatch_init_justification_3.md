@@ -1,8 +1,8 @@
 # Dispatch initialization 근거 분석 v3: wxd3–wxd7 확장 포함 paired sweep
 
 > 선행: v1 `analysis/20260624_dispatch_init_justification_1.md`
->       (plan `plans/20260624/dispatch_init_paper_justification_analysis.md`),
->       v2 `plans/20260624/dispatch_init_paired_direction_analysis.md`
+>       (plan `plans/experiment/20260624/dispatch_init_paper_justification_analysis.md`),
+>       v2 `plans/experiment/20260624/dispatch_init_paired_direction_analysis.md`
 > rule 레퍼런스: `vault/dispatching.md`
 > 작성일: 2026-06-26
 

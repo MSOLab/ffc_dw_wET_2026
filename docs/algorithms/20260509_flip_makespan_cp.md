@@ -109,6 +109,6 @@ phase PNGs (no JSON-specific renderer needed).
 
 - Implementation: `src/ffc_ddw_sum_et/algorithm/flip_makespan_cp/`
 - Controller wiring: `FFcDDWSubroutineController.run_flip_makespan_cp_from_incumbent`
-- Plan: `plans/20260507/flip_makespan_cp_from_incumbent.md`
+- Plan: `plans/experiment/20260507/flip_makespan_cp_from_incumbent.md`
 - Sample experiment: `metadata/20260507/flip_makespan_cp_debug.yaml`
 - Phase 3 baseline: `src/ffc_ddw_sum_et/algorithm/mcf_lb/phase3_dispatch.py`

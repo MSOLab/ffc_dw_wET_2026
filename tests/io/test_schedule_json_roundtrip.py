@@ -2,7 +2,7 @@
 
 ``load_schedule_json`` must reconstruct an ``FFcSchedule`` identical to the one
 ``dump_solution_json`` wrote (exact machines + start/end times) and return the
-stored obj_value/obj_bound. See plans/20260709/resume_from_base.md § 4.1.
+stored obj_value/obj_bound. See plans/experiment/20260709/resume_from_base.md § 4.1.
 """
 
 from __future__ import annotations

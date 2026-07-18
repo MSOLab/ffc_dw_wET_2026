@@ -10,7 +10,7 @@ Usage::
     uv run python scripts/render_intro_ddw_gantt.py \
         [--config metadata/20260610/intro_ddw_figure.yaml]
 
-See ``plans/20260610/intro-figure-ddw-gantt.md`` for the design.
+See ``plans/experiment/20260610/intro-figure-ddw-gantt.md`` for the design.
 """
 
 from __future__ import annotations

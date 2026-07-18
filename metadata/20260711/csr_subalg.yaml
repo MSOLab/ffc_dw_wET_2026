@@ -12,7 +12,7 @@ draw_gantt: false
 draw_progress_plot: true
 painter_thread_cnt: 96
 
-# CSR configurable solve flow (plans/20260711/csr_solve_flow.md).
+# CSR configurable solve flow (plans/experiment/20260711/csr_solve_flow.md).
 # The `coarsen_solve_reconstruct` step coarsens by factor=50 and runs the inner
 # `solve_flow` on the coarsened instance via a headless CHILD controller
 # (time_factor=50). Every child registration is a coarse candidate; candidates

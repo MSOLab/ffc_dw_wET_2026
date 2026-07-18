@@ -13,11 +13,11 @@ draw_progress_plot: false
 painter_thread_cnt: 1
 
 # CSR full-grid K∈{2,4,8} setting-selection run
-# 계획: plans/20260714/csr_full_grid_k248_selection.md
+# 계획: plans/experiment/20260714/csr_full_grid_k248_selection.md
 #
 # 목적 (게이트가 아니라 선택): fixed budget 하에서 어떤 (init-flow, K) 조합이
 # full 1440-grid 에서 가장 낮은 weighted E/T (= 최저 RPD) 를 내는가?
-# 정확성은 선행 게이트(plans/20260714/coarse_exact_higher_k_validation.md,
+# 정확성은 선행 게이트(plans/experiment/20260714/coarse_exact_higher_k_validation.md,
 # warning/crash 0) 에서 이미 확보 — 여기선 해 품질(RPD·win/tie)만 본다.
 #
 # 범위: full 1440-grid (ins_index 제거) × K{2,4,8} × 2 scenario

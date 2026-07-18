@@ -6,9 +6,9 @@
 - **선행 작업:** `6a8da8e fix(csr)!: drop due-window quantization`
 - **알고리즘 SSOT:** `vault/20260629_p3_csr.pdf` slide 6
   ("Idle Time Insertion After Coarsening – Floor for Shifting")
-- **설계 문서:** `plans/20260629/csr-time-factor-ssot.md`,
-  `plans/20260630/csr-floor-shift-overshoot-safe.md`,
-  `plans/20260630/csr-cap-k-to-min-due-window-width.md`(rejected)
+- **설계 문서:** `plans/experiment/20260629/csr-time-factor-ssot.md`,
+  `plans/experiment/20260630/csr-floor-shift-overshoot-safe.md`,
+  `plans/experiment/20260630/csr-cap-k-to-min-due-window-width.md`(rejected)
 - **검증 결과:** `uv run ruff check` 통과, 전체 테스트 **490 passed**,
   PDF slide 6 과 구현 1:1 대조 완료.
 

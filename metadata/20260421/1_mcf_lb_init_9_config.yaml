@@ -1,5 +1,5 @@
 # LB-init experiment config: sort jobs by MCF start time, then dispatch.
-# Ref: plans/20260419/mcf_lb_init_dispatch.md
+# Ref: plans/experiment/20260419/mcf_lb_init_dispatch.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 # POST_PROCESS_ONLY target (pick one; full path wins if both are set):

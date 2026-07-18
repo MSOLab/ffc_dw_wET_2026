@@ -15,7 +15,7 @@ painter_thread_cnt: 1
 # ins_index: [0, 1]
 
 # CSR TL-scaling sweep — K=1 × f=25% gap-fill run
-# 계획: plans/20260714/csr_tl_scaling_sweep.md / TODO.md
+# 계획: plans/experiment/20260714/csr_tl_scaling_sweep.md / TODO.md
 #   "CSR TL-scaling sweep — fill the K=1 × f=25% gap cell"
 #
 # 선행 스윕(20260714T234921_531156)은 f=25% 열을 fixed-budget 선행 run

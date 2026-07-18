@@ -1,6 +1,6 @@
 """``time_factor`` (CSR coarse-grid) support for the MCF-LB pipeline.
 
-W4 of ``plans/20260711/csr_solve_flow.md``. The MCF arc-cost construction
+W4 of ``plans/experiment/20260711/csr_solve_flow.md``. The MCF arc-cost construction
 lives in ``algorithm/parallel_mc_pmtn.py`` (outside the ``mcf_lb`` package),
 so exact ``time_factor`` threading of the *lower bound* is out of this
 workstream's file ownership. The documented fallback (plan §3) is

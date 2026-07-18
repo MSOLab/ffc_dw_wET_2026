@@ -76,7 +76,7 @@ class FFcDDWMultiInstanceRunner(
         The schedule comes from the solution JSON; obj_value / obj_bound (global
         MCF LB) / elapsed_time come from the manifest (the SSOT). Runners are
         submitted to a process pool by value, so this parent-side injection is
-        pickled to the workers. See plans/20260709/resume_from_base.md § 4.4.
+        pickled to the workers. See plans/experiment/20260709/resume_from_base.md § 4.4.
         """
         resume_root_str = self.output_metadata.get("resume_root")
         if not resume_root_str:

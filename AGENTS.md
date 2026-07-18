@@ -15,6 +15,40 @@ can pick up the same architectural intent.
   - Title: ≤49 chars (including `<type>(<scope>): ` prefix), imperative mood, no trailing period
   - Body: bullet points (`- ` prefix); each bullet is a **single line** (no hard-wrapping within a bullet)
 
+### Plan & analysis documents (`plans/`)
+
+`plans/` is split by intent. Both halves are tracked; date subdirectories use
+`YYYYMMDD`.
+
+| path | holds | written |
+|---|---|---|
+| `plans/experiment/<date>/` | code-change and experiment-execution plans | **before** the work |
+| `plans/analysis/<date>/` | cross-run / post-hoc analysis write-ups | **after** the runs exist |
+
+An analysis document is the tracked **single source of truth** for a merged
+analysis: the question, the source run directories (full paths), the exact
+reproduction command, the result tables, and the conclusion. Bulk artifacts
+(CSV / PNG / HTML) stay in `analysis/<id>/`, which is gitignored — the document
+must stand on its own without them.
+
+### Provenance commits
+
+`output/` and `analysis/` are gitignored, so results are discoverable only
+through commit messages. Two commit kinds name an untracked directory in their
+subject and are **exempt from the Conventional Commits format above**:
+
+- **run setting** — commit the config that produced a run:
+  `<run_dir>/<timestamp> run setting`, body naming the machine
+  (e.g. `19521ec`).
+- **merged analysis** — commit the `plans/analysis/` document (plus any new
+  script) for a cross-run analysis:
+  `analysis/<id> merged analysis`, body listing the source run directories,
+  the reproduction command, and a one-line conclusion.
+
+`git log --oneline | rg "merged analysis"` then indexes every cross-run
+analysis, and each commit body says which runs fed it and where its artifacts
+live.
+
 ## Architecture Docs
 
 - **Problem definition** (parameters, variables, constraints, objective):
@@ -44,7 +78,7 @@ tolerance). Notes:
   comparison for a global optimality judgment.
 - The same UB/LB pair is also emitted per progress point in
   `<instance>_obj_log.json` (`obj_value.data` / `obj_bound.data`) — see the
-  SW-CP TL-policy note in `plans/20260705/sw_cp_tl_policy_investigation.md` for the
+  SW-CP TL-policy note in `plans/experiment/20260705/sw_cp_tl_policy_investigation.md` for the
   loader caveat (the structured loader drops LB points that carry no note).
 
 ### PRA2017 instance parameters (generation grid & mapping source)

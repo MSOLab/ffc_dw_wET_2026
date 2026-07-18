@@ -1,7 +1,7 @@
 # Ablation ladder for the FFcDDW (wET) thesis chapter.
 #
 # Five cumulative configurations C1..C5 quantify the marginal contribution
-# of each algorithm component. See plans/20260517/ablation_ladder_plan.md.
+# of each algorithm component. See plans/experiment/20260517/ablation_ladder_plan.md.
 #
 # All scenarios share the same wall-clock budget ("0.09nc"). Per-step inner
 # time limits are identical to mcf_lb_neh_cp_ipwcp_base_cpsat_3_config.yaml;

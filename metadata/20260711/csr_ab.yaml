@@ -13,7 +13,7 @@ draw_progress_plot: true
 painter_thread_cnt: 96
 
 # A/B: does a coarse CSR initialization beat the original-scale constructive
-# prefix at equal budget? (plans/20260711/csr_solve_flow.md)
+# prefix at equal budget? (plans/experiment/20260711/csr_solve_flow.md)
 #
 # Both arms: total timelimit 0.09nc, identical incremental_sw_cp (kappa 0.005)
 # + solve_base_model_cpsat tail.

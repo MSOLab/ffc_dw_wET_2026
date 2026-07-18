@@ -219,7 +219,7 @@ Phase 2/4 각 solve 의 `response_proto.solve_log` 를 `log_search_progress=True
 1. **Default 행동 변화** (`PFMethod` 기본 `None`): 리포 안은 깔끔하게 마이그레이션 됐지만 CHANGELOG 성격의 noted change 가 있는 편이 안전. 이 리뷰 문서 자체를 근거로 PR 설명/릴리즈 노트에 반영 권장.
 2. **CP-SAT 로그 누적 쓰기(`.log.open("a")`)**: `repeat_while_improving` 루프에서 iteration 별 suffix 를 분리하므로 `"a"` 지만 실제로는 파일당 1회 기록. 다만 동일 subroutine 이 두 번 호출될 경우 append 로 축적됨 — 이것이 의도라면 OK, 아니면 `"w"` 로 명시하는 편이 놀람 최소.
 3. **`MCFLBOption` 미사용 상태**: `run_mcf_lb_4` 가 individual kwargs 를 직접 받도록 옮겨 가면서 이 option dataclass 는 실질적으로 dead weight 에 가까움. `docs/TODO.md` 에 "추후 `AlgOption` 기반 실행 컨트랙트로 통합 시 재정비" 로 남기면 의도가 드러남.
-4. **`plans/20260421/logging-overhaul.md`** 가 untracked 로 남아 있음 — 본 변경과 관련 있으면 커밋에 포함, 없으면 `.gitignore` 또는 삭제 판단 필요.
+4. **`plans/experiment/20260421/logging-overhaul.md`** 가 untracked 로 남아 있음 — 본 변경과 관련 있으면 커밋에 포함, 없으면 `.gitignore` 또는 삭제 판단 필요.
 
 ---
 

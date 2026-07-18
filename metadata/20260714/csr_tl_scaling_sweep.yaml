@@ -12,7 +12,7 @@ draw_progress_plot: false
 painter_thread_cnt: 1
 
 # CSR time-budget scaling sweep run
-# 계획: plans/20260714/csr_tl_scaling_sweep.md
+# 계획: plans/experiment/20260714/csr_tl_scaling_sweep.md
 #
 # 스윕 변수 = CSR budget 비율 f 하나. 표준 reference 예산(outer 0.09nc) 대비 CSR
 # 단계에 배정하는 비율을 {5,10,15,20,30}% 로 스윕(25% 는 선행 run

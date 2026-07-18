@@ -5,7 +5,7 @@ CSR seed 생성 알고리즘이 `20260624_more_init_dispatch` → `20260629_csr`
 
 핵심 장치: `solve=False` (seed-only 모드). CP-SAT solve를 생략하고 dispatch seed를
 그대로 reconstruct → 출력 = `reconstruct(seed)`. 재실행 노이즈 0이라 두 브랜치의
-per-instance obj를 직접 비교할 수 있다. (`plans/20260630/csr-seed-only-deterministic-ab.md`)
+per-instance obj를 직접 비교할 수 있다. (`plans/experiment/20260630/csr-seed-only-deterministic-ab.md`)
 
 ---
 
@@ -120,5 +120,5 @@ coarse seed 알고리즘에서만 온다는 것을 입증.
 - 전체 인스턴스(1440) 확장 재실행, 패밀리별 분해.
 - v3==v4 동일성 조사.
 - seed 회귀 원인 이등분 (floor shift vs SSOT 리팩터).
-- **F/L 변경 적용 후 비교**: `plans/20260630/csr-seed-only-ab-after-FL.md` (별도 계획).
+- **F/L 변경 적용 후 비교**: `plans/experiment/20260630/csr-seed-only-ab-after-FL.md` (별도 계획).
   적용·실험 후 본 문서에 timestamp·세팅·결과 섹션을 추가한다.

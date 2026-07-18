@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 SUBROUTINE_FLOW_CACHE_FN = "subroutine_flow.yaml"
 """Per-scenario cache of the executed subroutine flow. Written on every run so a
 later ``RunMode.RESUME`` run can validate its flow prefix against the base run's
-flow (see main.py + plans/20260709/resume_from_base.md)."""
+flow (see main.py + plans/experiment/20260709/resume_from_base.md)."""
 
 # TODO: Consider making this a parameter or deriving it from the observed solve times.
 TIMELIMIT_NC_MULTIPLIER = 0.09

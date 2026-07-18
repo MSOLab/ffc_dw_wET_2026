@@ -1,4 +1,6 @@
-"""Analyze the CSR time-budget scaling sweep (plans/20260714/csr_tl_scaling_sweep.md).
+"""Analyze the CSR time-budget scaling sweep.
+
+See plans/experiment/20260714/csr_tl_scaling_sweep.md.
 
 The sweep varies one axis — the CSR budget fraction ``f`` (share of the standard
 reference budget given to the coarsen_solve_reconstruct step) — over

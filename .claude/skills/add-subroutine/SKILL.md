@@ -6,7 +6,7 @@ description: Add a new algorithm subroutine (e.g. an LB seeder, a dispatcher int
 # Add a new algorithm subroutine to FFcDDW
 
 Canonical workflow, derived from the MCF-LB-init integration in
-`plans/20260419/mcf_lb_init_dispatch.md`. Follow it end-to-end — skipping steps
+`plans/experiment/20260419/mcf_lb_init_dispatch.md`. Follow it end-to-end — skipping steps
 breaks either the orchestration contract (solution manager / reports) or the
 post-run artifact pipeline.
 
@@ -22,9 +22,9 @@ post-run artifact pipeline.
 ## 1. Write the plan (always, even for "small" tasks)
 
 - Location: `plans/<YYYYMMDD>/<short_slug>.md` (project repo, **not**
-  `~/.claude/plans/`). Precedent: `plans/20260418/*.md`,
-  `plans/20260419/weighted_et_objective.md`,
-  `plans/20260419/mcf_lb_init_dispatch.md`.
+  `~/.claude/plans/`). Precedent: `plans/experiment/20260418/*.md`,
+  `plans/experiment/20260419/weighted_et_objective.md`,
+  `plans/experiment/20260419/mcf_lb_init_dispatch.md`.
 - Sections: **Context**, **Critical files to modify / create**,
   **Existing functions to reuse** (cite file:line), **Implementation outline**
   (numbered steps), **Verification** (unit + integration + end-to-end + ruff).
