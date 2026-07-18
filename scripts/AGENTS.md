@@ -469,6 +469,42 @@ uv run python scripts/analyze_csr_tl_scaling_sweep.py \
 
 ---
 
+### 20260718/analyze_p_sweep.py
+
+Merges the SW-CP TL **capture-percentile** scenarios into one p-axis sweep, the
+counterpart to `analyze_kappa_sweep.py`'s κ axis. Loading, the BKS join and the
+RPDf formula are imported from that script (which in turn imports them from
+`build_results_index.py`), so neither can drift.
+
+Two regimes are handled differently because their scenario names collide:
+the three `unfixed_batch_count_max=8` runs share a base incumbent and disjoint
+names, so they are concatenated into one 7-percentile + κ-family sweep; the
+`max=12` run repeats the same seven names, so it is loaded separately and joined
+per (scenario, instance) for a paired comparison.
+
+**Output** (`--outdir`, default `analysis/20260718_sw_cp_tl_p_u8_merge/`):
+
+- `p_sweep_by_scenario.csv` — one row per (slice, scenario), max=8 p + κ
+- `p_u8_vs_u12.csv` — one row per (slice, p), both regimes + paired win/tie/loss
+- `p_sweep_u8_vs_u12.png` — mean RPDf vs p, one panel per slice, both regimes
+
+```bash
+# defaults to the four runs the merged analysis was written from
+uv run python scripts/20260718/analyze_p_sweep.py
+
+# explicit runs / a single custom slice
+uv run python scripts/20260718/analyze_p_sweep.py \
+    --u8-run <run_dir> --u8-run <run_dir> --u12-run <run_dir_or_csv> --t 0.6 --r 0.2
+```
+
+> Conclusion (`plans/analysis/20260718/sw_cp_tl_p25_p75_u8_fill.md`): at max=8 the
+> U-shape holds across p25–p75 and **p60 is the best percentile in all three
+> slices**. κ=0.005 edges p60 on the overall mean only — both `T=0.6` slices pick
+> p60, so **read this per slice**. The max=8 vs max=12 comparison is confounded
+> (the max=12 run is `FULL_RUN`, not a resume from the shared base).
+
+---
+
 ## 5. Experiment Config Validation
 
 ### validate_resume_config.py
