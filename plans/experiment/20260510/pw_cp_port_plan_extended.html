@@ -189,11 +189,11 @@
 
 <nav class="toc">
   <div class="title">PW-CP Port — Gap Analysis</div>
-  <div class="crumb">plans/experiment/20260510/sw_cp_port_plan_extended.md</div>
+  <div class="crumb">plans/experiment/20260510/pw_cp_port_plan_extended.md</div>
 
   <div class="label">Peers</div>
-  <a class="peer" href="sw_cp_port_plan.html">→ Port plan (main)</a>
-  <a class="peer" href="sw_cp_port_plan_detail.html">→ Detail decisions</a>
+  <a class="peer" href="pw_cp_port_plan.html">→ Port plan (main)</a>
+  <a class="peer" href="pw_cp_port_plan_detail.html">→ Detail decisions</a>
 
   <div class="label">Sections</div>
   <a href="#tldr">TL;DR</a>
@@ -231,18 +231,18 @@
 
 <h1>PW-CP Port — Plan vs. Uncommitted Code Gap Analysis</h1>
 <div class="meta">
-  <span>plans/experiment/20260510/sw_cp_port_plan_extended.md</span> ·
-  <span>Companion to <a href="sw_cp_port_plan.html">sw_cp_port_plan</a> + <a href="sw_cp_port_plan_detail.html">_detail</a></span> ·
+  <span>plans/experiment/20260510/pw_cp_port_plan_extended.md</span> ·
+  <span>Companion to <a href="pw_cp_port_plan.html">pw_cp_port_plan</a> + <a href="pw_cp_port_plan_detail.html">_detail</a></span> ·
   <span>2026-05-11</span>
 </div>
 
-<p>Companion to <code>sw_cp_port_plan.md</code> and <code>sw_cp_port_plan_detail.md</code>. This
+<p>Companion to <code>pw_cp_port_plan.md</code> and <code>pw_cp_port_plan_detail.md</code>. This
 file captures every point where the current uncommitted change set
 diverges from the two plan documents, as of 2026-05-11. Read together
 with the two plan files; on conflict this file describes <i>what the code
 actually does</i>, while the original plans describe <i>what was intended</i>.</p>
 
-<p>The plan HTMLs (<code>sw_cp_port_plan.html</code>, <code>sw_cp_port_plan_detail.html</code>)
+<p>The plan HTMLs (<code>pw_cp_port_plan.html</code>, <code>pw_cp_port_plan_detail.html</code>)
 are direct renders of the same-named MDs, so the comparison below is
 against the MD bodies.</p>
 
@@ -358,7 +358,7 @@ declared scope.</p>
 </figure>
 
 <div class="override-banner">
-  <b>Plan coverage.</b> Plan dispatcher pseudocode (<code>sw_cp_port_plan.md:135-136</code>) explicitly uses
+  <b>Plan coverage.</b> Plan dispatcher pseudocode (<code>pw_cp_port_plan.md:135-136</code>) explicitly uses
   <code>params_for_horizon = BaseModelBuilder.make_params(instance); horizon = sum(params_for_horizon.p.values())</code>.
   The <code>cpsat_adapter.py</code> file is not mentioned anywhere in either plan — its declared scope is
   <code>algorithm/sw_cp/</code> + <code>controller.py</code> + <code>ffc_schedule.py</code> + <code>main.py</code>.
@@ -395,7 +395,7 @@ declared scope.</p>
 +CONFIG_PATH = Path("metadata/20260510/sw_cp_hint_check.yaml")</code></pre>
 
 <div class="override-banner">
-  <b>Plan vs. reality.</b> Plan body says "wire the new scenario name into the dispatch table (mirror the existing <code>neh_cp</code> / <code>mcf_lb</code> registration)". The repo has <i>no</i> such dispatch table — <code>main.py</code> uses a single <code>CONFIG_PATH</code> constant and YAML's <code>subroutine_flow.method:</code> resolves via <code>getattr</code> (clarified in <code>sw_cp_port_plan_detail.md</code> §"Naming and placement"). The plan's "registration" mental model is incorrect for this repo; the actual change is a single-line <code>CONFIG_PATH</code> redirect, currently aimed at the hint-check scenario rather than the <code>sw_cp_grid.yaml</code> the plan would have implied.
+  <b>Plan vs. reality.</b> Plan body says "wire the new scenario name into the dispatch table (mirror the existing <code>neh_cp</code> / <code>mcf_lb</code> registration)". The repo has <i>no</i> such dispatch table — <code>main.py</code> uses a single <code>CONFIG_PATH</code> constant and YAML's <code>subroutine_flow.method:</code> resolves via <code>getattr</code> (clarified in <code>pw_cp_port_plan_detail.md</code> §"Naming and placement"). The plan's "registration" mental model is incorrect for this repo; the actual change is a single-line <code>CONFIG_PATH</code> redirect, currently aimed at the hint-check scenario rather than the <code>sw_cp_grid.yaml</code> the plan would have implied.
 </div>
 
 <h2 id="b">B. Code differs from plan in shape (intent preserved)</h2>
@@ -404,7 +404,7 @@ declared scope.</p>
 
 <div class="grid-2">
   <div class="card plan">
-    <h4>Plan-listed fields <span class="badge muted">sw_cp_port_plan.md:232-243</span></h4>
+    <h4>Plan-listed fields <span class="badge muted">pw_cp_port_plan.md:232-243</span></h4>
     <p><code>step, unfixed_batch_start_idx, non_time_fixed_op_count, incumbent_obj_before, cp_obj, incumbent_obj_after, accepted, status, applied_tl_seconds, wall_seconds</code></p>
   </div>
   <div class="card code">
@@ -423,7 +423,7 @@ declared scope.</p>
   </div>
   <div class="card code">
     <h4>Code <span class="badge muted">sw_cp/cp_model.py:397-457</span></h4>
-    <p>Returns <code>tuple[FFcSchedule, cp_divergence_count: int]</code>. The diagnostic counter measures how many non-time-fixed ops realised a later end than the CP-promised end (cumulative-vs-greedy machine assignment drift, foreseen in <code>sw_cp_port_plan.md:327</code> Risk 3). Logged at DEBUG per step and persisted in <code>PwCpStepEntry</code>.</p>
+    <p>Returns <code>tuple[FFcSchedule, cp_divergence_count: int]</code>. The diagnostic counter measures how many non-time-fixed ops realised a later end than the CP-promised end (cumulative-vs-greedy machine assignment drift, foreseen in <code>pw_cp_port_plan.md:327</code> Risk 3). Logged at DEBUG per step and persisted in <code>PwCpStepEntry</code>.</p>
   </div>
 </div>
 
@@ -431,7 +431,7 @@ declared scope.</p>
 
 <div class="grid-2">
   <div class="card plan">
-    <h4>Plan <span class="badge muted">sw_cp_port_plan_detail.md:83-102</span></h4>
+    <h4>Plan <span class="badge muted">pw_cp_port_plan_detail.md:83-102</span></h4>
     <p>Pseudocode inlines the per-stage rewrite of <code>__stage_2_mc_2_job_tuple_seq[i][mc_id]</code>.</p>
   </div>
   <div class="card code">
@@ -458,17 +458,17 @@ declared scope.</p>
 <div class="risks">
   <div class="risk sev-low" id="c1">
     <div class="hd"><h4>C.1. <code>docs/TODO.md</code> rename note for <code>mcf_lb_phase_schedules</code></h4><span class="badge ok">low</span></div>
-    <div class="body"><code>sw_cp_port_plan_detail.md</code> §"Per-step Gantt" states "a TODO entry should track renaming the container to a generic <code>phase_schedules</code>". No such entry exists in <code>docs/TODO.md</code>.</div>
+    <div class="body"><code>pw_cp_port_plan_detail.md</code> §"Per-step Gantt" states "a TODO entry should track renaming the container to a generic <code>phase_schedules</code>". No such entry exists in <code>docs/TODO.md</code>.</div>
   </div>
   <div class="risk sev-low" id="c2">
     <div class="hd"><h4>C.2. <code>sw_cp</code> registration in <code>tests/algorithm/test_algorithm_contracts.py</code></h4><span class="badge muted">moot</span></div>
-    <div class="body">Plan §Verification 2 (<code>sw_cp_port_plan.md:305</code>): "register <code>sw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks run". In practice the file does not have an algorithm registry — it tests the generic <code>AlgSpec</code>/<code>AlgRecord</code> shapes against a toy instance with no algorithm-specific hooks. The plan's mental model of a per-algorithm registration slot is incorrect; no code change is actually required, but the plan instruction stands unresolved in literal terms.</div>
+    <div class="body">Plan §Verification 2 (<code>pw_cp_port_plan.md:305</code>): "register <code>sw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks run". In practice the file does not have an algorithm registry — it tests the generic <code>AlgSpec</code>/<code>AlgRecord</code> shapes against a toy instance with no algorithm-specific hooks. The plan's mental model of a per-algorithm registration slot is incorrect; no code change is actually required, but the plan instruction stands unresolved in literal terms.</div>
   </div>
 </div>
 
 <h3 id="c3">C.3. Test coverage of right-justification invariants <span class="badge ok">applied 2026-05-11</span></h3>
 
-<p>The plan's §Risks 1 (<code>sw_cp_port_plan.md:323</code>) enumerates the
+<p>The plan's §Risks 1 (<code>pw_cp_port_plan.md:323</code>) enumerates the
 correctness invariants for <code>delay_job_latest_leq_obj_contrib_all_stages</code>
 and lists them as test targets. Pre-existing tests in
 <code>tests/solution/test_ffc_schedule_delay_all_stages.py</code> already
@@ -525,7 +525,7 @@ were added:</p>
 <div class="invariants">
   <h4>In place &amp; matching the plan</h4>
   <ul>
-    <li><code>delay_job_latest_leq_obj_contrib_all_stages</code> (two-pass right-justification, invariants per <code>sw_cp_port_plan_detail.md:104-114</code>).</li>
+    <li><code>delay_job_latest_leq_obj_contrib_all_stages</code> (two-pass right-justification, invariants per <code>pw_cp_port_plan_detail.md:104-114</code>).</li>
     <li><code>PwCpOption</code> base field set (all plan fields present; extras in §A.2, §A.3 above).</li>
     <li>Five-region operation partition + <code>promote_job_contained_ops</code> + <code>validate_and_get_batch_count</code>.</li>
     <li>Partition-aware <code>PwCpModelBuilder</code>: non-time-fixed-only op vars, fixed left/right dummy bars sourced from <code>rj_schedule</code>, cumulative capacity, profile-fix precedence via existing <code>add_stage_ops_precedence_constraints_after_dispatch_from_schedule</code>, partial weighted-E/T objective with <code>et_offset_partial</code> for last-stage time-fixed jobs.</li>
@@ -546,7 +546,7 @@ were added:</p>
 <div class="decisions">
   <div class="decision">
     <div class="key">1. Add subsection</div>
-    <div class="val">Add §"Composite step: <code>incremental_sw_cp</code>" to <code>sw_cp_port_plan_detail.md</code> describing the two policies and the per-iteration <code>temporarily_extended_context</code> tagging.</div>
+    <div class="val">Add §"Composite step: <code>incremental_sw_cp</code>" to <code>pw_cp_port_plan_detail.md</code> describing the two policies and the per-iteration <code>temporarily_extended_context</code> tagging.</div>
   </div>
   <div class="decision">
     <div class="key">2. Replace horizon formula</div>
@@ -558,11 +558,11 @@ were added:</p>
   </div>
   <div class="decision">
     <div class="key">4. Fix "dispatch table" wording</div>
-    <div class="val">Correct <code>sw_cp_port_plan.md</code> §"File layout" to match <code>sw_cp_port_plan_detail.md</code> §"Naming and placement" (YAML <code>method:</code> → <code>getattr</code> on controller).</div>
+    <div class="val">Correct <code>pw_cp_port_plan.md</code> §"File layout" to match <code>pw_cp_port_plan_detail.md</code> §"Naming and placement" (YAML <code>method:</code> → <code>getattr</code> on controller).</div>
   </div>
   <div class="decision">
     <div class="key">5. Update step-entry fields</div>
-    <div class="val">Update <code>PwCpStepEntry</code> field list in <code>sw_cp_port_plan.md</code> to match <code>sw_cp/step_log.py</code> (rename <code>applied_tl_seconds</code> → <code>TL</code>; add <code>elapsed_time</code>, <code>elapsed_portion</code>, <code>sub_job_count</code>, <code>cp_divergence_count</code>).</div>
+    <div class="val">Update <code>PwCpStepEntry</code> field list in <code>pw_cp_port_plan.md</code> to match <code>sw_cp/step_log.py</code> (rename <code>applied_tl_seconds</code> → <code>TL</code>; add <code>elapsed_time</code>, <code>elapsed_portion</code>, <code>sub_job_count</code>, <code>cp_divergence_count</code>).</div>
   </div>
   <div class="decision">
     <div class="key">6. Note tuple return</div>
@@ -599,7 +599,7 @@ revert / extraction to a follow-up plan:</p>
 </div>
 
 <hr>
-<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/experiment/20260510/sw_cp_port_plan_extended.md</code> (markdown remains authoritative; this HTML is a spatial view).</p>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/experiment/20260510/pw_cp_port_plan_extended.md</code> (markdown remains authoritative; this HTML is a spatial view).</p>
 
 </main>
 </div>

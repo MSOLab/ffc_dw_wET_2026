@@ -1,12 +1,12 @@
 # PW-CP Port — Plan vs. Uncommitted Code Gap Analysis
 
-Companion to `sw_cp_port_plan.md` and `sw_cp_port_plan_detail.md`. This
+Companion to `pw_cp_port_plan.md` and `pw_cp_port_plan_detail.md`. This
 file captures every point where the current uncommitted change set
 diverges from the two plan documents, as of 2026-05-11. Read together
 with the two plan files; on conflict this file describes *what the code
 actually does*, while the original plans describe *what was intended*.
 
-The plan HTMLs (`sw_cp_port_plan.html`, `sw_cp_port_plan_detail.html`)
+The plan HTMLs (`pw_cp_port_plan.html`, `pw_cp_port_plan_detail.html`)
 are direct renders of the same-named MDs, so the comparison below is
 against the MD bodies.
 
@@ -47,7 +47,7 @@ Replaces the plan's `horizon = sum(p[j,i])` bound with
   - `cpsat` (existing)
   - `mixed_dispatcher_warm_start_cp` (existing; lines around 1608-1640)
 
-**Plan coverage**: plan dispatcher pseudocode (`sw_cp_port_plan.md:135-136`)
+**Plan coverage**: plan dispatcher pseudocode (`pw_cp_port_plan.md:135-136`)
 explicitly uses
 `params_for_horizon = BaseModelBuilder.make_params(instance); horizon = sum(params_for_horizon.p.values())`.
 The `cpsat_adapter.py` file is **not** mentioned anywhere in either
@@ -84,7 +84,7 @@ Code change:
 dispatch table (mirror the existing `neh_cp` / `mcf_lb` registration)".
 The repo has no such dispatch table — `main.py` uses a single
 `CONFIG_PATH` constant and YAML's `subroutine_flow.method:` resolves
-via `getattr` (clarified in `sw_cp_port_plan_detail.md` §"Naming and
+via `getattr` (clarified in `pw_cp_port_plan_detail.md` §"Naming and
 placement"). The plan's "registration" mental model is therefore
 incorrect for this repo; the actual change is a single-line
 `CONFIG_PATH` redirect, currently aimed at the hint-check scenario
@@ -94,7 +94,7 @@ rather than the `sw_cp_grid.yaml` the plan would have implied.
 
 ### B.1. `PwCpStepEntry` field set
 
-Plan-listed fields (`sw_cp_port_plan.md:232-243`):
+Plan-listed fields (`pw_cp_port_plan.md:232-243`):
 `step, unfixed_batch_start_idx, non_time_fixed_op_count,
 incumbent_obj_before, cp_obj, incumbent_obj_after, accepted, status,
 applied_tl_seconds, wall_seconds`.
@@ -112,12 +112,12 @@ Code-actual fields (`sw_cp/step_log.py`):
   `tuple[FFcSchedule, cp_divergence_count: int]`. The diagnostic
   counter measures how many non-time-fixed ops realised a later end
   than the CP-promised end (cumulative-vs-greedy machine assignment
-  drift, foreseen in `sw_cp_port_plan.md:327` Risk 3). Logged at DEBUG
+  drift, foreseen in `pw_cp_port_plan.md:327` Risk 3). Logged at DEBUG
   per step and persisted in `PwCpStepEntry`.
 
 ### B.3. `delay_job_latest_leq_obj_contrib_all_stages` extracted helper
 
-- Plan (`sw_cp_port_plan_detail.md:83-102`): pseudocode inlines the
+- Plan (`pw_cp_port_plan_detail.md:83-102`): pseudocode inlines the
   per-stage rewrite of `__stage_2_mc_2_job_tuple_seq[i][mc_id]`.
 - Code (`solution/ffc_schedule.py:1499-1562`): the per-stage loop body
   is extracted into private helper `_make_stage_right_justified`.
@@ -133,13 +133,13 @@ Code-actual fields (`sw_cp/step_log.py`):
 
 ### C.1. `docs/TODO.md` rename note for `mcf_lb_phase_schedules`
 
-`sw_cp_port_plan_detail.md` §"Per-step Gantt" states "a TODO entry
+`pw_cp_port_plan_detail.md` §"Per-step Gantt" states "a TODO entry
 should track renaming the container to a generic `phase_schedules`".
 No such entry exists in `docs/TODO.md`.
 
 ### C.2. `sw_cp` registration in `tests/algorithm/test_algorithm_contracts.py`
 
-Plan §Verification 2 (`sw_cp_port_plan.md:305`): "register `sw_cp` in
+Plan §Verification 2 (`pw_cp_port_plan.md:305`): "register `sw_cp` in
 `tests/algorithm/test_algorithm_contracts.py` so the shared shape-checks
 run".
 
@@ -151,7 +151,7 @@ but the plan instruction stands unresolved in literal terms.
 
 ## C.3. Test coverage of right-justification invariants (applied 2026-05-11)
 
-The plan's §Risks 1 (`sw_cp_port_plan.md:323`) enumerates the
+The plan's §Risks 1 (`pw_cp_port_plan.md:323`) enumerates the
 correctness invariants for
 `delay_job_latest_leq_obj_contrib_all_stages` and lists them as test
 targets. Pre-existing tests in
@@ -189,7 +189,7 @@ For completeness — the following are correctly implemented and match
 the plan:
 
 - `delay_job_latest_leq_obj_contrib_all_stages` (two-pass right-
-  justification, invariants per `sw_cp_port_plan_detail.md:104-114`).
+  justification, invariants per `pw_cp_port_plan_detail.md:104-114`).
 - `PwCpOption` base field set (all plan fields present; extras in
   §A.2, §A.3 above).
 - Five-region operation partition + `promote_job_contained_ops` +
@@ -214,7 +214,7 @@ If the plans should reflect the code as-is, the following edits are
 needed:
 
 1. Add a §"Composite step: `incremental_sw_cp`" subsection to
-   `sw_cp_port_plan_detail.md` describing the two policies and the
+   `pw_cp_port_plan_detail.md` describing the two policies and the
    per-iteration `temporarily_extended_context` tagging.
 2. Replace `horizon = sum(p)` references in both plans with the
    incumbent-makespan-multiplier formula, and document the
@@ -222,11 +222,11 @@ needed:
    its own plan).
 3. Document `log_search_progress` / `log_search_progress_max_steps` on
    `PwCpOption` and the `sw_cp_hint_check.yaml` debug scenario.
-4. Correct the "dispatch table" wording in `sw_cp_port_plan.md` §"File
-   layout" to match `sw_cp_port_plan_detail.md` §"Naming and placement"
+4. Correct the "dispatch table" wording in `pw_cp_port_plan.md` §"File
+   layout" to match `pw_cp_port_plan_detail.md` §"Naming and placement"
    (YAML `method:` → `getattr` on controller).
 5. Update `PwCpStepEntry` field list in
-   `sw_cp_port_plan.md` to match `sw_cp/step_log.py` (rename
+   `pw_cp_port_plan.md` to match `sw_cp/step_log.py` (rename
    `applied_tl_seconds` → `TL`; add `elapsed_time`, `elapsed_portion`,
    `sub_job_count`, `cp_divergence_count`).
 6. Note the `(schedule, cp_divergence_count)` return tuple of

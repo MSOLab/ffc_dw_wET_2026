@@ -171,7 +171,7 @@
 <nav class="toc">
   <div class="title">PW-CP Port Plan</div>
   <div class="crumb">plans/experiment/20260510/</div>
-  <a href="sw_cp_port_plan_detail.html" style="color: var(--accent); font-size: 12.5px;">→ Detail companion</a>
+  <a href="pw_cp_port_plan_detail.html" style="color: var(--accent); font-size: 12.5px;">→ Detail companion</a>
 
   <div class="label">Sections</div>
   <a href="#tldr">TL;DR</a>
@@ -201,8 +201,8 @@
 
 <h1>Plan: Port <code>sw_cp</code> into <code>ffc_ddw_sum_et</code></h1>
 <div class="meta">
-  <span>plans/experiment/20260510/sw_cp_port_plan.md</span> ·
-  <span>Companion: <a class="peer" href="sw_cp_port_plan_detail.html">sw_cp_port_plan_detail.html</a></span> ·
+  <span>plans/experiment/20260510/pw_cp_port_plan.md</span> ·
+  <span>Companion: <a class="peer" href="pw_cp_port_plan_detail.html">pw_cp_port_plan_detail.html</a></span> ·
   <span>Branch: <code>20260509_cp_lns</code></span>
 </div>
 
@@ -404,7 +404,7 @@
 <ul>
   <li><code>src/ffc_ddw_sum_et/orchestration/controller.py</code> — add <code>run_sw_cp(self, ...)</code>. Build <code>AlgSpec(instance, option=PwCpOption(**kwargs), ref_solution=current_incumbent, alg_root=self.subroutine_dir, logger=self.logger, stop_predicate=self.stop_predicate)</code>, call <code>PwCpDispatcher().run(spec)</code>, register via <code>self._register(report, sol)</code>. Two-phase Gantt: emit before/after PNGs around the call, gated on <code>draw_gantt</code> flag. <b>Per CLAUDE.md contract:</b> single <code>_register</code> per call; <code>elapsed_time = time.monotonic() - start_elapsed</code> measured immediately before report construction, no work between measurement and <code>_register</code>.</li>
   <li><code>ffcddw_single_instance_runner.py</code> — no change required if existing <code>_save_obj_log</code> aggregator already re-bases trajectories per step (verify during implementation).</li>
-  <li><code>configs/sw_cp/&lt;scenario&gt;.yaml</code> — new scenario invoking <code>run_sw_cp</code> with defaults + small grid (<code>unfixed_batch_count ∈ {2,3}</code>, <code>pf_method ∈ {"PF0","PF1"}</code>). <span class="badge warn">see detail</span> <a href="sw_cp_port_plan_detail.html#scenarios">scenarios live under <code>metadata/&lt;date&gt;/</code></a></li>
+  <li><code>configs/sw_cp/&lt;scenario&gt;.yaml</code> — new scenario invoking <code>run_sw_cp</code> with defaults + small grid (<code>unfixed_batch_count ∈ {2,3}</code>, <code>pf_method ∈ {"PF0","PF1"}</code>). <span class="badge warn">see detail</span> <a href="pw_cp_port_plan_detail.html#scenarios">scenarios live under <code>metadata/&lt;date&gt;/</code></a></li>
   <li><code>main.py</code> — wire the new scenario name into the dispatch table (mirror <code>neh_cp</code>/<code>mcf_lb</code>). The <code>add-subroutine</code> skill is the canonical executor.</li>
 </ul>
 
@@ -663,7 +663,7 @@ class PwCpOption(AlgOption):
   <li>Starting from <code>rj_schedule.deepcopy()</code> and removing all non-time-fixed <code>(j, i, k)</code> ops via <code>FFcSchedule.remove_operations</code>.</li>
   <li>For each non-time-fixed <code>(j, i)</code>, dispatching the op back with <code>op_start = solver.Value(op_vars.op_start[j,i])</code> and <code>op_end = solver.Value(op_vars.op_end[j,i])</code> via <code>FFcSchedule.add_ops_times_2_mc(stage_id=i, mc_id=k, job_id=j, start, end)</code> where <code>k</code> is the assigned machine — chosen by <b>earliest free machine on stage <code>i</code> at time <code>start</code></b> within the machines listed in <code>instance.stage_2_machines_map[i]</code> (matches hybridflowshop's <code>create_sw_cp_schedule</code> policy).</li>
 </ol>
-<p style="color: var(--muted); font-size: 13px;">→ Detail companion refines this with the <code>add_operation_2_stage</code> dispatch + assertion approach: <a href="sw_cp_port_plan_detail.html#machine-reassign">machine reassignment policy</a>.</p>
+<p style="color: var(--muted); font-size: 13px;">→ Detail companion refines this with the <code>add_operation_2_stage</code> dispatch + assertion approach: <a href="pw_cp_port_plan_detail.html#machine-reassign">machine reassignment policy</a>.</p>
 
 <h2 id="helpers">Reused helpers (with paths)</h2>
 <div class="helpers">
@@ -825,7 +825,7 @@ uv run ruff format &lt;same paths&gt;
 </div>
 
 <hr>
-<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/experiment/20260510/sw_cp_port_plan.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/experiment/20260510/pw_cp_port_plan.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
 
 </main>
 </div>

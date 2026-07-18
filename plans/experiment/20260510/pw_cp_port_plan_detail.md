@@ -1,8 +1,8 @@
-# PW-CP Port — Detail Decisions (companion to `sw_cp_port_plan.md`)
+# PW-CP Port — Detail Decisions (companion to `pw_cp_port_plan.md`)
 
 This file freezes the user-confirmed implementation decisions surfaced
 during the planning conversation on 2026-05-10. Read together with
-`sw_cp_port_plan.md`; this file overrides any conflicting wording.
+`pw_cp_port_plan.md`; this file overrides any conflicting wording.
 
 ## Naming and placement
 
