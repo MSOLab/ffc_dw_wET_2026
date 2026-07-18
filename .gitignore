@@ -218,6 +218,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Outputs
-
-output/
-analysis/
+#
+# Anchored to the repo root: an unanchored `analysis/` also matches at any
+# depth, which silently swallowed `plans/analysis/` (the tracked home for
+# cross-run analysis write-ups).
+/output/
+/analysis/
