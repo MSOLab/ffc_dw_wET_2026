@@ -418,9 +418,11 @@ overall CSR budget.
 the CSR / sw_cp surface:
 
 - `FFcSchedule.insert_idle_time(idle_mode=...)` — the three-branch
-  implementation (`src/ffc_ddw_sum_et/solution/ffc_schedule.py:1746/1762/1777`).
+  implementation (`src/ffc_ddw_sum_et/solution/ffc_schedule.py:1814/1830/1845`),
+  reachable only when `K == 1` (the `K > 1` gate at `:1751` `continue`s past it).
 - `coarsen_solve_reconstruct` — controller param
-  (`orchestration/controller.py:2649`) + option
+  (`orchestration/controller.py:2653`; `sw_cp` / `incremental_sw_cp` carry their
+  own at `:2305` / `:2478`, all defaulting to `"flooring"`) + option
   (`algorithm/coarsen_solve_reconstruct.py`), default `"flooring"`.
 - `SwCpOption.idle_mode` (added 2026-07-13) + controller `sw_cp` /
   `incremental_sw_cp` params + the four `csr_*` scenario keys in
@@ -438,6 +440,12 @@ hardcode `"lookahead"` and delete the field/params/scenario keys.
 At `time_factor == 1` all three modes are byte-identical, so hardcoding
 lookahead is a no-op for every non-CSR (`K == 1`) caller.
 
+> ⚠️ **This paragraph is false as of `c36fa5e`** — see the 2026-07-19 status
+> block below. At `K == 1` lookahead now differs from flooring/ceiling on
+> 132/1440 instances, so hardcoding lookahead is **not** a no-op for K==1
+> callers (whose defaults are `"flooring"`). Kept here to show what the
+> original premise was.
+
 **Why:** YAGNI once one mode wins — the knob multiplies config surface (field,
 validation, controller params, scenario keys) that must stay aligned
 (`SwCpOption.idle_mode` and both controller-step defaults are `"flooring"` as
@@ -453,7 +461,8 @@ with dropping the now-unused branches in `insert_idle_time`.
 **Status (2026-07-14):** Superseded by commit `9b7ad2a` (coarse-exact
 `insert_idle_time`). `idle_mode` now has **no effect at any `K`** — the `K > 1`
 branch is exact (the three heuristics are bypassed) and `K == 1` is
-byte-identical across modes. The knob is dead everywhere, so the
+byte-identical across modes. [**`K == 1` claim retracted 2026-07-19 — see
+below.**] The knob is dead everywhere, so the
 "validate lookahead as best on the coarse grid" premise above is moot; removal no
 longer needs a flooring-vs-lookahead comparison, only the mechanical cleanup of
 the field / params / four `csr_*` scenario keys. No-regression confirmed on the
@@ -471,6 +480,59 @@ controller+option params / four `csr_*` scenario keys / the flooring+ceiling
 branches in `insert_idle_time`). Kept (not deleted) because it still tracks real
 uncommitted code work. See `plans/experiment/20260714/coarse_exact_higher_k_validation.md`
 §"결과 (실행 후)".
+
+**Status (2026-07-19, K==1 no-op premise RETRACTED):** A deterministic
+1440-instance re-derivation (`solve=False` seed-only path, so no CP-SAT noise)
+compared today's code against the 2026-07-02 baseline
+`analysis/20260702T013931_438875/csr_idle_modes_v4_full_20260702.csv`:
+
+```bash
+uv run python scripts/dump_csr_coarse_obj.py \
+    --config metadata/20260702/csr_idle_modes_v4_config.yaml \
+    --out <out>.csv --workers 96      # ~5 min, 21600 rows
+```
+
+Two findings, pulling in opposite directions:
+
+1. **`K > 1`: confirmed fully dead.** All three modes now produce *identical*
+   `coarse_obj` on 1440/1440 instances at every `factor ∈ {2,4,8,16}` (baseline:
+   only 368–469/1440 agreed). Deleting flooring/ceiling is a genuine no-op here.
+   Incidentally this quantifies what `9b7ad2a` bought: flooring's coarse
+   objective improved by −5.59 / −5.28 / −3.76 / −1.72 % at `factor` 2/4/8/16,
+   while **lookahead was byte-identical to the new exact gate at every factor
+   (`max|diff| = 0`)** — the old lookahead heuristic was already *optimal* on
+   v4 seeds, not merely dominant.
+
+2. **`K == 1`: the modes have diverged.** Commit `c36fa5e` deliberately changed
+   the lookahead tie-break (`block_obj(db) < …` → `<=`, "prefer the larger shift
+   on objective ties"). The `K > 1` gate bypasses `idle_mode`, so this `<=`
+   survives **only at `K == 1`** — exactly where lookahead is supposed to
+   degenerate to flooring. Measured: the three modes agree on 1440/1440 in the
+   baseline but only **1308/1440** today. The 132 divergent instances carry the
+   same `coarse_obj` (it is a tie) but a different schedule, which reconstruction
+   turns into a different `recon_obj`: 82 better / 50 worse, net **−0.003 %**.
+
+   Impact: `SwCpOption.idle_mode` and both controller-step defaults are
+   `"flooring"`, as is `insert_idle_time`'s signature default — so hardcoding
+   `"lookahead"` **changes behaviour for every `K == 1` caller**, contrary to the
+   original premise. The effect is tiny and slightly favourable, but it must be
+   an explicit decision, not an assumed no-op.
+
+**Revised recommendation:** widen the exact gate from `if K > 1:` to `K >= 1`
+and delete all three branches, rather than hardcoding `"lookahead"`. This
+dissolves the tie-break question entirely and fixes a second inconsistency:
+`K == 1` currently still uses the `sum_e > sum_t` *weight-sum* gate, whereas
+`9b7ad2a`'s comment establishes that comparing **magnitudes** is what makes
+narrow due windows correct — so K==1 is presently running the weaker gate.
+
+**When to act (updated):** the flooring/ceiling half is unblocked — finding 1
+confirms they are never preferable and their removal cannot regress anything.
+Before touching `K == 1`, verify two things the measurement does not settle:
+(a) that the exact gate is genuinely optimal at `K == 1`, and (b) that its
+`O(n²)` unit-stepping is acceptable at `n = 200, K = 1` (the coarse problem is
+no longer shrunk). Note also that the seed-only dump never exercises
+CP-SAT-produced coarse schedules — which is where the original "left E/T on the
+table" warnings came from — so it bounds the *seed* impact only.
 
 ## `make_semi_active` — allow machine reassignment (time-sorted per stage)
 
