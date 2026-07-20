@@ -1,7 +1,8 @@
 # CSR coarsening rule — `ceil` → `max(round(p/K), 1)`
 
 - **Date:** 2026-07-20
-- **Status:** Phase 2 pending (Phase 0 pass, Phase 1 done)
+- **Status:** ❌ **Closed — negative result.** Phase 0 pass, Phase 1 done,
+  Phase 2 FAIL (neither `round` nor `floor` beats `ceil`; see §9)
 - **Motivating analysis:** [`../../analysis/20260720/csr_presentation_merged_reports.md`](../../analysis/20260720/csr_presentation_merged_reports.md),
 [`../../analysis/20260719/csr_init_k_budget_consolidation.md`](../../analysis/20260719/csr_init_k_budget_consolidation.md)
 - **Source:** deck TODO (`vault/20260719_p3_정리.pdf` p14, "Processing time coarsening 방식 다변화")
@@ -389,11 +390,77 @@ All three outcomes point to "proceed". Notably `floor` beats `round` at κ=16,32
 | ruff check + format | clean |
 | Test suite | 374 passed |
 
-### 2026-07-20 — Phase 2: experiment ⏳ PENDING
+### 2026-07-21 — Phase 2: experiment ❌ FAIL
 
 **Config:** `metadata/20260720/csr_coarsen_mode_T06.yaml`
 **Grid:** 16 scenarios = k=1 (ceil once) + k∈{2,4,8,16,32} × {ceil, round, floor}
 **Data:** 160-instance (T=0.6, R=0.2) subset
-**Run dir:** `output/20260720_csr_coarsen_mode/`
+**Run dir:** `output/20260720_csr_coarsen_mode/20260720T235407_177163`
+**Reproduce:** set `CONFIG_PATH` in `main.py` to the config above, `uv run main.py`
+**Cost:** 2560 runs, 12 workers, 23:54:07 → 01:10 (76 min), calop4
 
-Not yet run.
+#### Mean RPDf (%) vs `BKS_data`
+
+| κ | ceil | round | floor |
+| --- | --- | --- | --- |
+| 1 | **23.41** | — | — |
+| 2 | **34.62** | 34.97 | 35.08 |
+| 4 | 35.48 | **35.42** | 37.90 |
+| 8 | **35.06** | 36.76 | 42.47 |
+| 16 | **36.13** | 39.94 | 54.35 |
+| 32 | **43.58** | 50.75 | 70.86 |
+
+#### Paired per-instance difference vs `ceil` at the same κ (positive = worse)
+
+| κ | round mean Δ%p | W/L | floor mean Δ%p | W/L |
+| --- | --- | --- | --- | --- |
+| 2 | +0.35 | 75/85 | +0.46 | 76/84 |
+| 4 | **−0.06** | 78/82 | +2.42 | 61/99 |
+| 8 | +1.70 | 57/103 | +7.41 | 24/136 |
+| 16 | +3.81 | 49/111 | +18.22 | 2/158 |
+| 32 | +7.16 | 23/137 | +27.28 | 1/159 |
+
+#### Verdict against the §7 pre-committed criterion
+
+The criterion was: `max(round,1)` must beat `ceil` at the same κ **by more than
+the κ=1↔κ=2 gap is wide**. That gap measures **11.20 %p** here (23.41 → 34.62).
+
+`round` does not clear it — it does not beat `ceil` at all. Its only non-losing
+cell is κ=4, at −0.06 %p with 78 wins / 82 losses, which is a coin flip rather
+than an effect. `floor` loses everywhere and degrades without bound in κ.
+
+**§2's counter-evidence is confirmed: the dominant mechanism is resolution loss,
+not rounding bias.** Changing the rounding rule cannot recover the κ>1 penalty,
+so this direction is closed in favour of the deck's other TODO (ISW-CP
+batch-size tuning), exactly as §1 pre-specified.
+
+#### The Phase 0 gate was the wrong proxy — do not reuse it
+
+Phase 0 measured Kendall τ between the coarse surrogate's ranking and the true
+objective, and `round` improved it decisively (κ=8: 0.471 → 0.841; path error
+cut ~5×). **That improvement did not translate to solution quality at all** —
+`ceil` still wins κ=8 by 1.70 %p.
+
+So τ passed the gate and the experiment failed. Ranking fidelity of the coarse
+surrogate is **not** a predictor of CSR end quality, and a future plan must not
+substitute a τ-style offline proxy for a solve when deciding whether to spend
+compute. The §5 gate text is left unedited above as the record of what was
+believed beforehand.
+
+#### Open question (hypothesis, not established here)
+
+`ceil` wins *despite* the worst surrogate fidelity of the three. A plausible
+mechanism: `ceil`'s positive bias inflates processing times, so the coarse
+schedule is conservative and the original-scale reconstruction finds slack
+rather than conflict, whereas `round`/`floor` produce coarse schedules that are
+too tight. This run does not test that, and it should not be assumed.
+
+#### Consequence for the planned follow-up
+
+A 1440-instance k×f sweep on the winning mode (k∈{2,4,8} × f∈{5…30 %} × full,
+~9 h at this run's measured throughput) was under consideration. **It is not
+worth running:** there is no winning mode. The separate baseline-validity
+concern — that `output/20260720_merge_csr_k_f_sweep/20260720T171158_514111`
+predates the reconstruction fix `a6c4150` by ~3 h and is therefore void as a
+same-κ reference per §4 — is now moot for this question but still applies to any
+future comparison against that sweep.
