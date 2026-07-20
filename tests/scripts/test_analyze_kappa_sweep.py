@@ -18,7 +18,12 @@ import pandas as pd
 import pytest
 
 # scripts/ is not an importable package; load the module by path.
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "analyze_kappa_sweep.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "20260706"
+    / "analyze_kappa_sweep.py"
+)
 _spec = importlib.util.spec_from_file_location("analyze_kappa_sweep", _SCRIPT)
 assert _spec and _spec.loader
 A = importlib.util.module_from_spec(_spec)
