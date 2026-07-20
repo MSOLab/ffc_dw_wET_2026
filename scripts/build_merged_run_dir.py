@@ -38,9 +38,19 @@ the `subroutine_flow` copied from the source run's config, and run::
 
     uv run python main.py --config <that config>
 
-The instance sets of the merged scenarios must match; a mismatch aborts unless
-`--allow-instance-mismatch` is given (the reporter would otherwise emit
-placeholder rows for the instances a scenario lacks).
+The instance sets of the merged scenarios must match; a mismatch aborts, because
+the reporter would otherwise emit placeholder rows for the instances a scenario
+lacks. Two flags override that:
+
+- `--intersect-instances` symlinks only the instances common to every scenario,
+  so the merged dir *is* one grid. Prefer this when merging a full-grid run with
+  a subset run.
+- `--allow-instance-mismatch` merges the sets as they are. Note that a
+  POST_PROCESS_ONLY config's `ins_index` does **not** rescue this: it filters
+  `summary_csv` and everything derived from it, but the run-level chart writers
+  take no instance list and average over whatever is symlinked here. A superset
+  left on disk therefore reports that scenario's charts on a different instance
+  grid than its CSV rows, with nothing in the output saying so.
 """
 
 import argparse
