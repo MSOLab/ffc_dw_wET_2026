@@ -424,12 +424,103 @@ def test_coarsen_processing_times_preserves_weights_and_layout() -> None:
     assert coarsened.generation_params == instance.generation_params
 
 
-def test_coarsen_processing_times_name_has_coarsenp_suffix() -> None:
+def test_coarsen_processing_times_name_has_coarsen_k_suffix() -> None:
     instance = _make_small_instance()
 
     coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50)
 
-    assert coarsened.name == "test_instance_coarsenp50"
+    assert coarsened.name == "test_instance_coarsen_k50"
+
+
+def test_coarsen_processing_times_mode_round() -> None:
+    """``mode="round"`` → ``max(round(p/factor), 1)``."""
+    instance = _make_small_instance()
+    factor = 7
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(
+        instance, factor, mode="round"
+    )
+
+    # ceil: ceil(10/7)=2, ceil(20/7)=3, ceil(30/7)=5, ceil(40/7)=6
+    # round: round(10/7)=1, round(20/7)=3, round(30/7)=4, round(40/7)=6
+    # floor:  10//7=1,     20//7=2,      30//7=4,      40//7=5
+    expected = {
+        ("j0", "i0"): 1,
+        ("j0", "i1"): 3,
+        ("j1", "i0"): 4,
+        ("j1", "i1"): 6,
+    }
+    for (j, i), e in expected.items():
+        assert coarsened.job_2_stage_2_p_map[j][i] == e
+
+
+def test_coarsen_processing_times_mode_floor() -> None:
+    """``mode="floor"`` → ``max(p // factor, 1)``."""
+    instance = _make_small_instance()
+    factor = 7
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(
+        instance, factor, mode="floor"
+    )
+
+    expected = {
+        ("j0", "i0"): 1,
+        ("j0", "i1"): 2,
+        ("j1", "i0"): 4,
+        ("j1", "i1"): 5,
+    }
+    for (j, i), e in expected.items():
+        assert coarsened.job_2_stage_2_p_map[j][i] == e
+
+
+def test_coarsen_processing_times_mode_round_all_ge_1() -> None:
+    """mode="round": p' >= 1 for every operation, including p=1 at large factor."""
+    instance = _make_small_instance()
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50, mode="round")
+
+    for j in coarsened.job_id_list:
+        for i in coarsened.stage_id_list:
+            assert coarsened.job_2_stage_2_p_map[j][i] >= 1
+
+
+def test_coarsen_processing_times_mode_floor_all_ge_1() -> None:
+    """mode="floor": p' >= 1 even when p < factor (would floor to 0)."""
+    instance = _make_small_instance()
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 50, mode="floor")
+
+    for j in coarsened.job_id_list:
+        for i in coarsened.stage_id_list:
+            assert coarsened.job_2_stage_2_p_map[j][i] >= 1
+
+
+def test_coarsen_processing_times_invalid_mode() -> None:
+    instance = _make_small_instance()
+
+    with pytest.raises(ValueError, match="mode must be one of"):
+        FFcDDWParameters.coarsen_processing_times(instance, 7, mode="bogus")
+
+
+def test_coarsen_processing_times_mode_name_suffix() -> None:
+    instance = _make_small_instance()
+
+    assert (
+        FFcDDWParameters.coarsen_processing_times(instance, 8).name
+        == "test_instance_coarsen_k8"
+    )
+    assert (
+        FFcDDWParameters.coarsen_processing_times(instance, 8, mode="ceil").name
+        == "test_instance_coarsen_k8"
+    )
+    assert (
+        FFcDDWParameters.coarsen_processing_times(instance, 8, mode="round").name
+        == "test_instance_coarsen_k8_round"
+    )
+    assert (
+        FFcDDWParameters.coarsen_processing_times(instance, 8, mode="floor").name
+        == "test_instance_coarsen_k8_floor"
+    )
 
 
 def test_coarsen_processing_times_raises_value_error_for_zero_factor() -> None:

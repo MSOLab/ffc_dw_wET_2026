@@ -157,13 +157,15 @@ class CoarsenSolveReconstructOption(AlgOption):
     any per-call cap and the remaining global time before constructing this
     option. ``None`` means "no time cap from the caller".
 
-    ``factor`` is the coarsening divisor applied to all processing times via
-    ``ceil(p / factor)``. Due-window bounds are **preserved at original scale**
-    (since the 2026-06-30 SSOT review) and must be read together with
+    ``factor`` is the coarsening divisor applied to all processing times.
+    ``coarsen_mode`` selects the rounding rule (see
+    ``FFcDDWParameters.coarsen_processing_times``). Due-window bounds are
+    **preserved at original scale** and must be read together with
     ``time_factor=factor``.
     """
 
     factor: int = DEFAULT_COARSEN_FACTOR
+    coarsen_mode: Literal["ceil", "round", "floor"] = "ceil"
     timelimit_sec: float | None = None
     solver_thread_cnt: int = 1
     log_search_progress: bool = False
@@ -193,6 +195,11 @@ class CoarsenSolveReconstructOption(AlgOption):
         if self.idle_mode not in valid_idle:
             raise ValueError(
                 f"idle_mode must be one of {valid_idle}, got {self.idle_mode!r}"
+            )
+        valid_modes = {"ceil", "round", "floor"}
+        if self.coarsen_mode not in valid_modes:
+            raise ValueError(
+                f"coarsen_mode must be one of {valid_modes}, got {self.coarsen_mode!r}"
             )
 
 
@@ -452,7 +459,9 @@ def run_coarsen_solve_reconstruct(
     """
     build_start = time.monotonic()
 
-    coarsened = FFcDDWParameters.coarsen_processing_times(instance, option.factor)
+    coarsened = FFcDDWParameters.coarsen_processing_times(
+        instance, option.factor, mode=option.coarsen_mode
+    )
 
     logger.info(
         "run_coarsen_solve_reconstruct: instance=%s, coarsened=%s, factor=%d, "

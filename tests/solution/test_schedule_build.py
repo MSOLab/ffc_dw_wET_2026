@@ -160,7 +160,7 @@ def test_reconstruct_raw_handles_underallocated_operations() -> None:
         name="coarse_p", df=pd.DataFrame([[1, 1], [1, 1], [1, 1]])
     )
     coarsened = FFcDDWParameters(
-        name="recon_underalloc_coarsenp10",
+        name="recon_underalloc_coarsen_k10",
         job_id_list=inst.job_id_list,
         stage_id_list=inst.stage_id_list,
         stage_2_machines_map={"i0": ["i0_0", "i0_1"], "i1": ["i1_0"]},

@@ -1621,7 +1621,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self.instance.get_wxd2_job_sequence
         )
 
-    def initialize_by_eddub_twt(self, factor: int = 1) -> SubroutineReport:
+    def initialize_by_eddub_twt(
+        self,
+        factor: int = 1,
+        coarsen_mode: Literal["ceil", "round", "floor"] = "ceil",
+    ) -> SubroutineReport:
         """Step method: seed an incumbent by dispatching jobs in EDDUB+w⁺ order.
 
         Sort by ``(d⁺_j asc, w⁺_j desc, position asc)``
@@ -1636,6 +1640,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         When ``factor > 1``, the instance is coarsened (time units divided by
         ``factor``) before dispatch, then the coarse schedule is reconstructed
         onto the original scale via :func:`reconstruct_coarse_schedule`.
+        ``coarsen_mode`` selects the rounding rule (see
+        :meth:`FFcDDWParameters.coarsen_processing_times`).
         ``factor == 1`` is identical to the no-factor path.
         """
         if factor == 1:
@@ -1645,7 +1651,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         start_elapsed = time.monotonic()
 
-        coarsened = FFcDDWParameters.coarsen_processing_times(self.instance, factor)
+        coarsened = FFcDDWParameters.coarsen_processing_times(
+            self.instance, factor, mode=coarsen_mode
+        )
         coarse_sched, _coarse_obj = self._dispatch_by_reversed_sequence_with_iit(
             coarsened.get_eddub_twt_job_sequence(), instance=coarsened
         )
@@ -2644,6 +2652,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def coarsen_solve_reconstruct(
         self,
         factor: int = DEFAULT_COARSEN_FACTOR,
+        coarsen_mode: Literal["ceil", "round", "floor"] = "ceil",
         timelimit: float | str | None = None,
         solver_thread_cnt: int = 1,
         log_search_progress: bool = False,
@@ -2659,13 +2668,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """Step method: coarsen the instance, solve the base CP, and
         reconstruct to the original scale.
 
-        Coarsens all processing times and due-window bounds by ``factor``
-        via ``ceil(value / factor)``, solves the coarsened model via
-        :func:`run_coarsen_solve_reconstruct`, then inflates the raw
-        coarse start times back to original scale and restores original
-        processing times. Post-processing (``make_semi_active`` →
-        ``insert_idle_time``) and objective evaluation are done against
-        the original instance.
+        Coarsens all processing times by ``factor`` using the rule selected
+        by ``coarsen_mode`` (see
+        :meth:`FFcDDWParameters.coarsen_processing_times` for the formulas).
+        Solves the coarsened model via
+        :func:`run_coarsen_solve_reconstruct`, then reconstructs onto
+        the original scale by carrying machine assignment and per-machine
+        job order. Post-processing (``insert_idle_time``) and objective
+        evaluation are done against the original instance.
 
         ``timelimit`` is the user-specified per-call cap (absolute seconds,
         or any expression supported by :func:`resolve_value_expr`). The
@@ -2738,6 +2748,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             return self._coarsen_solve_reconstruct_via_flow(
                 start_elapsed,
                 factor=factor,
+                coarsen_mode=coarsen_mode,
                 timelimit=timelimit,
                 error_if_infeasible=error_if_infeasible,
                 seed_dispatch=seed_dispatch,
@@ -2772,6 +2783,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         option = CoarsenSolveReconstructOption(
             factor=factor,
+            coarsen_mode=coarsen_mode,
             timelimit_sec=eff_timelimit_sec,
             solver_thread_cnt=solver_thread_cnt,
             log_search_progress=log_search_progress,
@@ -2822,6 +2834,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         start_elapsed: float,
         *,
         factor: int,
+        coarsen_mode: Literal["ceil", "round", "floor"],
         timelimit: float | str | None,
         error_if_infeasible: bool,
         seed_dispatch: str,
@@ -2887,7 +2900,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         # --- coarsen + run the child controller headless ---
-        coarse_instance = FFcDDWParameters.coarsen_processing_times(instance, factor)
+        coarse_instance = FFcDDWParameters.coarsen_processing_times(
+            instance, factor, mode=coarsen_mode
+        )
         child = FFcDDWSubroutineController(
             instance=coarse_instance,
             subroutine_flow=solve_flow_list,

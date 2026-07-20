@@ -5,7 +5,7 @@ import statistics as _statistics
 from dataclasses import dataclass
 from functools import cached_property
 from io import StringIO
-from typing import Self, TextIO
+from typing import Literal, Self, TextIO
 
 import numpy as np
 
@@ -280,21 +280,30 @@ class FFcDDWParameters(FFcParameters):
         )
 
     @classmethod
-    def coarsen_processing_times(cls, instance: FFcParameters, factor: int) -> Self:
+    def coarsen_processing_times(
+        cls,
+        instance: FFcParameters,
+        factor: int,
+        mode: Literal["ceil", "round", "floor"] = "ceil",
+    ) -> Self:
         """Return a new FFcDDWParameters with processing times coarsened by
-        ``factor`` using ceiling division, while preserving the original due
-        windows.
+        ``factor``, while preserving the original due windows.
 
-        Every processing time ``p`` becomes ``ceil(p / factor)``, which is >= 1
-        when the original ``p > 0``.  Due window bounds are **preserved at the
-        original scale** and must be interpreted together with
-        ``time_factor=factor`` when evaluating the coarsened instance.  The
-        ``lower <= upper`` invariant is preserved because processing times are
-        independently ceiling-divided and the per-job window bounds are kept
-        unchanged.
+        ``mode`` selects the rounding rule:
 
-        Weights, job/stage/machine layout, and generation_params are preserved.
-        The new instance name is ``f"{instance.name}_coarsenp{factor}"``.
+        - ``"ceil"``  → ``ceil(p / factor)`` (current default)
+        - ``"round"`` → ``max(round(p / factor), 1)``
+        - ``"floor"`` → ``max(p // factor, 1)``
+
+        All formulas guarantee ``p' >= 1`` when ``p >= 1``, so no
+        zero-length operations are produced. Due window bounds are
+        **preserved at the original scale** and must be interpreted
+        together with ``time_factor=factor``.
+
+        Weights, job/stage/machine layout, and generation_params are
+        preserved.  The new instance name is
+        ``"{instance.name}_coarsen_k{factor}"`` when ``mode="ceil"``,
+        otherwise ``"{instance.name}_coarsen_k{factor}_{mode}"``.
 
         Scale-consistency invariant (caller's responsibility): the coarsened
         instance carries coarse processing times but original due windows.
@@ -305,16 +314,22 @@ class FFcDDWParameters(FFcParameters):
 
         Args:
             instance: Source FFcDDWParameters instance.
-            factor: Positive integer divisor; typically 50 for the
-                coarsen_solve_reconstruct experiment.
+            factor: Positive integer divisor.
+            mode: Rounding rule for ``p → p'``.
 
         Raises:
             TypeError: If ``instance`` is not an FFcDDWParameters.
-            ValueError: If ``factor <= 0``.
+            ValueError: If ``factor <= 0`` or ``mode`` is not one of
+                the recognised values.
 
         Returns:
             Self: A new coarsened FFcDDWParameters instance.
         """
+        _valid_modes = {"ceil", "round", "floor"}
+        if mode not in _valid_modes:
+            raise ValueError(
+                f"mode must be one of {sorted(_valid_modes)}, got {mode!r}"
+            )
         if not isinstance(instance, FFcDDWParameters):
             raise TypeError(
                 f"{cls.__name__}.coarsen_processing_times requires FFcDDWParameters, "
@@ -323,7 +338,13 @@ class FFcDDWParameters(FFcParameters):
         if factor <= 0:
             raise ValueError(f"factor must be a positive integer; got {factor!r}.")
 
-        new_df = np.ceil(instance.p_manager.df.copy() / factor).astype(int)
+        df = instance.p_manager.df.copy()
+        if mode == "ceil":
+            new_df = np.ceil(df / factor).astype(int)
+        elif mode == "round":
+            new_df = np.maximum(np.round(df / factor), 1).astype(int)
+        else:
+            new_df = np.maximum(df // factor, 1)
         new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)
 
         # Preserve original due windows — caller interprets with time_factor.
@@ -333,8 +354,13 @@ class FFcDDWParameters(FFcParameters):
             s: list(instance.stage_2_machines_map[s]) for s in instance.stage_id_list
         }
 
+        name = (
+            f"{instance.name}_coarsen_k{factor}"
+            if mode == "ceil"
+            else f"{instance.name}_coarsen_k{factor}_{mode}"
+        )
         return cls(
-            f"{instance.name}_coarsenp{factor}",
+            name,
             list(instance.job_id_list),
             list(instance.stage_id_list),
             new_stage_2_machines_map,

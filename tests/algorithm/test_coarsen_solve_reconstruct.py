@@ -128,10 +128,16 @@ def test_idle_mode_invalid_rejected() -> None:
         CoarsenSolveReconstructOption(idle_mode="turbo")  # type: ignore[arg-type]
 
 
+def test_coarsen_mode_invalid_rejected() -> None:
+    with pytest.raises(ValueError, match="coarsen_mode"):
+        CoarsenSolveReconstructOption(coarsen_mode="bogus")  # type: ignore[arg-type]
+
+
 def test_valid_option_defaults_accepted() -> None:
     opt = CoarsenSolveReconstructOption()
     assert opt.seed_dispatch == "mixed"
     assert opt.idle_mode == "flooring"
+    assert opt.coarsen_mode == "ceil"
 
 
 def test_all_valid_seed_dispatch_values_accepted() -> None:
@@ -144,6 +150,12 @@ def test_all_valid_idle_mode_values_accepted() -> None:
     for mode in ("flooring", "ceiling", "lookahead"):
         opt = CoarsenSolveReconstructOption(idle_mode=mode)
         assert opt.idle_mode == mode
+
+
+def test_all_valid_coarsen_mode_values_accepted() -> None:
+    for mode in ("ceil", "round", "floor"):
+        opt = CoarsenSolveReconstructOption(coarsen_mode=mode)
+        assert opt.coarsen_mode == mode
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +384,7 @@ def test_run_metrics_coarsened_instance_name() -> None:
 
     assert record.result is not None
     assert record.result.metrics is not None
-    expected_name = f"{instance.name}_coarsenp{factor}"
+    expected_name = f"{instance.name}_coarsen_k{factor}"
     assert record.result.metrics["coarsened_instance_name"] == expected_name
 
 
