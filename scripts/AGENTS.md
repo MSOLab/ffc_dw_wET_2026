@@ -505,6 +505,109 @@ uv run python scripts/20260718/analyze_p_sweep.py \
 
 ---
 
+### 20260719/analyze_csr_init_methods.py
+
+Phase 1 of the CSR 3-phase analysis
+(`plans/analysis/20260719/csr_triple_analysis_plan.md`): ranks 10 init scenarios
+(5 init approaches × 2 NEH priorities + baselines) on the full 1440-instance
+grid. Emits the overall ranking, five paired key comparisons, the **(T, R) 3×3
+cell decomposition** with per-cell winners and unique-best counts, and an
+**oracle portfolio table** (per-instance `min` over every 2- and 3-subset, plus
+marginal contributions). Also emits the 160-instance secondary table carrying
+`csr_fmm_base`.
+
+Reads `<ts>_rpdf_comparison.csv` and uses `RPDf_BKS_data` verbatim; the loader
+and the oracle helpers are imported from `analyze_dispatch_sweep.py` rather than
+re-derived.
+
+```bash
+uv run python scripts/20260719/analyze_csr_init_methods.py    # analysis/20260719_csr_init/
+```
+
+> **Two caveats the numbers do not carry themselves.** (1) Every scenario is a
+> single-step init flow spending ~25 % of the `0.09nc` cap, so these measure
+> **init quality**, not final solution quality. (2) All `csr_*` scenarios are
+> **K=4** (`metadata/20260713/csr_init_methods.yaml`, `factor: 4`) — the
+> inner-flow verdict here is a K=4 verdict and reverses at K≤2 (see the K-range
+> script). Portfolio numbers are **oracle bounds at k × budget**, not runnable.
+
+### 20260719/analyze_csr_k_range.py
+
+Phase 2 of the same analysis: mean RPDf vs coarsening factor
+K ∈ {1,2,4,8,16,32} at a fixed f=25 % budget, per init flow.
+
+Two views are kept in **separate frames on purpose**: `csr_{full,neh}_d2wp_k{2,4,8}`
+exists in *both* the 1440-instance `full_grid_k248` run and the 160-instance
+`higher_k_validation` run, so concatenating them would double-count K=2,4,8.
+(`analyze_kappa_sweep.load_runs` cannot be used here for the same reason — it
+raises on a scenario appearing in more than one run.) The script refuses any
+source that does not cover its expected grid, which rejects the 2-instance
+smoke-test run `20260715T175237_658738`.
+
+```bash
+uv run python scripts/20260719/analyze_csr_k_range.py         # analysis/20260719_csr_k/
+```
+
+> Conclusion (`plans/analysis/20260719/csr_init_k_budget_consolidation.md`):
+> **coarsening hurts at equal budget** — K=1 wins, `full` is monotone worsening
+> in K (K=1 beats K=2 by ~20 %p), `neh` is flat over K∈{1,2} then worsens, and
+> K=32 is catastrophic. Best measured triple: `(csr_full_d2wp, K=1, f=30 %)`.
+
+### 20260719/analyze_csr_equal_budget.py
+
+The **equal-budget** read of the CSR budget sweep: at a *fixed* f, which
+`(flow, K)` setting wins? Reads each f-column **vertically**, which is the
+comparison that discriminates between settings — "which f is best?" is trivially
+answered by the largest f measured and says nothing about the algorithm.
+
+`analyze_csr_tl_scaling_sweep.py` already prints the setting × f table (its block
+1.5); this script adds what is needed to judge how *decisive* each column is: the
+winner→runner-up gap in %p, a per-instance **paired win/tie/loss** for that pair,
+and a stability check over all (slice × f) columns. The paired test is not
+redundant with the gap — see the T=0.6 finding below.
+
+```bash
+uv run python scripts/20260719/analyze_csr_equal_budget.py   # analysis/20260719_csr_budget_sweep/
+```
+
+> Conclusion: `F_k1` (`csr_full_d2wp`, K=1) wins **all 18 (slice × f) columns**,
+> so the setting choice is budget-independent over f ∈ [5, 30] %. **But the
+> dominance erodes with budget on hard instances**: on T=0.6 the gap falls
+> 17.70 → 2.17 %p from f=5 to f=30, and at f=30 `F_k1` wins the mean while
+> *losing* the per-instance count **233/0/247**. Quote that exception alongside
+> the headline; a crossover past f=30 % is plausible and untested.
+
+### 20260719/analyze_csr_vs_baseline.py
+
+Answers "is CSR better than the initialization we already had?" — the best CSR
+setting (`csr_full_d2wp`, **K=1**) against the existing methods (`mcf_lb_fmm`,
+`neh`, and their budget-matched `_25p` variants) at **matched budget**.
+
+Phase 1 (`analyze_csr_init_methods.py`) already compares these, but only against
+CSR at **K=4**, which Phases 2–3 showed is far from best. This script redoes it
+at the K that actually wins. The baseline family spans f ≈ 0/10/25/30 on its own,
+so CSR is met head-to-head at three of its six budget points and **no new
+baseline sweep is needed**; f = 5/15/20 have no comparator and are skipped.
+
+Budget parity is verified on measured `elapsedTime`, not assumed. Emits the
+overall/T=0.6/(0.6,0.2) comparison plus a full **(T, R) cell view**, which is the
+test that matters: at K=4 `mcf_lb_fmm_25p` wins 3 of 9 cells outright.
+
+```bash
+uv run python scripts/20260719/analyze_csr_vs_baseline.py   # analysis/20260719_csr_init/
+```
+
+> Conclusion: **CSR K=1 beats every existing init method at matched budget, in
+> every slice, and in all 9 (T,R) cells** — `mcf_lb_fmm` −40.33 %p,
+> `mcf_lb_fmm_25p` −49.67, `neh_25p` −35.83, `neh` −34.79. The 3-cell loss at
+> K=4 is a K artifact and does not survive. Starved to **f=5 %** it still
+> dominates the mcf_lb family in all 9 cells at 4.8× less budget — but against
+> the NEH family it then **loses the whole R=1.0 column** (4/9 cells, paired
+> 628/83/729 vs `neh`). Its −2.67 %p mean there is a big win at R=0.2 cancelling
+> a big loss at R=1.0, so that diagonal comparison is parity, not victory.
+
+---
+
 ## 5. Experiment Config Validation
 
 ### validate_resume_config.py

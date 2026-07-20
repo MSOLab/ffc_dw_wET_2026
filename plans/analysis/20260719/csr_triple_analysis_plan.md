@@ -1,6 +1,7 @@
 # CSR 3-Phase Analysis Plan
 
-**Date:** 2026-07-19 · **Status:** Phases 1–3 planned (not yet executed);
+**Date:** 2026-07-19 · **Status:** **Phases 1–3 executed** — conclusions in
+[`csr_init_k_budget_consolidation.md`](csr_init_k_budget_consolidation.md);
 **Appendix A executed** (`insert_idle_time` before/after)
 
 ---
@@ -534,6 +535,68 @@ schedule, which reconstruction turns into a different `recon_obj`: 82 better /
 One entry per execution, newest last. Artifacts live under
 `output/20260719_csr_analysis/<timestamp>/` (gitignored — these entries are the
 tracked record).
+
+### `20260719` — Phases 1–3 executed
+
+All three phases ran on 2026-07-19. Conclusions, tables and follow-ups live in
+[`csr_init_k_budget_consolidation.md`](csr_init_k_budget_consolidation.md);
+this entry records only what was run and where the artifacts are.
+
+| phase | script | artifacts (gitignored) |
+| --- | --- | --- |
+| 1 | `scripts/20260719/analyze_csr_init_methods.py` (new) | `analysis/20260719_csr_init/` |
+| 2 | `scripts/20260719/analyze_csr_k_range.py` (new) | `analysis/20260719_csr_k/` |
+| 3 | `scripts/analyze_csr_tl_scaling_sweep.py` (existing) + `scripts/20260719/analyze_csr_equal_budget.py` (new) | `analysis/20260719_csr_budget_sweep/` |
+
+Headline: **at every fixed budget f, `csr_full_d2wp` at K=1 is the best setting**
+(winner in all 18 slice × f columns) — coarsening does not pay at equal budget,
+the CSR *inner flow* is what carries the gain, and `d2wp` beats `wdp` decisively
+(so the pre-commitment was sound). Three corrections to the plan's framing
+surfaced during execution:
+
+- **Phase 1 is a `K = 4` result** — every `csr_*` scenario in
+  `metadata/20260713/csr_init_methods.yaml` carries `factor: 4`. The plan did not
+  state this, and it matters: Phase 1's inner-flow verdict (`neh` wins) is a K=4
+  verdict, which Phases 2–3 show reverses at K≤2. The phases do not conflict;
+  they measure different K.
+- **The `(T,R)` decomposition changed a headline.** `mcf_lb_fmm_25p` ranks 5th of
+  10 overall and loses the equal-budget A/B by 23.5 %p, yet is the outright
+  winner in 3 of the 9 cells (all low-R) and the single most valuable portfolio
+  partner (+12.42 %p oracle). The plan's insistence that a 1440-mean is not
+  sufficient grounds for discarding a method was load-bearing, not a formality.
+
+- **Phase 3's question was posed the wrong way round.** §Phase 3 asks "where does
+  RPDf bottom out, and what is the marginal value of each +5 %p?" — but more
+  budget is monotonically better, so "best f" is always the largest f measured
+  and is a fact about the sweep's range, not the algorithm. The discriminating
+  read is the transpose: **fix f (= fix cost) and rank the settings down the
+  column.** `analyze_csr_tl_scaling_sweep.py`'s own docstring says this;
+  `analyze_csr_equal_budget.py` was added to answer it directly, with
+  winner→runner-up gaps and paired tests. Consolidation Q4 is now written that
+  way, and the marginal-Δ reading demoted to a secondary "budget efficiency"
+  note.
+
+`csr_fmm_base` verdict: **worse by 31.5 %p despite +40 % budget** (paired
+2/0/158) — the *a fortiori* argument holds, no budget-matched re-run needed.
+
+One caveat that the equal-budget read surfaced and the original framing would
+have hidden: **`F_k1`'s dominance erodes as f grows on hard instances.** On
+T=0.6 the winner→runner-up gap falls 17.70 → 10.15 → 2.17 %p at f=5/15/30, and
+at f=30 `F_k1` wins the mean while *losing* the per-instance count 233/0/247. A
+crossover just past f=30 % is plausible and untested — so "K=1 always wins" is
+budget-bounded, not general.
+
+**vs the existing initialization methods** (`analyze_csr_vs_baseline.py`, added
+after the first pass): the plan's §"The baselines already span part of the budget
+axis" is right that no baseline sweep is needed — `mcf_lb_fmm` / `neh` / `_25p`
+cover f ≈ 0/10/25/30. But Phase 1 only ever met them at **K=4**. Redone at K=1
+and matched on measured wall-clock, **CSR beats every existing method in every
+slice and in all 9 (T,R) cells** (`mcf_lb_fmm` −40.33 %p, `mcf_lb_fmm_25p`
+−49.67, `neh_25p` −35.83, `neh` −34.79), and needs **~5× less budget to match
+`neh`**. This also retracts the "uneven advantage" caveat above: at K=1 the
+3-cell loss to `mcf_lb_fmm_25p` disappears entirely. Honest limit: at f=5 % vs
+the NEH family CSR wins the mean but loses the per-instance count (628/83/729),
+so that particular diagonal comparison is parity, not victory.
 
 ### `20260719T223053` — `insert_idle_time` deterministic re-dump
 
