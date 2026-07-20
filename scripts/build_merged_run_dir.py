@@ -84,6 +84,12 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="permit scenarios whose instance sets differ",
     )
+    parser.add_argument(
+        "--intersect-instances",
+        action="store_true",
+        help="symlink only the instances present in EVERY scenario, so the "
+        "merged dir holds one common grid (implies --allow-instance-mismatch)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser.parse_args()
 
@@ -116,6 +122,7 @@ def build_merged_run_dir(
     run_id: str | None = None,
     *,
     allow_instance_mismatch: bool = False,
+    intersect_instances: bool = False,
 ) -> Path:
     """Create the synthetic run dir and return its path."""
     pairs = [_split_label(spec) for spec in specs]
@@ -137,19 +144,48 @@ def build_merged_run_dir(
         if not names:
             raise ValueError(f"scenario {label!r} holds no {INSTANCE_GLOB} subdirs")
 
-    reference_label, reference = next(iter(instance_sets.items()))
-    for label, names in instance_sets.items():
-        if names == reference:
-            continue
-        missing = sorted(reference - names)[:3]
-        extra = sorted(names - reference)[:3]
-        message = (
-            f"instance set of {label!r} differs from {reference_label!r} "
-            f"(missing e.g. {missing}, extra e.g. {extra})"
-        )
-        if not allow_instance_mismatch:
-            raise ValueError(message + "; pass --allow-instance-mismatch to proceed")
-        logger.warning("%s", message)
+    # The run-level chart writers (`write_post_run_subroutine_chart_artifacts`)
+    # take no instance list — they discover instances by walking the run dir.
+    # A POST_PROCESS_ONLY config's `ins_index` therefore filters `summary_csv`
+    # and everything derived from it, but NOT the scatter / flow-comparison
+    # HTMLs, which average over whatever is symlinked here. Keeping a superset
+    # on disk silently reports that scenario on a different instance grid than
+    # the CSVs, so `--intersect-instances` makes the directory itself the one
+    # common grid rather than relying on a downstream filter.
+    keep: set[str] | None = None
+    if intersect_instances:
+        keep = set.intersection(*instance_sets.values())
+        if not keep:
+            raise ValueError(
+                "--intersect-instances: the scenarios share no common instance"
+            )
+        for label, names in sorted(instance_sets.items()):
+            dropped = len(names) - len(keep)
+            if dropped:
+                logger.info(
+                    "%s: keeping %d of %d instances (%d outside the common grid)",
+                    label,
+                    len(keep),
+                    len(names),
+                    dropped,
+                )
+    else:
+        reference_label, reference = next(iter(instance_sets.items()))
+        for label, names in instance_sets.items():
+            if names == reference:
+                continue
+            missing = sorted(reference - names)[:3]
+            extra = sorted(names - reference)[:3]
+            message = (
+                f"instance set of {label!r} differs from {reference_label!r} "
+                f"(missing e.g. {missing}, extra e.g. {extra})"
+            )
+            if not allow_instance_mismatch:
+                raise ValueError(
+                    message + "; pass --allow-instance-mismatch or "
+                    "--intersect-instances to proceed"
+                )
+            logger.warning("%s", message)
 
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%dT%H%M%S_%f")
@@ -168,7 +204,11 @@ def build_merged_run_dir(
         target = run_dir / label
         target.mkdir()
         resolved = scenario_dir.resolve()
-        instance_dirs = sorted(p for p in resolved.glob(INSTANCE_GLOB) if p.is_dir())
+        instance_dirs = sorted(
+            p
+            for p in resolved.glob(INSTANCE_GLOB)
+            if p.is_dir() and (keep is None or p.name in keep)
+        )
         for instance_dir in instance_dirs:
             (target / instance_dir.name).symlink_to(instance_dir)
         logger.info("%s -> %s (%d instances)", label, scenario_dir, len(instance_dirs))
@@ -188,6 +228,7 @@ def main() -> int:
             args.dest,
             args.run_id,
             allow_instance_mismatch=args.allow_instance_mismatch,
+            intersect_instances=args.intersect_instances,
         )
     except (FileNotFoundError, FileExistsError, ValueError) as exc:
         logger.error("%s", exc)
