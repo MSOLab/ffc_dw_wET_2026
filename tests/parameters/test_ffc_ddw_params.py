@@ -495,6 +495,22 @@ def test_coarsen_processing_times_mode_floor_all_ge_1() -> None:
             assert coarsened.job_2_stage_2_p_map[j][i] >= 1
 
 
+@pytest.mark.parametrize("mode", ["ceil", "round", "floor"])
+def test_coarsen_processing_times_factor_1_is_identity(mode: str) -> None:
+    """κ=1 is the identity for every rounding mode.
+
+    ``ceil(p/1) == round(p/1) == p//1 == p``, so a CSR step configured with
+    ``factor=1`` does no coarsening at all — it is only the harvest-and-argmin
+    wrapper around a sub-budgeted solve flow.  Pinning this keeps the negative
+    κ>1 coarsening result from being read as applying to κ=1.
+    """
+    instance = _make_small_instance()
+
+    coarsened = FFcDDWParameters.coarsen_processing_times(instance, 1, mode=mode)
+
+    assert coarsened.job_2_stage_2_p_map == instance.job_2_stage_2_p_map
+
+
 def test_coarsen_processing_times_invalid_mode() -> None:
     instance = _make_small_instance()
 

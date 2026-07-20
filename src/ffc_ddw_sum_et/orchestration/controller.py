@@ -2460,6 +2460,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         solver_thread_cnt: int = 1,
         batch_size: int | float | str = "m",
+        extra_batch_size_expr: int | float | str | None = None,
         step_size: int = 1,
         unfixed_batch_count_min: int = 1,
         unfixed_batch_count_max: int = 1,
@@ -2492,6 +2493,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``unfixed_batch_count_max`` is clamped to the instance's actual batch
         count (``ceil(job_count / batch_size)``) so that iterations above
         ``batch_count`` — which are guaranteed dispatcher no-ops — are skipped.
+
+        ``extra_batch_size_expr`` is an additive offset on the resolved
+        ``batch_size``, mirroring ``neh_cp``'s parameter of the same name.
+        :func:`resolve_value_expr` has no arithmetic grammar, so ``"m+2"``
+        does not parse; express it as ``batch_size="m"`` plus
+        ``extra_batch_size_expr=2``. The sum is floored at 1.
 
         For each ``count`` in ``[unfixed_batch_count_min, effective_max]``:
 
@@ -2530,24 +2537,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         instance = self.instance
-        batch_size_resolved = max(
-            1,
-            int(
-                math.ceil(
-                    resolve_value_expr(
-                        batch_size,
-                        instance.job_count,
-                        instance.stage_count,
-                        instance.last_stage_mc_count,
-                    )
-                )
-            ),
-        )
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+        batch_size_resolved = int(math.ceil(resolve_value_expr(batch_size, n, c, m)))
+        if extra_batch_size_expr is not None:
+            extra = resolve_value_expr(extra_batch_size_expr, n, c, m)
+            if extra is not None:
+                batch_size_resolved += int(extra)
+        batch_size_resolved = max(1, batch_size_resolved)
         self.logger.info(
-            "incremental_sw_cp: batch_size=%r -> %d (m=%d)",
+            "incremental_sw_cp: batch_size=%r (+%r) -> %d (m=%d)",
             batch_size,
+            extra_batch_size_expr,
             batch_size_resolved,
-            instance.last_stage_mc_count,
+            m,
         )
 
         base_kwargs = dict(
