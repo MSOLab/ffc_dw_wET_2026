@@ -2,15 +2,18 @@
 
 Coarsens a ``FFcDDWParameters`` instance by ``factor``, applies a warm-start
 hint from an EDD-based dispatch seed before solving the coarsened model with
-the base CP-SAT (``BaseModelBuilder``), then reconstructs the raw coarse
-start/end times back to the original scale:
+the base CP-SAT (``BaseModelBuilder``), then reconstructs the coarse solution
+back to the original scale by carrying its **machine assignment and per-machine
+job order** and re-deriving times from the original processing times:
 
-    reconstructed_start[j,i] = coarse_start[j,i] * factor
-    reconstructed_end[j,i]   = reconstructed_start[j,i] + original_p[j,i]
+    start[j,i] = max(end[j,i-1], machine_end[k])   # k = coarse assignment
+    end[j,i]   = start[j,i] + original_p[j,i]
+
+See ``solution.schedule_build.reconstruct_raw_coarse_schedule`` for why the
+coarse *times* are not carried.
 
 The dispatch seed strategy is selected via ``seed_dispatch`` (``"job_wise"``,
-``"mixed"``, ``"v3"``, or ``"v4"``). Post-processing (``make_semi_active`` →
-``insert_idle_time``)
+``"mixed"``, ``"v3"``, or ``"v4"``). Post-processing (``insert_idle_time``)
 and objective evaluation (``compute_weighted_earliness_tardiness``) are done
 against the **original** instance, so metrics reflect the original problem scale.
 
@@ -154,8 +157,10 @@ class CoarsenSolveReconstructOption(AlgOption):
     any per-call cap and the remaining global time before constructing this
     option. ``None`` means "no time cap from the caller".
 
-    ``factor`` is the coarsening divisor applied to all processing times and
-    due-window bounds via ``ceil(value / factor)``.
+    ``factor`` is the coarsening divisor applied to all processing times via
+    ``ceil(p / factor)``. Due-window bounds are **preserved at original scale**
+    (since the 2026-06-30 SSOT review) and must be read together with
+    ``time_factor=factor``.
     """
 
     factor: int = DEFAULT_COARSEN_FACTOR
@@ -207,7 +212,7 @@ class CoarsenSolveReconstructTrace:
 
     # Schedules (None when no solution)
     final_schedule: FFcSchedule | None
-    """Post-processed schedule on original scale (make_semi_active + insert_idle_time)."""
+    """Post-processed schedule on original scale (raw reconstruction + insert_idle_time)."""
     coarse_schedule: FFcSchedule | None
     """Coarsened-scale schedule as returned by the CP-SAT solver."""
     reconstructed_raw_schedule: FFcSchedule | None
