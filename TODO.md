@@ -84,7 +84,7 @@ These keep things working but the underlying layering is still wrong.
 
 **Proposed clean decomposition:**
 
-```
+```txt
 _typing/        # leaf — NumericTV, ScalarTV, numeric_type_set
 _data/          # uses _typing — DfManager, Table2DManager
 _parser/        # leaf — TextDataParser
@@ -579,41 +579,3 @@ fixed-assignment left-shift achieves (e.g. tightening makespan/E-T beyond the
 current polish), or when the CSR reconstruct's dependence on
 `build_schedule_from_op_starts` for reassignment is folded back into
 `make_semi_active` so the two share one time-sorted assignment implementation.
-
-## CSR cp_gap report orphaned by `csr_cp_trajectory` deprecation
-
-The `csr_cp_trajectory` deprecation
-(`plans/analysis/20260721/csr_inner_progress_log.md` §8.4(5)) removed the coarse
-step-endpoint artifact but left its downstream consumer — the CSR **cp_gap**
-report — wired into the live post-run path. `collect_cp_gap_rows`
-(`orchestration/post_run_pivot.py`) is now a deprecated stub returning an empty
-DataFrame, so `build_cp_gap_comparison_df` → `write_cp_gap_artifacts` (still
-called from `orchestration/reporting.py`) **silently writes nothing**: the
-`cp_gap_comparison_csv` / `cp_gap_dashboard` artifacts and
-`scripts/build_cp_gap_report.py` all now produce empty output. No crash (tests
-green), but a live report is permanently blank.
-
-The inputs cp_gap needs (coarse UB, coarse LB per instance) are exactly what the
-replacement artifact `csr_inner_obj_log_json` already carries — `obj_value` is
-the coarse UB, `obj_bound` the coarse LB — so the gap is recomputable from its
-endpoints.
-
-**Change (if acted on):** decide **migrate vs remove**.
-- *Migrate:* rewrite `collect_cp_gap_rows` to read each instance's
-  `csr_inner_obj_log_json` endpoints instead of the removed
-  `*_csr_cp_trajectory.json`, restoring the report on the new data source.
-- *Remove:* drop the live `write_cp_gap_artifacts` call in `reporting.py`, the
-  now-stub `compute_cp_gaps` / `collect_cp_gap_rows` / `build_cp_gap_comparison_df`
-  / `write_cp_gap_artifacts` chain, the `cp_gap_*` artifact keys, and
-  `scripts/build_cp_gap_report.py`.
-
-**Why:** the report works only by accident (it no longer errors, but it conveys
-nothing). Deferred because whether the coarse CP UB/LB gap is still a wanted
-diagnostic is a product question, not a mechanical one — the deprecation plan
-(§8.4(5)) scoped only the artifact itself, not this consumer.
-
-**When to act:** when the coarse CP optimality-gap diagnostic is wanted again
-(→ migrate), or when tidying the post-run reporting path and the empty cp_gap
-artifacts become confusing (→ remove). Either way, update
-`scripts/build_cp_gap_report.py`'s docstring, which was corrected to note the
-deprecation in the meantime.

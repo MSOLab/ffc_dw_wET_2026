@@ -1,6 +1,6 @@
 """Tests for post_run_pivot builder functions.
 
-Covers compute_cp_gaps, _merge_instance_meta, and build_rpdf_comparison_df.
+Covers _merge_instance_meta and build_rpdf_comparison_df.
 """
 
 from pathlib import Path
@@ -11,35 +11,7 @@ import pytest
 from ffc_ddw_sum_et.orchestration.post_run_pivot import (
     _merge_instance_meta,
     build_rpdf_comparison_df,
-    compute_cp_gaps,
 )
-
-# --- compute_cp_gaps ---
-
-
-class TestComputeCpGaps:
-    @pytest.mark.parametrize(
-        "ub,lb,expected",
-        [
-            (None, 0, (None, None)),
-            (None, 50, (None, None)),
-            # lb is None (no bound logged): both gaps undefined, must not raise.
-            (100, None, (None, None)),
-            (0, None, (None, None)),
-            (0, 0, (0.0, 0.0)),
-            (100, 40, (1.5, 0.6)),
-            (100, 0, (None, 1.0)),
-            (50, 25, (1.0, 0.5)),
-            (200, 50, (3.0, 0.75)),
-        ],
-    )
-    def test_compute_cp_gaps(self, ub, lb, expected):
-        assert compute_cp_gaps(ub, lb) == expected
-
-    def test_compute_cp_gaps_lb_negative(self):
-        # Negative LB is unusual but should still compute
-        assert compute_cp_gaps(100, -10) == ((100 - (-10)) / (-10), (100 - (-10)) / 100)
-
 
 # --- _merge_instance_meta ---
 

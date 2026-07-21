@@ -753,7 +753,6 @@ class FFcDDWReporter:
         self._write_statistics_yaml()
         self._write_excel_report()
         self._write_post_run_pivot_artifacts()
-        self._write_cp_gap_artifacts()
         self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
         self._generate_progress_plots()
@@ -775,27 +774,6 @@ class FFcDDWReporter:
             layout=self.layout,
             hybrid_match_csv=self.ins_index_source,
             bks_table_csv=self.bks_table_csv_path,
-        )
-
-    def _write_cp_gap_artifacts(self) -> None:
-        """Emit CSR CP gap comparison CSV + PivotTable.js dashboard.
-
-        Skips silently when trajectory files are absent (non-CSR runs).
-        """
-        from .post_run_pivot import write_cp_gap_artifacts
-
-        if not self.ins_index_source or not self.ins_index_source.exists():
-            return
-        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
-            return
-
-        run_root = Path(self.layout.run_dir())
-        write_cp_gap_artifacts(
-            run_root,
-            self.layout,
-            self.ins_index_source,
-            self.bks_table_csv_path,
-            init_filter="v3",
         )
 
     def _write_post_run_subroutine_chart_artifacts(self) -> None:
