@@ -27,7 +27,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260721/csr_coarsen_mode_T06_2.yaml")
+CONFIG_PATH = Path("metadata/20260721/csr_k_f_cumulative.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
