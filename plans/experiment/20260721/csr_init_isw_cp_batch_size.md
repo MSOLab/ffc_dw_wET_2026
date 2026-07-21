@@ -1,8 +1,10 @@
 # Replace the initializer with CSR κ=1, then widen the ISW-CP batch
 
 - **Date:** 2026-07-21
-- **Status:** code change and config done (§9); the 1440-grid run has not been
-  launched
+- **Status:** DONE — run complete, proposal FAILS. See
+  [`../../analysis/20260721/csr_init_isw_batch_result.md`](../../analysis/20260721/csr_init_isw_batch_result.md).
+  A (unmodified C5) is the best arm; `m+2` batch widening is a uniform +2.54 %p
+  loss. Next: rerun CSR κ=1 init at batch `m` (§7 gate).
 - **Predecessor:** [`../20260720/csr_coarsening_rounding_modes.md`](../20260720/csr_coarsening_rounding_modes.md)
   — closed the coarsening direction (κ>1 loses under every rounding rule)
 - **Baseline plan:** [`../20260517/ablation_ladder_plan.md`](../20260517/ablation_ladder_plan.md)
@@ -317,3 +319,13 @@ This smoke is also where the §5 budget correction came from — ISW-CP runs to 
 wall clock in every arm and `solve_base_model_cpsat` is opportunistic. Pre-existing
 C5 behaviour, not caused by the change; the plan's wording was corrected rather
 than the code.
+
+**2026-07-21 — full run complete, proposal FAILS.**
+`output/20260721_csr_init_isw_batch/20260721T015603_278451` (run setting
+`9fb8868`; 5760 rows, 0 errors, wall 10:15:15). Pooled mean RPDf: **A −11.22**
+(best), B30 −9.85, B20 −8.84, C −8.69. Both proposal arms lose to A (`B20−A`
++2.39, `B30−A` +1.37). The `m+2` batch widening is the culprit: `C−A` = +2.54 %p,
+uniform across n and T; the CSR κ=1 init swap at fixed batch is neutral-to-helpful
+(`B30−C` −1.16). §3's 13 %p initializer margin is erased downstream exactly as §7
+predicted. Full analysis, gate reading, and the recommended `batch=m` follow-up:
+[`../../analysis/20260721/csr_init_isw_batch_result.md`](../../analysis/20260721/csr_init_isw_batch_result.md).
