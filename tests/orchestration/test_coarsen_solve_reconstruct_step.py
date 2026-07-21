@@ -298,9 +298,7 @@ def test_emit_phase_schedules_true_draws_three_snapshots_no_trajectory(
 
     controller._register = permissive_register  # type: ignore[method-assign]
 
-    controller.coarsen_solve_reconstruct(
-        emit_phase_schedules=True, draw_cp_trajectory=False
-    )
+    controller.coarsen_solve_reconstruct(emit_phase_schedules=True)
 
     assert len(controller.csr_phase_schedules) == 3, (
         f"Expected 3 phase snapshots; got {len(controller.csr_phase_schedules)}"
@@ -327,73 +325,16 @@ def test_emit_phase_schedules_true_draws_three_snapshots_no_trajectory(
         f"Third snapshot must start with 3_; got {order[2]}"
     )
 
-    assert controller.csr_cp_trajectory is None, (
-        "draw_cp_trajectory=False must leave csr_cp_trajectory as None"
-    )
-
 
 # ---------------------------------------------------------------------------
-# WP-2 flag test 6: emit_phase_schedules=False, draw_cp_trajectory=True
-# -> no snapshots, csr_cp_trajectory set.
+# WP-2 flag test: emit_phase_schedules=False -> no snapshots.
 # ---------------------------------------------------------------------------
 
 
-def test_draw_cp_trajectory_true_sets_trajectory_no_snapshots(
+def test_emit_phase_schedules_false_no_snapshots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """draw_cp_trajectory=True + solution -> csr_cp_trajectory set,
-    csr_phase_schedules remains empty."""
-    from ffc_ddw_sum_et.algorithm.base.alg_record import ProgressLogEntry
-
-    fake_entry = ProgressLogEntry(elapsed_sec=0.1, obj_value=5.0, obj_bound=3.0)
-    fake_trace = CoarsenSolveReconstructTrace(
-        work_status=WorkStatus.FEASIBLE,
-        termination_reason=TerminationReason.COMPLETED,
-        error=None,
-        final_schedule=_make_fake_schedule(),
-        coarse_schedule=_make_fake_schedule(),
-        reconstructed_raw_schedule=_make_fake_schedule(),
-        cp_progress_log=(fake_entry,),
-        obj_value=5.0,
-        metrics={},
-    )
-
-    controller = _make_controller()
-    monkeypatch.setattr(
-        "ffc_ddw_sum_et.orchestration.controller.run_coarsen_solve_reconstruct",
-        lambda instance, option, logger: fake_trace,
-    )
-
-    def permissive_register(report, solution, **kwargs):  # type: ignore[no-untyped-def]
-        return True
-
-    controller._register = permissive_register  # type: ignore[method-assign]
-
-    controller.coarsen_solve_reconstruct(
-        emit_phase_schedules=False, draw_cp_trajectory=True
-    )
-
-    assert len(controller.csr_phase_schedules) == 0, (
-        f"emit_phase_schedules=False must leave csr_phase_schedules empty; "
-        f"got {len(controller.csr_phase_schedules)} entries"
-    )
-    assert controller.csr_cp_trajectory is not None, (
-        "draw_cp_trajectory=True must set csr_cp_trajectory"
-    )
-    assert controller.csr_cp_trajectory == (fake_entry,), (
-        "csr_cp_trajectory must equal the trace's cp_progress_log"
-    )
-
-
-# ---------------------------------------------------------------------------
-# WP-2 flag test 7: both flags False -> no snapshots, trajectory None.
-# ---------------------------------------------------------------------------
-
-
-def test_both_flags_false_no_snapshots_no_trajectory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Both flags False (default) + solution -> no snapshots, trajectory None."""
+    """emit_phase_schedules=False (default) + solution -> no snapshots."""
     controller = _make_controller()
 
     fake_trace = _make_trace_with_schedule()
@@ -407,50 +348,10 @@ def test_both_flags_false_no_snapshots_no_trajectory(
 
     controller._register = permissive_register  # type: ignore[method-assign]
 
-    controller.coarsen_solve_reconstruct(
-        emit_phase_schedules=False, draw_cp_trajectory=False
-    )
+    controller.coarsen_solve_reconstruct(emit_phase_schedules=False)
 
     assert len(controller.csr_phase_schedules) == 0, (
-        "Both flags False must leave csr_phase_schedules empty"
-    )
-    assert controller.csr_cp_trajectory is None, (
-        "Both flags False must leave csr_cp_trajectory as None"
-    )
-
-
-# ---------------------------------------------------------------------------
-# WP-2 flag test 8: no-solution path -> flags have no effect (no snapshots,
-# trajectory None even when both are True).
-# ---------------------------------------------------------------------------
-
-
-def test_no_solution_flags_have_no_effect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With no solution, both flags True must still leave state empty/None."""
-    controller = _make_controller()
-
-    fake_trace = _make_trace_no_schedule()
-    monkeypatch.setattr(
-        "ffc_ddw_sum_et.orchestration.controller.run_coarsen_solve_reconstruct",
-        lambda instance, option, logger: fake_trace,
-    )
-
-    def permissive_register(report, solution, **kwargs):  # type: ignore[no-untyped-def]
-        return True
-
-    controller._register = permissive_register  # type: ignore[method-assign]
-
-    controller.coarsen_solve_reconstruct(
-        emit_phase_schedules=True, draw_cp_trajectory=True
-    )
-
-    assert len(controller.csr_phase_schedules) == 0, (
-        "No-solution path must leave csr_phase_schedules empty regardless of flags"
-    )
-    assert controller.csr_cp_trajectory is None, (
-        "No-solution path must leave csr_cp_trajectory None regardless of flags"
+        "emit_phase_schedules=False must leave csr_phase_schedules empty"
     )
 
 

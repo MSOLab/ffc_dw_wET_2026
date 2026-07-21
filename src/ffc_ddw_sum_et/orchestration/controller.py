@@ -2666,7 +2666,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
-        draw_cp_trajectory: bool = False,
         solve_flow: list[dict] | None = None,
     ) -> SubroutineReport:
         """Step method: coarsen the instance, solve the base CP, and
@@ -2716,14 +2715,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``self.csr_phase_schedules`` (1_coarse_solver_result,
         2_reconstructed_raw, 3_final) via ``_record_csr_phase``.
 
-        ``draw_cp_trajectory``: when ``True`` and the solve finds a
-        solution, captures the coarsened-scale CP-SAT UB/LB trajectory
-        into ``self.csr_cp_trajectory``. The trajectory is NOT inserted
-        into the report's ``progress_log`` (kept as a dedicated artifact
-        only, separate from the shared obj_log).
-
-        The two flags are independent — any combination is valid.
-
         ``solve_flow`` (optional): when provided, a non-empty list of step
         dicts (same schema as a scenario ``subroutine_flow``) that REPLACES
         the built-in dispatch-seed init AND the hard-coded base-CP solve. The
@@ -2758,7 +2749,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 seed_dispatch=seed_dispatch,
                 solve=solve,
                 emit_phase_schedules=emit_phase_schedules,
-                draw_cp_trajectory=draw_cp_trajectory,
                 solve_flow=solve_flow,
             )
 
@@ -2828,8 +2818,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     "2_reconstructed_raw", trace.reconstructed_raw_schedule
                 )
                 self._record_csr_phase("3_final", trace.final_schedule)
-            if draw_cp_trajectory:
-                self.csr_cp_trajectory = trace.cp_progress_log
 
         return report
 
@@ -2844,7 +2832,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         seed_dispatch: str,
         solve: bool,
         emit_phase_schedules: bool,
-        draw_cp_trajectory: bool,
         solve_flow: list[dict],
     ) -> SubroutineReport:
         """``coarsen_solve_reconstruct`` in ``solve_flow`` mode (plan §4).
@@ -2913,6 +2900,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             stopping_criteria={"timelimit": child_timelimit},
             time_factor=factor,
         )
+        child_offset = time.monotonic() - start_elapsed
         child.run()
 
         # --- harvest candidates (every child registration with a schedule) ---
@@ -2938,6 +2926,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 )
             )
         deduped = dedup_candidates(raw_candidates)
+
+        # Preserve child history for coarse-scale inner obj_log emission.
+        self.csr_child_history = list(child.solution_manager.history)
 
         # --- reconstruct + validate + score every deduped candidate ---
         candidate_rows: list[dict[str, object]] = []
@@ -2992,6 +2983,29 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 f"(candidates={len(raw_candidates)}, deduped={len(deduped)})."
             )
 
+        # --- build progress_log from candidate_rows (plan §3) ---
+        progress_log_entries: list[ProgressLogEntry] = []
+        running_min_obj: float | None = None
+        for row in candidate_rows:
+            rst = row["restored_obj"]
+            if rst is None:
+                continue
+            rst_f = float(rst)
+            if running_min_obj is None or rst_f < running_min_obj:
+                running_min_obj = rst_f
+            elapsed_sec = child_offset + float(row["sec_elapsed_step"])
+            obj_bound_val: float | None = None
+            if factor == 1 and row.get("coarse_bound") is not None:
+                obj_bound_val = float(row["coarse_bound"])
+            progress_log_entries.append(
+                ProgressLogEntry(
+                    elapsed_sec=elapsed_sec,
+                    obj_value=running_min_obj,
+                    obj_bound=obj_bound_val,
+                )
+            )
+        progress_log = tuple(progress_log_entries)
+
         # --- measure elapsed, then register EXACTLY ONCE (contract) ---
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
@@ -3005,9 +3019,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 FFcDDWSolution(
                     schedule=winner_final, obj_value=winner_obj, obj_bound=None
                 ),
+                progress_log=progress_log,
             )
         else:
-            self._register(report, None)
+            self._register(report, None, progress_log=progress_log)
 
         # --- post-register work (per contract: after _register, not before) ---
         self.csr_candidate_rows.extend(candidate_rows)
@@ -3039,36 +3054,5 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     ),
                 )
                 self._record_csr_phase("3_final", winner_final)
-            if draw_cp_trajectory:
-                self.csr_cp_trajectory = self._synthesize_csr_trajectory(child)
 
         return report
-
-    @staticmethod
-    def _synthesize_csr_trajectory(
-        child: "FFcDDWSubroutineController",
-    ) -> tuple[ProgressLogEntry, ...]:
-        """Build a coarse-scale CP trajectory from a child controller's history.
-
-        One :class:`ProgressLogEntry` per child registration. The x-coordinate
-        is the child-clock completion time of the step
-        (``report.start_time + report.elapsed_time``, the same controller-clock
-        convention ``_save_obj_log`` uses to place a step's end point); the
-        y-values are the child's coarse-scale ``obj_value`` / ``obj_bound``.
-        This trajectory is a dedicated artifact only — it is never merged into
-        the parent's original-scale obj_log.
-        """
-        entries: list[ProgressLogEntry] = []
-        for rec in child.solution_manager.history:
-            report = rec.report
-            if report is None:
-                continue
-            elapsed_sec = getattr(report, "start_time", 0.0) + report.elapsed_time
-            entries.append(
-                ProgressLogEntry(
-                    elapsed_sec=elapsed_sec,
-                    obj_value=report.obj_value,
-                    obj_bound=report.obj_bound,
-                )
-            )
-        return tuple(entries)

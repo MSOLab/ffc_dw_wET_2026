@@ -144,9 +144,11 @@ class FFcDDWSubroutineControllerCore(
         # Kept small on purpose (Rules 12/14): bulk per-candidate detail lives
         # in ``csr_candidate_rows`` / the candidates CSV, not here.
         self.csr_solve_flow_summary: dict[str, object] | None = None
-        # CP-SAT trajectory (coarsened scale) from the last CSR run.
-        # Set only when draw_cp_trajectory=True and a solution is found.
-        self.csr_cp_trajectory: tuple[ProgressLogEntry, ...] | None = None
+        # Headless child controller's solution_manager history from the last
+        # CSR solve_flow run. Emitted by the single-instance runner as the
+        # coarse-scale ``<instance>_csr_inner_obj_log.json``. None in the
+        # legacy CSR path.
+        self.csr_child_history: list[Any] | None = None
         # Outer wall-clock around `run()`. Set in the run() override below;
         # the runner reads this for the per-instance summary `elapsedTime`.
         self.total_elapsed_time: float = 0.0  # TODO: apply to routix

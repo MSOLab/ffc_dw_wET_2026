@@ -355,8 +355,8 @@ _HTML_TEMPLATE = Template("""<!doctype html>
     });
 
     const layout = {
-      title: { text: "Subroutine flow mean over-time RPDf by scenario" },
-      xaxis: { title: { text: "Normalized time" }, tickformat: ".$x_percent_decimals%", range: [0, payload.x_max] },
+      title: { text: "$chart_title" },
+      xaxis: { title: { text: "$x_axis_label" }, tickformat: ".$x_percent_decimals%", range: [0, payload.x_max] },
       yaxis: { title: { text: "Mean RPDf" }, tickformat: ".$y_percent_decimals%", range: [payload.y_min, payload.y_max] },
       template: "plotly_white",
       hovermode: "closest",
@@ -376,9 +376,20 @@ _HTML_TEMPLATE = Template("""<!doctype html>
 """)
 
 
-def _render_html(payload: dict, x_decimals: int, y_decimals: int) -> str:
+def _render_html(
+    payload: dict,
+    x_decimals: int,
+    y_decimals: int,
+    *,
+    title: str | None = None,
+    x_label: str | None = None,
+) -> str:
+    _title = title or "Subroutine flow mean over-time RPDf by scenario"
+    _x_label = x_label or "Normalized time"
     return _HTML_TEMPLATE.substitute(
         payload_json=json.dumps(payload, separators=(",", ":")),
+        chart_title=_title,
+        x_axis_label=_x_label,
         x_percent_decimals=x_decimals,
         y_percent_decimals=y_decimals,
         series_colors_json=series_colors_json(),
@@ -392,6 +403,8 @@ def export_multi_scenario_method_rpdf_comparison_html(
     *,
     x_percent_decimals: int = 1,
     y_percent_decimals: int = 1,
+    title: str | None = None,
+    x_label: str | None = None,
 ) -> bool:
     """Render the run-level scenario-comparison chart. Returns ``False`` when
     no scenario yielded usable data.
@@ -402,7 +415,13 @@ def export_multi_scenario_method_rpdf_comparison_html(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        _render_html(payload, x_percent_decimals, y_percent_decimals),
+        _render_html(
+            payload,
+            x_percent_decimals,
+            y_percent_decimals,
+            title=title,
+            x_label=x_label,
+        ),
         encoding="utf-8",
     )
     logger.info("Multi-scenario method comparison HTML saved to %s", output_path)

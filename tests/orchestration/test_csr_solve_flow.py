@@ -38,6 +38,7 @@ from ffc_ddw_sum_et.orchestration.artifact_layout import FFcArtifactLayout
 from ffc_ddw_sum_et.orchestration.controller import FFcDDWSubroutineController
 from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import (
     FFcDDWSingleInstanceRunner,
+    _fold_history_into_obj_log_dicts,
 )
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
@@ -400,7 +401,6 @@ def test_runner_emits_candidates_csv(tmp_path: Path) -> None:
     ]
     controller = SimpleNamespace(
         csr_phase_schedules=[],
-        csr_cp_trajectory=None,
         csr_candidate_rows=rows,
     )
 
@@ -433,8 +433,291 @@ def test_runner_no_candidates_writes_no_csv(tmp_path: Path) -> None:
     runner._ins_name = "test_ins"
     runner.instance = MagicMock()
 
-    controller = SimpleNamespace(csr_phase_schedules=[], csr_cp_trajectory=None)
+    controller = SimpleNamespace(csr_phase_schedules=[])
     runner._emit_csr_artifacts(controller, layout, scope)
 
     csv_path = layout.artifact_path("csr_candidates_csv", **scope)
     assert not csv_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# CSR inner-solve trajectory → progress_log (plan §4)
+# ---------------------------------------------------------------------------
+
+
+def test_solve_flow_progress_log_nonempty_and_non_decreasing() -> None:
+    """TDD step 1: the registered report's progress_log is non-empty,
+    has non-decreasing elapsed_sec, and its last obj_value equals the
+    report's registered obj_value."""
+    controller = _make_controller(timelimit=60.0)
+
+    register_kwargs: list[dict] = []
+    original_register = controller._register
+
+    def spy_register(report, solution, **kwargs):
+        register_kwargs.append(kwargs)
+        return original_register(report, solution, **kwargs)
+
+    controller._register = spy_register  # type: ignore[method-assign]
+
+    report = controller.coarsen_solve_reconstruct(
+        factor=2,
+        timelimit=30.0,
+        solve_flow=_FULL_FIVE_STEP_FLOW,
+    )
+
+    assert len(register_kwargs) == 1
+    progress_log = register_kwargs[0].get("progress_log", ())
+    assert isinstance(progress_log, tuple)
+    assert len(progress_log) > 0, "progress_log must be non-empty"
+
+    secs = [e.elapsed_sec for e in progress_log]
+    assert secs == sorted(secs), "elapsed_sec must be non-decreasing"
+
+    assert progress_log[-1].obj_value == report.obj_value, (
+        "last progress_log obj_value must equal the report's registered obj_value"
+    )
+
+
+def test_solve_flow_progress_log_bound_factor_dependent() -> None:
+    """TDD step 3: factor>1 → every entry has obj_bound=None.
+    factor=1 → carries the child LB bound (coarse_bound is valid at identity)."""
+    instance = _make_instance()
+
+    # --- factor=2: obj_bound must be None everywhere ---
+    ctrl2 = FFcDDWSubroutineController(
+        instance=instance,
+        subroutine_flow=[{"method": "coarsen_solve_reconstruct"}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    register_kwargs2: list[dict] = []
+    orig2 = ctrl2._register
+
+    def spy2(report, solution, **kwargs):
+        register_kwargs2.append(kwargs)
+        return orig2(report, solution, **kwargs)
+
+    ctrl2._register = spy2  # type: ignore[method-assign]
+    ctrl2.coarsen_solve_reconstruct(
+        factor=2,
+        timelimit=30.0,
+        solve_flow=[
+            {"method": "calc_mcf_lb_and_derive_full_sch"},
+            {"method": "neh_cp", "job_priority": "weight-due-pos", "cp_tl": 1.0},
+        ],
+    )
+    assert len(register_kwargs2) == 1
+    pl2 = register_kwargs2[0].get("progress_log", ())
+    assert len(pl2) > 0
+    for e in pl2:
+        assert e.obj_bound is None, (
+            f"factor=2: obj_bound must be None, got {e.obj_bound}"
+        )
+
+    # --- factor=1: child LB steps carry a valid bound ---
+    ctrl1 = FFcDDWSubroutineController(
+        instance=instance,
+        subroutine_flow=[{"method": "coarsen_solve_reconstruct"}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    register_kwargs1: list[dict] = []
+    orig1 = ctrl1._register
+
+    def spy1(report, solution, **kwargs):
+        register_kwargs1.append(kwargs)
+        return orig1(report, solution, **kwargs)
+
+    ctrl1._register = spy1  # type: ignore[method-assign]
+    ctrl1.coarsen_solve_reconstruct(
+        factor=1,
+        timelimit=30.0,
+        solve_flow=[
+            {"method": "calc_mcf_lb_and_derive_full_sch"},
+            {"method": "neh_cp", "job_priority": "weight-due-pos", "cp_tl": 1.0},
+        ],
+    )
+    assert len(register_kwargs1) == 1
+    pl1 = register_kwargs1[0].get("progress_log", ())
+    assert len(pl1) > 0
+    has_bound = any(e.obj_bound is not None for e in pl1)
+    assert has_bound, "factor=1: at least one entry must carry a valid obj_bound"
+
+
+def test_solve_flow_progress_log_non_increasing_obj_values() -> None:
+    """TDD step 4: progress_log obj_values are non-increasing (running-min),
+    ensuring trajectory consistency with the registered end point."""
+    controller = _make_controller(timelimit=60.0)
+
+    register_kwargs: list[dict] = []
+    original_register = controller._register
+
+    def spy_register(report, solution, **kwargs):
+        register_kwargs.append(kwargs)
+        return original_register(report, solution, **kwargs)
+
+    controller._register = spy_register  # type: ignore[method-assign]
+
+    controller.coarsen_solve_reconstruct(
+        factor=2,
+        timelimit=30.0,
+        solve_flow=_FULL_FIVE_STEP_FLOW,
+    )
+
+    assert len(register_kwargs) == 1
+    progress_log = register_kwargs[0].get("progress_log", ())
+    assert len(progress_log) > 0
+
+    obj_values = [e.obj_value for e in progress_log if e.obj_value is not None]
+    assert len(obj_values) >= 2, "need at least 2 obj_value entries"
+    for i in range(1, len(obj_values)):
+        assert obj_values[i] <= obj_values[i - 1], (
+            f"obj_value must be non-increasing (running-min); "
+            f"got {obj_values[i - 1]} → {obj_values[i]} at index {i}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# CSR coarse-scale inner obj_log (§8 TDD)
+# ---------------------------------------------------------------------------
+
+
+def test_inner_obj_log_has_more_points_than_child_steps() -> None:
+    """TDD §8.5 step 1: the coarse aggregator yields a JSON payload whose
+    obj_value.data has more points than there are child history records
+    (proves intra-step folding of each registration's progress_log)."""
+    controller = _make_controller(timelimit=60.0)
+
+    controller.coarsen_solve_reconstruct(
+        factor=2,
+        timelimit=30.0,
+        solve_flow=_FULL_FIVE_STEP_FLOW,
+    )
+
+    child_history = controller.csr_child_history
+    assert child_history is not None
+    n_steps = len(child_history)
+
+    value_data: dict[str, float] = {}
+    value_notes: dict[str, str] = {}
+    bound_data: dict[str, float] = {}
+    bound_notes: dict[str, str] = {}
+    _fold_history_into_obj_log_dicts(
+        child_history, value_data, value_notes, bound_data, bound_notes
+    )
+
+    assert len(value_data) > n_steps, (
+        f"obj_value.data ({len(value_data)}) must have more points than "
+        f"child history records ({n_steps}) — intra-step folding not working"
+    )
+
+
+def test_inner_obj_log_bound_at_factor_gt_one_and_child_origin() -> None:
+    """TDD §8.5 step 3: at κ>1, obj_bound.data is populated (child coarse
+    LB is carried here, unlike the parent obj_log which nulls it), and
+    x-coordinates start at the child frame origin (t≈0), not the parent offset."""
+    controller = _make_controller(timelimit=60.0)
+
+    controller.coarsen_solve_reconstruct(
+        factor=2,
+        timelimit=30.0,
+        solve_flow=_FULL_FIVE_STEP_FLOW,
+    )
+
+    child_history = controller.csr_child_history
+    assert child_history is not None
+
+    value_data: dict[str, float] = {}
+    value_notes: dict[str, str] = {}
+    bound_data: dict[str, float] = {}
+    bound_notes: dict[str, str] = {}
+    _fold_history_into_obj_log_dicts(
+        child_history, value_data, value_notes, bound_data, bound_notes
+    )
+
+    # obj_bound must be populated (carried from child's LB steps).
+    assert len(bound_data) > 0, (
+        "obj_bound.data must be populated at κ>1 — child coarse LB "
+        "is carried in the inner obj_log"
+    )
+
+    # x-coordinates (elapsed_sec keys) must start near the child frame origin.
+    all_keys = sorted(float(k) for k in value_data)
+    assert all_keys[0] >= 0.0
+    assert all_keys[0] < 1.0, (
+        f"earliest timestamp ({all_keys[0]}) should be near child frame "
+        f"origin (t=0), not parent offset"
+    )
+
+
+def test_runner_emits_csr_inner_obj_log_json(tmp_path: Path) -> None:
+    """TDD §8.5 step 4: the runner writes csr_inner_obj_log_json when
+    csr_child_history is present, and does not when it is absent."""
+    import json
+
+    from ffc_ddw_sum_et.orchestration.subroutine_report import (
+        FFcDDWSubroutineReport,
+    )
+
+    run_id = "20260721T000000_000000"
+    layout = FFcArtifactLayout(run_root=tmp_path / run_id, run_id=run_id)
+    scope = {"scenario_name": "sc", "instance_name": "test_ins"}
+
+    runner = object.__new__(FFcDDWSingleInstanceRunner)
+    runner.logger = MagicMock()
+    runner.ins_name = "test_ins"
+    runner._ins_name = "test_ins"
+    runner.instance = MagicMock()
+
+    # Build a minimal child history with one record carrying progress_log.
+    report = FFcDDWSubroutineReport(
+        elapsed_time=2.5,
+        obj_value=100.0,
+        obj_bound=50.0,
+        start_time=0.1,
+        step_label="1-calc_mcf_lb_and_derive_full_sch",
+    )
+    child_history = [
+        SimpleNamespace(
+            report=report,
+            solution=MagicMock(),
+        )
+    ]
+    controller = SimpleNamespace(
+        csr_phase_schedules=[],
+        csr_candidate_rows=[],
+        csr_child_history=child_history,
+    )
+
+    runner._emit_csr_artifacts(controller, layout, scope)
+
+    inner_path = layout.artifact_path("csr_inner_obj_log_json", **scope)
+    assert inner_path.exists(), "csr_inner_obj_log_json must be written"
+
+    with open(inner_path, encoding="utf-8") as f:
+        payload = json.load(f)
+    assert "obj_value" in payload
+    assert "obj_bound" in payload
+    assert len(payload["obj_value"]["data"]) > 0
+    assert len(payload["obj_bound"]["data"]) > 0
+
+    # --- csr_child_history absent: no file written ---
+    run_id2 = "20260721T000000_000001"
+    layout2 = FFcArtifactLayout(run_root=tmp_path / run_id2, run_id=run_id2)
+    controller2 = SimpleNamespace(
+        csr_phase_schedules=[],
+        csr_candidate_rows=[],
+        csr_child_history=None,
+    )
+
+    runner2 = object.__new__(FFcDDWSingleInstanceRunner)
+    runner2.logger = MagicMock()
+    runner2.ins_name = "test_ins"
+    runner2._ins_name = "test_ins"
+    runner2.instance = MagicMock()
+
+    runner2._emit_csr_artifacts(controller2, layout2, scope)
+
+    inner_path2 = layout2.artifact_path("csr_inner_obj_log_json", **scope)
+    assert not inner_path2.exists(), (
+        "csr_inner_obj_log_json must NOT be written when child_history is absent"
+    )

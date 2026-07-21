@@ -14,7 +14,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ffc_ddw_sum_et.algorithm.base.alg_record import ProgressLogEntry
 from ffc_ddw_sum_et.orchestration.artifact_layout import FFcArtifactLayout
 from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import (
     FFcDDWSingleInstanceRunner,
@@ -55,14 +54,6 @@ def _make_runner(tmp_path: Path) -> FFcDDWSingleInstanceRunner:
     return runner
 
 
-def _make_traj_entries() -> tuple[ProgressLogEntry, ...]:
-    return (
-        ProgressLogEntry(elapsed_sec=0.1, obj_value=100, obj_bound=None),
-        ProgressLogEntry(elapsed_sec=0.5, obj_value=90, obj_bound=50),
-        ProgressLogEntry(elapsed_sec=1.0, obj_value=85, obj_bound=70),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -91,7 +82,6 @@ class TestEmitCsrPhaseSchedules:
         ]
         controller = SimpleNamespace(
             csr_phase_schedules=snapshots,
-            csr_cp_trajectory=None,
         )
 
         runner._emit_csr_artifacts(controller, layout, scope)
@@ -122,7 +112,6 @@ class TestEmitCsrPhaseSchedules:
         ]
         controller = SimpleNamespace(
             csr_phase_schedules=snapshots,
-            csr_cp_trajectory=None,
         )
 
         runner._emit_csr_artifacts(controller, layout, scope)
@@ -159,7 +148,6 @@ class TestEmitCsrPhaseSchedules:
         ]
         controller = SimpleNamespace(
             csr_phase_schedules=snapshots,
-            csr_cp_trajectory=None,
         )
 
         runner._emit_csr_artifacts(controller, layout, scope)
@@ -195,7 +183,6 @@ class TestEmitCsrPhaseSchedules:
         ]
         controller = SimpleNamespace(
             csr_phase_schedules=snapshots,
-            csr_cp_trajectory=None,
         )
 
         runner._emit_csr_artifacts(controller, layout, scope)
@@ -219,12 +206,11 @@ class TestEmitCsrPhaseSchedules:
         layout = _make_layout(tmp_path)
         scope = {"scenario_name": "sc", "instance_name": "test_ins"}
         runner = _make_runner(tmp_path)
-        controller = SimpleNamespace(csr_phase_schedules=[], csr_cp_trajectory=None)
+        controller = SimpleNamespace(csr_phase_schedules=[])
 
         runner._emit_csr_artifacts(controller, layout, scope)
 
-        # No progress dir files should exist for csr kinds
-        progress_dir = layout.artifact_path("csr_cp_trajectory_json", **scope).parent
+        progress_dir = layout.zone_dir("progress", **scope)
         csr_files = list(progress_dir.glob("*csr*")) if progress_dir.exists() else []
         assert csr_files == []
 
@@ -237,95 +223,3 @@ class TestEmitCsrPhaseSchedules:
 
         # Must not raise
         runner._emit_csr_artifacts(controller, layout, scope)
-
-
-class TestEmitCsrCpTrajectory:
-    def test_trajectory_json_written_with_parallel_arrays(self, tmp_path: Path) -> None:
-        """csr_cp_trajectory_json is written with parallel elapsed_sec/obj_value/obj_bound arrays."""
-        layout = _make_layout(tmp_path)
-        scope = {"scenario_name": "sc", "instance_name": "test_ins"}
-        runner = _make_runner(tmp_path)
-
-        traj = _make_traj_entries()
-        controller = SimpleNamespace(csr_phase_schedules=[], csr_cp_trajectory=traj)
-
-        runner._emit_csr_artifacts(controller, layout, scope)
-
-        traj_path = layout.artifact_path("csr_cp_trajectory_json", **scope)
-        assert traj_path.exists()
-
-        data = json.loads(traj_path.read_text())
-        assert "elapsed_sec" in data
-        assert "obj_value" in data
-        assert "obj_bound" in data
-        assert data["elapsed_sec"] == [0.1, 0.5, 1.0]
-        assert data["obj_value"] == [100, 90, 85]
-        # First entry has obj_bound=None → null in JSON
-        assert data["obj_bound"] == [None, 50, 70]
-
-    def test_trajectory_json_is_compact(self, tmp_path: Path) -> None:
-        """The trajectory JSON must be written as a single line (compact)."""
-        layout = _make_layout(tmp_path)
-        scope = {"scenario_name": "sc", "instance_name": "test_ins"}
-        runner = _make_runner(tmp_path)
-
-        traj = _make_traj_entries()
-        controller = SimpleNamespace(csr_phase_schedules=[], csr_cp_trajectory=traj)
-
-        runner._emit_csr_artifacts(controller, layout, scope)
-
-        traj_path = layout.artifact_path("csr_cp_trajectory_json", **scope)
-        text = traj_path.read_text()
-        assert "\n" not in text.rstrip("\n"), (
-            "Expected compact (single-line) JSON but got multi-line output"
-        )
-
-    def test_none_trajectory_writes_nothing(self, tmp_path: Path) -> None:
-        """When csr_cp_trajectory is None, no trajectory file is created."""
-        layout = _make_layout(tmp_path)
-        scope = {"scenario_name": "sc", "instance_name": "test_ins"}
-        runner = _make_runner(tmp_path)
-        controller = SimpleNamespace(csr_phase_schedules=[], csr_cp_trajectory=None)
-
-        runner._emit_csr_artifacts(controller, layout, scope)
-
-        traj_path = layout.artifact_path("csr_cp_trajectory_json", **scope)
-        assert not traj_path.exists()
-
-    def test_both_phases_and_trajectory_emitted_together(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Both 3 schedule JSONs and the trajectory JSON are written in one call."""
-        layout = _make_layout(tmp_path)
-        scope = {"scenario_name": "sc", "instance_name": "test_ins"}
-        runner = _make_runner(tmp_path)
-
-        monkeypatch.setattr(
-            "ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner.compute_phase_obj_value",
-            lambda sched, instance: 55.0,
-        )
-
-        call_ctx = "csr"
-        snapshots = [
-            (f"{call_ctx}_1_coarse_solver_result", _make_schedule()),
-            (f"{call_ctx}_2_reconstructed_raw", _make_schedule()),
-            (f"{call_ctx}_3_final", _make_schedule()),
-        ]
-        traj = _make_traj_entries()
-        controller = SimpleNamespace(
-            csr_phase_schedules=snapshots,
-            csr_cp_trajectory=traj,
-        )
-
-        runner._emit_csr_artifacts(controller, layout, scope)
-
-        # 3 phase schedule JSONs
-        for name, _ in snapshots:
-            p = layout.artifact_path("csr_phase_schedule", phase_name=name, **scope)
-            assert p.exists(), f"Missing {p}"
-
-        # 1 trajectory JSON
-        traj_path = layout.artifact_path("csr_cp_trajectory_json", **scope)
-        assert traj_path.exists()
-        data = json.loads(traj_path.read_text())
-        assert len(data["elapsed_sec"]) == 3

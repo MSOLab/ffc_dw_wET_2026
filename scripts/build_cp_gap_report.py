@@ -1,12 +1,23 @@
 """Build CSR CP gap comparison report (CSV + PivotTable.js dashboard).
 
+.. deprecated::
+    Its data source, the ``*_csr_cp_trajectory.json`` artifact, was removed when
+    ``csr_cp_trajectory`` was superseded by ``csr_inner_obj_log_json``
+    (``plans/analysis/20260721/csr_inner_progress_log.md`` §8.4(5)).
+    ``post_run_pivot.collect_cp_gap_rows`` is now a stub returning an empty
+    DataFrame, so this script **produces empty output**. Restoring it means
+    migrating cp_gap onto ``csr_inner_obj_log_json`` endpoints (``obj_value`` =
+    coarse UB, ``obj_bound`` = coarse LB), or removing the report entirely — see
+    "CSR cp_gap report orphaned by ``csr_cp_trajectory`` deprecation" in
+    ``TODO.md``.
+
 Usage::
 
     uv run python scripts/build_cp_gap_report.py <run_dir> [options]
 
-Reads all ``*_csr_cp_trajectory.json`` files under the run directory,
-computes final CP gap (lb_gap, solver_gap) from coarsened UB/LB endpoints,
-joins with instance metadata, and writes:
+Historically read all ``*_csr_cp_trajectory.json`` files under the run
+directory, computed final CP gap (lb_gap, solver_gap) from coarsened UB/LB
+endpoints, joined with instance metadata, and wrote:
 
   * ``<run_id>_cp_gap_comparison.csv``
   * ``<run_id>_cp_gap_dashboard.html``

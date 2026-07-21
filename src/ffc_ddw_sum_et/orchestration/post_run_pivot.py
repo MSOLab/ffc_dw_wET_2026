@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 from routix.io import ArtifactLayout
@@ -101,29 +99,11 @@ def _merge_instance_meta(
 def read_csr_cp_trajectory_endpoint(
     path: Path,
 ) -> tuple[float | None, float | None, float | None]:
-    """Read the final UB, LB, and elapsed from a CSR CP trajectory JSON.
+    """Deprecated — csr_cp_trajectory superseded by csr_inner_obj_log_json.
 
-    ``ub`` = last non-null value in ``obj_value`` (None if empty/all-null).
-    ``lb`` = last value in ``obj_bound`` (None if empty).
-    ``elapsed`` = last value in ``elapsed_sec`` (None if missing).
+    Always returns (None, None, None).
     """
-    try:
-        data = json.loads(path.read_text(encoding="utf8"))
-    except (OSError, json.JSONDecodeError):
-        return (None, None, None)
-
-    obj_value: list[Any] = data.get("obj_value", []) or []
-    obj_bound: list[Any] = data.get("obj_bound", []) or []
-    elapsed_sec: list[Any] = data.get("elapsed_sec", []) or []
-
-    ub = None
-    for v in obj_value:
-        if v is not None:
-            ub = v
-    lb = obj_bound[-1] if obj_bound else None
-    elapsed = elapsed_sec[-1] if elapsed_sec else None
-
-    return (ub, lb, elapsed)
+    return (None, None, None)
 
 
 def compute_cp_gaps(
@@ -153,55 +133,11 @@ def collect_cp_gap_rows(
     *,
     init_filter: str | None = "v3",
 ) -> pd.DataFrame:
-    """Scan run_root for CSR CP trajectory JSONs and return long-format rows.
+    """Deprecated — csr_cp_trajectory superseded by csr_inner_obj_log_json.
 
-    Glob pattern: ``*/*/progress/*_csr_cp_trajectory.json``.
-    Path parts: scenario = parts[-4], instance = parts[-3].
-
-    ``init_filter`` selects scenarios ending with ``_{init_filter}``
-    (default ``"v3"``; ``None`` accepts all).
-
-    Returns a DataFrame with columns:
-      instanceName, scenarioName, cp_ub, cp_lb, cp_elapsed, factor, init
+    Always returns an empty DataFrame.
     """
-    import glob as glob_mod
-
-    pattern = str(run_root / "*" / "*" / "progress" / "*_csr_cp_trajectory.json")
-    rows: list[dict[str, Any]] = []
-
-    for traj_path_str in sorted(glob_mod.glob(pattern)):
-        traj_path = Path(traj_path_str)
-        parts = traj_path.parts
-        if len(parts) < 6:
-            continue
-        scenario = parts[-4]
-        instance = parts[-3]
-
-        if init_filter is not None:
-            if not scenario.endswith(f"_{init_filter}"):
-                continue
-
-        ub, lb, elapsed = read_csr_cp_trajectory_endpoint(traj_path)
-
-        # Parse factor from scenario name (e.g. "csr16_v3" → factor=16, init="v3")
-        m = re.search(r"csr(\d+)", scenario)
-        factor = int(m.group(1)) if m else None
-        init = scenario.rsplit("_", 1)[-1] if "_" in scenario else "unknown"
-
-        rows.append(
-            {
-                "instanceName": instance,
-                "scenarioName": scenario,
-                "cp_ub": ub,
-                "cp_lb": lb,
-                "cp_elapsed": elapsed,
-                "factor": factor,
-                "init": init,
-            }
-        )
-
     return pd.DataFrame(
-        rows,
         columns=[
             "instanceName",
             "scenarioName",
