@@ -165,7 +165,7 @@ class CoarsenSolveReconstructOption(AlgOption):
     """
 
     factor: int = DEFAULT_COARSEN_FACTOR
-    coarsen_mode: Literal["ceil", "round", "floor"] = "ceil"
+    coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil"
     timelimit_sec: float | None = None
     solver_thread_cnt: int = 1
     log_search_progress: bool = False
@@ -196,7 +196,7 @@ class CoarsenSolveReconstructOption(AlgOption):
             raise ValueError(
                 f"idle_mode must be one of {valid_idle}, got {self.idle_mode!r}"
             )
-        valid_modes = {"ceil", "round", "floor"}
+        valid_modes = {"ceil", "round", "floor", "cumulative"}
         if self.coarsen_mode not in valid_modes:
             raise ValueError(
                 f"coarsen_mode must be one of {valid_modes}, got {self.coarsen_mode!r}"

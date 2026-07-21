@@ -153,7 +153,7 @@ def test_all_valid_idle_mode_values_accepted() -> None:
 
 
 def test_all_valid_coarsen_mode_values_accepted() -> None:
-    for mode in ("ceil", "round", "floor"):
+    for mode in ("ceil", "round", "floor", "cumulative"):
         opt = CoarsenSolveReconstructOption(coarsen_mode=mode)
         assert opt.coarsen_mode == mode
 

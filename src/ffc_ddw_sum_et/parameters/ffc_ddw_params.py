@@ -8,6 +8,7 @@ from io import StringIO
 from typing import Literal, Self, TextIO
 
 import numpy as np
+import pandas as pd
 
 from .base.job_stage_p import JobStageProcessingTimeManager
 from .ffc_params import FFcParameters
@@ -284,7 +285,7 @@ class FFcDDWParameters(FFcParameters):
         cls,
         instance: FFcParameters,
         factor: int,
-        mode: Literal["ceil", "round", "floor"] = "ceil",
+        mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil",
     ) -> Self:
         """Return a new FFcDDWParameters with processing times coarsened by
         ``factor``, while preserving the original due windows.
@@ -294,6 +295,8 @@ class FFcDDWParameters(FFcParameters):
         - ``"ceil"``  → ``ceil(p / factor)`` (current default)
         - ``"round"`` → ``max(round(p / factor), 1)``
         - ``"floor"`` → ``max(p // factor, 1)``
+        - ``"cumulative"`` → round the cumulative sum per job stage-by-stage,
+          then derive per-stage values by subtraction, floor 1
 
         All formulas guarantee ``p' >= 1`` when ``p >= 1``, so no
         zero-length operations are produced. Due window bounds are
@@ -325,7 +328,7 @@ class FFcDDWParameters(FFcParameters):
         Returns:
             Self: A new coarsened FFcDDWParameters instance.
         """
-        _valid_modes = {"ceil", "round", "floor"}
+        _valid_modes = {"ceil", "round", "floor", "cumulative"}
         if mode not in _valid_modes:
             raise ValueError(
                 f"mode must be one of {sorted(_valid_modes)}, got {mode!r}"
@@ -343,6 +346,27 @@ class FFcDDWParameters(FFcParameters):
             new_df = np.ceil(df / factor).astype(int)
         elif mode == "round":
             new_df = np.maximum(np.round(df / factor), 1).astype(int)
+        elif mode == "cumulative":
+            values: np.ndarray = df.to_numpy()  # (n_job, n_stage) original p, int
+            cum: np.ndarray = (
+                np.round(  # (n_job, n_stage) rounded cumulative C_i, float
+                    np.cumsum(values, axis=1) / factor
+                )
+            )
+            new: np.ndarray = np.empty(
+                values.shape, dtype=int
+            )  # (n_job, n_stage) output p'
+            running: np.ndarray = np.zeros(
+                values.shape[0]
+            )  # (n_job,) per-job Σ p'[<col], float
+            for col in range(values.shape[1]):
+                p_col: np.ndarray = np.maximum(  # (n_job,) coarse p' for this stage
+                    cum[:, col] - running,
+                    1,  # cum[:,col] − Σ p'[<col], floor at 1
+                )
+                new[:, col] = p_col
+                running = running + p_col
+            new_df = pd.DataFrame(new, index=df.index, columns=df.columns)
         else:
             new_df = np.maximum(df // factor, 1)
         new_p_manager = JobStageProcessingTimeManager(instance.p_manager.name, new_df)

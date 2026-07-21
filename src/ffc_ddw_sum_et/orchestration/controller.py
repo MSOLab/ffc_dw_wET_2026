@@ -1624,7 +1624,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def initialize_by_eddub_twt(
         self,
         factor: int = 1,
-        coarsen_mode: Literal["ceil", "round", "floor"] = "ceil",
+        coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil",
     ) -> SubroutineReport:
         """Step method: seed an incumbent by dispatching jobs in EDDUB+w⁺ order.
 
@@ -2656,7 +2656,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def coarsen_solve_reconstruct(
         self,
         factor: int = DEFAULT_COARSEN_FACTOR,
-        coarsen_mode: Literal["ceil", "round", "floor"] = "ceil",
+        coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil",
         timelimit: float | str | None = None,
         solver_thread_cnt: int = 1,
         log_search_progress: bool = False,
@@ -2826,7 +2826,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         start_elapsed: float,
         *,
         factor: int,
-        coarsen_mode: Literal["ceil", "round", "floor"],
+        coarsen_mode: Literal["ceil", "round", "floor", "cumulative"],
         timelimit: float | str | None,
         error_if_infeasible: bool,
         seed_dispatch: str,
