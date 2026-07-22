@@ -1693,7 +1693,9 @@ class FFcSchedule:
           behaviour. When Δ₁ == 0 the shift stalls and ``j`` is decremented.
         - ``"ceiling"``: Δ₁ uses **ceil** (``-(-lo // K)`` / ``-(-hi // K)``).
         - ``"lookahead"``: picks the floor candidate Δ_a or Δ_a + 1, whichever
-          minimises ``block_obj``.
+          minimises ``block_obj``. **Ties go to the larger shift Δ_b** (the
+          comparison is ``block_obj(Δ_b) <= block_obj(Δ_a)``, not ``<``) — see
+          the inline note at the comparison for why.
 
         Termination guard: when the chosen shift is 0, ``j`` is decremented to
         avoid an infinite loop.
@@ -1776,9 +1778,7 @@ class FFcSchedule:
                         if K * (c + 1) > d_hi:  # tardy after the shift
                             twt = twt_map.get(job_ids[i], 1)
                             tardiness_added += (
-                                twt * K
-                                if K * c >= d_hi
-                                else twt * (K * (c + 1) - d_hi)
+                                twt * K if K * c >= d_hi else twt * (K * (c + 1) - d_hi)
                             )
                     if earliness_saved > tardiness_added:
                         # Jump across the full-marginal region (every job stays
@@ -1853,6 +1853,15 @@ class FFcSchedule:
                         delta1 = min(delta1_vals) if delta1_vals else INF
                         da = min(delta1, delta2)
                         db = min(delta1 + 1, delta2)
+                        # ``<=``, not ``<``: on an objective tie prefer the
+                        # LARGER shift Δ_b. Both land the block at the same E/T
+                        # cost, but Δ_b right-justifies it one cell further,
+                        # freeing earlier machine capacity for the blocks still
+                        # to be swept (``j`` walks backwards). Strict ``<``
+                        # would keep Δ_a and, when Δ_a == 0, stall the block
+                        # into the ``j -= 1`` guard for no objective gain.
+                        # Cannot loop: the chosen Δ_b > Δ_a >= 0 always
+                        # advances ``ends``.
                         best = (
                             db if (db != da and block_obj(db) <= block_obj(da)) else da
                         )
