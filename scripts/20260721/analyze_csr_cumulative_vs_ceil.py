@@ -76,9 +76,7 @@ def _pair(df: pd.DataFrame) -> pd.DataFrame:
 def _agg_cell(paired: pd.DataFrame, stratum: str) -> pd.DataFrame:
     """Per-(k, f) mean/median ΔRPDf and win/tie/loss for one T-stratum."""
     g = paired.groupby(["k", "f"])
-    out = g["delta"].agg(
-        n_paired="size", mean_delta="mean", median_delta="median"
-    )
+    out = g["delta"].agg(n_paired="size", mean_delta="mean", median_delta="median")
     out["wins_cum"] = g["delta"].apply(lambda s: int((s < -TIE_TOL).sum()))
     out["ties"] = g["delta"].apply(lambda s: int((s.abs() <= TIE_TOL).sum()))
     out["losses_cum"] = g["delta"].apply(lambda s: int((s > TIE_TOL).sum()))
@@ -104,9 +102,7 @@ def main(run_dir: Path) -> None:
 
     # ----- block 6 first: coverage gates every downstream claim -----
     print("\n=== [6] coverage — instances paired per (k, f) cell ===")
-    cov = (
-        paired.groupby(["k", "f"]).size().rename("n_paired").reset_index()
-    )
+    cov = paired.groupby(["k", "f"]).size().rename("n_paired").reset_index()
     cov["short_of_1440"] = EXPECTED_PER_CELL - cov["n_paired"]
     print(cov.to_string(index=False))
     short = cov[cov["n_paired"] < EXPECTED_PER_CELL]
@@ -132,9 +128,7 @@ def main(run_dir: Path) -> None:
     for name in strata:
         sub = agg[agg["stratum"] == name]
         print(f"\n-- stratum: {name} --")
-        print(
-            sub.pivot_table(index="k", columns="f", values="mean_delta").round(2)
-        )
+        print(sub.pivot_table(index="k", columns="f", values="mean_delta").round(2))
 
     print("\n=== [2] per-cell win/tie/loss (cum vs ceil), overall stratum ===")
     show = agg[agg["stratum"] == "all"][
@@ -144,8 +138,16 @@ def main(run_dir: Path) -> None:
 
     print("\n=== [3] κ=1 calibration (null floor: CP noise + cross-run offset) ===")
     k1 = agg[(agg["k"] == 1)][
-        ["stratum", "f", "n_paired", "mean_delta", "median_delta",
-         "wins_cum", "ties", "losses_cum"]
+        [
+            "stratum",
+            "f",
+            "n_paired",
+            "mean_delta",
+            "median_delta",
+            "wins_cum",
+            "ties",
+            "losses_cum",
+        ]
     ]
     print(k1.to_string(index=False))
     k1_overall = k1[k1["stratum"] == "all"]["mean_delta"]
@@ -159,9 +161,7 @@ def main(run_dir: Path) -> None:
     for name in strata:
         sub = agg[agg["stratum"] == name]
         print(f"\n-- stratum: {name} --")
-        print(
-            sub.pivot_table(index="k", columns="f", values="net_vs_k1").round(2)
-        )
+        print(sub.pivot_table(index="k", columns="f", values="net_vs_k1").round(2))
 
     print("\n=== [5] verdict scaffold ===")
     net_k = agg[(agg["stratum"] == "all") & (agg["k"] > 1)]
@@ -187,9 +187,9 @@ def main(run_dir: Path) -> None:
         ANALYSIS_DIR / "cum_vs_ceil_rpdf.csv", index=False
     )
     agg.to_csv(ANALYSIS_DIR / "cum_vs_ceil_summary.csv", index=False)
-    agg[
-        ["stratum", "k", "f", "n_paired", "wins_cum", "ties", "losses_cum"]
-    ].to_csv(ANALYSIS_DIR / "cum_vs_ceil_win_tie_loss.csv", index=False)
+    agg[["stratum", "k", "f", "n_paired", "wins_cum", "ties", "losses_cum"]].to_csv(
+        ANALYSIS_DIR / "cum_vs_ceil_win_tie_loss.csv", index=False
+    )
     print(f"\nwrote 3 CSVs to {ANALYSIS_DIR}/")
 
 

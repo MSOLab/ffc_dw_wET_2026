@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import csv
 import statistics
-import sys
 from pathlib import Path
 
 KAPPA: dict[str, float] = {

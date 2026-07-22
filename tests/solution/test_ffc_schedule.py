@@ -695,7 +695,9 @@ def test_insert_idle_time_factor1_all_modes_identical() -> None:
         (2, (105, 300), 3),
     ],
 )
-def test_insert_idle_time_coarse_exact_modes_agree(coarse_c, window, expected_c) -> None:
+def test_insert_idle_time_coarse_exact_modes_agree(
+    coarse_c, window, expected_c
+) -> None:
     """At K>1 the coarse-exact path ignores idle_mode: flooring/ceiling/
     lookahead all land on the same optimum (no mode divergence, no stall)."""
     dw = {"j0": window}
@@ -724,26 +726,20 @@ def test_insert_idle_time_coarse_exact_modes_agree(coarse_c, window, expected_c)
 # -------------------------------------------------------------------
 
 
-def _make_last_stage_seq(
-    ends: list[int], durs: list[int] | None = None
-) -> FFcSchedule:
+def _make_last_stage_seq(ends: list[int], durs: list[int] | None = None) -> FFcSchedule:
     """Single-stage ('s0') single-machine ('m0') schedule with jobs j0..jN-1
     placed left-compressed at the given coarse ``ends`` (contiguous unless a
     gap is baked into ``ends``). ``durs[i]`` defaults to 1."""
     n = len(ends)
     durs = durs if durs is not None else [1] * n
     jobs = [f"j{i}" for i in range(n)]
-    sched = FFcSchedule(
-        jobs=jobs, stages=["s0"], machines_per_stage={"s0": ["m0"]}
-    )
+    sched = FFcSchedule(jobs=jobs, stages=["s0"], machines_per_stage={"s0": ["m0"]})
     for i, (e, d) in enumerate(zip(ends, durs)):
         sched.add_ops_times_2_mc("s0", "m0", jobs[i], e - d, e)
     return sched
 
 
-def _et_cost(
-    ends: dict[str, int], dw, ewt, twt, K: int
-) -> int:
+def _et_cost(ends: dict[str, int], dw, ewt, twt, K: int) -> int:
     total = 0
     for j, c in ends.items():
         d_lo, d_hi = dw[j]
@@ -797,7 +793,9 @@ _COARSE_EXACT_CASES = [
 
 @pytest.mark.parametrize("mode", ["flooring", "ceiling", "lookahead"])
 @pytest.mark.parametrize(
-    "name,ends,durs,dw,ewt,twt,K", _COARSE_EXACT_CASES, ids=[c[0] for c in _COARSE_EXACT_CASES]
+    "name,ends,durs,dw,ewt,twt,K",
+    _COARSE_EXACT_CASES,
+    ids=[c[0] for c in _COARSE_EXACT_CASES],
 )
 def test_insert_idle_time_coarse_exact(name, ends, durs, dw, ewt, twt, K, mode) -> None:
     """insert_idle_time must reach the coarse-grid optimum for a fixed
@@ -854,7 +852,9 @@ def test_insert_idle_time_coarse_exact_random_property(mode) -> None:
             K,
         )
         if got > opt:
-            failures.append(f"ends={ends} durs={durs} K={K} dw={dw} got={got} opt={opt}")
+            failures.append(
+                f"ends={ends} durs={durs} K={K} dw={dw} got={got} opt={opt}"
+            )
     assert not failures, (
         f"{len(failures)} coarse-suboptimal cases under {mode}; first: "
         + (failures[0] if failures else "")

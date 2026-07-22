@@ -141,16 +141,23 @@ def report_curves(rows: list[dict]) -> None:
         for k in KS:
             cells = []
             for f in FS:
-                a = _agg(rows, lambda r: r["flow"] == flow and r["K"] == k and r["f"] == f)
+                a = _agg(
+                    rows, lambda r: r["flow"] == flow and r["K"] == k and r["f"] == f
+                )
                 cells.append(f"{a[0]:.2f}({a[1]:.2f})" if a else "--")
-            print(f"  {flow}_k{k}: " + " | ".join(f"f{f}={c}" for f, c in zip(FS, cells)))
+            print(
+                f"  {flow}_k{k}: " + " | ".join(f"f{f}={c}" for f, c in zip(FS, cells))
+            )
 
 
 # Report slices: overall + the two due-date-hard regimes (kappa-sweep convention).
 SLICES: tuple[tuple[str, object], ...] = (
     ("overall", lambda r: True),
     ("T=0.6", lambda r: abs(r["T"] - 0.6) < 1e-9),
-    ("(T,R)=(0.6,0.2)", lambda r: abs(r["T"] - 0.6) < 1e-9 and abs(r["R"] - 0.2) < 1e-9),
+    (
+        "(T,R)=(0.6,0.2)",
+        lambda r: abs(r["T"] - 0.6) < 1e-9 and abs(r["R"] - 0.2) < 1e-9,
+    ),
 )
 
 
@@ -166,7 +173,11 @@ def report_equal_budget(rows: list[dict]) -> None:
     print("\n### equal-budget setting comparison — mean RPDf% by setting × f")
     print("    read DOWN each f-column (same budget); * = column best, lower is better")
     for sname, spred in SLICES:
-        n_cell = sum(1 for r in rows if spred(r) and r["flow"] == "full" and r["K"] == 1 and r["f"] == 30)
+        n_cell = sum(
+            1
+            for r in rows
+            if spred(r) and r["flow"] == "full" and r["K"] == 1 and r["f"] == 30
+        )
         print(f"\n  -- slice: {sname} (n={n_cell}/cell) --")
         table: dict[tuple, float] = {}
         for flow in FLOWS:
@@ -174,16 +185,22 @@ def report_equal_budget(rows: list[dict]) -> None:
                 for f in FS:
                     a = _agg(
                         rows,
-                        lambda r, flow=flow, k=k, f=f: spred(r)
-                        and r["flow"] == flow
-                        and r["K"] == k
-                        and r["f"] == f,
+                        lambda r, flow=flow, k=k, f=f: (
+                            spred(r)
+                            and r["flow"] == flow
+                            and r["K"] == k
+                            and r["f"] == f
+                        ),
                     )
                     if a is not None:
                         table[(flow, k, f)] = a[0]
         best_per_f = {
             f: min(
-                ((s, table[(s[0], s[1], f)]) for s in ((fl, k) for fl in FLOWS for k in KS) if (s[0], s[1], f) in table),
+                (
+                    (s, table[(s[0], s[1], f)])
+                    for s in ((fl, k) for fl in FLOWS for k in KS)
+                    if (s[0], s[1], f) in table
+                ),
                 key=lambda sv: sv[1],
                 default=None,
             )
@@ -198,11 +215,15 @@ def report_equal_budget(rows: list[dict]) -> None:
                     if v is None:
                         cells.append(f"{'--':>9}")
                         continue
-                    mark = "*" if best_per_f[f] and best_per_f[f][0] == (flow, k) else " "
+                    mark = (
+                        "*" if best_per_f[f] and best_per_f[f][0] == (flow, k) else " "
+                    )
                     cells.append(f"{v:>8.2f}{mark}")
                 print(f"    {flow[0].upper()}_k{k}   " + " ".join(cells))
         best_line = " ".join(
-            f"{('f' + str(f)):>4}={best_per_f[f][0][0][0].upper()}_k{best_per_f[f][0][1]}" if best_per_f[f] else f"{('f' + str(f)):>4}=--"
+            f"{('f' + str(f)):>4}={best_per_f[f][0][0][0].upper()}_k{best_per_f[f][0][1]}"
+            if best_per_f[f]
+            else f"{('f' + str(f)):>4}=--"
             for f in FS
         )
         print("    best:    " + best_line)
@@ -213,7 +234,13 @@ def report_best_f(rows: list[dict]) -> None:
     for flow in FLOWS:
         for k in KS:
             means = [
-                (_agg(rows, lambda r: r["flow"] == flow and r["K"] == k and r["f"] == f) or (None,))[0]
+                (
+                    _agg(
+                        rows,
+                        lambda r: r["flow"] == flow and r["K"] == k and r["f"] == f,
+                    )
+                    or (None,)
+                )[0]
                 for f in FS
             ]
             present = [m for m in means if m is not None]
@@ -226,7 +253,10 @@ def report_best_f(rows: list[dict]) -> None:
                 else "--"
                 for i in range(1, len(means))
             ]
-            print(f"  {flow}_k{k}: best f={best_f}% | Δ(5→10→15→20→25→30): " + " ".join(deltas))
+            print(
+                f"  {flow}_k{k}: best f={best_f}% | Δ(5→10→15→20→25→30): "
+                + " ".join(deltas)
+            )
 
 
 def report_t_decomposition(rows: list[dict]) -> None:
@@ -239,10 +269,18 @@ def report_t_decomposition(rows: list[dict]) -> None:
                 for f in FS:
                     a = _agg(
                         rows,
-                        lambda r: r["flow"] == flow and r["K"] == k and r["f"] == f and r["T"] == T,
+                        lambda r: (
+                            r["flow"] == flow
+                            and r["K"] == k
+                            and r["f"] == f
+                            and r["T"] == T
+                        ),
                     )
                     cells.append(f"{a[0]:.1f}" if a else "--")
-                print(f"    {flow}_k{k}: " + " ".join(f"f{f}={c}" for f, c in zip(FS, cells)))
+                print(
+                    f"    {flow}_k{k}: "
+                    + " ".join(f"f{f}={c}" for f, c in zip(FS, cells))
+                )
 
 
 def _paired(rows: list[dict], pred):
@@ -288,7 +326,9 @@ def _paired_line(rows: list[dict], label: str, pred) -> None:
 
 
 def report_flow_comparison(rows: list[dict]) -> None:
-    print("\n### csr_full vs csr_neh — paired (gap = full - neh mean RPDf%; <0 = full wins)")
+    print(
+        "\n### csr_full vs csr_neh — paired (gap = full - neh mean RPDf%; <0 = full wins)"
+    )
     print(" by K (all f):")
     for k in KS:
         _paired_line(rows, f"K={k}", lambda kk, f, T, k=k: kk == k)
@@ -304,7 +344,9 @@ def report_flow_comparison(rows: list[dict]) -> None:
             _paired_line(
                 rows,
                 f"K={k} T={T} f30",
-                lambda kk, ff, TT, k=k, T=T: kk == k and ff == 30 and abs(TT - T) < 1e-9,
+                lambda kk, ff, TT, k=k, T=T: (
+                    kk == k and ff == 30 and abs(TT - T) < 1e-9
+                ),
             )
 
 
@@ -399,7 +441,9 @@ def report_k1_optimality(run_dirs: list[Path]) -> None:
             if abs(ov - ob) <= 1e-6 * max(1.0, abs(ov)):
                 opt += 1
         if tot:
-            print(f"  {scenario_dir.name}: {opt}/{tot} optimal ({100 * opt / tot:.1f}%)")
+            print(
+                f"  {scenario_dir.name}: {opt}/{tot} optimal ({100 * opt / tot:.1f}%)"
+            )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -439,7 +483,9 @@ def main() -> None:
     run_dirs.extend(args.extra_run_dirs)
     rows = load_rows(run_dirs)
     fs_present = sorted({r["f"] for r in rows})
-    print(f"rows: {len(rows)}  f-points: {fs_present}  run_dirs: {[d.name for d in run_dirs]}\n")
+    print(
+        f"rows: {len(rows)}  f-points: {fs_present}  run_dirs: {[d.name for d in run_dirs]}\n"
+    )
     report_curves(rows)
     report_equal_budget(rows)
     report_best_f(rows)
