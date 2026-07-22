@@ -6,8 +6,7 @@ Verifies the two CLAUDE.md subroutine step contract invariants:
 2. ``elapsed_time`` is measured from step entry to immediately before
    ``_register`` — no heavy work wedged in between.
 
-WP-2 additions: flag independence tests for ``emit_phase_schedules`` and
-``draw_cp_trajectory``.
+WP-2 additions: flag independence tests for ``emit_phase_schedules``.
 """
 
 from __future__ import annotations
@@ -275,8 +274,8 @@ def test_elapsed_time_does_not_include_post_register_work(
 
 
 # ---------------------------------------------------------------------------
-# WP-2 flag test 5: emit_phase_schedules=True, draw_cp_trajectory=False
-# -> 3 snapshots on csr_phase_schedules, csr_cp_trajectory remains None.
+# WP-2 flag test 5: emit_phase_schedules=True
+# -> 3 snapshots on csr_phase_schedules.
 # ---------------------------------------------------------------------------
 
 
@@ -284,7 +283,7 @@ def test_emit_phase_schedules_true_draws_three_snapshots_no_trajectory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """emit_phase_schedules=True + solution -> csr_phase_schedules length 3,
-    names ordered 1_/2_/3_, and csr_cp_trajectory stays None."""
+    names ordered 1_/2_/3_."""
     controller = _make_controller()
 
     fake_trace = _make_trace_with_schedule()

@@ -1285,7 +1285,7 @@ def test_solve_true_default_unchanged() -> None:
 
 
 def test_solve_false_trajectory_ignored() -> None:
-    """solve=False + draw_cp_trajectory=True must produce falsy trajectory."""
+    """solve=False must produce a falsy cp_progress_log trajectory."""
     import logging
 
     from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
