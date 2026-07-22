@@ -21,7 +21,7 @@ import csv
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -720,4 +720,115 @@ def test_runner_emits_csr_inner_obj_log_json(tmp_path: Path) -> None:
     inner_path2 = layout2.artifact_path("csr_inner_obj_log_json", **scope)
     assert not inner_path2.exists(), (
         "csr_inner_obj_log_json must NOT be written when child_history is absent"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Candidate-drop path (reconstruction raises → dropped_count > 0)
+# ---------------------------------------------------------------------------
+
+
+def _RAISE_ON_FIRST(wrapped: object) -> object:  # type: ignore[no-untyped-def]
+    """Side-effect factory: raise Exception on first call, pass through after."""
+    _first = True
+
+    def wrapper(*args, **kwargs):
+        nonlocal _first
+        if _first:
+            _first = False
+            raise RuntimeError("simulated reconstruction failure")
+        return wrapped(*args, **kwargs)
+
+    return wrapper
+
+
+def test_solve_flow_candidate_drop_path() -> None:
+    """A simulated reconstruction failure on one candidate should produce
+    ``dropped_count >= 1`` and at least one ``valid=False`` row."""
+    controller = _make_controller(timelimit=60.0)
+    two_step_flow = [
+        {"method": "calc_mcf_lb_and_derive_full_sch"},
+        {"method": "neh_cp", "job_priority": "weight-due-pos", "cp_tl": 1.0},
+    ]
+
+    from ffc_ddw_sum_et.solution.schedule_build import (
+        reconstruct_coarse_schedule as real_reconstruct,
+    )
+
+    side_effect = _RAISE_ON_FIRST(real_reconstruct)
+    with patch(
+        "ffc_ddw_sum_et.orchestration.controller.reconstruct_coarse_schedule",
+        side_effect=side_effect,
+    ):
+        controller.coarsen_solve_reconstruct(
+            factor=2,
+            timelimit=30.0,
+            solve_flow=two_step_flow,
+        )
+
+    summary = controller.csr_solve_flow_summary
+    assert summary is not None
+    assert summary["dropped_count"] >= 1, (
+        f"expected at least 1 dropped candidate, got {summary['dropped_count']}"
+    )
+    rows = controller.csr_candidate_rows
+    assert any(r["valid"] is False for r in rows), (
+        "expected at least one valid=False row"
+    )
+
+
+# ---------------------------------------------------------------------------
+# No-winner fallback (all candidates dropped)
+# ---------------------------------------------------------------------------
+
+
+def _RAISE_ALWAYS(wrapped: object) -> object:  # type: ignore[no-untyped-def]
+    """Side-effect factory: raise on every call, no candidate survives."""
+
+    def wrapper(*args, **kwargs):
+        raise RuntimeError("simulated reconstruction failure")
+
+    return wrapper
+
+
+def test_solve_flow_no_winner_registers_none() -> None:
+    """When every candidate's reconstruction raises, the step registers with
+    solution=None and the summary marks winner_source=None."""
+    controller = _make_controller(timelimit=60.0)
+    two_step_flow = [
+        {"method": "calc_mcf_lb_and_derive_full_sch"},
+        {"method": "neh_cp", "job_priority": "weight-due-pos", "cp_tl": 1.0},
+    ]
+
+    register_kwargs: list[dict] = []
+    original_register = controller._register
+
+    def spy_register(report, solution, **kwargs):
+        register_kwargs.append({"report": report, "solution": solution})
+        return original_register(report, solution, **kwargs)
+
+    controller._register = spy_register  # type: ignore[method-assign]
+
+    with patch(
+        "ffc_ddw_sum_et.orchestration.controller.reconstruct_coarse_schedule",
+        side_effect=_RAISE_ALWAYS(None),
+    ):
+        controller.coarsen_solve_reconstruct(
+            factor=2,
+            timelimit=30.0,
+            solve_flow=two_step_flow,
+        )
+
+    summary = controller.csr_solve_flow_summary
+    assert summary is not None
+    assert summary["dropped_count"] == summary["deduped_count"], (
+        f"all deduped candidates should be dropped; "
+        f"dropped={summary['dropped_count']}, deduped={summary['deduped_count']}"
+    )
+    assert summary["winner_source"] is None
+    assert summary["winner_original_obj"] is None
+
+    assert len(register_kwargs) == 1
+    assert register_kwargs[0]["solution"] is None, (
+        "no-winner path must register solution=None"
     )
