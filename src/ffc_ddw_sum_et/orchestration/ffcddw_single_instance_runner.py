@@ -349,14 +349,14 @@ class FFcDDWSingleInstanceRunner(
                 f"{self._ins_name!r}; _load_resume_data did not inject it "
                 "(check resume_root and base artifacts)."
             )
+        # Structural feasibility guard on the restored schedule.
+        self.ctrlr.check_feasibility(
+            self.resume_solution.schedule.get_jik_2_start_time_map()
+        )
         elapsed = float(self.resume_elapsed_time or 0.0)
         # Back-date the clock: timer.elapsed_sec ≈ elapsed at register time.
         self.ctrlr.timer.set_start_time(
             datetime.datetime.now() - datetime.timedelta(seconds=elapsed)
-        )
-        # Structural feasibility guard on the restored schedule.
-        self.ctrlr.check_feasibility(
-            self.resume_solution.schedule.get_jik_2_start_time_map()
         )
         # Register the restored incumbent: obj_value drives the incumbent, and
         # obj_bound (base global MCF LB) seeds solution_manager.best_obj_bound.
