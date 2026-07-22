@@ -16,7 +16,11 @@ from typing import Any
 import pandas as pd
 
 from ._chart_constants import series_colors_json, symbol_map_json
-from .np_utils import progression_points_to_arrays, step_function_mean_over_union
+from .np_utils import (
+    decimate_step_series,
+    progression_points_to_arrays,
+    step_function_mean_over_union,
+)
 from .step_path import build_step_path
 from .trajectory_utils import (
     build_best_so_far_progression_points,
@@ -37,6 +41,12 @@ _POSITIVE_AXIS_PADDING = 1.05
 # Minimum normalized-time x-axis upper. Prevents the chart from
 # squeezing horizontally when every scenario finishes well before t=1.
 _MIN_NORMALIZED_TIME_X_UPPER = 1.0
+
+# Upper bound on breakpoints kept per scenario mean step series. The raw
+# union-of-change-times mean carries 10^5-10^6 points (one per any
+# instance's improvement); at this resolution the sub-quantum thinning is
+# visually lossless while shrinking the emitted HTML from ~70MB to ~1MB.
+_MEAN_SERIES_MAX_POINTS = 4000
 
 
 def _positive_axis_upper(values: list[float]) -> float:
@@ -201,6 +211,9 @@ def _build_scenario_mean_series(
         progression_points_to_arrays(m["progression_points"]) for m in models
     ]
     mean_x, mean_y = step_function_mean_over_union(model_arrays)
+    mean_x, mean_y = decimate_step_series(
+        mean_x, mean_y, max_points=_MEAN_SERIES_MAX_POINTS
+    )
 
     step_x, step_y = build_step_path(mean_x, mean_y)
     guide_df = (
@@ -342,8 +355,8 @@ _HTML_TEMPLATE = Template("""<!doctype html>
     });
 
     const layout = {
-      title: { text: "Subroutine flow mean over-time RPDf by scenario" },
-      xaxis: { title: { text: "Normalized time" }, tickformat: ".$x_percent_decimals%", range: [0, payload.x_max] },
+      title: { text: "$chart_title" },
+      xaxis: { title: { text: "$x_axis_label" }, tickformat: ".$x_percent_decimals%", range: [0, payload.x_max] },
       yaxis: { title: { text: "Mean RPDf" }, tickformat: ".$y_percent_decimals%", range: [payload.y_min, payload.y_max] },
       template: "plotly_white",
       hovermode: "closest",
@@ -363,9 +376,20 @@ _HTML_TEMPLATE = Template("""<!doctype html>
 """)
 
 
-def _render_html(payload: dict, x_decimals: int, y_decimals: int) -> str:
+def _render_html(
+    payload: dict,
+    x_decimals: int,
+    y_decimals: int,
+    *,
+    title: str | None = None,
+    x_label: str | None = None,
+) -> str:
+    _title = title or "Subroutine flow mean over-time RPDf by scenario"
+    _x_label = x_label or "Normalized time"
     return _HTML_TEMPLATE.substitute(
         payload_json=json.dumps(payload, separators=(",", ":")),
+        chart_title=_title,
+        x_axis_label=_x_label,
         x_percent_decimals=x_decimals,
         y_percent_decimals=y_decimals,
         series_colors_json=series_colors_json(),
@@ -379,6 +403,8 @@ def export_multi_scenario_method_rpdf_comparison_html(
     *,
     x_percent_decimals: int = 1,
     y_percent_decimals: int = 1,
+    title: str | None = None,
+    x_label: str | None = None,
 ) -> bool:
     """Render the run-level scenario-comparison chart. Returns ``False`` when
     no scenario yielded usable data.
@@ -389,7 +415,13 @@ def export_multi_scenario_method_rpdf_comparison_html(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        _render_html(payload, x_percent_decimals, y_percent_decimals),
+        _render_html(
+            payload,
+            x_percent_decimals,
+            y_percent_decimals,
+            title=title,
+            x_label=x_label,
+        ),
         encoding="utf-8",
     )
     logger.info("Multi-scenario method comparison HTML saved to %s", output_path)

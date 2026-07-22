@@ -6,24 +6,28 @@ import argparse
 import logging
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from routix.io import RunRoot, init_run_root
+from routix.dynamic_data_object import DynamicDataObject
+from routix.io import RunRoot, init_run_root, load_yaml
+from routix.subroutine_flow_validator import SubroutineFlowValidator
 from routix.type_defs import RunMode
 
 from ffc_ddw_sum_et.logging_setup import setup_logging
 from ffc_ddw_sum_et.orchestration import (
+    SUBROUTINE_FLOW_CACHE_FN,
     BenchmarkLoader,
     FFcDDWMultiInstanceRunner,
     FFcDDWMultiScenarioRunner,
     FFcDDWSingleInstanceRunner,
+    FFcDDWSubroutineController,
     init_ffc_artifact_layout,
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260707/sw_cp_tl_p25_p50.yaml")
+CONFIG_PATH = Path("metadata/20260721/csr_init_isw_batch_3.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -82,8 +86,18 @@ def main() -> None:
     else:
         logger.info("Run output directory: %s", run_root.path)
 
+    # RESUME: resolve the base scenario dir and load its cached flow so each
+    # scenario's prefix can be validated and its resume index derived.
+    resume_dir: Path | None = None
+    base_flow: list | None = None
+    if mode == RunMode.RESUME:
+        resume_dir = _resolve_resume_dir(config, base_output_dir)
+        logger.info("RESUME: resolved base scenario dir: %s", resume_dir)
+        base_flow = load_yaml(resume_dir / SUBROUTINE_FLOW_CACHE_FN)
+
     instance_worker_cnt = config.get("instance_worker_cnt", 1)
     draw_gantt = bool(config.get("draw_gantt", True))
+    draw_progress_plot = bool(config.get("draw_progress_plot", False))
     painter_thread_cnt = int(config.get("painter_thread_cnt", 1))
 
     benchmark_dir = Path(config["benchmark_dir"])
@@ -99,19 +113,49 @@ def main() -> None:
     instances = loader.load_all(ins_index=ins_index_filter)
     logger.info("Loaded %d instances", len(instances))
 
+    flow_validator = (
+        SubroutineFlowValidator(FFcDDWSubroutineController)
+        if mode == RunMode.RESUME
+        else None
+    )
+
     scenario_configs = []
     scenario_names = []
     for sc in config.get("scenarios", []):
-        scenario_configs.append(
-            {
-                "subroutine_flow": sc["subroutine_flow"],
-                "stopping_criteria": {"timelimit": sc["timelimit"]},
-                "output_subdir": sc.get("output_subdir"),
-            }
-        )
-        scenario_names.append(sc.get("name", f"scenario_{len(scenario_configs)}"))
+        scenario_name = sc.get("name", f"scenario_{len(scenario_configs) + 1}")
+        scenario_config: dict[str, Any] = {
+            "subroutine_flow": sc["subroutine_flow"],
+            "stopping_criteria": {"timelimit": sc["timelimit"]},
+            "output_subdir": sc.get("output_subdir"),
+        }
+        if mode == RunMode.RESUME:
+            assert flow_validator is not None and base_flow is not None
+            flow_resume_idx = flow_validator.validate_subroutine_flow_prefix(
+                DynamicDataObject.from_obj(base_flow),
+                DynamicDataObject.from_obj(sc["subroutine_flow"]),
+            )
+            step_cnt = len(sc["subroutine_flow"])
+            if flow_resume_idx >= step_cnt:
+                raise ValueError(
+                    f"RESUME: scenario {scenario_name!r} would run no steps — its "
+                    f"{step_cnt}-step flow is fully covered by the base flow at "
+                    f"resume_dir ({resume_dir}). Point resume_dir at the base "
+                    "(prefix) run, not a run of the case scenarios themselves."
+                )
+            scenario_config["flow_resume_idx"] = flow_resume_idx
+            logger.info(
+                "RESUME: scenario %s resumes at flow index %d (base prefix of %d "
+                "steps validated)",
+                scenario_name,
+                flow_resume_idx,
+                flow_resume_idx,
+            )
+        scenario_configs.append(scenario_config)
+        scenario_names.append(scenario_name)
 
-    output_metadata = {"start_dt": main_start_dt}
+    output_metadata: dict[str, Any] = {"start_dt": main_start_dt}
+    if mode == RunMode.RESUME and resume_dir is not None:
+        output_metadata["resume_root"] = str(resume_dir)
 
     runner = FFcDDWMultiScenarioRunner(
         m_i_runner_class=FFcDDWMultiInstanceRunner,
@@ -126,6 +170,7 @@ def main() -> None:
         scenario_names=scenario_names,
         instance_worker_cnt=instance_worker_cnt,
         draw_gantt=draw_gantt,
+        draw_progress_plot=draw_progress_plot,
         painter_thread_cnt=painter_thread_cnt,
         ins_index_source=ins_index_source,
         bks_table_csv_path=bks_table_csv_path,
@@ -156,9 +201,9 @@ def main() -> None:
         setup_logging(*main_logging_args, is_main=True)
         time_main_end = time.monotonic()
         logger.info(
-            "Finished main() at %s. Total elapsed time: %f seconds",
+            "Finished main() at %s. Total elapsed time: %s",
             datetime.now(),
-            time_main_end - time_main_start,
+            timedelta(seconds=time_main_end - time_main_start),
         )
 
 
@@ -207,6 +252,81 @@ def _resolve_post_process_dir(config: dict[str, Any], base_output_dir: Path) -> 
         "POST_PROCESS_ONLY requires 'analysis_dir_path' or 'analysis_timestamp' "
         "in the config YAML."
     )
+
+
+_LATEST_PREFIX = "latest:"
+
+
+def _resolve_resume_dir(config: dict[str, Any], base_output_dir: Path) -> Path:
+    """Resolve the base **scenario** directory to resume from (RunMode.RESUME).
+
+    Requires ``resume_dir`` in the config. Two accepted forms:
+
+    1. An explicit **scenario dir** that directly holds ``subroutine_flow.yaml``
+       (plus per-instance ``<ins>/<ins>_solution.json`` /
+       ``<ins>_instance_result.yaml``) — used verbatim.
+    2. ``latest:<scenario_name>`` — the newest run dir under ``base_output_dir``
+       that contains ``<scenario_name>/subroutine_flow.yaml``. Saves re-pointing
+       the config at each fresh timestamped base run.
+
+    Form 2 **requires the scenario name**: a *case* run's scenario dir also
+    carries a flow cache and resume artifacts, so an unqualified "newest flow
+    cache anywhere" search can silently resolve to a case run — whose flow fully
+    covers each case scenario, yielding a run that skips every step. Naming the
+    base scenario (case scenarios are named differently) makes that impossible.
+    """
+    resume_dir_str = config.get("resume_dir")
+    if not resume_dir_str:
+        raise ValueError(
+            "RESUME requires 'resume_dir' in the config YAML (a base scenario "
+            "dir, or 'latest:<base_scenario_name>')."
+        )
+    if resume_dir_str.startswith(_LATEST_PREFIX):
+        scenario_name = resume_dir_str[len(_LATEST_PREFIX) :].strip()
+        if not scenario_name:
+            raise ValueError(
+                "resume_dir 'latest:' requires the base scenario name, e.g. "
+                "'latest:mcf_lb_fmm_neh_cp'."
+            )
+        return _resolve_latest_scenario_dir(base_output_dir, scenario_name)
+    if resume_dir_str == "latest":
+        raise ValueError(
+            "resume_dir 'latest' is ambiguous; name the base scenario instead: "
+            "'latest:<base_scenario_name>' (e.g. 'latest:mcf_lb_fmm_neh_cp')."
+        )
+    path = Path(resume_dir_str).expanduser()
+    if not path.is_dir():
+        raise FileNotFoundError(f"resume_dir does not exist: {path}")
+    flow_cache = path / SUBROUTINE_FLOW_CACHE_FN
+    if not flow_cache.is_file():
+        raise FileNotFoundError(
+            f"resume_dir missing flow cache {SUBROUTINE_FLOW_CACHE_FN}: "
+            f"{flow_cache}. Was the base run produced by the current code?"
+        )
+    return path
+
+
+def _resolve_latest_scenario_dir(base_output_dir: Path, scenario_name: str) -> Path:
+    """Newest run dir under ``base_output_dir`` holding ``scenario_name``'s flow cache.
+
+    Run dir names are timestamps minted by ``init_run_root``
+    (``YYYYmmddTHHMMSS_microseconds``), so lexicographic order == chronological.
+    """
+    if not base_output_dir.is_dir():
+        raise FileNotFoundError(f"output_dir does not exist: {base_output_dir}")
+    candidates = [
+        run_dir / scenario_name
+        for run_dir in base_output_dir.iterdir()
+        if run_dir.is_dir()
+        and (run_dir / scenario_name / SUBROUTINE_FLOW_CACHE_FN).is_file()
+    ]
+    if not candidates:
+        raise FileNotFoundError(
+            f"RESUME: no run under {base_output_dir} has a scenario "
+            f"{scenario_name!r} with a {SUBROUTINE_FLOW_CACHE_FN}. Run the base "
+            "config first, or name the scenario that the base run emits."
+        )
+    return max(candidates, key=lambda scenario_dir: scenario_dir.parent.name)
 
 
 def _validate_scenario_uniqueness(scenarios: list[dict[str, Any]]) -> None:

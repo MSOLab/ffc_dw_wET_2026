@@ -6,7 +6,7 @@
 #   - partition: wxd5 와 동일(d̄₅ = max(중점평균, min_j r_j + Σ_j p_last/(m_last·2)))
 #   - 정렬 center 분리: early = min r_j + Σ p_last / m_last (÷2 없음), late = min r_j
 #   - wxd6: wxd2/5 곱셈형 키, wxd7: 쌩 weighted penalty 키
-# See plans/20260625/wxd6_wxd7_dispatch.md
+# See plans/experiment/20260625/wxd6_wxd7_dispatch.md
 run_mode: FULL_RUN
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv

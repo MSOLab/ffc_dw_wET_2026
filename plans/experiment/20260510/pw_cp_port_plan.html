@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plan: Port sw_cp into ffc_ddw_sum_et</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --surface: #ffffff;
+    --border: #e4e2da;
+    --border-soft: #efede5;
+    --text: #1a1a1a;
+    --muted: #5e5e58;
+    --faint: #8a8a82;
+    --accent: #2454b8;
+    --accent-soft: #e6edfa;
+    --code-bg: #f3f2ec;
+    --code-text: #2c2c28;
+    --ok: #1e7a3a;
+    --ok-bg: #e3f2e9;
+    --warn: #a55a07;
+    --warn-bg: #fbeed5;
+    --danger: #b3261e;
+    --danger-bg: #fbe2e0;
+    --info: #1f5a8a;
+    --info-bg: #e3eff8;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.03);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: ui-monospace, monospace; }
+  code { font-size: .88em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; color: var(--code-text); }
+  pre {
+    background: #1f2024; color: #e6e6e0; padding: 14px 16px; border-radius: 6px;
+    overflow-x: auto; font-size: 12.5px; line-height: 1.55; margin: 12px 0;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .toc { position: static !important; border-right: 0; border-bottom: 1px solid var(--border); } }
+
+  .toc {
+    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    padding: 28px 18px 28px 28px; border-right: 1px solid var(--border-soft);
+    background: var(--bg); font-size: 13px;
+  }
+  .toc .label { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 16px 0 6px; }
+  .toc a { display: block; padding: 3px 0; color: var(--muted); border-left: 2px solid transparent; padding-left: 10px; margin-left: -10px; }
+  .toc a:hover { color: var(--text); text-decoration: none; border-left-color: var(--border); }
+  .toc .title { font-weight: 600; color: var(--text); font-size: 14px; margin-bottom: 4px; }
+  .toc .crumb { color: var(--faint); font-size: 11px; margin-bottom: 14px; }
+
+  main { padding: 36px 48px 80px; max-width: 920px; }
+  @media (max-width: 900px) { main { padding: 24px 20px 60px; } }
+
+  h1 { font-size: 28px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -.01em; }
+  h2 { font-size: 19px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); letter-spacing: -.005em; }
+  h3 { font-size: 15.5px; margin: 26px 0 10px; color: var(--text); }
+  h4 { font-size: 13.5px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+  .meta { color: var(--faint); font-size: 12.5px; margin-bottom: 24px; }
+  .meta .peer { color: var(--accent); }
+
+  .tldr {
+    background: var(--info-bg); border: 1px solid #c9def0; border-radius: 8px;
+    padding: 14px 18px; margin: 18px 0 28px;
+  }
+  .tldr h4 { margin: 0 0 6px; color: var(--info); }
+  .tldr ul { margin: 4px 0 0; padding-left: 20px; }
+  .tldr li { margin: 3px 0; font-size: 14px; }
+
+  .badge {
+    display: inline-block; font-size: 10.5px; font-weight: 600;
+    padding: 2px 7px; border-radius: 10px; vertical-align: middle;
+    text-transform: uppercase; letter-spacing: .04em; line-height: 1.5;
+  }
+  .badge.ok       { background: var(--ok-bg); color: var(--ok); }
+  .badge.warn     { background: var(--warn-bg); color: var(--warn); }
+  .badge.danger   { background: var(--danger-bg); color: var(--danger); }
+  .badge.info     { background: var(--info-bg); color: var(--info); }
+  .badge.muted    { background: #e8e7e0; color: #5a5a55; }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  th { background: #f3f2ec; font-weight: 600; font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #fbfaf3; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 12px 0; }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .card.template { border-color: #c2d5b5; background: #f4faee; }
+  .card.template h4 { color: var(--ok); }
+  .card.not-template { border-color: #e7d5c5; background: #fbf3eb; }
+  .card.not-template h4 { color: var(--warn); }
+  .card h4 { margin: 0 0 6px; text-transform: none; letter-spacing: 0; font-size: 13.5px; }
+  .card p { margin: 4px 0; font-size: 13.5px; }
+  .card .path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+
+  /* Decision strip */
+  .decisions { display: grid; gap: 10px; margin: 14px 0; }
+  .decision {
+    display: grid; grid-template-columns: 170px 1fr; gap: 14px;
+    padding: 10px 14px; border-left: 3px solid var(--accent); background: #f6f8fc; border-radius: 0 6px 6px 0;
+  }
+  .decision .key { font-weight: 600; color: var(--accent); font-size: 13px; }
+  .decision .val { font-size: 13.5px; color: var(--text); }
+  .decision.deferred { border-left-color: var(--faint); background: #f4f3ed; }
+  .decision.deferred .key { color: var(--faint); }
+
+  /* 5-region SVG */
+  .partition-fig { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 14px 0; box-shadow: var(--shadow); }
+  .partition-fig figcaption { font-size: 12px; color: var(--muted); margin-top: 10px; text-align: center; }
+
+  /* Module map */
+  .modmap { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 14px 0; box-shadow: var(--shadow); }
+
+  /* Risk cards */
+  .risks { display: grid; gap: 10px; margin: 12px 0; }
+  .risk {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+    padding: 12px 16px;
+  }
+  .risk .hd { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .risk .hd h4 { margin: 0; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--text); }
+  .risk .body { font-size: 13.5px; color: var(--muted); margin-top: 6px; }
+  .risk.sev-high   { border-left: 4px solid var(--danger); }
+  .risk.sev-med    { border-left: 4px solid var(--warn); }
+  .risk.sev-low    { border-left: 4px solid var(--ok); }
+
+  /* Helpers table */
+  .helpers code { background: transparent; padding: 0; color: var(--text); font-weight: 500; }
+  .helpers td:nth-child(2) { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+
+  details { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 8px 14px; margin: 10px 0; }
+  details[open] { background: #fbfaf3; }
+  summary { cursor: pointer; font-weight: 600; font-size: 13.5px; color: var(--muted); user-select: none; }
+  summary:hover { color: var(--text); }
+  details pre, details p { margin-top: 10px; }
+
+  .scope-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 16px; }
+
+  .toc-section { margin-bottom: 6px; }
+  ul.plain { list-style: none; padding-left: 0; }
+  ul.plain li { padding: 4px 0; border-bottom: 1px dashed var(--border-soft); }
+  ul.plain li:last-child { border-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <div class="title">PW-CP Port Plan</div>
+  <div class="crumb">plans/experiment/20260510/</div>
+  <a href="pw_cp_port_plan_detail.html" style="color: var(--accent); font-size: 12.5px;">→ Detail companion</a>
+
+  <div class="label">Sections</div>
+  <a href="#tldr">TL;DR</a>
+  <a href="#context">Context</a>
+  <a href="#decisions">User decisions</a>
+  <a href="#goal">Goal</a>
+  <a href="#filelayout">File layout</a>
+  <a href="#option">PwCpOption fields</a>
+  <a href="#cpmodel">CP model</a>
+  <a href="#dispatcher">Dispatcher flow</a>
+  <a href="#helpers">Reused helpers</a>
+  <a href="#verify">Verification</a>
+  <a href="#risks">Risks</a>
+  <a href="#followups">Deferred follow-ups</a>
+
+  <div class="label">Glossary</div>
+  <ul class="plain" style="font-size: 12px;">
+    <li><b>FFcDDW</b> — hybrid flowshop, due windows, weighted E/T</li>
+    <li><b>LTF/RTF</b> — Left/Right Time-Fixed (locked timestamps)</li>
+    <li><b>LPF/RPF</b> — Left/Right Profile-Fixed (precedence only)</li>
+    <li><b>PF0/PF1</b> — profile-fix precedence variants</li>
+    <li><b>RJ</b> — right-justification (delay-latest)</li>
+  </ul>
+</nav>
+
+<main>
+
+<h1>Plan: Port <code>sw_cp</code> into <code>ffc_ddw_sum_et</code></h1>
+<div class="meta">
+  <span>plans/experiment/20260510/pw_cp_port_plan.md</span> ·
+  <span>Companion: <a class="peer" href="pw_cp_port_plan_detail.html">pw_cp_port_plan_detail.html</a></span> ·
+  <span>Branch: <code>20260509_cp_lns</code></span>
+</div>
+
+<section id="tldr" class="tldr">
+  <h4>At a glance</h4>
+  <ul>
+    <li>Port a <b>sliding-window CP refiner</b> from hybridflowshop into ffc_ddw_sum_et, refining an FFcDDW incumbent by re-solving an <em>unfixed</em> window + profile-fixed buffer batch-by-batch, directly minimising weighted E/T over the sub-window.</li>
+    <li>Structural template: <code>hybridflowshop/.../sw_cp.py</code> (5-region, cumulative + dummy bars). <b>Not</b> the flowshop_tardiness variant (incompatible with parallel machines per stage).</li>
+    <li>Load-bearing solution-layer addition: <code>FFcSchedule.delay_job_latest_leq_obj_contrib_all_stages</code> — objective-preserving right-justification extended to every stage.</li>
+    <li>One algorithm package <code>algorithm/sw_cp/</code>, one new subroutine method <code>sw_cp</code> on the controller, one experiment YAML, two-phase Gantt + per-step CSV.</li>
+  </ul>
+</section>
+
+<h2 id="context">Context</h2>
+
+<p><code>ffc_ddw_sum_et</code> solves FFcDDW (hybrid flowshop with due windows, weighted E/T from due window). Two upstream PW-CP implementations exist:</p>
+
+<div class="grid-2">
+  <div class="card not-template">
+    <h4>✗ Not the template <span class="badge warn">single-permutation</span></h4>
+    <div class="path">/home/hjt/code/flowshop-tardiness/<br>flowshop_tardiness/controller/sw_cp.py</div>
+    <p>Permutation flowshop, indirect-precedence CP. Assumes one permutation per stage — <b>incompatible</b> with parallel machines per stage.</p>
+  </div>
+  <div class="card template">
+    <h4>✓ Structural template <span class="badge ok">5-region, cumulative</span></h4>
+    <div class="path">/home/hjt/code/hybridflowshop/<br>hybridflowshop/controller/sw_cp.py (<code>PwCpConstructor</code>)</div>
+    <p>Hybrid flowshop, 5-region sliding window (ltf | lpf | unfixed | rpf | rtf), cumulative + dummy-bar CP. Mirror this.</p>
+  </div>
+</div>
+
+<figure class="partition-fig">
+  <svg viewBox="0 0 760 220" width="100%" style="max-width: 720px; display:block; margin:0 auto;" xmlns="http://www.w3.org/2000/svg">
+    <!-- time axis -->
+    <line x1="20" y1="180" x2="740" y2="180" stroke="#999" stroke-width="1"/>
+    <polygon points="740,180 732,177 732,183" fill="#999"/>
+    <text x="740" y="200" font-size="11" fill="#888" text-anchor="end" font-family="system-ui, sans-serif">time</text>
+
+    <!-- region bands -->
+    <rect x="20"  y="40" width="140" height="120" fill="#444"   opacity=".85" rx="3"/>
+    <rect x="160" y="40" width="120" height="120" fill="#7aa3d0" opacity=".75" rx="3"/>
+    <rect x="280" y="40" width="200" height="120" fill="#5fb37a" opacity=".85" rx="3"/>
+    <rect x="480" y="40" width="120" height="120" fill="#7aa3d0" opacity=".75" rx="3"/>
+    <rect x="600" y="40" width="140" height="120" fill="#444"   opacity=".85" rx="3"/>
+
+    <!-- labels -->
+    <text x="90"  y="22" font-size="13" font-weight="600" text-anchor="middle" fill="#1a1a1a" font-family="system-ui, sans-serif">LTF</text>
+    <text x="220" y="22" font-size="13" font-weight="600" text-anchor="middle" fill="#1a1a1a" font-family="system-ui, sans-serif">LPF</text>
+    <text x="380" y="22" font-size="13" font-weight="700" text-anchor="middle" fill="#1a1a1a" font-family="system-ui, sans-serif">UNFIXED</text>
+    <text x="540" y="22" font-size="13" font-weight="600" text-anchor="middle" fill="#1a1a1a" font-family="system-ui, sans-serif">RPF</text>
+    <text x="670" y="22" font-size="13" font-weight="600" text-anchor="middle" fill="#1a1a1a" font-family="system-ui, sans-serif">RTF</text>
+
+    <!-- semantics -->
+    <text x="90"  y="105" font-size="10.5" text-anchor="middle" fill="#fff" font-family="system-ui, sans-serif">left time-fixed</text>
+    <text x="90"  y="120" font-size="10" text-anchor="middle" fill="#fff" opacity=".85" font-family="system-ui, sans-serif">→ dummy bar [0, L]</text>
+    <text x="220" y="105" font-size="10.5" text-anchor="middle" fill="#fff" font-family="system-ui, sans-serif">left profile-fixed</text>
+    <text x="220" y="120" font-size="10" text-anchor="middle" fill="#fff" opacity=".9" font-family="system-ui, sans-serif">→ precedence only</text>
+    <text x="380" y="100" font-size="11.5" text-anchor="middle" fill="#fff" font-weight="600" font-family="system-ui, sans-serif">CP-SAT vars</text>
+    <text x="380" y="118" font-size="10" text-anchor="middle" fill="#fff" opacity=".9" font-family="system-ui, sans-serif">+ partial w·(E+T) obj</text>
+    <text x="540" y="105" font-size="10.5" text-anchor="middle" fill="#fff" font-family="system-ui, sans-serif">right profile-fixed</text>
+    <text x="540" y="120" font-size="10" text-anchor="middle" fill="#fff" opacity=".9" font-family="system-ui, sans-serif">→ precedence only</text>
+    <text x="670" y="105" font-size="10.5" text-anchor="middle" fill="#fff" font-family="system-ui, sans-serif">right time-fixed</text>
+    <text x="670" y="120" font-size="10" text-anchor="middle" fill="#fff" opacity=".85" font-family="system-ui, sans-serif">→ dummy bar [R, H]</text>
+
+    <!-- boundary labels -->
+    <line x1="280" y1="40" x2="280" y2="170" stroke="#1a1a1a" stroke-width="1.5" stroke-dasharray="3,3"/>
+    <line x1="480" y1="40" x2="480" y2="170" stroke="#1a1a1a" stroke-width="1.5" stroke-dasharray="3,3"/>
+    <text x="280" y="155" font-size="9.5" text-anchor="middle" fill="#fff" font-family="system-ui, sans-serif">unfixed_start</text>
+    <text x="480" y="155" font-size="9.5" text-anchor="middle" fill="#fff" font-family="system-ui, sans-serif">unfixed_end</text>
+
+    <!-- caption-area: per-stage k -->
+    <text x="20"  y="170" font-size="10" fill="#fff" font-family="system-ui, sans-serif">per (stage i, machine k)</text>
+  </svg>
+  <figcaption>Five-region sliding partition. LTF/RTF carry zero CP variables — they enter the model as fixed dummy bars in the cumulative resource. LPF/RPF carry precedence only. The <b>unfixed</b> window is what CP-SAT actually optimises.</figcaption>
+</figure>
+
+<h2 id="decisions">User decisions <span class="badge info">final</span></h2>
+
+<div class="decisions">
+  <div class="decision">
+    <div class="key">Algorithm name</div>
+    <div class="val"><code>sw_cp</code> (single variant)</div>
+  </div>
+  <div class="decision">
+    <div class="key">Non-final batch obj</div>
+    <div class="val"><b>Direct partial weighted E/T</b> minimisation over the sub-instance (<em>(a)안</em>). No <code>common_spacing</code>, no lex 2-phase.</div>
+  </div>
+  <div class="decision">
+    <div class="key">Sub-instance shape</div>
+    <div class="val"><b>hybridflowshop fidelity</b>: left/right dummy bars + release-time trick. Time-fixed ops get no CP vars; their footprint is dummy bars + (for cross-stage prec) stage-0 release on jobs with an LTF prefix.</div>
+  </div>
+  <div class="decision">
+    <div class="key"><code>spec.ref_solution</code></div>
+    <div class="val"><b>Required</b>; raise <code>ValueError</code> if absent.</div>
+  </div>
+  <div class="decision">
+    <div class="key">Dispatcher mirror</div>
+    <div class="val">Mirror <code>algorithm/neh_cp/dispatcher.py</code> mechanically: AlgSpec validation, option resolve, per-step TL via <code>resolve_per_step_tl</code>, wall-clock deadline plumbing, <code>ObjectiveValueRecorder</code> progress log, <code>keep_step_schedules</code> parity, <code>AlgRecord</code> assembly.</div>
+  </div>
+  <div class="decision">
+    <div class="key">Right-justification</div>
+    <div class="val"><b>Enabled</b> via objective-preserving extension. Add <code>FFcSchedule.delay_job_latest_leq_obj_contrib_all_stages</code>: first run existing last-stage delay (fixes every C<sub>j</sub>), then for stages c−1…1 push each op latest. PW-CP calls this on <code>incumbent.deepcopy()</code> once per batch → <code>rj_schedule</code> becomes the source of truth for <code>right_boundary[i,k]</code>, the i→i+1 precedence constants, and warm-start hints. Original incumbent stays untouched (accept/reject baseline only).</div>
+  </div>
+  <div class="decision">
+    <div class="key">In scope (added)</div>
+    <div class="val">Subroutine integration on <code>FFcDDWSubroutineController</code>, dedicated experiment config wired into <code>main.py</code>, two-phase Gantt (before/after) and hfs_summary-style per-step CSV. Use the <code>add-subroutine</code> skill for the convention stack; controller method follows the per-step contract in CLAUDE.md.</div>
+  </div>
+</div>
+
+<h2 id="goal">Goal</h2>
+<p>Add a sliding-window CP refiner that improves an FFcDDW incumbent by re-solving an unfixed window plus a profile-fixed buffer at each step, directly minimising weighted E/T over the sub-window. Algorithm id: <code>"sw_cp"</code>. Self-contained under <code>src/ffc_ddw_sum_et/algorithm/sw_cp/</code>.</p>
+
+<h2 id="filelayout">File layout</h2>
+
+<h3>Solution-layer extension</h3>
+<p>Single new method, used by PW-CP for objective-preserving RJ:</p>
+<ul>
+  <li><code>src/ffc_ddw_sum_et/solution/ffc_schedule.py</code> — add <code>FFcSchedule.delay_job_latest_leq_obj_contrib_all_stages(self, job_2_dw_ub_map)</code>.</li>
+</ul>
+<details>
+  <summary>Body sketch</summary>
+  <p>Call existing <code>self.delay_job_latest_leq_obj_contrib(job_2_dw_ub_map)</code> first (fixes every last-stage end / every C<sub>j</sub>); then for <code>i in reversed(self.stages[:-1])</code>, for each <code>mc_id</code> in <code>self.machines_per_stage[i]</code>, scan that machine's <code>__stage_2_mc_2_job_tuple_seq[i][mc_id]</code> from latest to earliest and rewrite each op's end as <code>min(op_start_of_same_job_on_stage_i+1, next_op_new_start_on_same_machine_or_+inf)</code>, with <code>new_start = new_end - duration</code>. After each stage's pass, call <code>self._rebuild_stage_time_caches(i)</code> to refresh cached lookup maps. No mutation of <code>__stage_2_mc_2_job_tuple_seq</code> ordering — only timestamps shift; the per-machine sequence order is preserved.</p>
+</details>
+
+<h3>Algorithm core <span class="badge ok">new package</span></h3>
+<p>Under <code>src/ffc_ddw_sum_et/algorithm/sw_cp/</code>:</p>
+
+<figure class="modmap">
+  <svg viewBox="0 0 720 280" width="100%" style="max-width: 700px; display:block; margin:0 auto;" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#7a7a72"/>
+      </marker>
+    </defs>
+    <!-- __init__ at top -->
+    <rect x="290" y="14" width="140" height="38" fill="#e6edfa" stroke="#2454b8" rx="4"/>
+    <text x="360" y="30" font-size="12.5" font-weight="600" text-anchor="middle" font-family="system-ui, sans-serif">__init__.py</text>
+    <text x="360" y="46" font-size="10.5" fill="#555" text-anchor="middle" font-family="system-ui, sans-serif">re-exports public API</text>
+
+    <!-- middle row: option, partition, step_log -->
+    <rect x="40"  y="90" width="160" height="50" fill="#fff" stroke="#9aa" rx="4"/>
+    <text x="120" y="110" font-size="12" font-weight="600" text-anchor="middle" font-family="system-ui, sans-serif">option.py</text>
+    <text x="120" y="128" font-size="10.5" fill="#555" text-anchor="middle" font-family="system-ui, sans-serif">PwCpOption(AlgOption)</text>
+
+    <rect x="280" y="90" width="160" height="50" fill="#fff" stroke="#9aa" rx="4"/>
+    <text x="360" y="110" font-size="12" font-weight="600" text-anchor="middle" font-family="system-ui, sans-serif">partition.py</text>
+    <text x="360" y="128" font-size="10.5" fill="#555" text-anchor="middle" font-family="system-ui, sans-serif">OperationPartition + builders</text>
+
+    <rect x="520" y="90" width="160" height="50" fill="#fff" stroke="#9aa" rx="4"/>
+    <text x="600" y="110" font-size="12" font-weight="600" text-anchor="middle" font-family="system-ui, sans-serif">step_log.py</text>
+    <text x="600" y="128" font-size="10.5" fill="#555" text-anchor="middle" font-family="system-ui, sans-serif">PwCpStepEntry</text>
+
+    <!-- cp_model -->
+    <rect x="160" y="190" width="180" height="56" fill="#f4faee" stroke="#5fb37a" rx="4"/>
+    <text x="250" y="212" font-size="12.5" font-weight="600" text-anchor="middle" font-family="system-ui, sans-serif">cp_model.py</text>
+    <text x="250" y="230" font-size="10.5" fill="#555" text-anchor="middle" font-family="system-ui, sans-serif">PwCpModelBuilder</text>
+    <text x="250" y="243" font-size="9.5" fill="#888" text-anchor="middle" font-family="system-ui, sans-serif">partition-aware var creation</text>
+
+    <!-- dispatcher -->
+    <rect x="400" y="190" width="180" height="56" fill="#fbf3eb" stroke="#d18a3a" rx="4"/>
+    <text x="490" y="212" font-size="12.5" font-weight="600" text-anchor="middle" font-family="system-ui, sans-serif">dispatcher.py</text>
+    <text x="490" y="230" font-size="10.5" fill="#555" text-anchor="middle" font-family="system-ui, sans-serif">PwCpDispatcher.run(spec)</text>
+    <text x="490" y="243" font-size="9.5" fill="#888" text-anchor="middle" font-family="system-ui, sans-serif">sliding loop + RJ pre-pass</text>
+
+    <!-- arrows from __init__ down -->
+    <line x1="320" y1="52" x2="160" y2="88" stroke="#7a7a72" marker-end="url(#arrow)"/>
+    <line x1="360" y1="52" x2="360" y2="88" stroke="#7a7a72" marker-end="url(#arrow)"/>
+    <line x1="400" y1="52" x2="560" y2="88" stroke="#7a7a72" marker-end="url(#arrow)"/>
+
+    <!-- arrows into cp_model -->
+    <line x1="180" y1="140" x2="240" y2="188" stroke="#7a7a72" marker-end="url(#arrow)"/>
+    <line x1="340" y1="140" x2="270" y2="188" stroke="#7a7a72" marker-end="url(#arrow)"/>
+
+    <!-- arrows into dispatcher -->
+    <line x1="200" y1="140" x2="450" y2="188" stroke="#7a7a72" marker-end="url(#arrow)"/>
+    <line x1="370" y1="140" x2="475" y2="188" stroke="#7a7a72" marker-end="url(#arrow)"/>
+    <line x1="580" y1="140" x2="510" y2="188" stroke="#7a7a72" marker-end="url(#arrow)"/>
+
+    <!-- dispatcher uses cp_model -->
+    <line x1="400" y1="218" x2="342" y2="218" stroke="#5fb37a" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="370" y="210" font-size="9.5" fill="#5fb37a" text-anchor="middle" font-family="system-ui, sans-serif">build()</text>
+  </svg>
+  <figcaption>Module map. <code>__init__</code> re-exports <code>PwCpDispatcher</code> and <code>PwCpOption</code>; <code>dispatcher</code> drives the sliding loop and calls <code>cp_model</code> for each batch.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>File</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td><code>__init__.py</code></td><td>re-export <code>PwCpDispatcher</code>, <code>PwCpOption</code></td></tr>
+    <tr><td><code>option.py</code></td><td><code>PwCpOption(AlgOption)</code> dataclass</td></tr>
+    <tr><td><code>partition.py</code></td><td><code>OperationPartition</code>, <code>_build_operation_partition</code>, <code>build_stage_2_batch_list</code>, <code>validate_and_get_batch_count</code>. Ported from hybridflowshop, trimmed (drop <code>slack_occupying</code>; keep <code>promote_job_contained_ops</code>, <code>non_time_fixed</code>, <code>non_profile_fixed</code>).</td></tr>
+    <tr><td><code>cp_model.py</code></td><td><code>PwCpModelBuilder</code> (partition-aware CP-SAT builder)</td></tr>
+    <tr><td><code>dispatcher.py</code></td><td><code>PwCpDispatcher.run(spec)</code> (mirrors <code>NehCpDispatcher.run</code> mechanically)</td></tr>
+    <tr><td><code>step_log.py</code></td><td><code>PwCpStepEntry</code> (frozen dataclass)</td></tr>
+  </tbody>
+</table>
+
+<h3>Subroutine integration</h3>
+<p>Mirrors existing <code>mcf_lb</code>/<code>neh_cp</code> step methods on the controller:</p>
+<ul>
+  <li><code>src/ffc_ddw_sum_et/orchestration/controller.py</code> — add <code>run_sw_cp(self, ...)</code>. Build <code>AlgSpec(instance, option=PwCpOption(**kwargs), ref_solution=current_incumbent, alg_root=self.subroutine_dir, logger=self.logger, stop_predicate=self.stop_predicate)</code>, call <code>PwCpDispatcher().run(spec)</code>, register via <code>self._register(report, sol)</code>. Two-phase Gantt: emit before/after PNGs around the call, gated on <code>draw_gantt</code> flag. <b>Per CLAUDE.md contract:</b> single <code>_register</code> per call; <code>elapsed_time = time.monotonic() - start_elapsed</code> measured immediately before report construction, no work between measurement and <code>_register</code>.</li>
+  <li><code>ffcddw_single_instance_runner.py</code> — no change required if existing <code>_save_obj_log</code> aggregator already re-bases trajectories per step (verify during implementation).</li>
+  <li><code>configs/sw_cp/&lt;scenario&gt;.yaml</code> — new scenario invoking <code>run_sw_cp</code> with defaults + small grid (<code>unfixed_batch_count ∈ {2,3}</code>, <code>pf_method ∈ {"PF0","PF1"}</code>). <span class="badge warn">see detail</span> <a href="pw_cp_port_plan_detail.html#scenarios">scenarios live under <code>metadata/&lt;date&gt;/</code></a></li>
+  <li><code>main.py</code> — wire the new scenario name into the dispatch table (mirror <code>neh_cp</code>/<code>mcf_lb</code>). The <code>add-subroutine</code> skill is the canonical executor.</li>
+</ul>
+
+<h3>Tests</h3>
+<p>Under <code>tests/algorithm/sw_cp/</code> (shape mirrored from <code>tests/algorithm/neh_cp/</code>).</p>
+
+<h3>Reuse without copy from <code>algorithm/</code></h3>
+<ul>
+  <li><code>step_tl_resolver.resolve_per_step_tl</code> + <code>BatchTlMode</code> — already promoted out of <code>neh_cp/</code> into <code>algorithm/step_tl_resolver.py</code>. Import directly.</li>
+  <li><code>utils.trunc4</code> — already promoted into <code>algorithm/utils.py</code>. Import directly.</li>
+  <li><code>cpsat_callbacks.obj_value_recorder.ObjectiveValueRecorder</code> — progress recorder.</li>
+</ul>
+
+<h2 id="option">PwCpOption fields</h2>
+<pre><code>@dataclass(frozen=True, slots=True, kw_only=True)
+class PwCpOption(AlgOption):
+    solver_thread_cnt: int = 1
+    batch_size: int = 1
+    step_size: int = 1
+    unfixed_batch_count: int = 1
+    left_profile_fixed_batch_count: int = 0
+    right_profile_fixed_batch_count: int = 0
+    enable_promotion_profile_fixed: bool = False
+    pf_method: PFMethod = "PF1"
+
+    cp_tl_seconds: float | None = None
+    total_timelimit_seconds: float | None = None
+    batch_tl_mode: BatchTlMode = "constant"
+    batch_tl_offset_seconds: float = 0.01
+    apply_cumulative_tl: bool = False
+    wall_clock_deadline_sec: float | None = None
+
+    error_if_infeasible: bool = False
+    keep_step_schedules: bool = False
+</code></pre>
+<p><b>Skipped intentionally (deferred):</b> <code>tighten_ranges</code>, <code>use_lns_only</code>, <code>non_time_fixed_op_time_limit_multiplier</code>, <code>minimize_makespan_lex</code>, <code>cp_tl_2nd_obj_seconds</code>, lex/common_spacing toggles.</p>
+
+<h2 id="cpmodel">CP model (<code>PwCpModelBuilder</code>)</h2>
+<p>Cannot reuse <code>BaseModelBuilder.build</code> directly because it creates op vars for every <code>(j, i)</code>. PW-CP needs partition-aware variable creation. New builder, with shapes deliberately mirroring hybridflowshop's <code>cpsat_model_2/sw_cp.py:PwCpModelBuilder</code>.</p>
+
+<div class="tldr" style="background: var(--accent-soft); border-color: #c9d8f0;">
+  <h4 style="color: var(--accent);">Reference schedule</h4>
+  Every CP-model construction step reads start/end constants from
+  <code>rj_schedule = incumbent.deepcopy(); rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(instance.job_2_dw_ub_map)</code>
+  — <b>not</b> from the raw incumbent. <code>rj_schedule</code> has identical per-job objective contribution (E<sub>j</sub>, T<sub>j</sub>) but every op is at its latest objective-preserving position, giving non-time-fixed ops <b>maximal left-side slack</b> inside the window.
+</div>
+
+<h3>1. Sub-instance</h3>
+<p><code>sub_jobs = {j : non_time_fixed_op_count(j) > 0}</code> — jobs with at least one op in <code>lpf ∪ unfixed ∪ rpf</code>. Build <code>sub_instance = FFcDDWParameters.create_instance_of_job_subset(instance, sub_jobs)</code>.</p>
+
+<h3>2. Op vars (non-time-fixed only)</h3>
+<p>For each <code>(j, i)</code> in <code>sub_jobs × stages</code> where <code>(j, machine_in_rj_for_(j,i))</code> is in <code>stage_2_partition[i].non_time_fixed</code>, create <code>op_start[j,i]</code>, <code>op_end[j,i]</code>, <code>op_intvl[j,i]</code>. <b>Not</b> for <code>(j, i)</code> whose op falls in <code>time_fixed</code> — those ops contribute via dummy bars and the precedence constants below.</p>
+
+<h3>3. Dummy bar vars</h3>
+<p>Per <code>(stage, machine)</code>, both sourced from <code>rj_schedule</code>:</p>
+<ul>
+  <li><b>Left dummy bar</b>: fixed interval <code>[0, left_boundary[i,k]]</code> where <code>left_boundary[i,k] = max end-time of LTF ops on (i,k)</code> in <code>rj_schedule</code> (0 if none).</li>
+  <li><b>Right dummy bar</b>: fixed interval <code>[right_boundary[i,k], horizon]</code> where <code>right_boundary[i,k] = min start-time of RTF ops on (i,k)</code> in <code>rj_schedule</code> (horizon if none). <b>No <code>common_spacing</code> variable</b> — both endpoints are constants.</li>
+</ul>
+
+<h3>4. Job-stage precedence (<code>add_non_fixed_job_precedence_constraints</code>)</h3>
+<p>For each <code>j ∈ sub_jobs</code> and consecutive stage pair <code>(i, i+1)</code>:</p>
+<table>
+  <thead><tr><th>Stage i state</th><th>Stage i+1 state</th><th>Constraint</th></tr></thead>
+  <tbody>
+    <tr><td>non-time-fixed</td><td>non-time-fixed</td><td><code>op_end[j,i] &lt;= op_start[j,i+1]</code></td></tr>
+    <tr><td>time-fixed</td><td>non-time-fixed</td><td><code>op_start[j,i+1] &gt;= rj_schedule_end[j,i]</code> (constant lower bound)</td></tr>
+    <tr><td>non-time-fixed</td><td>time-fixed</td><td><code>op_end[j,i] &lt;= rj_schedule_start[j,i+1]</code> (constant upper bound)</td></tr>
+  </tbody>
+</table>
+<p>Equivalent to hybridflowshop's <code>add_non_fixed_job_precedence_constraints</code>. <b>Constants come from <code>rj_schedule</code> rather than the raw incumbent — this is the entire benefit of the RJ pre-pass.</b></p>
+
+<h3>5. Stage-0 release-time trick</h3>
+<p>Where applicable, <code>_make_vars</code>-style release on the first non-time-fixed stage of each <code>j</code> is implicit via the bullet above (i time-fixed, i+1 non-time-fixed). <b>Do NOT</b> use <code>BaseModelBuilder._make_vars</code>'s <code>job_2_release</code> parameter — that hook only fires on <code>i_list[0]</code> and the partition can leave a job's stage-0 op time-fixed while later stages are not. The per-stage "constant lower bound" handles all cases uniformly.</p>
+
+<h3>6. Capacity (cumulative with dummy bars)</h3>
+<p>For each stage <code>i</code>:</p>
+<pre><code>mdl.add_cumulative(
+    [op_intvl[j,i] for non_time_fixed (j, k_in_partition)]
+        + [left_dummy[i,k]  for k in M_i]
+        + [right_dummy[i,k] for k in M_i],
+    demands=[1]*N, capacity=|M_i|)
+</code></pre>
+<p>Equivalent to <code>add_capacity_with_dummy_bar_constraints</code> in hybridflowshop.</p>
+
+<h3>7. Profile-fix precedence</h3>
+<p>Build <code>profile_fixed_schedule = rj_schedule.deepcopy()</code> then <code>remove_operations(non_profile_fixed_ops)</code>. Call existing <code>BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule</code> (<code>cumulative.py:457</code>) with <code>decode_pf_method(option.pf_method)</code>. <b>Reuse this — do not re-implement.</b></p>
+
+<h3>8. Hints</h3>
+<p>From <code>rj_schedule</code> restricted to non-time-fixed ops. Reuse <code>BaseModelBuilder.apply_start_hints_from_start_time_map</code> and <code>apply_end_hints_from_end_time_map</code> over the non-time-fixed <code>(j, i, k)</code> subset. E/T hints via <code>apply_et_hints_from_ref_schedule</code> on E/T vars built in step 9 — <code>rj_schedule</code> and the raw incumbent have identical C<sub>j</sub>, so either works; using <code>rj_schedule</code> keeps the hint set internally consistent.</p>
+
+<h3>9. Objective (partial weighted E/T)</h3>
+<p>For each <code>j ∈ sub_jobs</code> whose <b>last-stage</b> op is non-time-fixed (i.e., <code>(j, k_last) ∈ partition[last_i].non_time_fixed</code>):</p>
+<ul>
+  <li>Create <code>E<sub>j</sub> = max(0, d⁻<sub>j</sub> - op_end[j, last_i])</code> and <code>T<sub>j</sub> = max(0, op_end[j, last_i] - d⁺<sub>j</sub>)</code> via <code>add_max_equality</code>.</li>
+  <li>Add <code>w_e[j] * E_j + w_t[j] * T_j</code> to the objective.</li>
+</ul>
+<p>For <code>j ∈ sub_jobs</code> whose last-stage op is <b>time-fixed</b> in this partition: skip — its C<sub>j</sub> is a constant from the incumbent and contributes a constant <code>et_offset_partial</code> (logged but not added to the CP objective; constants don't affect <code>argmin</code>).</p>
+<p><code>mdl.minimize(sum(et_terms))</code>. No <code>obj_lb</code>, no <code>et_ub</code>, no makespan secondary.</p>
+
+<h2 id="dispatcher">Dispatcher flow (<code>PwCpDispatcher.run</code>)</h2>
+
+<details open>
+<summary>Pseudocode</summary>
+<pre><code>run(spec):
+  instance = _validate_instance(spec)              # FFcDDWParameters
+  if spec.ref_solution is None:
+      raise ValueError("sw_cp requires spec.ref_solution")
+  option   = _resolve_option(spec)                  # PwCpOption()
+  logger   = spec.logger or logging.getLogger(__name__)
+
+  incumbent = spec.ref_solution.deepcopy()
+  incumbent.make_semi_active(instance.stage_2_job_2_p_map)
+  incumbent.insert_idle_time(instance.job_2_due_window_map,
+                             instance.job_2_ewt_map, instance.job_2_twt_map)
+
+  params_for_horizon = BaseModelBuilder.make_params(instance)
+  horizon = sum(params_for_horizon.p.values())
+
+  initial_batches = build_stage_2_batch_list(incumbent, option.batch_size)
+  max_batch_cnt   = validate_and_get_batch_count(initial_batches)
+  iteration_idxs  = list(range(0,
+                                max_batch_cnt - option.unfixed_batch_count + 1,
+                                option.step_size))
+
+  per_step_tl = resolve_per_step_tl(
+      cp_tl_from_arg=option.cp_tl_seconds,
+      total_seconds=option.total_timelimit_seconds,
+      num_batches=None,
+      batch_count=len(iteration_idxs),
+      batch_tl_mode=option.batch_tl_mode,
+      batch_tl_offset_seconds=option.batch_tl_offset_seconds,
+      logger=logger)
+
+  start_elapsed   = time.monotonic()
+  step_entries: list[PwCpStepEntry] = []
+  progress_entries: list[ProgressLogEntry] = []
+  step_schedules: list[tuple[int, FFcSchedule, FFcSchedule | None]] = []
+  stopped_early = False
+
+  for step, unfixed_start in enumerate(iteration_idxs):
+      # 1) re-batch from current incumbent (positions shift as incumbent improves)
+      stage_2_batch  = build_stage_2_batch_list(incumbent, option.batch_size)
+      assert validate_and_get_batch_count(stage_2_batch) == max_batch_cnt
+
+      stage_2_partition = {
+          i: _build_operation_partition(
+              stage_2_batch[i], i,
+              unfixed_batch_start_idx=unfixed_start,
+              unfixed_batch_count=option.unfixed_batch_count,
+              left_profile_fixed_batch_count=option.left_profile_fixed_batch_count,
+              right_profile_fixed_batch_count=option.right_profile_fixed_batch_count)
+          for i in instance.stage_id_list }
+
+      if option.enable_promotion_profile_fixed:
+          unfixed_jobs = { j for p in stage_2_partition.values()
+                             for (j, _) in p.unfixed }
+          stage_2_partition = { i: p.promote_job_contained_ops(unfixed_jobs)
+                                for i, p in stage_2_partition.items() }
+
+      # 2) Objective-preserving right-justification on a copy
+      rj_schedule = incumbent.deepcopy()
+      rj_schedule.delay_job_latest_leq_obj_contrib_all_stages(instance.job_2_dw_ub_map)
+
+      # 3) build sub-problem
+      sub_jobs = { j for p in stage_2_partition.values()
+                       for (j, _) in p.non_time_fixed }
+      if not sub_jobs:
+          continue                                  # nothing to optimize this batch
+      sub_instance = FFcDDWParameters.create_instance_of_job_subset(instance, sub_jobs)
+
+      builder = PwCpModelBuilder()
+      mdl, sub_params, op_vars, et_vars, last_i_partial_jobs = builder.build(
+          sub_instance, instance, rj_schedule, stage_2_partition,
+          horizon=horizon, pf_method=option.pf_method)
+
+      # 4) solve with TL + wall-clock deadline (mirror neh_cp lines 223-273)
+      solver = cp_model.CpSolver()
+      applied_tl_seconds = _apply_tl_and_deadline(
+          solver, option, per_step_tl[step], start_elapsed, step,
+          len(iteration_idxs), logger)
+      if applied_tl_seconds is False:                # deadline already exceeded
+          stopped_early = True
+          break
+      solver.parameters.num_workers = option.solver_thread_cnt
+      value_recorder = ObjectiveValueRecorder()
+      status = solver.solve(mdl, solution_callback=value_recorder)
+      _append_progress_entries(progress_entries, value_recorder, start_elapsed)
+
+      # 5) reconstruct candidate over FULL instance and accept/reject
+      cand = None
+      cand_obj = None
+      if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+          # Time-fixed ops carry over from rj_schedule (same E/T as incumbent
+          # but at latest objective-preserving positions); non-time-fixed ops
+          # come from the CP solution.
+          cand = _build_full_schedule_from_cp(
+              instance, rj_schedule, stage_2_partition,
+              op_vars, sub_params, solver)
+          cand.make_semi_active(instance.stage_2_job_2_p_map)
+          cand.insert_idle_time(instance.job_2_due_window_map,
+                                instance.job_2_ewt_map, instance.job_2_twt_map)
+          se, st = compute_weighted_earliness_tardiness(cand, instance)
+          cand_obj = float(se + st)
+
+      incumbent_obj_before = _full_obj(incumbent, instance)
+      accepted = cand is not None and cand_obj &lt; incumbent_obj_before
+      if accepted:
+          incumbent = cand
+      else:
+          incumbent.make_semi_active(instance.stage_2_job_2_p_map)
+          incumbent.insert_idle_time(...)
+
+      step_entries.append(PwCpStepEntry(
+          step=step,
+          unfixed_batch_start_idx=unfixed_start,
+          non_time_fixed_op_count=sum(len(p.non_time_fixed) for p in stage_2_partition.values()),
+          incumbent_obj_before=incumbent_obj_before,
+          cp_obj=cand_obj,
+          incumbent_obj_after=_full_obj(incumbent, instance),
+          accepted=accepted,
+          status=solver.StatusName(status),
+          applied_tl_seconds=applied_tl_seconds,
+          wall_seconds=solver.wall_time))
+
+      if option.keep_step_schedules:
+          step_schedules.append((step, incumbent.deepcopy(),
+                                 cand.deepcopy() if cand is not None else None))
+
+      if spec.stop_predicate is not None and spec.stop_predicate():
+          stopped_early = True
+          break
+
+  termination_reason = (TerminationReason.STOP_REQUESTED if stopped_early
+                        else TerminationReason.COMPLETED)
+  obj_value = _full_obj(incumbent, instance)
+  metrics = {"step_log": tuple(step_entries)}
+  if option.keep_step_schedules:
+      metrics["step_schedules"] = step_schedules
+  return AlgRecord(
+      work_status=WorkStatus.FEASIBLE,
+      instance_id=instance.name,
+      algorithm_id="sw_cp",
+      option=option,
+      result=AlgResult(schedule=incumbent, obj_value=obj_value,
+                       obj_bound=None, metrics=metrics),
+      progress_log=tuple(progress_entries),
+      termination_reason=termination_reason,
+  )
+</code></pre>
+</details>
+
+<h3><code>_build_full_schedule_from_cp</code></h3>
+<p>Reconstructs a full <code>FFcSchedule</code> by:</p>
+<ol>
+  <li>Starting from <code>rj_schedule.deepcopy()</code> and removing all non-time-fixed <code>(j, i, k)</code> ops via <code>FFcSchedule.remove_operations</code>.</li>
+  <li>For each non-time-fixed <code>(j, i)</code>, dispatching the op back with <code>op_start = solver.Value(op_vars.op_start[j,i])</code> and <code>op_end = solver.Value(op_vars.op_end[j,i])</code> via <code>FFcSchedule.add_ops_times_2_mc(stage_id=i, mc_id=k, job_id=j, start, end)</code> where <code>k</code> is the assigned machine — chosen by <b>earliest free machine on stage <code>i</code> at time <code>start</code></b> within the machines listed in <code>instance.stage_2_machines_map[i]</code> (matches hybridflowshop's <code>create_sw_cp_schedule</code> policy).</li>
+</ol>
+<p style="color: var(--muted); font-size: 13px;">→ Detail companion refines this with the <code>add_operation_2_stage</code> dispatch + assertion approach: <a href="pw_cp_port_plan_detail.html#machine-reassign">machine reassignment policy</a>.</p>
+
+<h2 id="helpers">Reused helpers (with paths)</h2>
+<div class="helpers">
+<table>
+  <thead><tr><th>Symbol</th><th>Path</th></tr></thead>
+  <tbody>
+    <tr><td><code>FFcSchedule.delay_job_latest_leq_obj_contrib</code></td><td>solution/ffc_schedule.py:1451 (existing; <code>_all_stages</code> extension delegates to it)</td></tr>
+    <tr><td><code>FFcSchedule._rebuild_stage_time_caches</code></td><td>solution/ffc_schedule.py (used by single-stage helper at line 1497)</td></tr>
+    <tr><td><code>BaseModelBuilder.make_params</code></td><td>algorithm/cumulative.py:185</td></tr>
+    <tr><td><code>BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule</code></td><td>cumulative.py:457</td></tr>
+    <tr><td><code>BaseModelBuilder.add_start_time_freezed_operation_constraints</code></td><td>cumulative.py:582 (edge-case pinning only)</td></tr>
+    <tr><td><code>apply_start_hints_from_start_time_map</code> / <code>apply_end_hints_from_end_time_map</code> / <code>apply_et_hints_from_ref_schedule</code></td><td>cumulative.py:592, 611, 630</td></tr>
+    <tr><td><code>decode_pf_method</code>, <code>PFMethod</code></td><td>cumulative.py:18, 31</td></tr>
+    <tr><td><code>FFcDDWParameters.create_instance_of_job_subset</code></td><td>parameters/ffc_ddw_params.py (used by NEH-CP at dispatcher.py:143)</td></tr>
+    <tr><td><code>FFcSchedule.{deepcopy, make_semi_active, insert_idle_time, remove_operations, iter_operations_on_stage, get_jik_2_start_time_map, get_jik_2_end_time_map, get_job_end_time, add_ops_times_2_mc, makespan}</code></td><td>solution/ffc_schedule.py</td></tr>
+    <tr><td><code>compute_weighted_earliness_tardiness</code></td><td>solution/objectives.py:12</td></tr>
+    <tr><td><code>resolve_per_step_tl</code>, <code>BatchTlMode</code></td><td>algorithm/step_tl_resolver.py</td></tr>
+    <tr><td><code>trunc4</code></td><td>algorithm/utils.py</td></tr>
+    <tr><td><code>ObjectiveValueRecorder</code></td><td>algorithm/cpsat_callbacks/obj_value_recorder.py</td></tr>
+    <tr><td><code>AlgSpec, AlgRecord, AlgResult, ProgressLogEntry, WorkStatus, TerminationReason, AlgOption</code></td><td>algorithm/base/</td></tr>
+    <tr><td>Reference: TL/deadline plumbing, semi-active gating, accept/reject, AlgRecord assembly</td><td>algorithm/neh_cp/dispatcher.py:120-280, 339-371, 480-582</td></tr>
+    <tr><td>Reference: partition / dummy bars / capacity / non-fixed-precedence</td><td>hybridflowshop/cpsat_model_2/sw_cp.py (<code>PwCpModelBuilder</code>); controller/sw_cp.py (sliding loop)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="verify">Verification</h2>
+
+<h3>1. Unit tests under <code>tests/algorithm/sw_cp/</code></h3>
+<ul>
+  <li><b><code>test_option.py</code></b> — defaults, frozen, validation of <code>step_size&gt;=1</code>, <code>unfixed_batch_count&gt;=1</code>.</li>
+  <li><b><code>test_partition.py</code></b> — 5-region splits at edge offsets (start, middle, end); <code>enable_promotion_profile_fixed</code> promotes correctly; <code>validate_and_get_batch_count</code> raises on uneven stage batch counts.</li>
+  <li><b><code>test_cp_model.py</code></b> — on a 3-job/2-stage/1-machine instance, verify <code>PwCpModelBuilder.build</code> creates op vars only for non-time-fixed ops; left/right dummy intervals match <code>[0, left_boundary]</code> / <code>[right_boundary, horizon]</code> <b>with boundaries sourced from <code>rj_schedule</code></b>; profile-fix precedence forces the expected order.</li>
+  <li><b><code>test_dispatcher.py</code></b> — load a small PRA instance, build a NEH-CP incumbent in fixture, pass as <code>spec.ref_solution</code> to <code>PwCpDispatcher</code>, run with <code>cp_tl_seconds=1.0</code> and <code>unfixed_batch_count=2</code>, assert (a) <code>result.obj_value &lt;= ref_obj</code>, (b) every job in <code>result.schedule</code>, (c) <code>FEASIBLE</code>, (d) <code>progress_log</code> monotonically improving.</li>
+  <li><b><code>test_ffc_schedule_delay_all_stages.py</code></b> (under <code>tests/solution/</code>) — assert <code>delay_job_latest_leq_obj_contrib_all_stages</code>: (i) preserves every C<sub>j</sub>, (ii) preserves per-machine sequence order at every stage, (iii) preserves every duration <code>p[j,i]</code>, (iv) <code>compute_weighted_earliness_tardiness</code> returns the same value, (v) <code>validate_schedule</code> passes.</li>
+  <li><b><code>test_dispatcher_stop.py</code></b> — assert <code>wall_clock_deadline_sec</code> and <code>spec.stop_predicate</code> short-circuit cleanly with <code>termination_reason == STOP_REQUESTED</code>.</li>
+  <li><b><code>test_dispatcher_no_ref_solution.py</code></b> — assert <code>ValueError</code> when <code>spec.ref_solution is None</code>.</li>
+</ul>
+
+<h3>2. Algorithm contract test</h3>
+<p>Register <code>sw_cp</code> in <code>tests/algorithm/test_algorithm_contracts.py</code> so the shared shape-checks (option type, AlgRecord shape, instance-id passthrough) run.</p>
+
+<h3>3. Smoke test (algorithm core)</h3>
+<pre><code>uv run python -c "from ffc_ddw_sum_et.algorithm.neh_cp import NehCpDispatcher, NehCpOption; \
+  from ffc_ddw_sum_et.algorithm.sw_cp import PwCpDispatcher, PwCpOption; \
+  ...; rec1 = NehCpDispatcher().run(spec1); \
+  spec2 = AlgSpec(instance=ins, option=PwCpOption(unfixed_batch_count=3, cp_tl_seconds=2.0), ref_solution=rec1.result.schedule); \
+  rec2 = PwCpDispatcher().run(spec2); print(rec1.result.obj_value, '->', rec2.result.obj_value)"
+</code></pre>
+<p>Expect <code>rec2.obj_value &lt;= rec1.obj_value</code>.</p>
+
+<h3>4. Subroutine integration smoke test</h3>
+<p><code>uv run python main.py</code> with the new <code>sw_cp</code> scenario YAML on one small instance. Verify (a) <code>_obj_log.json</code> with monotonic non-increasing E/T, (b) before/after Gantt PNGs in the subroutine output dir, (c) per-step CSV rows appended, (d) run terminates within configured stopping criterion.</p>
+
+<h3>5. Lint</h3>
+<pre><code>uv run ruff check src/ffc_ddw_sum_et/algorithm/sw_cp \
+                  tests/algorithm/sw_cp \
+                  src/ffc_ddw_sum_et/orchestration/controller.py
+uv run ruff format &lt;same paths&gt;
+</code></pre>
+
+<h2 id="risks">Risks</h2>
+
+<div class="risks">
+
+<div class="risk sev-high">
+  <div class="hd">
+    <h4>1. <code>delay_job_latest_leq_obj_contrib_all_stages</code> correctness</h4>
+    <span class="badge danger">high</span>
+  </div>
+  <div class="body">
+    Must preserve every C<sub>j</sub> (last-stage end), preserve every per-machine sequence order, and yield a feasible schedule (no overlap, all job-stage precedence). The latest-end formula on stage <code>i &lt; c</code> is <code>min(op_start_of_same_job_on_stage_(i+1), next_op_start_on_same_machine_or_+inf)</code>; verify by unit test that on every <code>(j, i)</code>:
+    <ul>
+      <li><code>new_end[j,i] &lt;= op_start[j,i+1]</code></li>
+      <li><code>new_start[j,i] &gt;= prev_op_end[j,i]_on_same_machine</code> (earlier op on same machine that we have not yet rewritten — we scan latest→earliest)</li>
+      <li><code>new_end[j,i] - new_start[j,i] == p[j,i]</code> (duration preserved)</li>
+    </ul>
+    Build <code>validate_schedule</code> (solution/ffc_schedule.py:1575) into the test as a final check.
+  </div>
+</div>
+
+<div class="risk sev-med">
+  <div class="hd">
+    <h4>2. Dummy-bar interaction with <code>make_semi_active</code> post-CP</h4>
+    <span class="badge warn">medium</span>
+  </div>
+  <div class="body">
+    Cumulative + dummy bars guarantee the CP solution respects LTF/RTF capacity, but <code>make_semi_active</code> mutates non-LTF/RTF op start times. If the merge step (<code>_build_full_schedule_from_cp</code>) leaves a job's first non-time-fixed stage starting before the LTF prefix end, <code>make_semi_active</code> may attempt to left-shift it past the LTF boundary on the same machine. <b>Mitigation:</b> restrict <code>make_semi_active</code>'s <code>start_from_stage</code> to the first non-time-fixed stage of each job, or pass an <code>operation_set</code> excluding LTF/RTF ops.
+  </div>
+</div>
+
+<div class="risk sev-med">
+  <div class="hd">
+    <h4>3. <code>make_semi_active</code> machine reassignment ambiguity</h4>
+    <span class="badge warn">medium</span>
+  </div>
+  <div class="body">
+    The CP-SAT model uses cumulative (capacity-only) and does not bind a specific machine. The earliest-free-machine policy in <code>_build_full_schedule_from_cp</code> is one of several valid assignments; if the dispatch policy diverges from what cumulative implicitly counted, resulting ops may be slightly later than CP <code>op_start</code> values. Acceptable as long as objective is recomputed post-merge from the actual schedule (we do that).
+  </div>
+</div>
+
+<div class="risk sev-low">
+  <div class="hd">
+    <h4>4. Partition mismatch when batch counts differ across stages</h4>
+    <span class="badge ok">low</span>
+  </div>
+  <div class="body">
+    <code>validate_and_get_batch_count</code> raises in such cases. For instances where stages have unequal job counts (some jobs skip stages?), batching breaks. FFcDDW assumes every job visits every stage (docs/problem-description.md constraint 1), so this should not occur — but a defensive <code>len(jobs) == len(instance.job_id_list)</code> check on each stage's op count is worth adding.
+  </div>
+</div>
+
+<div class="risk sev-med">
+  <div class="hd">
+    <h4>5. <code>MixedDispatcher</code> not consulted</h4>
+    <span class="badge warn">medium</span>
+  </div>
+  <div class="body">
+    Unlike NEH-CP, PW-CP does not run a per-step dispatch fallback when CP is infeasible — it just keeps the incumbent and re-applies <code>make_semi_active</code>. This matches hybridflowshop's <code>_accept_candidate_or_repair_incumbent</code> and is intentional, but a buggy <code>PwCpModelBuilder</code> producing an infeasible model would silently no-op the entire run. <b>Mitigation:</b> log infeasibility at WARNING on first occurrence per run; surface a count in <code>step_log</code>.
+  </div>
+</div>
+
+<div class="risk sev-low">
+  <div class="hd">
+    <h4>6. <code>PFMethod="PF1"</code> default may be too tight on small windows</h4>
+    <span class="badge ok">low</span>
+  </div>
+  <div class="body">
+    If <code>unfixed_batch_count=1</code>, profile-fix precedence forces the entire chain order from the incumbent and CP can only swap timings, not order. Documented behavior; users seeking exploration should set <code>unfixed_batch_count &gt;= 2</code> or <code>pf_method="PF0"</code>. Add a brief docstring note on <code>PwCpOption.pf_method</code>.
+  </div>
+</div>
+
+<div class="risk sev-high">
+  <div class="hd">
+    <h4>7. Subroutine step contract drift</h4>
+    <span class="badge danger">high</span>
+  </div>
+  <div class="body">
+    The CLAUDE.md per-step contract is load-bearing for <code>_obj_log.json</code> re-basing. <code>run_sw_cp</code> must do all work, then measure <code>elapsed = monotonic() - start</code>, then construct the report, then <code>_register</code> — with <b>no</b> intervening work (Gantt PNG emission, CSV row append, etc. happen <em>after</em> <code>_register</code>). The two-phase Gantt's "before" snapshot must be taken <em>before</em> <code>start = monotonic()</code> is captured to avoid skewing the trajectory. Verify by reading <code>_save_obj_log</code> in <code>ffcddw_single_instance_runner.py</code> during implementation.
+  </div>
+</div>
+
+</div>
+
+<h2 id="followups">Open follow-ups <span class="badge muted">explicitly deferred</span></h2>
+
+<div class="decisions">
+  <div class="decision deferred">
+    <div class="key">Lex 2-phase</div>
+    <div class="val">(E/T then makespan) — straightforward to add by extending <code>PwCpModelBuilder</code> to call <code>BaseModelBuilder._define_objective(..., minimize_makespan_lex=True, et_ub=...)</code> on a second pass per batch. May resurrect right-justification at that point.</div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">PwCpOption knobs</div>
+    <div class="val"><code>tighten_ranges</code>, <code>use_lns_only</code>, <code>non_time_fixed_op_time_limit_multiplier</code> — straightforward additions once a need surfaces.</div>
+  </div>
+  <div class="decision deferred">
+    <div class="key">common_spacing proxy</div>
+    <div class="val">Alternative to (a)안 — only worth revisiting if (a)안 underperforms in practice.</div>
+  </div>
+</div>
+
+<hr>
+<p style="font-size: 12px; color: var(--faint);">Source: <code>plans/experiment/20260510/pw_cp_port_plan.md</code> (markdown remains the authoritative copy; this HTML is a spatial view).</p>
+
+</main>
+</div>
+</body>
+</html>

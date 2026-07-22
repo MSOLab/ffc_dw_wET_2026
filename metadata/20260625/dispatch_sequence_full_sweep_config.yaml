@@ -6,7 +6,7 @@
 #           max(min_j r_j + Σ_early p_last_j / m_last, d̄) (마지막 stage 완료 추정)
 #   - initialize_by_simple_dispatch: forward job-centric MixedDispatcher 디코드
 #   - initialize_by_reversed_dispatch: reverse + IIT pipeline
-# See plans/20260625/wxd3_wxd4_dispatch.md
+# See plans/experiment/20260625/wxd3_wxd4_dispatch.md
 run_mode: FULL_RUN
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv

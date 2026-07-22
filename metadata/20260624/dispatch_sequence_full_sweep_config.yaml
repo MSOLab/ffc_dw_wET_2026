@@ -5,7 +5,7 @@
 #   - initialize_by_simple_dispatch: forward job-centric MixedDispatcher 디코드
 #     (MixedDispatcher.get_job_centric_schedule_by_sequence, np = job_count head)
 #   - initialize_by_reversed_dispatch: reverse + IIT pipeline
-# See plans/20260624/lsl_osl_reversed_dispatch_sequence_sweep.md
+# See plans/experiment/20260624/lsl_osl_reversed_dispatch_sequence_sweep.md
 run_mode: FULL_RUN
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv

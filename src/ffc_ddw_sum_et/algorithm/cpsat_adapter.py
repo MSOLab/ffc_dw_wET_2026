@@ -77,12 +77,24 @@ class CpsatOption(AlgOption):
     back to ``sum(p)`` only when ``ref_solution`` is ``None`` (no
     incumbent to scale from). Must be ``>= 1.0``."""
 
+    time_factor: int = 1
+    """CSR coarse-grid scaling factor. When ``> 1``, the instance is a
+    coarsened instance (``coarsen_processing_times``) whose processing times
+    live on a coarse grid but whose due windows are at the ORIGINAL scale.
+    Every coarse completion ``C^c`` is then interpreted as original-scale
+    ``time_factor * C^c`` for the E/T objective — threaded into
+    ``BaseModelBuilder.build``, ``FFcSchedule.insert_idle_time``, and
+    ``compute_weighted_earliness_tardiness``. ``1`` (default) is the ordinary
+    same-scale case and reproduces the pre-CSR behaviour exactly."""
+
     def __post_init__(self) -> None:
         if self.horizon_makespan_multiplier < 1.0:
             raise ValueError(
                 "horizon_makespan_multiplier must be >= 1.0, got "
                 f"{self.horizon_makespan_multiplier}"
             )
+        if self.time_factor < 1:
+            raise ValueError(f"time_factor must be >= 1; got {self.time_factor!r}.")
 
 
 class CpsatAdapter:
@@ -103,7 +115,10 @@ class CpsatAdapter:
         )
         builder = BaseModelBuilder()
         mdl, params, op_vars, et_vars = builder.build(
-            instance, horizon=horizon, obj_lb=option.obj_lb
+            instance,
+            horizon=horizon,
+            obj_lb=option.obj_lb,
+            time_factor=option.time_factor,
         )
 
         if ref_schedule is not None:
@@ -198,22 +213,43 @@ class CpsatAdapter:
             instance.job_2_due_window_map,
             instance.job_2_ewt_map,
             instance.job_2_twt_map,
+            time_factor=option.time_factor,
         )
 
-        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            schedule, instance, time_factor=option.time_factor
+        )
         obj_value = float(sum_e + sum_t)
         cp_obj = float(solver.objective_value)
         if obj_value > cp_obj:
             logger.warning(
-                "CpsatAdapter: post-process objective %.3f > CP-SAT objective %.3f",
+                "CpsatAdapter: post-process objective %.3f > CP-SAT objective %.3f "
+                "(gap=%.3f) for instance=%s status=%s time_factor=%d: the "
+                "reconstruction (make_semi_active -> insert_idle_time) did not "
+                "reproduce CP-SAT's completion times. Residual split: "
+                "sum_e=%.3f sum_t=%.3f, makespan=%d.",
                 obj_value,
                 cp_obj,
+                obj_value - cp_obj,
+                instance.name,
+                status_name,
+                option.time_factor,
+                float(sum_e),
+                float(sum_t),
+                schedule.makespan,
             )
         elif obj_value < cp_obj:
             logger.info(
-                "CpsatAdapter: post-process objective %.3f < CP-SAT objective %.3f",
+                "CpsatAdapter: post-process objective %.3f < CP-SAT objective %.3f "
+                "for instance=%s status=%s time_factor=%d "
+                "(sum_e=%.3f sum_t=%.3f)",
                 obj_value,
                 cp_obj,
+                instance.name,
+                status_name,
+                option.time_factor,
+                float(sum_e),
+                float(sum_t),
             )
         obj_bound = float(solver.best_objective_bound)
 

@@ -2,7 +2,7 @@
 
 - **날짜**: 2026-07-05
 - **대상**: branch `20260705_rj_scope_option`의 **staged(uncommitted) change**
-  (계획서 `plans/20260705/sw_cp_rj_scope_option.md` 실행 결과)
+  (계획서 `plans/experiment/20260705/sw_cp_rj_scope_option.md` 실행 결과)
 - **판정**: ✅ **코드 이상 없음.** 계획서 Part A~E가 충실히 구현되어 의도대로 동작하며,
   결과 산출물과 발표자료 PDF(`analysis/20260705_p3_sw_cp.pdf`)가 정확히 일치.
   `ruff check` 통과, 재실행 시 결정론적으로 동일 obj 재현. **git add/commit은 하지 않음.**

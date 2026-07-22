@@ -21,7 +21,7 @@ Reference: Pan, Ruiz, Alfaro-Fernández (2017). *Computers and Operations Resear
 - [`docs/problem-description.md`](docs/problem-description.md) — problem definition
 - [`docs/io-principles.md`](docs/io-principles.md) — IO extraction and import rules
 - [`docs/algorithm-principles.md`](docs/algorithm-principles.md) — algorithm execution contract
-- [`TODOS.md`](TODOS.md) — deferred design notes
+- [`TODO.md`](TODO.md) — deferred design notes
 
 ## Results
 

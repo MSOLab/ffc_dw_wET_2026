@@ -5,7 +5,7 @@
 #   csrN_mixed  — seed_dispatch=mixed (best np-list candidate by wET).
 #   csrN_v3     — seed_dispatch=v3 (v3 paired-dispatch pool on coarsened).
 #
-# See plans/20260625/coarsen_solve_reconstruct_v3_seed.md.
+# See plans/experiment/20260625/coarsen_solve_reconstruct_v3_seed.md.
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

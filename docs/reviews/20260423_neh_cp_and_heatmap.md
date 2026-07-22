@@ -41,7 +41,7 @@
 
 ### 2. `feat(neh-cp): add incremental CP-SAT constructor` (`570520b`)
 
-**Files**: `main.py`, `metadata/20260423/neh_cp_config.yaml`, `plans/20260423/neh_cp.md`, `controller.py`, `ffc_ddw_params.py`, `schedule_build.py`, `test_controller.py`
+**Files**: `main.py`, `metadata/20260423/neh_cp_config.yaml`, `plans/experiment/20260423/neh_cp.md`, `controller.py`, `ffc_ddw_params.py`, `schedule_build.py`, `test_controller.py`
 
 **Changes**:
 
@@ -54,7 +54,7 @@
 
 **Review**:
 
-- The implementation closely follows the plan in `plans/20260423/neh_cp.md`. The plan is well-structured with algorithm pseudocode, file list, and verification steps.
+- The implementation closely follows the plan in `plans/experiment/20260423/neh_cp.md`. The plan is well-structured with algorithm pseudocode, file list, and verification steps.
 - `create_instance_of_job_subset` properly preserves job order and copies machine lists (shallow copy of lists, which is correct since machine IDs are strings).
 - The `neh_cp` method adds `dispatched.make_semi_active()` and `dispatched.insert_idle_time()` calls that are not in the plan. These are constructive additions — semi-active schedule and idle time insertion improve the warm-start quality for CP-SAT.
 - The `criteria="makespan"` in `MixedDispatcher` call differs from the plan (which says `"weighted_et"`). Using makespan for the dispatch phase is reasonable since the outer objective is weighted E+T and the CP solver optimizes that.
@@ -126,7 +126,7 @@
 
 ### 6. `create logging-improvements.md for future` (`bdb17b7`)
 
-**Files**: `plans/20260423/logging-improvements.md` (new)
+**Files**: `plans/experiment/20260423/logging-improvements.md` (new)
 
 **Changes**:
 
@@ -169,7 +169,7 @@
 ### Strengths
 
 1. **Incremental development** — Each commit adds one feature on top of the previous. The progression from basic constructor to skip PF to cumulative TL to extraction is logical.
-2. **Plan-driven** — `plans/20260423/neh_cp.md` provides a clear spec. Implementation follows it closely.
+2. **Plan-driven** — `plans/experiment/20260423/neh_cp.md` provides a clear spec. Implementation follows it closely.
 3. **Test coverage** — Unit tests for the job sequence priority and full schedule registration give confidence in the core logic.
 4. **Documentation** — README updated, docstrings added to `neh_cp()`, deferred logging plan written.
 

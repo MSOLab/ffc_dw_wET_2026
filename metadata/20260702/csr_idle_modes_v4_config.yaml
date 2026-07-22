@@ -10,7 +10,7 @@
 # factor=1: ceil(d/1) == d == floor(d/1), so all three modes are byte-identical
 # (clean control group; see plan §1.3).
 #
-# See plans/20260702/csr-idle-modes-flooring-ceiling-lookahead.md
+# See plans/experiment/20260702/csr-idle-modes-flooring-ceiling-lookahead.md
 
 run_mode: FULL_RUN
 

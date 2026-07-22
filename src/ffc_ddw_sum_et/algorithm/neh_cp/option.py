@@ -73,6 +73,17 @@ class NehCpOption(AlgOption):
     tight. ``None`` (default) preserves today's behavior.
     """
 
+    time_factor: int = 1
+    """CSR coarse-grid scaling factor. When ``> 1``, the NEH-CP instance is a
+    coarsened instance (``coarsen_processing_times``) whose processing times
+    live on a coarse grid but whose due windows are at the ORIGINAL scale.
+    Every coarse completion ``C^c`` is then interpreted as original-scale
+    ``time_factor * C^c`` for the E/T objective — mirroring
+    ``BaseModelBuilder`` (CP model), ``FFcSchedule.insert_idle_time``, and
+    ``compute_weighted_earliness_tardiness``. ``1`` (default) is the ordinary
+    same-scale case and reproduces the pre-CSR behaviour exactly.
+    """
+
     def __post_init__(self) -> None:
         if self.batch_tl_mode == "proportional":
             raise ValueError(
@@ -80,6 +91,8 @@ class NehCpOption(AlgOption):
                 "(NEH-CP has no per-op time-limit multiplier); "
                 "use 'constant' or 'linear'."
             )
+        if self.time_factor < 1:
+            raise ValueError(f"time_factor must be >= 1; got {self.time_factor!r}.")
 
     @classmethod
     def coerce_skip_pf_below_obj(

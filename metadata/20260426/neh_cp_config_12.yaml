@@ -4,7 +4,7 @@
 #   profile fix: PF1
 # total_timelimit: "0.024nc" derives cp_tl = 0.024 * c * added_batch_size per batch.
 # Reported objective: weighted earliness + tardiness.
-# Ref: plans/20260423/neh_cp.md
+# Ref: plans/experiment/20260423/neh_cp.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

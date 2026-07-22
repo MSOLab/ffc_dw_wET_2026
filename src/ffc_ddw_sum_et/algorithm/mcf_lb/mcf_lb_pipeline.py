@@ -155,9 +155,17 @@ class CalcMcfLbAndDeriveFullSchResult:
     (which may be ``None`` only when r1 build_full failed mid-pipeline).
 
     ``best_schedule`` is the full schedule from r1 / r2 with the lower
-    wET; ties favour r2. ``final_obj_bound`` is always ``r1_apply.mcf_lb``
-    when r1's LP solved — that bound is valid on the original instance
-    regardless of any r2 augmentation.
+    wET; ties favour r2.
+
+    ``final_obj_bound`` is ``r1_apply.mcf_lb`` when r1's LP solved and
+    ``time_factor == 1`` — that bound is valid on the original instance
+    regardless of any r2 augmentation. When ``time_factor > 1`` (CSR coarse
+    mode) it is ``None`` and ``lb_suppressed_by_time_factor`` is ``True``:
+    the coarse-problem MCF lower bound is not exactly re-derived because the
+    arc-cost construction (``algorithm/parallel_mc_pmtn.py``) is outside this
+    package (plan 20260711 §3 LB-soundness fallback). The pipeline still
+    derives and scores every schedule at the coarse scale; only the bound is
+    suppressed. ``time_factor`` echoes the value the pipeline ran with.
 
     ``r1_phase_schedules`` and ``r2_phase_schedules`` are pre-numbered
     (``"<n>_<label>"``). r1 has up to 8 entries (1..8); r2 has up to 9
@@ -168,6 +176,8 @@ class CalcMcfLbAndDeriveFullSchResult:
     best_schedule: FFcSchedule | None
     best_obj: float | None
     final_obj_bound: float | None
+    time_factor: int
+    lb_suppressed_by_time_factor: bool
     elapsed_sec: float
 
     r1_apply: ApplyLbByMcfResult | None
@@ -194,6 +204,7 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     heatmap_sort: HeatmapSort = "end_time",
     job_placement_priority: PmPrmpSortKey = "end_time",
     last_stage_only_placement_criteria: Literal["contrib", "dist"] = "dist",
+    time_factor: int = 1,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     heatmap_yaml_path: Path | None = None,
@@ -205,7 +216,18 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     ``rebuild_last_stage_with_original_p=False``). Stop checks fire
     between every substep; ``MCFLBStopRequested`` from the LP layer is
     treated as a clean stop too.
+
+    ``time_factor`` (CSR coarse-grid scale, ``>= 1``) is threaded into the
+    heuristic and full-schedule builders so every schedule is positioned and
+    scored as if a coarse completion ``C^c`` were ``time_factor * C^c``. It is
+    **not** threaded into ``apply_lb_by_mcf``: the MCF arc-cost construction
+    (``algorithm/parallel_mc_pmtn.py``) is outside this package, so in coarse
+    mode the returned ``apply.mcf_lb`` is not a re-derived coarse bound. The
+    composite suppresses it (reports ``final_obj_bound=None``) for
+    ``time_factor > 1``.
     """
+    if time_factor < 1:
+        raise ValueError(f"time_factor must be >= 1, got {time_factor}")
     start_elapsed = time.monotonic()
     phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
 
@@ -254,6 +276,7 @@ def calc_mcf_lb_r1_and_derive_full_sch(
         logger=logger,
         job_priority=job_placement_priority,
         placement_priority=last_stage_only_placement_criteria,
+        time_factor=time_factor,
     )
     for label, sched in heuristic.intermediate_schedules:
         phase_schedules.append((f"2_{label}", sched))
@@ -268,6 +291,7 @@ def calc_mcf_lb_r1_and_derive_full_sch(
         instance,
         heuristic.schedule,
         rebuild_last_stage_with_original_p=False,
+        time_factor=time_factor,
         logger=logger,
     )
     # Drop ``lastS_only_before_rs`` from r1: r1 runs without p-adjustment,
@@ -306,6 +330,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     last_stage_rebuild_config: Literal[
         "original_pr", "increased_pr", "best"
     ] = "increased_pr",
+    time_factor: int = 1,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     heatmap_yaml_path: Path | None = None,
@@ -351,7 +376,15 @@ def calc_mcf_lb_r2_and_derive_full_sch(
     ``r_adjust_coeff`` (default ``0.5``) scales the ``adjust_r`` formula:
     ``r_increment = ceil(delta_for_inc * r_adjust_coeff)``. The default
     matches the historical hard-coded ``ceil(delta_for_inc / 2)`` factor.
+
+    ``time_factor`` (CSR coarse-grid scale, ``>= 1``) is forwarded to the
+    heuristic and full-schedule builders (same semantics as round 1). The
+    ``makespan_delta`` / ``p_increment`` / ``r_increment`` augmentation math
+    is on the coarse grid (a difference of coarse makespans, coarse durations
+    and releases) and is scale-free — ``time_factor`` does not enter it.
     """
+    if time_factor < 1:
+        raise ValueError(f"time_factor must be >= 1, got {time_factor}")
     start_elapsed = time.monotonic()
     phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
 
@@ -427,6 +460,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
             placement_priority=last_stage_only_placement_criteria,
             p_increment=p_increment if use_increments else 0,
             r_increment=r_increment if use_increments else 0,
+            time_factor=time_factor,
         )
 
     def _run_build(
@@ -436,6 +470,7 @@ def calc_mcf_lb_r2_and_derive_full_sch(
             instance,
             heuristic_schedule,
             rebuild_last_stage_with_original_p=rebuild,
+            time_factor=time_factor,
             logger=logger,
         )
 
@@ -528,6 +563,7 @@ def calc_mcf_lb_and_derive_full_sch(
         "original_pr", "increased_pr", "best"
     ] = "increased_pr",
     proceed_r2_when_nonpositive_cmax: bool = False,
+    time_factor: int = 1,
     stop_predicate: Callable[[], bool] | None = None,
     logger: logging.Logger | None = None,
     r1_heatmap_yaml_path: Path | None = None,
@@ -591,6 +627,24 @@ def calc_mcf_lb_and_derive_full_sch(
             stage). The LP layer also raises ``MCFLBStopRequested`` when
             the predicate fires before solve; both forms short-circuit
             cleanly.
+        proceed_r2_when_nonpositive_cmax: When False (default), the
+            historical ``delta_le_0`` skip applies (see above). When True,
+            that skip is bypassed.
+        time_factor: CSR coarse-grid scale ``>= 1``. When ``> 1``, the
+            instance is a coarsened one (coarse processing times, original
+            due windows); a coarse completion ``C^c`` is interpreted as
+            original-scale ``time_factor * C^c`` when scored against the due
+            window. It is threaded into every schedule-construction and
+            objective-evaluation path (heuristic placement tie-break,
+            ``insert_idle_time``, pre-flip delay cap, and
+            ``compute_weighted_earliness_tardiness``), so ``best_obj`` is the
+            coarse-scale wET of ``best_schedule``. **LB soundness (plan
+            20260711 §3):** the MCF lower bound is *not* re-derived for the
+            coarse scale — the arc-cost construction lives in
+            ``algorithm/parallel_mc_pmtn.py`` (outside this package). For
+            ``time_factor > 1`` the pipeline reports ``final_obj_bound=None``
+            and sets ``lb_suppressed_by_time_factor=True``. ``1`` (default)
+            reproduces current behaviour exactly.
         logger: Optional logger forwarded to all sub-functions.
         r1_heatmap_yaml_path / r2_heatmap_yaml_path: Optional output
             paths for the per-round C-cost heatmap YAML. Ignored when
@@ -601,6 +655,8 @@ def calc_mcf_lb_and_derive_full_sch(
             "makespan_delta_ref must be 'mcfLbMakespan' or "
             f"'lastStageOnlyMakespan'; got {makespan_delta_ref!r}"
         )
+    if time_factor < 1:
+        raise ValueError(f"time_factor must be >= 1, got {time_factor}")
 
     start_elapsed = time.monotonic()
 
@@ -619,10 +675,21 @@ def calc_mcf_lb_and_derive_full_sch(
             Literal["no_adjust", "stop_guard", "s1_none", "delta_le_0"] | None
         ),
     ) -> CalcMcfLbAndDeriveFullSchResult:
+        # LB soundness fallback (plan 20260711 §3): for time_factor > 1 the
+        # coarse-problem MCF bound is not re-derived (arc costs live outside
+        # this package), so suppress it. At time_factor == 1 the r1 MCF LB is
+        # a valid global bound and is reported unchanged.
+        lb_suppressed = time_factor > 1
+        if lb_suppressed:
+            final_obj_bound = None
+        else:
+            final_obj_bound = r1.apply.mcf_lb if r1.apply is not None else None
         return CalcMcfLbAndDeriveFullSchResult(
             best_schedule=best_schedule,
             best_obj=best_obj,
-            final_obj_bound=r1.apply.mcf_lb if r1.apply is not None else None,
+            final_obj_bound=final_obj_bound,
+            time_factor=time_factor,
+            lb_suppressed_by_time_factor=lb_suppressed,
             elapsed_sec=time.monotonic() - start_elapsed,
             r1_apply=r1.apply,
             r1_heuristic=r1.heuristic,
@@ -646,6 +713,7 @@ def calc_mcf_lb_and_derive_full_sch(
         heatmap_sort=heatmap_sort,
         job_placement_priority=job_placement_priority,
         last_stage_only_placement_criteria=last_stage_only_placement_criteria,
+        time_factor=time_factor,
         stop_predicate=stop_predicate,
         logger=logger,
         heatmap_yaml_path=r1_heatmap_yaml_path,
@@ -756,6 +824,7 @@ def calc_mcf_lb_and_derive_full_sch(
         job_placement_priority=job_placement_priority,
         last_stage_only_placement_criteria=last_stage_only_placement_criteria,
         last_stage_rebuild_config=last_stage_rebuild_config,
+        time_factor=time_factor,
         stop_predicate=stop_predicate,
         logger=logger,
         heatmap_yaml_path=r2_heatmap_yaml_path,

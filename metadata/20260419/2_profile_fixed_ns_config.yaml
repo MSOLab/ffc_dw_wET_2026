@@ -1,7 +1,7 @@
 # profile-fixed CP-SAT experiment: seed with MCF-LB, then refine via
 # CP-SAT solving under fixed dispatch profile (precedence arcs derived
 # from the incumbent).
-# Ref: plans/20260419/profile_fixed_ns.md
+# Ref: plans/experiment/20260419/profile_fixed_ns.md
 
 run_mode: FULL_RUN        # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

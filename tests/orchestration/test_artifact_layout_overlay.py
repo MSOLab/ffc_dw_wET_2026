@@ -67,7 +67,7 @@ def test_find_mcf_lb_phase_schedule_does_not_over_match_siblings(
     Regression for the greedy ``progress/*.json`` glob: ``mcf_lb_phase_schedule``
     and ``flip_makespan_cp_phase_schedule`` both used a flat ``{phase_name}.json``
     template, so each kind's glob matched the other's files (and the flat
-    ``csr_cp_trajectory_json``). Nesting each phase-schedule kind under its own
+    ``csr_candidates_csv``). Nesting each phase-schedule kind under its own
     subdir scopes the glob to its own files.
     """
     layout = _layout(tmp_path)
@@ -81,8 +81,8 @@ def test_find_mcf_lb_phase_schedule_does_not_over_match_siblings(
         phase_name="2-run_flip_makespan_cp_01_incumbent",
         **scope,
     )
-    traj = layout.artifact_path("csr_cp_trajectory_json", **scope)
-    for p in (mcf, flip, traj):
+    csr_csv = layout.artifact_path("csr_candidates_csv", **scope)
+    for p in (mcf, flip, csr_csv):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("{}", encoding="utf-8")
 

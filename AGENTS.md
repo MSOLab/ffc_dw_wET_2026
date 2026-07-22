@@ -15,6 +15,40 @@ can pick up the same architectural intent.
   - Title: ≤49 chars (including `<type>(<scope>): ` prefix), imperative mood, no trailing period
   - Body: bullet points (`- ` prefix); each bullet is a **single line** (no hard-wrapping within a bullet)
 
+### Plan & analysis documents (`plans/`)
+
+`plans/` is split by intent. Both halves are tracked; date subdirectories use
+`YYYYMMDD`.
+
+| path | holds | written |
+|---|---|---|
+| `plans/experiment/<date>/` | code-change and experiment-execution plans | **before** the work |
+| `plans/analysis/<date>/` | cross-run / post-hoc analysis write-ups | **after** the runs exist |
+
+An analysis document is the tracked **single source of truth** for a merged
+analysis: the question, the source run directories (full paths), the exact
+reproduction command, the result tables, and the conclusion. Bulk artifacts
+(CSV / PNG / HTML) stay in `analysis/<id>/`, which is gitignored — the document
+must stand on its own without them.
+
+### Provenance commits
+
+`output/` and `analysis/` are gitignored, so results are discoverable only
+through commit messages. Two commit kinds name an untracked directory in their
+subject and are **exempt from the Conventional Commits format above**:
+
+- **run setting** — commit the config that produced a run:
+  `<run_dir>/<timestamp> run setting`, body naming the machine
+  (e.g. `19521ec`).
+- **merged analysis** — commit the `plans/analysis/` document (plus any new
+  script) for a cross-run analysis:
+  `analysis/<id> merged analysis`, body listing the source run directories,
+  the reproduction command, and a one-line conclusion.
+
+`git log --oneline | rg "merged analysis"` then indexes every cross-run
+analysis, and each commit body says which runs fed it and where its artifacts
+live.
+
 ## Architecture Docs
 
 - **Problem definition** (parameters, variables, constraints, objective):
@@ -44,8 +78,55 @@ tolerance). Notes:
   comparison for a global optimality judgment.
 - The same UB/LB pair is also emitted per progress point in
   `<instance>_obj_log.json` (`obj_value.data` / `obj_bound.data`) — see the
-  SW-CP TL-policy note in `plans/20260705/sw_cp_tl_policy_investigation.md` for the
+  SW-CP TL-policy note in `plans/experiment/20260705/sw_cp_tl_policy_investigation.md` for the
   loader caveat (the structured loader drops LB points that carry no note).
+
+### PRA2017 instance parameters (generation grid & mapping source)
+
+When grouping/filtering results by instance-generation parameters (T, R, n, c,
+machine count, W), the **authoritative per-instance source is
+`benchmarks/PRA2017/pra2017_bks_table.csv`** — one row per `insIndex`
+(`0000`–`1439`, zero-padded 4-digit string). Columns:
+
+`insIndex, n, c, totalMcCount, T, R, W, BKS_data, BKS_calc, BKS_T, BKS_F`.
+
+Parameter meanings and the **full generation grid** (1440 = all combinations ×
+5 replicates; each `(n, c, totalMcCount)` cell has exactly 90 instances):
+
+| Param | Meaning | Values |
+|-------|---------|--------|
+| `n` | job count | 50, 100, 150, 200 |
+| `c` | stage count | 5, 10 |
+| `totalMcCount` | total machine count = `c × machines-per-stage` | 15, 25, 30, 50 |
+| `T` | tardiness factor (due-date tightness) | 0.2, 0.4, 0.6 |
+| `R` | due-date range factor | 0.2, 0.6, 1.0 |
+| `W` | weight range | 10, 20 |
+| (Rep) | replicate id, not a column — see filename | 0–4 |
+
+- **machines-per-stage is uniform** and ∈ {3, 5}: `totalMcCount = c × mps`
+  (so `c=5`→{15,25}, `c=10`→{30,50}). It is **not** a `bks_table` column; read
+  it from `totalMcCount / c` or the filename.
+- **Filename encoding** (via `pra2017_hybrid_match.csv`, `insIndex →
+  ffc_ddw_sum_et_filename`): `Instance_{n}_{c}_{mps}_{T}_{R}_{W}_Rep{k}.txt`,
+  e.g. `Instance_50_5_3_0,2_0,2_10_Rep0.txt`. **Decimals use a comma**
+  (`0,2` = 0.2). Verified: all 1440 filenames' decoded fields match
+  `bks_table` exactly.
+- **BKS variants** (all "best known solution" objective values):
+  - `BKS_T`: objective with `force_job_id_seq=True` (preserves best_seq order)
+  - `BKS_F`: objective with `force_job_id_seq=False` (FAM reordering)
+  - `BKS_calc`: `min(BKS_T, BKS_F)`
+  - `BKS_data`: the paper/data reference BKS — **this is the RPDf denominator**
+    used by report tooling (`RPDf_BKS_data`).
+  - See `benchmarks/PRA2017/README.md` for how the table is generated.
+- **How reports attach these**: `orchestration/post_run_pivot.py` merges each
+  run's `instanceName` → `insIndex` (via `pra2017_hybrid_match.csv`) →
+  `bks_table` metadata, emitting `<run>_rpdf_comparison.csv` with columns
+  `insIndex, scenarioName, n, c, totalMcCount, T, R, W, BKS_data, bestObj,
+  RPDf_BKS_data, elapsedTime, timelimit, time%`. **This CSV is the ready-made
+  source for any (T, R, size)-grouped RPDf comparison** — no need to re-join.
+- **RPDf is symmetric** (`ffc_ddw_sum_et._calc.rpd_f`):
+  `2·(obj − ref)/(obj + ref)`, **not** the classic `(obj − ref)/ref`. Range
+  (−2, 2); `obj == ref == 0 → 0`.
 
 ## Working Agreement
 
@@ -119,11 +200,11 @@ Composite steps (e.g. `calc_mcf_lb_and_derive_full_sch`) delegate to
 
 ## Deferred Design Notes
 
-- `TODOS.md` (repository root) collects refactor ideas that are
+- `TODO.md` (repository root) collects refactor ideas that are
   deliberately deferred (YAGNI today but worth capturing so the
   reasoning isn't re-derived).
-- Before proposing a refactor, check `TODOS.md` to see if it has
+- Before proposing a refactor, check `TODO.md` to see if it has
   already been considered — respect the "When to act" condition.
 - When a design idea is agreed to be deferred rather than acted on,
-  append it to `TODOS.md` with **Why** and **When to act** fields.
+  append it to `TODO.md` with **Why** and **When to act** fields.
 - Do not execute TODO items autonomously — they are deferred by intent.

@@ -1,4 +1,4 @@
-run_mode: FULL_RUN
+run_mode: POST_PROCESS_ONLY
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
@@ -6,6 +6,9 @@ ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260707_sw_cp_tl_p25_p50
+# POST_PROCESS_ONLY target (pick one; full path wins if both are set):
+analysis_dir_path: output/20260707_sw_cp_tl_p25_p50/20260708T014624_039386
+# analysis_timestamp: 20260418T231308_268427
 
 instance_worker_cnt: 12  # 12 x solver_thread_cnt(8) = 96 cores, no oversubscription
 draw_gantt: false

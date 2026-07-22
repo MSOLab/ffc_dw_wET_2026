@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-06 · **대상 스크립트:** `k_for_capture.py`
 **관련 문서:** `ANALYSIS_DESIGN.md` (Step D), `regression_summary.md`,
-`plans/20260705/sw_cp_tl_policy_investigation.md` §3.2 / §8 item 4
+`plans/experiment/20260705/sw_cp_tl_policy_investigation.md` §3.2 / §8 item 4
 
 ---
 
@@ -243,5 +243,5 @@ window 크기(median ntf)에 대한 TL 초값. 현재 고정 120 s와 비교하�
 - `k_for_capture.py` — `cap_a`, `cap_b2`, B1 percentile 계산
 - `ANALYSIS_DESIGN.md` §Step D — equal-budget 비교의 설계 spec
 - `regression_summary.md` — 현재 run의 회귀 결과
-- `plans/20260705/sw_cp_tl_policy_investigation.md` §3.2 — headline
+- `plans/experiment/20260705/sw_cp_tl_policy_investigation.md` §3.2 — headline
   correction (artifact 수정 내역), §8 item 4-5 — remaining work

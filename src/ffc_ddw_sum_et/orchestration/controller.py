@@ -8,14 +8,17 @@ from pathlib import Path
 from typing import Callable, Literal, Sequence
 
 from ortools.sat.python import cp_model
+from routix.constants import SubroutineFlowKeys
 from routix.io import dump_yaml
 from routix.report import SubroutineReport
 
-from ffc_ddw_sum_et.algorithm.base.alg_record import TerminationReason
+from ffc_ddw_sum_et.algorithm.base.alg_record import ProgressLogEntry, TerminationReason
 from ffc_ddw_sum_et.algorithm.base.alg_spec import AlgSpec
 from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
     DEFAULT_COARSEN_FACTOR,
     CoarsenSolveReconstructOption,
+    CsrCandidate,
+    dedup_candidates,
     run_coarsen_solve_reconstruct,
 )
 from ffc_ddw_sum_et.algorithm.cpsat_adapter import CpsatAdapter, CpsatOption
@@ -89,6 +92,7 @@ from ffc_ddw_sum_et.solution.objectives import (
 from ffc_ddw_sum_et.solution.schedule_build import (
     build_schedule_from_op_starts,
     reconstruct_coarse_schedule,
+    reconstruct_raw_coarse_schedule,
 )
 
 from .controller_core import FFcDDWSubroutineControllerCore, MCFLBPhaseSchedule
@@ -1306,6 +1310,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             logger=self.logger,
             r1_heatmap_yaml_path=r1_heatmap_yaml_path,
             r2_heatmap_yaml_path=r2_heatmap_yaml_path,
+            time_factor=self.time_factor,
         )
 
         # ---- Populate diagnostic from result (mostly straight-through). ----
@@ -1616,7 +1621,11 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             self.instance.get_wxd2_job_sequence
         )
 
-    def initialize_by_eddub_twt(self, factor: int = 1) -> SubroutineReport:
+    def initialize_by_eddub_twt(
+        self,
+        factor: int = 1,
+        coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil",
+    ) -> SubroutineReport:
         """Step method: seed an incumbent by dispatching jobs in EDDUB+w⁺ order.
 
         Sort by ``(d⁺_j asc, w⁺_j desc, position asc)``
@@ -1631,6 +1640,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         When ``factor > 1``, the instance is coarsened (time units divided by
         ``factor``) before dispatch, then the coarse schedule is reconstructed
         onto the original scale via :func:`reconstruct_coarse_schedule`.
+        ``coarsen_mode`` selects the rounding rule (see
+        :meth:`FFcDDWParameters.coarsen_processing_times`).
         ``factor == 1`` is identical to the no-factor path.
         """
         if factor == 1:
@@ -1640,7 +1651,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         start_elapsed = time.monotonic()
 
-        coarsened = FFcDDWParameters.coarsen_processing_times(self.instance, factor)
+        coarsened = FFcDDWParameters.coarsen_processing_times(
+            self.instance, factor, mode=coarsen_mode
+        )
         coarse_sched, _coarse_obj = self._dispatch_by_reversed_sequence_with_iit(
             coarsened.get_eddub_twt_job_sequence(), instance=coarsened
         )
@@ -1788,7 +1801,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         )
 
         builder = BaseModelBuilder()
-        mdl, params, op_vars, et_vars = builder.build(instance, horizon=horizon)
+        mdl, params, op_vars, et_vars = builder.build(
+            instance, horizon=horizon, time_factor=self.time_factor
+        )
 
         by_machine, stride_set = decode_pf_method(pf_method)
         BaseModelBuilder.add_stage_ops_precedence_constraints_after_dispatch_from_schedule(
@@ -1846,7 +1861,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         }
         schedule = build_schedule_from_op_starts(instance, j_i_2_start, j_i_2_end)
 
-        sum_e, sum_t = compute_weighted_earliness_tardiness(schedule, instance)
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            schedule, instance, time_factor=self.time_factor
+        )
         obj_value = float(sum_e + sum_t)
         cp_obj = float(solver.objective_value)
         if obj_value != cp_obj:
@@ -1968,6 +1985,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             phase_schedule_path_getter=self._build_flip_phase_path_getter()
             if emit_phase_schedules
             else None,
+            time_factor=self.time_factor,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2075,6 +2093,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             draw_gantt=draw_gantt,
             obj_lb=obj_lb,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
+            time_factor=self.time_factor,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2210,6 +2229,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible=error_if_infeasible,
             wall_clock_deadline_sec=wall_clock_deadline_sec,
             objective_lower_bound=obj_lb,
+            time_factor=self.time_factor,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2290,6 +2310,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
         rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
+        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> SubroutineReport:
         """Step method: refine the incumbent via :class:`SwCpDispatcher`.
 
@@ -2385,6 +2406,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             debug_partition_gantt_path_getter=debug_partition_gantt_path_getter,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
             rj_right_justify_scope=rj_right_justify_scope,
+            idle_mode=idle_mode,
+            time_factor=self.time_factor,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2437,6 +2460,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         solver_thread_cnt: int = 1,
         batch_size: int | float | str = "m",
+        extra_batch_size_expr: int | float | str | None = None,
         step_size: int = 1,
         unfixed_batch_count_min: int = 1,
         unfixed_batch_count_max: int = 1,
@@ -2460,12 +2484,23 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
         rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
+        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> None:
         """Composite step: iterate :meth:`sw_cp` over a range of
         ``unfixed_batch_count`` values.
 
         Mirrors ``hybridflowshop/controller/hfs_cp_lns.py:incremental_pw_cp``.
-        For each ``count`` in ``[unfixed_batch_count_min, unfixed_batch_count_max]``:
+        ``unfixed_batch_count_max`` is clamped to the instance's actual batch
+        count (``ceil(job_count / batch_size)``) so that iterations above
+        ``batch_count`` — which are guaranteed dispatcher no-ops — are skipped.
+
+        ``extra_batch_size_expr`` is an additive offset on the resolved
+        ``batch_size``, mirroring ``neh_cp``'s parameter of the same name.
+        :func:`resolve_value_expr` has no arithmetic grammar, so ``"m+2"``
+        does not parse; express it as ``batch_size="m"`` plus
+        ``extra_batch_size_expr=2``. The sum is floored at 1.
+
+        For each ``count`` in ``[unfixed_batch_count_min, effective_max]``:
 
         - ``"always"``: invoke ``self.sw_cp(unfixed_batch_count=count, ...)``
           once.
@@ -2502,24 +2537,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         instance = self.instance
-        batch_size_resolved = max(
-            1,
-            int(
-                math.ceil(
-                    resolve_value_expr(
-                        batch_size,
-                        instance.job_count,
-                        instance.stage_count,
-                        instance.last_stage_mc_count,
-                    )
-                )
-            ),
-        )
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+        batch_size_resolved = int(math.ceil(resolve_value_expr(batch_size, n, c, m)))
+        if extra_batch_size_expr is not None:
+            extra = resolve_value_expr(extra_batch_size_expr, n, c, m)
+            if extra is not None:
+                batch_size_resolved += int(extra)
+        batch_size_resolved = max(1, batch_size_resolved)
         self.logger.info(
-            "incremental_sw_cp: batch_size=%r -> %d (m=%d)",
+            "incremental_sw_cp: batch_size=%r (+%r) -> %d (m=%d)",
             batch_size,
+            extra_batch_size_expr,
             batch_size_resolved,
-            instance.last_stage_mc_count,
+            m,
         )
 
         base_kwargs = dict(
@@ -2543,18 +2575,22 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             draw_gantt=draw_gantt,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
             rj_right_justify_scope=rj_right_justify_scope,
+            idle_mode=idle_mode,
         )
 
+        batch_count = math.ceil(instance.job_count / batch_size_resolved)
+        effective_max = min(unfixed_batch_count_max, batch_count)
         self.logger.info(
-            "incremental_sw_cp: policy=%s, unfixed_batch_count=[%d, %d]",
+            "incremental_sw_cp: policy=%s, unfixed_batch_count=[%d, %d] "
+            "(requested_max=%d, batch_count=%d)",
             increment_unfixed_batch_count_flag,
             unfixed_batch_count_min,
+            effective_max,
             unfixed_batch_count_max,
+            batch_count,
         )
 
-        for unfixed_batch_count in range(
-            unfixed_batch_count_min, unfixed_batch_count_max + 1
-        ):
+        for unfixed_batch_count in range(unfixed_batch_count_min, effective_max + 1):
             if self.is_stopping_condition():
                 self.logger.info(
                     "incremental_sw_cp: stopping condition met before "
@@ -2620,6 +2656,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
     def coarsen_solve_reconstruct(
         self,
         factor: int = DEFAULT_COARSEN_FACTOR,
+        coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil",
         timelimit: float | str | None = None,
         solver_thread_cnt: int = 1,
         log_search_progress: bool = False,
@@ -2629,18 +2666,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
-        draw_cp_trajectory: bool = False,
+        solve_flow: list[dict] | None = None,
     ) -> SubroutineReport:
         """Step method: coarsen the instance, solve the base CP, and
         reconstruct to the original scale.
 
-        Coarsens all processing times and due-window bounds by ``factor``
-        via ``ceil(value / factor)``, solves the coarsened model via
-        :func:`run_coarsen_solve_reconstruct`, then inflates the raw
-        coarse start times back to original scale and restores original
-        processing times. Post-processing (``make_semi_active`` →
-        ``insert_idle_time``) and objective evaluation are done against
-        the original instance.
+        Coarsens all processing times by ``factor`` using the rule selected
+        by ``coarsen_mode`` (see
+        :meth:`FFcDDWParameters.coarsen_processing_times` for the formulas).
+        Solves the coarsened model via
+        :func:`run_coarsen_solve_reconstruct`, then reconstructs onto
+        the original scale by carrying machine assignment and per-machine
+        job order. Post-processing (``insert_idle_time``) and objective
+        evaluation are done against the original instance.
 
         ``timelimit`` is the user-specified per-call cap (absolute seconds,
         or any expression supported by :func:`resolve_value_expr`). The
@@ -2677,13 +2715,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         ``self.csr_phase_schedules`` (1_coarse_solver_result,
         2_reconstructed_raw, 3_final) via ``_record_csr_phase``.
 
-        ``draw_cp_trajectory``: when ``True`` and the solve finds a
-        solution, captures the coarsened-scale CP-SAT UB/LB trajectory
-        into ``self.csr_cp_trajectory``. The trajectory is NOT inserted
-        into the report's ``progress_log`` (kept as a dedicated artifact
-        only, separate from the shared obj_log).
-
-        The two flags are independent — any combination is valid.
+        ``solve_flow`` (optional): when provided, a non-empty list of step
+        dicts (same schema as a scenario ``subroutine_flow``) that REPLACES
+        the built-in dispatch-seed init AND the hard-coded base-CP solve. The
+        flow runs on the coarsened instance via a CHILD
+        :class:`FFcDDWSubroutineController` (``time_factor=factor``, headless
+        — no artifact layout / working directory bound). Every child
+        registration with a schedule becomes a coarse candidate; candidates
+        are structurally de-duplicated, each reconstructed to the original
+        scale, validated-and-dropped if infeasible, scored by original-scale
+        wET, and the argmin (earlier-wins tie-break) is registered as the
+        incumbent (``obj_bound=None`` — a coarse solve is never a valid
+        original-scale bound). ``seed_dispatch`` / ``solve`` are ignored in
+        this mode (a warning is logged if set to non-defaults). See
+        plans/experiment/20260711/csr_solve_flow.md §4. v1 solve_flow configs must keep
+        child gantt / emission / log-search flags OFF (the child has no sink).
 
         Per CLAUDE.md subroutine step contract: a single ``_register`` per
         call, ``elapsed_time`` measured immediately before report
@@ -2692,6 +2738,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         start_elapsed = time.monotonic()
         if self.is_stopping_condition():
             return self._make_stop_report(start_elapsed)
+
+        if solve_flow is not None:
+            return self._coarsen_solve_reconstruct_via_flow(
+                start_elapsed,
+                factor=factor,
+                coarsen_mode=coarsen_mode,
+                timelimit=timelimit,
+                error_if_infeasible=error_if_infeasible,
+                seed_dispatch=seed_dispatch,
+                solve=solve,
+                emit_phase_schedules=emit_phase_schedules,
+                solve_flow=solve_flow,
+            )
 
         instance = self.instance
         timelimit_resolved = resolve_value_expr(
@@ -2718,6 +2777,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         option = CoarsenSolveReconstructOption(
             factor=factor,
+            coarsen_mode=coarsen_mode,
             timelimit_sec=eff_timelimit_sec,
             solver_thread_cnt=solver_thread_cnt,
             log_search_progress=log_search_progress,
@@ -2758,7 +2818,241 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     "2_reconstructed_raw", trace.reconstructed_raw_schedule
                 )
                 self._record_csr_phase("3_final", trace.final_schedule)
-            if draw_cp_trajectory:
-                self.csr_cp_trajectory = trace.cp_progress_log
+
+        return report
+
+    def _coarsen_solve_reconstruct_via_flow(
+        self,
+        start_elapsed: float,
+        *,
+        factor: int,
+        coarsen_mode: Literal["ceil", "round", "floor", "cumulative"],
+        timelimit: float | str | None,
+        error_if_infeasible: bool,
+        seed_dispatch: str,
+        solve: bool,
+        emit_phase_schedules: bool,
+        solve_flow: list[dict],
+    ) -> SubroutineReport:
+        """``coarsen_solve_reconstruct`` in ``solve_flow`` mode (plan §4).
+
+        Runs ``solve_flow`` on the coarsened instance via a headless child
+        controller, harvests + de-duplicates + reconstructs the coarse
+        candidates, and registers the original-scale argmin (or a no-solution
+        report). ``start_elapsed`` is the parent step-entry monotonic clock —
+        the whole child run + reconstruction counts toward this step's
+        ``elapsed_time`` (measured immediately before ``_register``).
+        """
+        instance = self.instance
+
+        # --- validate solve_flow (non-empty list of parseable step dicts) ---
+        if isinstance(solve_flow, (str, bytes)) or not isinstance(solve_flow, Sequence):
+            raise ValueError("solve_flow must be a non-empty list of step dicts")
+        solve_flow_list = list(solve_flow)
+        if not solve_flow_list:
+            raise ValueError("solve_flow must be a non-empty list of step dicts")
+        for step in solve_flow_list:
+            step_obj = step.to_obj() if hasattr(step, "to_obj") else step
+            SubroutineFlowKeys.parse_step(step_obj)  # raises on malformed step
+
+        # seed_dispatch / solve are meaningless in solve_flow mode (the flow
+        # owns both seeding and solving). Warn only when set to non-defaults.
+        if seed_dispatch != "mixed" or solve is not True:
+            self.logger.warning(
+                "coarsen_solve_reconstruct: solve_flow set together with explicit "
+                "seed_dispatch=%r / solve=%r; both are ignored in solve_flow mode.",
+                seed_dispatch,
+                solve,
+            )
+
+        # --- resolve CSR budget (same as the legacy path) ---
+        timelimit_resolved = resolve_value_expr(
+            timelimit,
+            instance.job_count,
+            instance.stage_count,
+            instance.last_stage_mc_count,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        csr_budget = (
+            min(timelimit_resolved, remaining_sec)
+            if timelimit_resolved is not None
+            else remaining_sec
+        )
+        child_timelimit = min(csr_budget, remaining_sec)
+
+        self.logger.info(
+            "coarsen_solve_reconstruct[solve_flow]: factor=%d, child_timelimit=%.3fs "
+            "(timelimit=%s, remaining=%.3fs), steps=%d",
+            factor,
+            child_timelimit,
+            f"{timelimit_resolved:.3f}s" if timelimit_resolved is not None else "None",
+            remaining_sec,
+            len(solve_flow_list),
+        )
+
+        # --- coarsen + run the child controller headless ---
+        coarse_instance = FFcDDWParameters.coarsen_processing_times(
+            instance, factor, mode=coarsen_mode
+        )
+        child = FFcDDWSubroutineController(
+            instance=coarse_instance,
+            subroutine_flow=solve_flow_list,
+            stopping_criteria={"timelimit": child_timelimit},
+            time_factor=factor,
+        )
+        child_offset = time.monotonic() - start_elapsed
+        child.run()
+
+        # --- harvest candidates (every child registration with a schedule) ---
+        raw_candidates: list[CsrCandidate] = []
+        for rec in child.solution_manager.history:
+            sol = rec.solution
+            if sol is None or sol.schedule is None:
+                continue
+            source = getattr(rec.report, "step_label", None) or "unknown"
+            report = rec.report
+            sec_elapsed_step = (
+                getattr(report, "start_time", 0.0) + report.elapsed_time
+                if report is not None
+                else None
+            )
+            raw_candidates.append(
+                CsrCandidate(
+                    source=source,
+                    coarse_schedule=sol.schedule,
+                    coarse_obj=sol.obj_value,
+                    coarse_bound=sol.obj_bound,
+                    sec_elapsed_step=sec_elapsed_step,
+                )
+            )
+        deduped = dedup_candidates(raw_candidates)
+
+        # Preserve child history for coarse-scale inner obj_log emission.
+        self.csr_child_history = list(child.solution_manager.history)
+
+        # --- reconstruct + validate + score every deduped candidate ---
+        candidate_rows: list[dict[str, object]] = []
+        winner: CsrCandidate | None = None
+        winner_final: FFcSchedule | None = None
+        winner_obj: float | None = None
+        dropped_count = 0
+        for cand in deduped:
+            recon_start = time.monotonic()
+            restored_obj: float | None = None
+            valid = False
+            final_sch: FFcSchedule | None = None
+            try:
+                final_sch = reconstruct_coarse_schedule(
+                    cand.coarse_schedule, instance, factor
+                )
+                self.check_feasibility(final_sch.get_jik_2_start_time_map())
+                sum_e, sum_t = compute_weighted_earliness_tardiness(final_sch, instance)
+                restored_obj = float(sum_e + sum_t)
+                valid = True
+            except Exception:
+                self.logger.warning(
+                    "coarsen_solve_reconstruct[solve_flow]: dropping invalid "
+                    "candidate from %s",
+                    cand.source,
+                    exc_info=True,
+                )
+                dropped_count += 1
+                final_sch = None
+            recon_elapsed = time.monotonic() - recon_start
+            candidate_rows.append(
+                {
+                    "source": cand.source,
+                    "coarse_obj": cand.coarse_obj,
+                    "coarse_bound": cand.coarse_bound,
+                    "restored_obj": restored_obj,
+                    "valid": valid,
+                    "sec_elapsed_step": cand.sec_elapsed_step,
+                    "sec_elapsed_recon": recon_elapsed,
+                }
+            )
+            if valid and (winner_obj is None or restored_obj < winner_obj):
+                winner = cand
+                winner_final = final_sch
+                winner_obj = restored_obj
+
+        # --- no-candidate fallback (mirror legacy error_if_infeasible branch) ---
+        if winner_final is None and error_if_infeasible:
+            raise RuntimeError(
+                "coarsen_solve_reconstruct[solve_flow]: no feasible candidate "
+                f"survived reconstruction for {instance.name} "
+                f"(candidates={len(raw_candidates)}, deduped={len(deduped)})."
+            )
+
+        # --- build progress_log from candidate_rows (plan §3) ---
+        progress_log_entries: list[ProgressLogEntry] = []
+        running_min_obj: float | None = None
+        for row in candidate_rows:
+            rst = row["restored_obj"]
+            if rst is None:
+                continue
+            rst_f = float(rst)
+            if running_min_obj is None or rst_f < running_min_obj:
+                running_min_obj = rst_f
+            elapsed_sec = child_offset + float(row["sec_elapsed_step"])
+            obj_bound_val: float | None = None
+            if factor == 1 and row.get("coarse_bound") is not None:
+                obj_bound_val = float(row["coarse_bound"])
+            progress_log_entries.append(
+                ProgressLogEntry(
+                    elapsed_sec=elapsed_sec,
+                    obj_value=running_min_obj,
+                    obj_bound=obj_bound_val,
+                )
+            )
+        progress_log = tuple(progress_log_entries)
+
+        # --- measure elapsed, then register EXACTLY ONCE (contract) ---
+        elapsed = time.monotonic() - start_elapsed
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=winner_obj,
+            obj_bound=None,  # a coarse solve is never a valid original-scale LB
+        )
+        if winner_final is not None:
+            self._register(
+                report,
+                FFcDDWSolution(
+                    schedule=winner_final, obj_value=winner_obj, obj_bound=None
+                ),
+                progress_log=progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=progress_log)
+
+        # --- post-register work (per contract: after _register, not before) ---
+        self.csr_candidate_rows.extend(candidate_rows)
+        self.csr_solve_flow_summary = {
+            "candidate_count": len(raw_candidates),
+            "deduped_count": len(deduped),
+            "dropped_count": dropped_count,
+            "winner_source": winner.source if winner is not None else None,
+            "winner_coarse_obj": winner.coarse_obj if winner is not None else None,
+            "winner_original_obj": winner_obj,
+        }
+        self.logger.info(
+            "coarsen_solve_reconstruct[solve_flow]: candidates=%d deduped=%d "
+            "dropped=%d winner_source=%s winner_coarse_obj=%s winner_original_obj=%s",
+            len(raw_candidates),
+            len(deduped),
+            dropped_count,
+            winner.source if winner is not None else None,
+            winner.coarse_obj if winner is not None else None,
+            f"{winner_obj:.3f}" if winner_obj is not None else None,
+        )
+        if winner_final is not None:
+            if emit_phase_schedules:
+                self._record_csr_phase("1_coarse_solver_result", winner.coarse_schedule)
+                self._record_csr_phase(
+                    "2_reconstructed_raw",
+                    reconstruct_raw_coarse_schedule(
+                        winner.coarse_schedule, instance, factor
+                    ),
+                )
+                self._record_csr_phase("3_final", winner_final)
 
         return report

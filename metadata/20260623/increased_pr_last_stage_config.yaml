@@ -8,7 +8,7 @@
 # (the "modified" solution in earlier discussion). A base CP-SAT solve follows
 # so the run produces a complete, validated incumbent.
 #
-# See plans/20260623/last_stage_rebuild_config.md.
+# See plans/experiment/20260623/last_stage_rebuild_config.md.
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

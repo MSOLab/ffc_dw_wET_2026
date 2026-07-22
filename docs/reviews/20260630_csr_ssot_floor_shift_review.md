@@ -6,9 +6,9 @@
 - **선행 작업:** `6a8da8e fix(csr)!: drop due-window quantization`
 - **알고리즘 SSOT:** `vault/20260629_p3_csr.pdf` slide 6
   ("Idle Time Insertion After Coarsening – Floor for Shifting")
-- **설계 문서:** `plans/20260629/csr-time-factor-ssot.md`,
-  `plans/20260630/csr-floor-shift-overshoot-safe.md`,
-  `plans/20260630/csr-cap-k-to-min-due-window-width.md`(rejected)
+- **설계 문서:** `plans/experiment/20260629/csr-time-factor-ssot.md`,
+  `plans/experiment/20260630/csr-floor-shift-overshoot-safe.md`,
+  `plans/experiment/20260630/csr-cap-k-to-min-due-window-width.md`(rejected)
 - **검증 결과:** `uv run ruff check` 통과, 전체 테스트 **490 passed**,
   PDF slide 6 과 구현 1:1 대조 완료.
 
@@ -155,7 +155,7 @@ window `(16,24)` 가 K=2 의 정확한 배수라 **floor==ceil 로 우연히 일
 `0792b18` 이 `dispatch_forward_with_iit` 의 semi-active 호출에 `# TODO: remove`
 마커를 달았다. 한편 `dispatch_reversed_with_iit`(`paired.py:145`)의 동일 호출엔
 마커가 없어 비대칭. IIT 파이프라인에서 semi-active 가 불필요/유해한지는 별도
-조사 필요. (이번 리뷰 범위 밖, `TODOS.md` 기준 자율 실행 금지 항목.)
+조사 필요. (이번 리뷰 범위 밖, `TODO.md` 기준 자율 실행 금지 항목.)
 
 ### 4.5 [관찰 · 설계 리스크] scale-hybrid coarsened 인스턴스
 

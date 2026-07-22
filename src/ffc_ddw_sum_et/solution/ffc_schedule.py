@@ -1664,33 +1664,41 @@ class FFcSchedule:
           (sets S_E/S_D/S_T may have changed, or S_M grew by merging with
           the next block when delta == delta2).
 
-        When ``time_factor > 1``, the schedule lives on a coarse time grid and
-        the due window belongs to the original (fine) scale. The partition
-        (``K * c < lo`` → S_E, ``K * c >= hi`` → S_T, else S_D — the
-        Multiplication form, exact, no rounding) is shared by all three
-        ``idle_mode`` values; only the shift breakpoint Δ₁ (and whether the
-        shift is unconditional) differs:
+        When ``time_factor > 1`` (``K > 1``) the schedule lives on a coarse
+        time grid while the due window belongs to the original (fine) scale.
+        In that regime each block is shifted to its **exact coarse-grid
+        optimum** by the CSR idle-time-insertion of
+        ``vault/20260713_p3_csr.pdf``: the gate is the ACTUAL objective change
+        from shifting the block one coarse cell — earliness saved (a full
+        ``K*w-`` while the job stays early, or the partial ``w-*(lo - K*C)`` on
+        the cell it crosses out) vs tardiness added (``K*w+`` while already
+        tardy, or the partial ``w+*(K*(C+1) - hi)`` on the cell it crosses in).
+        Comparing these MAGNITUDES (not weights) is what makes narrow windows
+        correct: coarsening can leave a window with no in-grid cell, so a single
+        cell can leap early -> tardy. The block jumps across each full-marginal
+        region (``floor(lo/K)``/``floor(hi/K)`` boundaries) and unit-steps
+        through window-edge cells. This supersedes the ``idle_mode`` heuristics
+        below — **``idle_mode`` has no effect when ``K > 1``** — which undershoot
+        on the coarse grid (the ``K*(C+1)`` partition misclassifies
+        genuinely-early jobs as on-time, leaving residual earliness). See
+        ``plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md``.
+
+        At ``time_factor == 1`` (fine grid, the only regime for non-CSR
+        callers) the original paper heuristic runs and ``idle_mode`` selects the
+        Δ₁ breakpoint rule. Floor equals ceil there, so the shift is exact; the
+        three modes agree for aligned windows:
 
         - ``"flooring"`` (default): Δ₁ uses **floor** (``lo // K`` /
-          ``hi // K``), overshoot-safe (no early job is pushed past its
-          sub-grid due window into tardiness). When Δ₁ == 0 the shift stalls
-          and ``j`` is decremented to make progress. This is byte-identical
-          to the original (pre-idle_mode) behaviour.
+          ``hi // K``); byte-identical to the original (pre-idle_mode)
+          behaviour. When Δ₁ == 0 the shift stalls and ``j`` is decremented.
         - ``"ceiling"``: Δ₁ uses **ceil** (``-(-lo // K)`` / ``-(-hi // K)``).
-          Δ₁ >= 1 always (see plan §1.1), so the shift is unconditional —
-          never stalls.
-        - ``"lookahead"``: computes the floor-based candidate Δ_a and the
-          Δ_a + 1 candidate Δ_b (each capped by delta2), and picks whichever
-          minimises the block's local E/T objective (``block_obj``). Falls
-          back to the flooring stall rule (``j -= 1``) when the chosen shift
-          is 0.
+        - ``"lookahead"``: picks the floor candidate Δ_a or Δ_a + 1, whichever
+          minimises ``block_obj``. **Ties go to the larger shift Δ_b** (the
+          comparison is ``block_obj(Δ_b) <= block_obj(Δ_a)``, not ``<``) — see
+          the inline note at the comparison for why.
 
-        At ``time_factor == 1``, floor equals ceil and all three modes are
-        byte-identical to the no-factor path — a true no-op for all existing
-        (non-CSR) callers.
-
-        Termination guard: when the chosen shift is 0 (flooring/lookahead),
-        ``j`` is decremented to avoid an infinite loop.
+        Termination guard: when the chosen shift is 0, ``j`` is decremented to
+        avoid an infinite loop.
         """
         last_stage_id = self.stages[-1]
         INF = 10**9
@@ -1721,10 +1729,10 @@ class FFcSchedule:
                 s_e, s_t, s_d = [], [], []
                 for i in range(j, block_end + 1):
                     d_lo, d_hi = due_window_map[job_ids[i]]
-                    KC_j = K * ends[i]
-                    if KC_j < d_lo:
+                    K_times_Cj_plus_single_unit = K * (ends[i] + 1)
+                    if K_times_Cj_plus_single_unit <= d_lo:
                         s_e.append(i)
-                    elif KC_j >= d_hi:
+                    elif d_hi < K_times_Cj_plus_single_unit:
                         s_t.append(i)
                     else:
                         s_d.append(i)
@@ -1741,6 +1749,66 @@ class FFcSchedule:
                         twt = twt_map.get(job_ids[i], 1)
                         total += ewt * max(0, d_lo - K * c) + twt * max(0, K * c - d_hi)
                     return total
+
+                if K > 1:
+                    # Exact coarse-grid optimal block shift (O(n^2), the CSR
+                    # idle-time-insertion of vault/20260713_p3_csr.pdf). The gate
+                    # is the ACTUAL objective change from shifting the block one
+                    # coarse cell (+K real): a job reduces earliness by a full K
+                    # while it stays early, or partially (``d_lo - K*C``) on the
+                    # cell it crosses out of its window; symmetrically it grows
+                    # tardiness by K while already tardy, or partially
+                    # (``K*(C+1) - d_hi``) on the cell it crosses in. Comparing
+                    # these MAGNITUDES (not weights) is what makes narrow windows
+                    # correct — coarsening can leave a window with no in-grid
+                    # cell, so a cell can leap early->tardy. Shift while the
+                    # earliness saved exceeds the tardiness added. ``idle_mode``
+                    # is irrelevant here (exact). See
+                    # plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md.
+                    earliness_saved = 0
+                    tardiness_added = 0
+                    for i in range(j, block_end + 1):
+                        d_lo, d_hi = due_window_map[job_ids[i]]
+                        c = ends[i]
+                        if K * c < d_lo:  # early: shifting +1 cell cuts earliness
+                            ewt = ewt_map.get(job_ids[i], 1)
+                            earliness_saved += (
+                                ewt * K if K * (c + 1) <= d_lo else ewt * (d_lo - K * c)
+                            )
+                        if K * (c + 1) > d_hi:  # tardy after the shift
+                            twt = twt_map.get(job_ids[i], 1)
+                            tardiness_added += (
+                                twt * K if K * c >= d_hi else twt * (K * (c + 1) - d_hi)
+                            )
+                    if earliness_saved > tardiness_added:
+                        # Jump across the full-marginal region (every job stays
+                        # on the same early/on-time/tardy piece, so the per-cell
+                        # gate above holds for the whole jump); unit-step through
+                        # a cell where some job crosses a window edge (the gate
+                        # is re-evaluated with the new magnitudes there).
+                        jump = INF
+                        for i in range(j, block_end + 1):
+                            d_lo, d_hi = due_window_map[job_ids[i]]
+                            c = ends[i]
+                            if K * c < d_lo:  # early: full until it reaches d_lo
+                                jump = min(
+                                    jump, (d_lo // K - c) if K * (c + 1) <= d_lo else 0
+                                )
+                            elif K * c <= d_hi:  # on-time: rate 0 until it reaches d_hi
+                                jump = min(
+                                    jump, (d_hi // K - c) if K * (c + 1) <= d_hi else 0
+                                )
+                            # tardy: constant +K rate, no boundary ahead -> no cap
+                        delta = min(1 if jump <= 0 else jump, delta2)
+                        if delta > 0:
+                            for i in range(j, block_end + 1):
+                                starts[i] += delta
+                                ends[i] += delta
+                        else:
+                            j -= 1
+                    else:
+                        j -= 1
+                    continue
 
                 if sum_e > sum_t:
                     if idle_mode == "flooring":
@@ -1785,8 +1853,17 @@ class FFcSchedule:
                         delta1 = min(delta1_vals) if delta1_vals else INF
                         da = min(delta1, delta2)
                         db = min(delta1 + 1, delta2)
+                        # ``<=``, not ``<``: on an objective tie prefer the
+                        # LARGER shift Δ_b. Both land the block at the same E/T
+                        # cost, but Δ_b right-justifies it one cell further,
+                        # freeing earlier machine capacity for the blocks still
+                        # to be swept (``j`` walks backwards). Strict ``<``
+                        # would keep Δ_a and, when Δ_a == 0, stall the block
+                        # into the ``j -= 1`` guard for no objective gain.
+                        # Cannot loop: the chosen Δ_b > Δ_a >= 0 always
+                        # advances ``ends``.
                         best = (
-                            db if (db != da and block_obj(db) < block_obj(da)) else da
+                            db if (db != da and block_obj(db) <= block_obj(da)) else da
                         )
                         if best > 0:
                             for i in range(j, block_end + 1):

@@ -104,19 +104,22 @@ artifacts:
     zone: progress
     kind: csr_phase_schedule
     file_template: "coarsen_solve_reconstruct/{phase_name}.json"
-  # CP-SAT objective trajectory captured during the coarsened solve.
-  # Coarsened-scale obj_value/obj_bound — NOT mixed into the shared obj_log
-  # (which is original-scale and used for cross-step RPD/optimality-gap).
+  # Per-candidate table from a CSR solve_flow run: one row per
+  # (candidate × reconstruction) — source, coarse_obj, coarse_bound,
+  # restored_obj (blank if dropped), valid, elapsed_sec. Offline analysis of
+  # which sub-step produced the winning coarse schedule.
   - scope: instance
     zone: progress
-    kind: csr_cp_trajectory_json
-    file_template: "{instance_name}_csr_cp_trajectory.json"
-  # UB/LB-vs-time line graph rendered from csr_cp_trajectory_json.
-  # x-axis = solve elapsed seconds; two lines: UB (obj_value) and LB (obj_bound).
+    kind: csr_candidates_csv
+    file_template: "{instance_name}_csr_candidates.csv"
+  # Coarse-scale inner-solve obj_log of the CSR child controller. Mirrors
+  # the shared obj_log_json layout (obj_value/obj_bound per time) but on
+  # the coarsened-instance scale, living entirely in the child-clock frame.
+  # Emitted for solve_flow CSR runs only (no child flow in the legacy path).
   - scope: instance
     zone: progress
-    kind: csr_cp_trajectory_png
-    file_template: "{instance_name}_csr_cp_trajectory.png"
+    kind: csr_inner_obj_log_json
+    file_template: "{instance_name}_csr_inner_obj_log.json"
 
   # ---- instance / report (post-run renderings) ----
   # `phase_gantt_png` covers both regular and preemptive phase Gantt PNGs;
@@ -132,6 +135,12 @@ artifacts:
     zone: report
     kind: phase_gantt_png
     file_template: "{phase_name}_gantt.png"
+  # Per-instance progress plot: controller-frame UB/LB vs time, rendered from
+  # obj_log_json.  Gated by draw_progress_plot config flag.
+  - scope: instance
+    zone: report
+    kind: progress_plot_png
+    file_template: "{instance_name}_progress_plot.png"
   # Paired Gantt PNG for ``calc_mcf_lb_phase_schedule``. Two-level nested
   # layout mirrors the source JSON tree.
   - scope: instance
@@ -211,17 +220,17 @@ artifacts:
   - scope: run
     kind: time_p_dashboard
     file_template: "{run_id}_time_p_dashboard.html"
-  - scope: run
-    kind: cp_gap_comparison_csv
-    file_template: "{run_id}_cp_gap_comparison.csv"
-  - scope: run
-    kind: cp_gap_dashboard
-    file_template: "{run_id}_cp_gap_dashboard.html"
   # Run-level multi-scenario subroutine flow comparison chart. Aggregates
   # endpoint/progression frames built from each scenario's obj_log_jsons.
   - scope: run
     kind: multi_scenario_subroutine_flow_comparison_html
     file_template: "{run_id}_multi_scenario_subroutine_flow_comparison.html"
+  # Run-level multi-scenario CSR inner-flow comparison chart. Reads
+  # csr_inner_obj_log_json per instance — coarse-scale child-clock
+  # obj_value vs normalized time, one trace per κ scenario.
+  - scope: run
+    kind: csr_inner_flow_comparison_html
+    file_template: "{run_id}_csr_inner_flow_comparison.html"
   # Run-level table aggregating every per-scenario
   # calc_mcf_lb_and_derive_full_sch summary into one CSV with
   # `scenarioName` as the leading column.

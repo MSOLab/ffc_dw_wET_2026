@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from routix.io import ArtifactLayout, load_yaml
+from routix.io import ArtifactLayout, dump_yaml, load_yaml
 from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
@@ -26,6 +26,11 @@ from .mcf_lb_phase_labels import MCF_LB_R1_LABEL_ORDER, MCF_LB_R2_LABEL_ORDER
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
 
 logger = logging.getLogger(__name__)
+
+SUBROUTINE_FLOW_CACHE_FN = "subroutine_flow.yaml"
+"""Per-scenario cache of the executed subroutine flow. Written on every run so a
+later ``RunMode.RESUME`` run can validate its flow prefix against the base run's
+flow (see main.py + plans/experiment/20260709/resume_from_base.md)."""
 
 # TODO: Consider making this a parameter or deriving it from the observed solve times.
 TIMELIMIT_NC_MULTIPLIER = 0.09
@@ -304,18 +309,14 @@ def _phase_makespan_from_json(json_path: Path) -> int | None:
     return max(ends) if ends else None
 
 
-def _render_csr_cp_trajectory_line(json_path: Path, png_path: Path) -> None:
-    """Render a UB/LB-vs-time line graph from a CSR CP trajectory JSON.
+def _render_progress_plot(json_path: Path, png_path: Path) -> None:
+    """Render controller-frame UB/LB-vs-time step chart from ``_obj_log.json``.
 
-    Loads ``{"elapsed_sec":[...], "obj_value":[...], "obj_bound":[...]}``
-    (parallel arrays; ``None`` entries are skipped per-series) and plots
-    two step-style lines: UB from ``obj_value`` and LB from ``obj_bound``.
-
-    y-axis represents the **coarsened-scale** objective (the solve was run
-    on a coarsened instance, so these values are NOT directly comparable to
-    the original-scale objectives in ``_obj_log.json``).
-
-    Module-level so it's picklable by ``ProcessPoolExecutor``.
+    Reads ``{"obj_value":{"data":{...},"notes":{...}},
+    "obj_bound":{"data":{...}}}`` and plots two step-style lines:
+    UB from ``obj_value.data`` (solid) and LB from ``obj_bound.data`` (dashed).
+    Step-boundary annotations from ``obj_value.notes`` are rendered as rotated
+    vertical labels.  Module-level for ``ProcessPoolExecutor`` picklability.
     """
     try:
         import matplotlib
@@ -328,49 +329,109 @@ def _render_csr_cp_trajectory_line(json_path: Path, png_path: Path) -> None:
 
     try:
         with open(json_path) as f:
-            data = json.load(f)
+            log = json.load(f)
     except Exception:
-        logger.exception("Failed to load CSR trajectory json %s", json_path)
+        logger.exception("Failed to load obj_log %s", json_path)
         return
 
-    elapsed = data.get("elapsed_sec") or []
-    ub_raw = data.get("obj_value") or []
-    lb_raw = data.get("obj_bound") or []
+    obj_value = log.get("obj_value", {})
+    obj_bound = log.get("obj_bound", {})
+    value_data = obj_value.get("data", {})
+    bound_data = obj_bound.get("data", {})
+    notes = obj_value.get("notes", {})
 
-    # Filter each series to pairs where the value is not None.
-    ub_points = [(t, v) for t, v in zip(elapsed, ub_raw) if v is not None]
-    lb_points = [(t, v) for t, v in zip(elapsed, lb_raw) if v is not None]
+    def _sorted_pairs(
+        d: dict[str, float],
+    ) -> tuple[list[float], list[float]]:
+        items = sorted(((float(k), v) for k, v in d.items()), key=lambda kv: kv[0])
+        if not items:
+            return [], []
+        xs, ys = zip(*items)
+        return list(xs), list(ys)
 
-    if not ub_points and not lb_points:
-        # Nothing to plot; skip file creation.
+    ub_t, ub_y = _sorted_pairs(value_data)
+    lb_t, lb_y = _sorted_pairs(bound_data)
+
+    # UB is minimized: keep only best-so-far points, dropping any increase.
+    def _running_min(
+        ts: list[float], ys: list[float]
+    ) -> tuple[list[float], list[float]]:
+        out_t: list[float] = []
+        out_y: list[float] = []
+        best: float | None = None
+        for t, y in zip(ts, ys):
+            if best is None or y <= best:
+                best = y
+                out_t.append(t)
+                out_y.append(y)
+        return out_t, out_y
+
+    ub_t, ub_y = _running_min(ub_t, ub_y)
+
+    if not ub_t and not lb_t:
         return
 
-    # Derive instance label from filename for the title.
-    stem = png_path.stem  # e.g. "MyInstance_csr_cp_trajectory"
-    instance_label = stem.replace("_csr_cp_trajectory", "")
+    note_items = sorted(((float(k), v) for k, v in notes.items()), key=lambda kv: kv[0])
+
+    # Derive label from filename: "MyInstance_progress_plot" -> "MyInstance"
+    instance_label = png_path.stem.replace("_progress_plot", "")
 
     try:
         png_path.parent.mkdir(parents=True, exist_ok=True)
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-        if ub_points:
-            t_ub, v_ub = zip(*ub_points)
-            ax.step(t_ub, v_ub, where="post", label="UB (obj_value)")
+        if ub_t:
+            ax.step(
+                ub_t,
+                ub_y,
+                where="post",
+                label="objValue",
+                linewidth=1.5,
+            )
+        if lb_t:
+            ax.step(
+                lb_t,
+                lb_y,
+                where="post",
+                label="objBound",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.7,
+            )
 
-        if lb_points:
-            t_lb, v_lb = zip(*lb_points)
-            ax.step(t_lb, v_lb, where="post", label="LB (obj_bound)", linestyle="--")
+        # Step-boundary annotations (rotated vertical labels at top of chart)
+        if note_items and ub_t:
+            all_t = ub_t + lb_t + [t for t, _ in note_items]
+            span = max(all_t) - min(all_t) or 1.0
+            pad = span * 0.04
+            ax.set_xlim(min(all_t) - pad, max(all_t) + pad)
+            ymin, ymax = ax.get_ylim()
+            ymax_padded = ymax + (ymax - ymin) * 0.18
+            ax.set_ylim(ymin, ymax_padded)
+            for t, label in note_items:
+                ax.axvline(t, linestyle=":", linewidth=0.8, alpha=0.5)
+                ax.annotate(
+                    label,
+                    xy=(t, ymax_padded),
+                    xytext=(-4, -2),
+                    textcoords="offset points",
+                    rotation=90,
+                    va="top",
+                    ha="right",
+                    fontsize=7,
+                    clip_on=False,
+                )
 
-        ax.set_xlabel("solve elapsed (s)")
-        ax.set_ylabel("coarsened objective")
-        ax.set_title(f"{instance_label}\ncoarsened-scale UB/LB trajectory")
-        ax.legend()
-
+        ax.set_title(instance_label)
+        ax.set_xlabel("controller time (s)")
+        ax.set_ylabel("objective")
+        ax.legend(loc="lower right")
+        ax.grid(True, linestyle="--", alpha=0.6)
         fig.tight_layout()
-        fig.savefig(str(png_path))
+        fig.savefig(str(png_path), dpi=150)
         plt.close(fig)
     except Exception:
-        logger.exception("Failed to render CSR trajectory for %s", json_path)
+        logger.exception("Failed to render progress plot for %s", json_path)
 
 
 @dataclass
@@ -414,6 +475,7 @@ class FFcDDWMultiScenarioRunner(
         self,
         scenario_names: list[str] | None = None,
         draw_gantt: bool = True,
+        draw_progress_plot: bool = False,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
@@ -437,6 +499,7 @@ class FFcDDWMultiScenarioRunner(
         ]
         super().__init__(**kwargs)
         self.draw_gantt = draw_gantt
+        self.draw_progress_plot = draw_progress_plot
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = ins_index_source
         self.bks_table_csv_path = bks_table_csv_path
@@ -467,6 +530,21 @@ class FFcDDWMultiScenarioRunner(
                 else f"scenario_{i + 1}"
             )
             scenario_output_dir = layout.scenario_dir(scenario_name)
+            # Cache the executed flow so a later RESUME run can prefix-validate
+            # against it (see main.py RESUME plumbing). POST_PROCESS_ONLY runs
+            # against an existing run dir and executes no flow — writing there
+            # would clobber the base run's cache that RESUME validates against.
+            if self.mode != RunMode.POST_PROCESS_ONLY:
+                try:
+                    scenario_output_dir.mkdir(parents=True, exist_ok=True)
+                    dump_yaml(
+                        subroutine_flow,
+                        scenario_output_dir / SUBROUTINE_FLOW_CACHE_FN,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to cache subroutine_flow for scenario %s", scenario_name
+                    )
             multi_instance_runner = self.m_i_runner_class(
                 s_i_runner_class=self.s_i_runner_class,
                 instances=self.instances,
@@ -575,6 +653,7 @@ class FFcDDWMultiScenarioRunner(
             scenario_results,
             layout=layout,
             draw_gantt=self.draw_gantt,
+            draw_progress_plot=self.draw_progress_plot,
             painter_thread_cnt=self.painter_thread_cnt,
             ins_index_source=self.ins_index_source,
             bks_table_csv_path=self.bks_table_csv_path,
@@ -594,6 +673,7 @@ class FFcDDWReporter:
         *,
         layout: ArtifactLayout,
         draw_gantt: bool = True,
+        draw_progress_plot: bool = False,
         painter_thread_cnt: int = 1,
         ins_index_source: Path | None = None,
         bks_table_csv_path: Path | None = None,
@@ -603,6 +683,7 @@ class FFcDDWReporter:
         self.scenario_results = scenario_results
         self.layout = layout
         self.draw_gantt = draw_gantt
+        self.draw_progress_plot = draw_progress_plot
         self.painter_thread_cnt = painter_thread_cnt
         self.ins_index_source = (
             Path(ins_index_source) if ins_index_source is not None else None
@@ -675,9 +756,9 @@ class FFcDDWReporter:
         self._write_statistics_yaml()
         self._write_excel_report()
         self._write_post_run_pivot_artifacts()
-        self._write_cp_gap_artifacts()
         self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
+        self._generate_progress_plots()
 
     def _write_post_run_pivot_artifacts(self) -> None:
         """Emit long-format RPDf comparison CSV + 3 PivotTable.js HTML files."""
@@ -696,27 +777,6 @@ class FFcDDWReporter:
             layout=self.layout,
             hybrid_match_csv=self.ins_index_source,
             bks_table_csv=self.bks_table_csv_path,
-        )
-
-    def _write_cp_gap_artifacts(self) -> None:
-        """Emit CSR CP gap comparison CSV + PivotTable.js dashboard.
-
-        Skips silently when trajectory files are absent (non-CSR runs).
-        """
-        from .post_run_pivot import write_cp_gap_artifacts
-
-        if not self.ins_index_source or not self.ins_index_source.exists():
-            return
-        if not self.bks_table_csv_path or not self.bks_table_csv_path.exists():
-            return
-
-        run_root = Path(self.layout.run_dir())
-        write_cp_gap_artifacts(
-            run_root,
-            self.layout,
-            self.ins_index_source,
-            self.bks_table_csv_path,
-            init_filter="v3",
         )
 
     def _write_post_run_subroutine_chart_artifacts(self) -> None:
@@ -1890,20 +1950,6 @@ class FFcDDWReporter:
                         )
 
         gantt_count = len(jobs)
-        # CSR CP trajectory line graphs (coarsened UB/LB vs time).
-        for sc in self.scenario_results:
-            for ir in sc.instance_results:
-                ins = ir.instance_name
-                scope = {"scenario_name": sc.name, "instance_name": ins}
-                traj_json = self.layout.artifact_path("csr_cp_trajectory_json", **scope)
-                if traj_json.exists():
-                    jobs.append(
-                        (
-                            _render_csr_cp_trajectory_line,
-                            traj_json,
-                            self.layout.artifact_path("csr_cp_trajectory_png", **scope),
-                        )
-                    )
         # Heatmap YAMLs aren't registered in ArtifactLayout yet; iterate the
         # progress zone per (scenario, instance) and route the HTML output
         # into the same instance's report zone.
@@ -1948,6 +1994,54 @@ class FFcDDWReporter:
                     future.result()
                 except Exception:
                     logger.exception("Gantt worker failed")
+
+    def _generate_progress_plots(self) -> None:
+        """Render per-instance progress plot PNGs from ``_obj_log.json``.
+
+        Gated by ``draw_progress_plot``.  Each PNG shows controller-frame
+        UB (obj_value, solid step line) and LB (obj_bound, dashed step line)
+        vs elapsed time.  Rendering fans out across a ``ProcessPoolExecutor``
+        sized by ``painter_thread_cnt``.
+        """
+        if not self.draw_progress_plot:
+            logger.info("draw_progress_plot=False; skipping progress plot rendering")
+            return
+
+        jobs: list[tuple[Any, Path, Path]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {"scenario_name": sc.name, "instance_name": ins}
+                obj_log = self.layout.artifact_path("obj_log_json", **scope)
+                if obj_log.exists():
+                    png = self.layout.artifact_path("progress_plot_png", **scope)
+                    jobs.append((_render_progress_plot, obj_log, png))
+
+        if not jobs:
+            return
+
+        worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
+        logger.info(
+            "Rendering %d progress plots with %d worker(s)",
+            len(jobs),
+            worker_cnt,
+        )
+        if worker_cnt == 1:
+            for fn, src, dst in jobs:
+                fn(src, dst)
+            return
+
+        pool_kwargs: dict[str, Any] = {"max_workers": worker_cnt}
+        if self._setup_logging_args is not None:
+            pool_kwargs["initializer"] = setup_logging
+            pool_kwargs["initargs"] = self._setup_logging_args
+        with ProcessPoolExecutor(**pool_kwargs) as executor:
+            futures = [executor.submit(fn, src, dst) for fn, src, dst in jobs]
+            for future in futures:
+                try:
+                    future.result()
+                except Exception:
+                    logger.exception("Progress plot worker failed")
 
     def _write_excel_report(self) -> None:
         """Write Excel report with dashboard, statistics, and analysis sheets."""

@@ -158,9 +158,15 @@ def _scenario_metrics_dict(
     label: str,
     progressions: list[InstanceProgression],
     baseline_df: pd.DataFrame,
+    *,
+    per_instance_norm_timelimit: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    endpoint_df = build_endpoint_df(progressions)
-    raw_progression_df = build_raw_progression_df(progressions)
+    endpoint_df = build_endpoint_df(
+        progressions, per_instance_norm_timelimit=per_instance_norm_timelimit
+    )
+    raw_progression_df = build_raw_progression_df(
+        progressions, per_instance_norm_timelimit=per_instance_norm_timelimit
+    )
     return {
         "label": label,
         "endpoint_df": attach_rpdf_columns(endpoint_df, baseline_df),
@@ -231,10 +237,7 @@ def write_post_run_subroutine_chart_artifacts(
                 scenario_name,
             )
 
-        method_points = load_method_mean_metrics(
-            progressions,
-            baseline_obj_by_instance=baseline_obj_map,
-        )
+        method_points = load_method_mean_metrics(progressions, baseline_obj_map)
         if method_points:
             scenario_entry = {"label": scenario_name, "method_points": method_points}
             per_scenario_path = layout.artifact_path(
@@ -280,3 +283,73 @@ def write_post_run_subroutine_chart_artifacts(
             logger.info(
                 "Run-level method-mean scatter HTML saved to %s", run_level_path
             )
+
+    # --- CSR inner-flow comparison (coarse-scale child-clock trajectories) ---
+    _maybe_write_csr_inner_flow_comparison_html(layout, scenarios, baseline_df)
+
+
+def _maybe_write_csr_inner_flow_comparison_html(
+    layout: ArtifactLayout,
+    scenarios: list[str],
+    baseline_df: pd.DataFrame,
+) -> None:
+    """Emit a run-level CSR inner-flow comparison HTML reusing the same
+    ``export_multi_scenario_method_rpdf_comparison_html`` chart writer
+    as the shared flow comparison — the only difference is the artifact
+    key (``csr_inner_obj_log_json``), per-instance inner-budget x-axis
+    normalization, and distinct labels.
+    """
+    scenario_metrics: list[dict[str, Any]] = []
+    for scenario_name in scenarios:
+        progressions = iter_scenario_instance_progressions(
+            layout,
+            scenario_name,
+            obj_log_kind="csr_inner_obj_log_json",
+        )
+        if not progressions:
+            continue
+        per_instance_budget = _compute_inner_budget_per_instance(progressions)
+        metrics = _scenario_metrics_dict(
+            scenario_name,
+            progressions,
+            baseline_df,
+            per_instance_norm_timelimit=per_instance_budget,
+        )
+        if metrics["endpoint_df"].empty:
+            continue
+        scenario_metrics.append(metrics)
+
+    if not scenario_metrics:
+        logger.info("No CSR inner obj_log data found; skipping inner flow chart")
+        return
+
+    out_path = layout.artifact_path("csr_inner_flow_comparison_html")
+    ok = export_multi_scenario_method_rpdf_comparison_html(
+        scenario_metrics=scenario_metrics,
+        output_path=out_path,
+        title="CSR inner-solve (coarse) RPDf by κ",
+        x_label="Normalized inner-solve time",
+    )
+    if ok:
+        logger.info("CSR inner flow comparison HTML saved to %s", out_path)
+    else:
+        logger.info("CSR inner flow comparison HTML skipped (no traces)")
+
+
+def _compute_inner_budget_per_instance(
+    progressions: list[InstanceProgression],
+) -> dict[str, float]:
+    """Compute per-instance inner (child-clock) budget as the max
+    ``global_sec`` across all obj_value points — every trajectory then
+    starts at 0 and spans [0, 1] on the inner-solve clock.
+    """
+    result: dict[str, float] = {}
+    for prog in progressions:
+        max_t = 0.0
+        for call in prog.obj_value_calls:
+            for point in call.points:
+                if point.global_sec > max_t:
+                    max_t = point.global_sec
+        if max_t > 0:
+            result[prog.instance_id] = max_t
+    return result

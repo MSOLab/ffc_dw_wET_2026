@@ -592,3 +592,52 @@ def test_initialize_by_dispatch_v4_is_deterministic() -> None:
     report2 = controller2.initialize_by_dispatch_v4()
 
     assert report1.obj_value == report2.obj_value
+
+
+# ---------------------------------------------------------------------------
+# run(flow_resume_idx=...) flow-skipping (RESUME)
+# ---------------------------------------------------------------------------
+
+
+def test_run_flow_resume_skips_prefix_steps() -> None:
+    """With flow_resume_idx=1 on a 2-step flow, step 0 is skipped and step 1 runs."""
+    instance = _make_instance()
+    flow = [
+        {"method": "run_fam"},
+        {"method": "initialize_by_dispatch_v4"},
+    ]
+    controller = FFcDDWSubroutineController(
+        instance=instance,
+        subroutine_flow=flow,
+        stopping_criteria=StoppingCriteria({"timelimit": 60}),
+    )
+    controller.run(flow_resume_idx=1)
+
+    assert controller.method_call_counts.get("run_fam", 0) == 0, (
+        "prefix step run_fam should be skipped"
+    )
+    assert controller.method_call_counts.get("initialize_by_dispatch_v4", 0) == 1, (
+        "post-resume step initialize_by_dispatch_v4 should run"
+    )
+
+
+def test_run_flow_resume_runs_before_resume_methods() -> None:
+    """A method in method_names_to_run_before_resume still runs even when in
+    the prefix — the RESUME `run` override respects the override."""
+    instance = _make_instance()
+    flow = [
+        {"method": "run_fam"},
+        {"method": "initialize_by_dispatch_v4"},
+    ]
+    controller = FFcDDWSubroutineController(
+        instance=instance,
+        subroutine_flow=flow,
+        stopping_criteria=StoppingCriteria({"timelimit": 60}),
+    )
+    controller.method_names_to_run_before_resume.add("run_fam")
+    controller.run(flow_resume_idx=1)
+
+    assert controller.method_call_counts.get("run_fam", 0) == 1, (
+        "run-before-resume method must still run despite being in prefix"
+    )
+    assert controller.method_call_counts.get("initialize_by_dispatch_v4", 0) == 1

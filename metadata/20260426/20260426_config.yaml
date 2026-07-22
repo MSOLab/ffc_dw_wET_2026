@@ -7,7 +7,7 @@
 # MCF-LB block (3 scenarios, 300s each, run_mcf_lb_4 with phase2 cumulative heuristic):
 #   (last_stage_only_tl, full_cp_tl) sweep: (0.005,0.005) / (0.01,0.005) / (0.01,0.01) nc
 # Reported objective: weighted earliness + tardiness.
-# Refs: plans/20260423/neh_cp.md, plans/20260427/neh-cp-extra-batch-size-expr.md,
+# Refs: plans/experiment/20260423/neh_cp.md, plans/experiment/20260427/neh-cp-extra-batch-size-expr.md,
 #       docs/algorithms/20260426_mcf_lb.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY

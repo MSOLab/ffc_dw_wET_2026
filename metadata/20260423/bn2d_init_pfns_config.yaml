@@ -1,7 +1,7 @@
 # BN2D dispatcher init experiment (makespan-driven bottleneck two-way dispatch).
 # Internal objective: minimize makespan (preserves the upstream BN2D goal).
 # Reported objective: weighted earliness + tardiness.
-# Ref: plans/20260423/bn2d-dispatcher-port.md
+# Ref: plans/experiment/20260423/bn2d-dispatcher-port.md
 
 run_mode: FULL_RUN # FULL_RUN | RESUME | POST_PROCESS_ONLY
 

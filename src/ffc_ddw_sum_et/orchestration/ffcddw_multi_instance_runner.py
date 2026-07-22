@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
+from routix.io import load_yaml
 from routix.runner.multi_instance_concurrent_runner import (
     MultiInstanceConcurrentRunner,
 )
 
+from ..io import load_schedule_json
 from ..parameters.ffc_ddw_params import FFcDDWParameters
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner
+from .solution_manager import FFcDDWSolution
 
 
 class FFcDDWMultiInstanceRunner(
@@ -61,6 +65,66 @@ class FFcDDWMultiInstanceRunner(
                 setup_logging_args=self._setup_logging_args,
             )
             self.runners.append(runner)
+
+    def _load_resume_data(self) -> None:
+        """RunMode.RESUME: load each instance's base incumbent from
+        ``resume_root`` and inject it into the matching single-instance runner.
+
+        Overrides routix's file-existence-only check: FFcDDW stores artifacts as
+        ``{resume_root}/{ins}/{ins}_solution.json`` (+ ``_instance_result.yaml``)
+        — no ``results/`` segment, JSON not YAML, no per-instance summary.csv.
+        The schedule comes from the solution JSON; obj_value / obj_bound (global
+        MCF LB) / elapsed_time come from the manifest (the SSOT). Runners are
+        submitted to a process pool by value, so this parent-side injection is
+        pickled to the workers. See plans/experiment/20260709/resume_from_base.md § 4.4.
+        """
+        resume_root_str = self.output_metadata.get("resume_root")
+        if not resume_root_str:
+            raise ValueError(
+                "RESUME requires 'resume_root' in output_metadata "
+                f"(available keys: {list(self.output_metadata.keys())})."
+            )
+        resume_root = Path(resume_root_str)
+
+        missing: list[str] = []
+        loaded = 0
+        for instance, runner in zip(self.instances, self.runners):
+            ins_name = instance.name
+            inst_dir = resume_root / ins_name
+            sol_path = inst_dir / f"{ins_name}_solution.json"
+            manifest_path = inst_dir / f"{ins_name}_instance_result.yaml"
+            if not sol_path.is_file() or not manifest_path.is_file():
+                missing.append(ins_name)
+                continue
+
+            schedule, _sol_obj_value, _sol_obj_bound = load_schedule_json(sol_path)
+            manifest = load_yaml(manifest_path)
+            if not isinstance(manifest, dict):
+                missing.append(ins_name)
+                continue
+            # obj_value / obj_bound from the manifest (SSOT): the incumbent
+            # solution JSON usually carries objBound=None; the global LB lives
+            # in the manifest's obj_bound (max over registered reports).
+            runner.resume_solution = FFcDDWSolution(
+                schedule=schedule,
+                obj_value=manifest.get("obj_value"),
+                obj_bound=manifest.get("obj_bound"),
+            )
+            runner.resume_elapsed_time = manifest.get("elapsed_time")
+            loaded += 1
+
+        self.logger.info(
+            "RESUME: loaded base incumbent for %d/%d instances from %s",
+            loaded,
+            len(self.instances),
+            resume_root,
+        )
+        if missing:
+            raise RuntimeError(
+                "RESUME: missing base artifacts "
+                "(_solution.json / _instance_result.yaml) under "
+                f"{resume_root} for instances: {', '.join(missing)}"
+            )
 
     def post_run_process(self) -> list[Any]:
         """Aggregates per-instance results.

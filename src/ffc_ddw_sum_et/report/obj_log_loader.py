@@ -212,13 +212,18 @@ def iter_scenario_instance_progressions(
     scenario_name: str,
     *,
     instance_names: Iterable[str] | None = None,
+    obj_log_kind: str = "obj_log_json",
 ) -> list[InstanceProgression]:
     """Load every instance under ``scenario_name`` that has both files.
 
     When ``instance_names`` is omitted, the function discovers instances by
-    scanning the scenario directory for sub-directories that hold an
-    ``<instance>_obj_log.json``. Instances missing the obj_log are silently
+    scanning the scenario directory for sub-directories that hold the
+    obj_log artifact. Instances missing the obj_log are silently
     skipped; instances that have the obj_log but lack the manifest raise.
+
+    ``obj_log_kind`` selects which artifact key to use (default
+    ``"obj_log_json"``). Use ``"csr_inner_obj_log_json"`` for the coarse-scale
+    CSR inner-solve trajectory.
     """
     # Read-side path lookup: layout.scenario_dir() is a write-side registration
     # API that raises on the second call for the same scenario. Post-run
@@ -236,10 +241,10 @@ def iter_scenario_instance_progressions(
     results: list[InstanceProgression] = []
     for ins in candidates:
         obj_log_path = layout.artifact_path(
-            "obj_log_json", scenario_name=scenario_name, instance_name=ins
+            obj_log_kind, scenario_name=scenario_name, instance_name=ins
         )
         if not obj_log_path.exists():
-            logger.debug("Skipping %s: no obj_log_json", ins)
+            logger.debug("Skipping %s: no %s", ins, obj_log_kind)
             continue
         manifest_path = layout.artifact_path(
             "instance_result_manifest",
@@ -248,7 +253,7 @@ def iter_scenario_instance_progressions(
         )
         if not manifest_path.exists():
             raise FileNotFoundError(
-                f"obj_log_json present but manifest missing for {ins}: {manifest_path}"
+                f"{obj_log_kind} present but manifest missing for {ins}: {manifest_path}"
             )
         results.append(load_instance_progression(obj_log_path, manifest_path))
     return results
@@ -268,16 +273,21 @@ def build_endpoint_df(
     progressions: list[InstanceProgression],
     *,
     series: str = "obj_value",
+    per_instance_norm_timelimit: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     """One row per (instance, controller step). ``rpd_f`` is left NaN here —
     callers join a baseline DataFrame to fill it.
     """
     rows: list[dict[str, Any]] = []
     for prog in progressions:
-        if prog.timelimit_sec <= 0:
+        norm_denom = (
+            per_instance_norm_timelimit.get(prog.instance_id, prog.timelimit_sec)
+            if per_instance_norm_timelimit is not None
+            else prog.timelimit_sec
+        )
+        if norm_denom <= 0:
             raise ValueError(
-                f"non-positive timelimit_sec for instance {prog.instance_id}: "
-                f"{prog.timelimit_sec}"
+                f"non-positive timelimit for instance {prog.instance_id}: {norm_denom}"
             )
         for call in _calls_for_series(prog, series):
             if not call.points:
@@ -292,7 +302,7 @@ def build_endpoint_df(
                     "prefixed_subroutine_name": call.prefixed_subroutine_name,
                     "call_index": call.call_index,
                     "global_end_sec": call.global_end_sec,
-                    "norm_time": call.global_end_sec / prog.timelimit_sec,
+                    "norm_time": call.global_end_sec / norm_denom,
                     "obj_value": endpoint_value,
                 }
             )
@@ -303,14 +313,25 @@ def build_raw_progression_df(
     progressions: list[InstanceProgression],
     *,
     series: str = "obj_value",
+    per_instance_norm_timelimit: dict[str, float] | None = None,
 ) -> pd.DataFrame:
-    """One row per (instance, controller step, point). Used for the line view."""
+    """One row per (instance, controller step, point). Used for the line view.
+
+    When ``per_instance_norm_timelimit`` is given, its value for an instance
+    replaces ``prog.timelimit_sec`` for ``norm_time`` computation — used
+    when the trajectory lives on a different clock than the outer controller
+    (e.g. CSR inner-solve child-clock budget).
+    """
     rows: list[dict[str, Any]] = []
     for prog in progressions:
-        if prog.timelimit_sec <= 0:
+        norm_denom = (
+            per_instance_norm_timelimit.get(prog.instance_id, prog.timelimit_sec)
+            if per_instance_norm_timelimit is not None
+            else prog.timelimit_sec
+        )
+        if norm_denom <= 0:
             raise ValueError(
-                f"non-positive timelimit_sec for instance {prog.instance_id}: "
-                f"{prog.timelimit_sec}"
+                f"non-positive timelimit for instance {prog.instance_id}: {norm_denom}"
             )
         for call in _calls_for_series(prog, series):
             for point in call.points:
@@ -323,7 +344,7 @@ def build_raw_progression_df(
                         "prefixed_subroutine_name": call.prefixed_subroutine_name,
                         "call_index": call.call_index,
                         "global_sec": point.global_sec,
-                        "norm_time": point.global_sec / prog.timelimit_sec,
+                        "norm_time": point.global_sec / norm_denom,
                         "obj_value": point.value,
                     }
                 )

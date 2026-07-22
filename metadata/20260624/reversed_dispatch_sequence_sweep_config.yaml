@@ -1,6 +1,6 @@
 # Reverse-dispatch sequence sweep: 모든 instance-기반 job sequence를 동일한
 # _dispatch_by_reversed_sequence_with_iit pipeline에 흘려 incumbent wET 비교.
-# See plans/20260624/lsl_osl_reversed_dispatch_sequence_sweep.md
+# See plans/experiment/20260624/lsl_osl_reversed_dispatch_sequence_sweep.md
 run_mode: FULL_RUN
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv

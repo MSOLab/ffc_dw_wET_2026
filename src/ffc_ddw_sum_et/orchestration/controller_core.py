@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from routix.constants import SubroutineFlowKeys
 from routix.dynamic_data_object import DynamicDataObject
 from routix.report import SubroutineReport
 from routix.stopping_criteria import StoppingCriteria
@@ -32,6 +33,12 @@ from .solution_manager import FFcDDWSolution, FFcDDWSolutionManager
 from .subroutine_report import FFcDDWSubroutineReport
 
 MCFLBPhaseSchedule = FFcSchedule | MCFPreemptiveSchedule
+
+RESUME_SEED_STEP_NAME = "resume_seed"
+"""Method-context name pushed around the RunMode.RESUME incumbent registration
+(see ``seed_resume_incumbent``). Produces a valid ``<idx>-resume_seed`` obj_log
+step_label; the single-instance runner suppresses this note when it has merged
+the base run's obj_log (whose real prefix-end note already marks the join)."""
 
 
 def _to_ddo(data: Any) -> Any:
@@ -58,7 +65,10 @@ class FFcDDWSubroutineControllerCore(
         | Sequence[dict]
         | dict,
         stopping_criteria: StoppingCriteria | dict,
+        time_factor: int = 1,
     ):
+        if time_factor < 1:
+            raise ValueError(f"time_factor must be >= 1, got {time_factor}")
         self._instance_name = instance.name
         self.logger = logging.getLogger(
             f"ffc_ddw_sum_et.orchestration.controller.{self._instance_name}"
@@ -75,7 +85,21 @@ class FFcDDWSubroutineControllerCore(
             logger=self.logger,
         )
         self.instance = instance
+        # CSR coarse-mode scale bridge. ``1`` for every parent controller
+        # (bit-for-bit unchanged behaviour); only the child controller spawned
+        # by ``coarsen_solve_reconstruct`` with a ``solve_flow`` sets this to
+        # the coarsening ``factor`` so its step methods interpret a coarse
+        # completion ``C^c`` as original-scale ``time_factor * C^c`` when they
+        # build option payloads / the base CP model. See
+        # plans/experiment/20260711/csr_solve_flow.md §3.
+        self.time_factor = time_factor
         self.solution_manager = FFcDDWSolutionManager()
+        # Prefix step methods that must still run before a resume point (e.g.
+        # pure setup that produces state not captured by the restored
+        # incumbent). Empty today: the current prefix (mcf_lb / flip / neh_cp)
+        # only produces the incumbent + global LB, both restored on resume.
+        # See plans/experiment/20260709/resume_from_base.md § 2 "Safety assumption".
+        self.method_names_to_run_before_resume: set[str] = set()
         self._define_states()
 
     def _define_states(self) -> None:
@@ -111,9 +135,20 @@ class FFcDDWSubroutineControllerCore(
         # Populated only when coarsen_solve_reconstruct is called with
         # emit_phase_schedules=True and a solution is found.
         self.csr_phase_schedules: list[tuple[str, FFcSchedule]] = []
-        # CP-SAT trajectory (coarsened scale) from the last CSR run.
-        # Set only when draw_cp_trajectory=True and a solution is found.
-        self.csr_cp_trajectory: tuple[ProgressLogEntry, ...] | None = None
+        # Per-candidate rows from a CSR solve_flow run (one dict per
+        # candidate × reconstruction). Emitted by the single-instance runner
+        # as ``<instance>_csr_candidates.csv``. Empty in the legacy CSR path.
+        self.csr_candidate_rows: list[dict[str, object]] = []
+        # Compact summary of the last CSR solve_flow run (candidate/dedup/drop
+        # counts + winner source & objectives). ``None`` in the legacy path.
+        # Kept small on purpose (Rules 12/14): bulk per-candidate detail lives
+        # in ``csr_candidate_rows`` / the candidates CSV, not here.
+        self.csr_solve_flow_summary: dict[str, object] | None = None
+        # Headless child controller's solution_manager history from the last
+        # CSR solve_flow run. Emitted by the single-instance runner as the
+        # coarse-scale ``<instance>_csr_inner_obj_log.json``. None in the
+        # legacy CSR path.
+        self.csr_child_history: list[Any] | None = None
         # Outer wall-clock around `run()`. Set in the run() override below;
         # the runner reads this for the per-instance summary `elapsedTime`.
         self.total_elapsed_time: float = 0.0  # TODO: apply to routix
@@ -264,6 +299,34 @@ class FFcDDWSubroutineControllerCore(
         wrapped = self._wrap_report(report, progress_log=progress_log)
         return self.solution_manager.register(wrapped, solution)
 
+    def seed_resume_incumbent(
+        self,
+        solution: FFcDDWSolution,
+        *,
+        obj_value: float | None,
+        obj_bound: float | None,
+    ) -> None:
+        """Register a base run's restored incumbent as the starting solution of
+        a RunMode.RESUME run.
+
+        Wrapped in a pushed method context so the synthesized history entry
+        carries a valid ``<idx>-resume_seed`` step_label (an empty context
+        would yield ``"ROOT"``, which the obj_log loader rejects). ``elapsed_time
+        = 0`` anchors the seed at the current (back-dated) controller clock.
+        """
+        self._method_context_mgr.push(RESUME_SEED_STEP_NAME)
+        try:
+            self._register(
+                SubroutineReport(
+                    elapsed_time=0.0,
+                    obj_value=obj_value,
+                    obj_bound=obj_bound,
+                ),
+                solution,
+            )
+        finally:
+            self._method_context_mgr.pop()
+
     def get_file_path_for_subroutine(self, filename_suffix: str) -> Path:
         """Override: when an `ArtifactLayout` is bound, route per-call-context
         paths into the instance's `progress/` zone instead of the working
@@ -329,11 +392,35 @@ class FFcDDWSubroutineControllerCore(
             return None
         return self.get_file_path_for_subroutine(suffix)
 
-    def run(self) -> None:
-        """Wrap routix's run loop with an outer wall-clock measurement."""
+    def run(self, flow_resume_idx: int = -1) -> None:
+        """Wrap routix's run loop with an outer wall-clock measurement.
+
+        When ``flow_resume_idx > 0`` this is a resume run: the first
+        ``flow_resume_idx`` steps are skipped (their outcome was restored from a
+        base run's incumbent), except any step whose method is in
+        ``method_names_to_run_before_resume``, which is re-run. Steps from
+        ``flow_resume_idx`` onward run normally. See
+        plans/experiment/20260709/resume_from_base.md.
+        """
         start = time.monotonic()
         try:
-            super().run()
+            flow = self._subroutine_flow
+            is_seq = isinstance(flow, Sequence) and not isinstance(flow, (str, bytes))
+            if flow_resume_idx > 0 and is_seq:
+                for step in flow[:flow_resume_idx]:
+                    method_name, _ = SubroutineFlowKeys.parse_step(step.to_obj())
+                    run_before = method_name in self.method_names_to_run_before_resume
+                    self._run_flow(step, skip_method_call=not run_before)
+                self._run_flow(flow[flow_resume_idx:])
+                self.post_run_process()
+            else:
+                if flow_resume_idx > 0 and not is_seq:
+                    self.logger.warning(
+                        "run: flow_resume_idx=%d but subroutine_flow is not a "
+                        "Sequence — resume index ignored; running full flow",
+                        flow_resume_idx,
+                    )
+                super().run()
         finally:  # TODO: apply to routix
             self.total_elapsed_time = time.monotonic() - start
 
