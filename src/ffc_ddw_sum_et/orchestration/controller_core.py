@@ -425,6 +425,12 @@ class FFcDDWSubroutineControllerCore(
                 self._run_flow(flow[flow_resume_idx:])
                 self.post_run_process()
             else:
+                if flow_resume_idx > 0 and not is_seq:
+                    self.logger.warning(
+                        "run: flow_resume_idx=%d but subroutine_flow is not a "
+                        "Sequence — resume index ignored; running full flow",
+                        flow_resume_idx,
+                    )
                 super().run()
         finally:  # TODO: apply to routix
             self.total_elapsed_time = time.monotonic() - start
