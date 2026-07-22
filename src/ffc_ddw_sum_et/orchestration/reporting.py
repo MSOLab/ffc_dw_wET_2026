@@ -531,17 +531,20 @@ class FFcDDWMultiScenarioRunner(
             )
             scenario_output_dir = layout.scenario_dir(scenario_name)
             # Cache the executed flow so a later RESUME run can prefix-validate
-            # against it (see main.py RESUME plumbing).
-            try:
-                scenario_output_dir.mkdir(parents=True, exist_ok=True)
-                dump_yaml(
-                    subroutine_flow,
-                    scenario_output_dir / SUBROUTINE_FLOW_CACHE_FN,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to cache subroutine_flow for scenario %s", scenario_name
-                )
+            # against it (see main.py RESUME plumbing). POST_PROCESS_ONLY runs
+            # against an existing run dir and executes no flow — writing there
+            # would clobber the base run's cache that RESUME validates against.
+            if self.mode != RunMode.POST_PROCESS_ONLY:
+                try:
+                    scenario_output_dir.mkdir(parents=True, exist_ok=True)
+                    dump_yaml(
+                        subroutine_flow,
+                        scenario_output_dir / SUBROUTINE_FLOW_CACHE_FN,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to cache subroutine_flow for scenario %s", scenario_name
+                    )
             multi_instance_runner = self.m_i_runner_class(
                 s_i_runner_class=self.s_i_runner_class,
                 instances=self.instances,
