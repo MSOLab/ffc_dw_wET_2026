@@ -380,17 +380,6 @@ class FFcDDWSubroutineControllerCore(
         prefixed = f"{self._get_call_context_of_current_method()}_{name}"
         self.csr_phase_schedules.append((prefixed, sched))
 
-    def _record_csr_candidate(self, row: dict[str, object]) -> None:
-        """Append one CSR solve_flow candidate row to ``csr_candidate_rows``.
-
-        Each row describes a single (candidate × reconstruction):
-        ``source``, ``coarse_obj``, ``coarse_bound``, ``restored_obj``
-        (``None`` when dropped), ``valid`` flag, and reconstruction
-        ``elapsed_sec``. The single-instance runner emits the accumulated
-        rows as ``<instance>_csr_candidates.csv``.
-        """
-        self.csr_candidate_rows.append(row)
-
     def try_get_file_path_for_subroutine(self, suffix: str) -> Path | None:
         """Like ``get_file_path_for_subroutine`` but returns ``None`` instead
         of raising when no working directory is configured.
