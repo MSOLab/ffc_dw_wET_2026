@@ -71,6 +71,7 @@ def main() -> None:
         shutil.copy2(config_path, run_root.path / config_path.name)
 
     _validate_scenario_uniqueness(config.get("scenarios", []))
+    _reject_deprecated_step_kwargs(config.get("scenarios", []))
     if mode == RunMode.POST_PROCESS_ONLY:
         layout = restore_layout_from_run_dir(run_root)
     else:
@@ -327,6 +328,52 @@ def _resolve_latest_scenario_dir(base_output_dir: Path, scenario_name: str) -> P
             "config first, or name the scenario that the base run emits."
         )
     return max(candidates, key=lambda scenario_dir: scenario_dir.parent.name)
+
+
+DEPRECATED_STEP_KWARGS: dict[str, str] = {
+    "idle_mode": (
+        "removed 2026-07-22 — CSR and sw_cp always use 'lookahead'. Delete the "
+        "key (see plans/experiment/20260722/csr_idle_mode_lookahead_only.md)"
+    ),
+}
+"""Step kwargs that no longer exist, mapped to the message shown when used.
+
+Without this preflight a stale key reaches ``_call_method(name, **kwargs)`` and
+dies inside a worker with a bare ``TypeError``, mid-run. Keys are rejected
+regardless of value: accepting the surviving value would keep implying the
+knob is still configurable.
+"""
+
+
+def _reject_deprecated_step_kwargs(scenarios: list[dict[str, Any]]) -> None:
+    """Fail-fast on removed step kwargs anywhere in a scenario's flow.
+
+    Scans each step dict recursively so nested flows (``solve_flow`` under
+    ``coarsen_solve_reconstruct``) are covered too.
+    """
+    offenders: list[str] = []
+
+    def scan(steps: Any, scenario_name: str) -> None:
+        if isinstance(steps, list):
+            for step in steps:
+                scan(step, scenario_name)
+            return
+        if not isinstance(steps, dict):
+            return
+        method = steps.get("method", "<unnamed step>")
+        for key, reason in DEPRECATED_STEP_KWARGS.items():
+            if key in steps:
+                offenders.append(f"{scenario_name}/{method}: {key!r} {reason}")
+        for value in steps.values():
+            if isinstance(value, list):
+                scan(value, scenario_name)
+
+    for i, sc in enumerate(scenarios):
+        scan(sc.get("subroutine_flow", []), sc.get("name", f"scenario_{i + 1}"))
+
+    if offenders:
+        details = "\n  ".join(offenders)
+        raise ValueError(f"deprecated step kwargs in config:\n  {details}")
 
 
 def _validate_scenario_uniqueness(scenarios: list[dict[str, Any]]) -> None:
