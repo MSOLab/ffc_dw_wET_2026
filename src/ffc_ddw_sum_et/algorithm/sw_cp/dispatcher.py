@@ -103,7 +103,6 @@ class SwCpDispatcher:
             instance.job_2_ewt_map,
             instance.job_2_twt_map,
             time_factor=option.time_factor,
-            idle_mode=option.idle_mode,
         )
 
         # CSR: in coarse mode (time_factor > 1) a coarse last-stage end e keeps
@@ -368,7 +367,6 @@ class SwCpDispatcher:
                     instance.job_2_ewt_map,
                     instance.job_2_twt_map,
                     time_factor=option.time_factor,
-                    idle_mode=option.idle_mode,
                 )
                 cand_obj = self._full_obj(cand, instance, option.time_factor)
                 if cp_divergence_count:

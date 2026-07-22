@@ -13,7 +13,7 @@ Imported by both ``orchestration.controller`` (refactored thin wrappers) and
 from __future__ import annotations
 
 import logging
-from typing import Literal, Sequence
+from typing import Sequence
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.parameters.sorter import (
@@ -40,7 +40,6 @@ def dispatch_forward_with_iit(
     logger: logging.Logger | None = None,
     *,
     time_factor: int = 1,
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float]:
     """sd pipeline: forward job-centric decode + semi-active + IIT + wET."""
     log = logger or logging.getLogger(__name__)
@@ -57,7 +56,6 @@ def dispatch_forward_with_iit(
         instance.job_2_ewt_map,
         instance.job_2_twt_map,
         time_factor=time_factor,
-        idle_mode=idle_mode,
     )
     sum_e, sum_t = compute_weighted_earliness_tardiness(
         schedule, instance, time_factor=time_factor
@@ -71,7 +69,6 @@ def dispatch_reversed_with_iit(
     logger: logging.Logger | None = None,
     *,
     time_factor: int = 1,
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float]:
     """rd pipeline: stage-reverse + reversed mixed(makespan) + unflip + IIT + wET."""
     log = logger or logging.getLogger(__name__)
@@ -151,7 +148,6 @@ def dispatch_reversed_with_iit(
         instance.job_2_ewt_map,
         instance.job_2_twt_map,
         time_factor=time_factor,
-        idle_mode=idle_mode,
     )
     sum_e, sum_t = compute_weighted_earliness_tardiness(
         schedule, instance, time_factor=time_factor
@@ -165,7 +161,6 @@ def build_v3_paired_dispatch_schedule(
     logger: logging.Logger | None = None,
     *,
     factor: int = 1,
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float, str]:
     """v3 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
 
@@ -182,10 +177,10 @@ def build_v3_paired_dispatch_schedule(
         # the instance's original window), so candidates are built and scored
         # consistently with the CSR CP model.
         sd_sch, sd_obj = dispatch_forward_with_iit(
-            instance, seq, log, time_factor=factor, idle_mode=idle_mode
+            instance, seq, log, time_factor=factor
         )
         rd_sch, rd_obj = dispatch_reversed_with_iit(
-            instance, seq, log, time_factor=factor, idle_mode=idle_mode
+            instance, seq, log, time_factor=factor
         )
         candidates.append((sd_obj, f"sd:{p}", sd_sch))
         candidates.append((rd_obj, f"rd:{p}", rd_sch))
@@ -206,7 +201,6 @@ def build_v4_paired_dispatch_schedule(
     logger: logging.Logger | None = None,
     *,
     factor: int = 1,
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float, str]:
     """v4 paired pool: priority×{sd,rd} candidates → min-wET (schedule, obj, label).
 
@@ -223,10 +217,10 @@ def build_v4_paired_dispatch_schedule(
         # the instance's original window), so candidates are built and scored
         # consistently with the CSR CP model.
         sd_sch, sd_obj = dispatch_forward_with_iit(
-            instance, seq, log, time_factor=factor, idle_mode=idle_mode
+            instance, seq, log, time_factor=factor
         )
         rd_sch, rd_obj = dispatch_reversed_with_iit(
-            instance, seq, log, time_factor=factor, idle_mode=idle_mode
+            instance, seq, log, time_factor=factor
         )
         candidates.append((sd_obj, f"sd:{p}", sd_sch))
         candidates.append((rd_obj, f"rd:{p}", rd_sch))

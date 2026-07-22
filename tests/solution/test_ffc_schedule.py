@@ -513,11 +513,17 @@ def test_insert_idle_time_tf1_is_noop() -> None:
 
 
 def test_insert_idle_time_tf_effective_window() -> None:
-    """tf=2 with original window (16,24) and tf=1 with (8,12) produce the same schedule.
+    """tf=2 with original window (16,24) and tf=1 with (8,12) cost the same.
 
-    (16,24) is exactly divisible by K=2, so floor/ceil coincide and the
-    multiplication-based partition yields the same result as the old
-    ``ceil(d/K)`` effective-window model.  This tests the K-aligned case only.
+    (16,24) is exactly divisible by K=2, so the multiplication-based partition
+    agrees with the old ``ceil(d/K)`` effective-window model. This tests the
+    K-aligned case only.
+
+    The two paths land on *different* ends (K>1 takes the exact gate, K==1 the
+    lookahead heuristic whose tie-break right-justifies one unit further), so
+    the invariant is equal **E/T cost** — both reach zero — not equal end
+    times. Byte-equality held only while K==1 ran the flooring rule, removed
+    2026-07-22.
     """
     # Coarse schedule: j0 ends at 5, j1 ends at 7 on coarse grid
     coarse = FFcSchedule(
@@ -555,7 +561,14 @@ def test_insert_idle_time_tf_effective_window() -> None:
     eff_dw = {"j0": (8, 12), "j1": (8, 12)}
     fine.insert_idle_time(eff_dw, ewt, twt)
 
-    assert coarse.get_jik_2_end_time_map() == fine.get_jik_2_end_time_map()
+    coarse_ends = coarse.get_jik_2_end_time_map()
+    fine_ends = fine.get_jik_2_end_time_map()
+    for job_id in ("j0", "j1"):
+        lo, hi = eff_dw[job_id]
+        coarse_c = coarse_ends[(job_id, "s2", "m2")]
+        fine_c = fine_ends[(job_id, "s2", "m2")]
+        assert lo <= coarse_c <= hi, job_id  # K=2 grid, window scaled by K
+        assert lo <= fine_c <= hi, job_id  # both reach zero E/T
 
 
 # -------------------------------------------------------------------
@@ -634,83 +647,16 @@ def test_insert_idle_time_termination_on_delta1_zero() -> None:
 def test_insert_idle_time_coarse_exact_reaches_in_due_cell() -> None:
     """Wide window (110,220), K=50: coarse-exact (direction B) reaches the
     in-due cell C=3 (real 150, E/T=0), eliminating the residual earliness that
-    the pre-fix flooring left at C=2. idle_mode is irrelevant at K>1."""
+    the pre-fix flooring left at C=2."""
     dw = {"j0": (110, 220)}
     ewt = {"j0": 1}
     twt = {"j0": 1}
 
-    for mode in ("flooring", "ceiling", "lookahead"):
-        sched = _make_iit_schedule_single_job("j0", coarse_c=1)
-        sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode=mode)
-        final_c = sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
-        assert final_c == 3, mode  # in-due cell, real 150
-        assert 110 <= 50 * final_c <= 220  # zero E/T
-
-
-# -------------------------------------------------------------------
-# idle_mode variants (flooring / ceiling / lookahead)
-# -------------------------------------------------------------------
-
-
-def test_insert_idle_time_flooring_matches_default_call() -> None:
-    """idle_mode='flooring' explicit must match omitting idle_mode entirely
-    (regression guard: default behavior stays byte-identical)."""
-    sched1 = _make_iit_schedule()
-    sched2 = _make_iit_schedule()
-    dw = {"j0": (8, 12), "j1": (10, 16)}
-    ewt = {"j0": 1, "j1": 1}
-    twt = {"j0": 1, "j1": 1}
-
-    sched1.insert_idle_time(dw, ewt, twt, time_factor=2)
-    sched2.insert_idle_time(dw, ewt, twt, time_factor=2, idle_mode="flooring")
-
-    assert sched1.get_jik_2_end_time_map() == sched2.get_jik_2_end_time_map()
-
-
-def test_insert_idle_time_factor1_all_modes_identical() -> None:
-    """At time_factor=1, ceil(d/1) == floor(d/1) == d, so flooring/ceiling/
-    lookahead must produce byte-identical schedules (plan §1.3 — a clean
-    control group at factor=1)."""
-    dw = {"j0": (8, 12), "j1": (10, 16)}
-    ewt = {"j0": 1, "j1": 1}
-    twt = {"j0": 1, "j1": 1}
-
-    end_maps = {}
-    for mode in ("flooring", "ceiling", "lookahead"):
-        sched = _make_iit_schedule()
-        sched.insert_idle_time(dw, ewt, twt, time_factor=1, idle_mode=mode)
-        end_maps[mode] = sched.get_jik_2_end_time_map()
-
-    assert end_maps["flooring"] == end_maps["ceiling"] == end_maps["lookahead"]
-
-
-@pytest.mark.parametrize(
-    "coarse_c,window,expected_c",
-    [
-        # K=50, non-multiple d_lo=110 (floor 2, ceil 3): exact reaches the
-        # in-due cell C=3 for every mode (pre-fix: floor stalled at 2, ceil 3).
-        (1, (110, 220), 3),
-        # K=50, window (105,300), start C=2: pre-fix flooring stalled at C=2
-        # (Δ₁==0); exact shifts to the in-due cell C=3 for every mode.
-        (2, (105, 300), 3),
-    ],
-)
-def test_insert_idle_time_coarse_exact_modes_agree(
-    coarse_c, window, expected_c
-) -> None:
-    """At K>1 the coarse-exact path ignores idle_mode: flooring/ceiling/
-    lookahead all land on the same optimum (no mode divergence, no stall)."""
-    dw = {"j0": window}
-    ewt = {"j0": 1}
-    twt = {"j0": 1}
-
-    ends = {}
-    for mode in ("flooring", "ceiling", "lookahead"):
-        sched = _make_iit_schedule_single_job("j0", coarse_c=coarse_c)
-        sched.insert_idle_time(dw, ewt, twt, time_factor=50, idle_mode=mode)
-        ends[mode] = sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
-
-    assert ends["flooring"] == ends["ceiling"] == ends["lookahead"] == expected_c
+    sched = _make_iit_schedule_single_job("j0", coarse_c=1)
+    sched.insert_idle_time(dw, ewt, twt, time_factor=50)
+    final_c = sched.get_jik_2_end_time_map()[("j0", "s2", "m2")]
+    assert final_c == 3  # in-due cell, real 150
+    assert 110 <= 50 * final_c <= 220  # zero E/T
 
 
 # -------------------------------------------------------------------
@@ -719,10 +665,10 @@ def test_insert_idle_time_coarse_exact_modes_agree(
 # Invariant: on a FIXED last-stage sequence, insert_idle_time must recover the
 # integer coarse-grid optimum for that sequence, so the reconstructed E/T is
 # never worse than any feasible placement (in particular <= CP-SAT's proven
-# obj). flooring undershoots (floor delta1); ceiling/lookahead relax it but the
-# shared `K*(C+1)` partition still misclassifies genuinely-early jobs as
-# on-time (residual earliness == the production sum_e=149 signature). The
-# `time_factor == 1` control stays optimal for every mode (fine grid).
+# obj). The pre-`9b7ad2a` heuristics undershot here — the `K*(C+1)` partition
+# misclassifies genuinely-early jobs as on-time (residual earliness == the
+# production sum_e=149 signature) — which is why K > 1 now takes the exact
+# gate instead.
 # -------------------------------------------------------------------
 
 
@@ -791,18 +737,17 @@ _COARSE_EXACT_CASES = [
 ]
 
 
-@pytest.mark.parametrize("mode", ["flooring", "ceiling", "lookahead"])
 @pytest.mark.parametrize(
     "name,ends,durs,dw,ewt,twt,K",
     _COARSE_EXACT_CASES,
     ids=[c[0] for c in _COARSE_EXACT_CASES],
 )
-def test_insert_idle_time_coarse_exact(name, ends, durs, dw, ewt, twt, K, mode) -> None:
+def test_insert_idle_time_coarse_exact(name, ends, durs, dw, ewt, twt, K) -> None:
     """insert_idle_time must reach the coarse-grid optimum for a fixed
     sequence (RED for flooring/ceiling/lookahead until direction B lands)."""
     opt = _brute_optimum(ends, durs, dw, ewt, twt, K, horizon=max(ends) + 12)
     sched = _make_last_stage_seq(ends, durs)
-    sched.insert_idle_time(dw, ewt, twt, time_factor=K, idle_mode=mode)
+    sched.insert_idle_time(dw, ewt, twt, time_factor=K)
     end_map = sched.get_jik_2_end_time_map()
     got = _et_cost(
         {f"j{i}": end_map[(f"j{i}", "s0", "m0")] for i in range(len(ends))},
@@ -811,11 +756,10 @@ def test_insert_idle_time_coarse_exact(name, ends, durs, dw, ewt, twt, K, mode) 
         twt,
         K,
     )
-    assert got <= opt, f"{name}/{mode}: E/T {got} > coarse optimum {opt}"
+    assert got <= opt, f"{name}: E/T {got} > coarse optimum {opt}"
 
 
-@pytest.mark.parametrize("mode", ["flooring", "ceiling", "lookahead"])
-def test_insert_idle_time_coarse_exact_random_property(mode) -> None:
+def test_insert_idle_time_coarse_exact_random_property() -> None:
     """Randomised coarse-grid property test: insert_idle_time never exceeds the
     brute-force optimum across many small fixed sequences (K>1). The brute
     oracle is the plan's recommended falsifier; this is the strongest RED."""
@@ -842,7 +786,7 @@ def test_insert_idle_time_coarse_exact_random_property(mode) -> None:
             twt[f"j{i}"] = rng.randint(1, 5)
         opt = _brute_optimum(ends, durs, dw, ewt, twt, K, horizon=max(ends) + 10)
         sched = _make_last_stage_seq(ends, durs)
-        sched.insert_idle_time(dw, ewt, twt, time_factor=K, idle_mode=mode)
+        sched.insert_idle_time(dw, ewt, twt, time_factor=K)
         end_map = sched.get_jik_2_end_time_map()
         got = _et_cost(
             {f"j{i}": end_map[(f"j{i}", "s0", "m0")] for i in range(n)},
@@ -855,9 +799,8 @@ def test_insert_idle_time_coarse_exact_random_property(mode) -> None:
             failures.append(
                 f"ends={ends} durs={durs} K={K} dw={dw} got={got} opt={opt}"
             )
-    assert not failures, (
-        f"{len(failures)} coarse-suboptimal cases under {mode}; first: "
-        + (failures[0] if failures else "")
+    assert not failures, f"{len(failures)} coarse-suboptimal cases; first: " + (
+        failures[0] if failures else ""
     )
 
 

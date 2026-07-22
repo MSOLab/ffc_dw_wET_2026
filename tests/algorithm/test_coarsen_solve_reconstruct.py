@@ -123,9 +123,14 @@ def test_seed_dispatch_invalid_rejected() -> None:
         CoarsenSolveReconstructOption(seed_dispatch="mied")  # type: ignore[arg-type]
 
 
-def test_idle_mode_invalid_rejected() -> None:
-    with pytest.raises(ValueError, match="idle_mode"):
-        CoarsenSolveReconstructOption(idle_mode="turbo")  # type: ignore[arg-type]
+def test_idle_mode_field_removed() -> None:
+    """``idle_mode`` was removed 2026-07-22 — CSR always uses ``"lookahead"``.
+
+    Constructing the option with the key must fail outright rather than
+    silently accepting a value that is no longer honoured.
+    """
+    with pytest.raises(TypeError, match="idle_mode"):
+        CoarsenSolveReconstructOption(idle_mode="lookahead")  # type: ignore[call-arg]
 
 
 def test_coarsen_mode_invalid_rejected() -> None:
@@ -136,7 +141,6 @@ def test_coarsen_mode_invalid_rejected() -> None:
 def test_valid_option_defaults_accepted() -> None:
     opt = CoarsenSolveReconstructOption()
     assert opt.seed_dispatch == "mixed"
-    assert opt.idle_mode == "flooring"
     assert opt.coarsen_mode == "ceil"
 
 
@@ -144,12 +148,6 @@ def test_all_valid_seed_dispatch_values_accepted() -> None:
     for strategy in ("job_wise", "mixed", "v3", "v4"):
         opt = CoarsenSolveReconstructOption(seed_dispatch=strategy)
         assert opt.seed_dispatch == strategy
-
-
-def test_all_valid_idle_mode_values_accepted() -> None:
-    for mode in ("flooring", "ceiling", "lookahead"):
-        opt = CoarsenSolveReconstructOption(idle_mode=mode)
-        assert opt.idle_mode == mode
 
 
 def test_all_valid_coarsen_mode_values_accepted() -> None:

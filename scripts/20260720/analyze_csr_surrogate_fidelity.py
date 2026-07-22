@@ -145,7 +145,6 @@ def project_and_score(
     fine_schedule,
     target: FFcDDWParameters,
     factor: int,
-    idle_mode: str,
 ) -> float:
     """Transplant ``fine_schedule``'s (assignment, order) onto ``target`` and
     return the weighted E+T of the result.
@@ -161,7 +160,6 @@ def project_and_score(
         target.job_2_ewt_map,
         target.job_2_twt_map,
         time_factor=factor,
-        idle_mode=idle_mode,
     )
     sum_e, sum_t = compute_weighted_earliness_tardiness(
         projected, target, time_factor=factor
@@ -196,7 +194,7 @@ def _tie_frac(values: np.ndarray) -> float:
 
 def _rows_for_instance(job: tuple) -> list[dict]:
     """All (rule, kappa) rows for one instance. Runs in a worker process."""
-    instance, schedule_paths, kappas, rules, idle_mode = job
+    instance, schedule_paths, kappas, rules = job
 
     schedules, stored_objs = [], []
     for path in schedule_paths:
@@ -206,7 +204,7 @@ def _rows_for_instance(job: tuple) -> list[dict]:
     stored = np.array(stored_objs, dtype=float)
 
     truth = np.array(
-        [project_and_score(s, instance, 1, idle_mode) for s in schedules],
+        [project_and_score(s, instance, 1) for s in schedules],
         dtype=float,
     )
     # How much the projection itself costs, before any coarsening. Large values
@@ -219,7 +217,7 @@ def _rows_for_instance(job: tuple) -> list[dict]:
         for kappa in kappas:
             coarse = coarsen(instance, kappa, rule)
             surrogate = np.array(
-                [project_and_score(s, coarse, kappa, idle_mode) for s in schedules],
+                [project_and_score(s, coarse, kappa) for s in schedules],
                 dtype=float,
             )
             if kappa == 1 and not np.allclose(surrogate, truth):
@@ -322,7 +320,6 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--kappas", type=int, nargs="+", default=[2, 4, 8])
     p.add_argument("--rules", nargs="+", default=list(RULES), choices=list(RULES))
-    p.add_argument("--idle-mode", default="lookahead")
     p.add_argument("--workers", type=int, default=1)
     return p.parse_args()
 
@@ -352,7 +349,7 @@ def main() -> None:
     print("self-check: local ceil == coarsen_processing_times OK")
 
     jobs = [
-        (by_name[n], paths[n], args.kappas, args.rules, args.idle_mode) for n in names
+        (by_name[n], paths[n], args.kappas, args.rules) for n in names
     ]
     rows: list[dict] = []
     if args.workers <= 1:

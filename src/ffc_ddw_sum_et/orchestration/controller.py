@@ -2310,7 +2310,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
         rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> SubroutineReport:
         """Step method: refine the incumbent via :class:`SwCpDispatcher`.
 
@@ -2406,7 +2405,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             debug_partition_gantt_path_getter=debug_partition_gantt_path_getter,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
             rj_right_justify_scope=rj_right_justify_scope,
-            idle_mode=idle_mode,
             time_factor=self.time_factor,
         )
         spec = AlgSpec(
@@ -2484,7 +2482,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
         rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> None:
         """Composite step: iterate :meth:`sw_cp` over a range of
         ``unfixed_batch_count`` values.
@@ -2575,7 +2572,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             draw_gantt=draw_gantt,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
             rj_right_justify_scope=rj_right_justify_scope,
-            idle_mode=idle_mode,
         )
 
         batch_count = math.ceil(instance.job_count / batch_size_resolved)
@@ -2663,7 +2659,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         error_if_infeasible: bool = False,
         seed_dispatch: str = "mixed",
         solve: bool = True,
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
         solve_flow: list[dict] | None = None,
@@ -2700,11 +2695,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         re-run variance. ``cp_progress_log`` is empty; ``coarsened_status``
         is ``"SEED_ONLY"``. Default is ``True`` (preserve existing behavior).
 
-        ``idle_mode`` selects the ``insert_idle_time`` breakpoint rule used
-        when building the coarse-grid dispatch seed: ``"flooring"``
-        (default, byte-identical to prior behavior), ``"ceiling"``, or
-        ``"lookahead"``. Does not affect the final original-scale
-        post-process (always standard flooring).
+        Idle insertion has a single rule since 2026-07-22 — the former
+        ``idle_mode`` parameter (``"flooring"`` / ``"ceiling"`` /
+        ``"lookahead"``) was removed from every layer and only the lookahead
+        rule survives, on the coarse-grid seed and on the final original-scale
+        post-process alike. See
+        ``plans/experiment/20260722/csr_idle_mode_lookahead_only.md``.
 
         ``draw_gantt`` is accepted for API consistency but does not
         currently render a Gantt chart; any post-work would be placed after
@@ -2784,7 +2780,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible=error_if_infeasible,
             seed_dispatch=seed_dispatch,
             solve=solve,
-            idle_mode=idle_mode,
         )
         trace = run_coarsen_solve_reconstruct(instance, option, self.logger)
 

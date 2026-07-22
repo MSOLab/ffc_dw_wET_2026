@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import bisect
 import logging
-from typing import Iterable, Iterator, Literal, Mapping, Sequence
+from typing import Iterable, Iterator, Mapping, Sequence
 
 JobIdType = str
 StageIdType = str
@@ -1652,7 +1652,6 @@ class FFcSchedule:
         twt_map: Mapping[JobIdType, int],
         *,
         time_factor: int = 1,
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> None:
         """Insert idle time on the last stage to minimise earliness-tardiness.
 
@@ -1677,25 +1676,22 @@ class FFcSchedule:
         correct: coarsening can leave a window with no in-grid cell, so a single
         cell can leap early -> tardy. The block jumps across each full-marginal
         region (``floor(lo/K)``/``floor(hi/K)`` boundaries) and unit-steps
-        through window-edge cells. This supersedes the ``idle_mode`` heuristics
-        below — **``idle_mode`` has no effect when ``K > 1``** — which undershoot
-        on the coarse grid (the ``K*(C+1)`` partition misclassifies
+        through window-edge cells. This supersedes the heuristic below, which
+        undershoots on the coarse grid (the ``K*(C+1)`` partition misclassifies
         genuinely-early jobs as on-time, leaving residual earliness). See
         ``plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md``.
 
-        At ``time_factor == 1`` (fine grid, the only regime for non-CSR
-        callers) the original paper heuristic runs and ``idle_mode`` selects the
-        Δ₁ breakpoint rule. Floor equals ceil there, so the shift is exact; the
-        three modes agree for aligned windows:
+        At ``time_factor == 1`` (fine grid) the original paper heuristic runs.
+        Its Δ₁ breakpoint rule considers the floor candidate Δ_a and Δ_a + 1
+        and takes whichever minimises ``block_obj``, so the chosen shift is
+        never worse than plain flooring for that block. **Ties go to the larger
+        shift Δ_b** (the comparison is ``block_obj(Δ_b) <= block_obj(Δ_a)``, not
+        ``<``) — see the inline note at the comparison for why.
 
-        - ``"flooring"`` (default): Δ₁ uses **floor** (``lo // K`` /
-          ``hi // K``); byte-identical to the original (pre-idle_mode)
-          behaviour. When Δ₁ == 0 the shift stalls and ``j`` is decremented.
-        - ``"ceiling"``: Δ₁ uses **ceil** (``-(-lo // K)`` / ``-(-hi // K)``).
-        - ``"lookahead"``: picks the floor candidate Δ_a or Δ_a + 1, whichever
-          minimises ``block_obj``. **Ties go to the larger shift Δ_b** (the
-          comparison is ``block_obj(Δ_b) <= block_obj(Δ_a)``, not ``<``) — see
-          the inline note at the comparison for why.
+        This used to be selectable via an ``idle_mode`` parameter
+        (``"flooring"`` / ``"ceiling"`` / ``"lookahead"``); the parameter was
+        removed 2026-07-22 and only the lookahead rule survives — see
+        ``plans/experiment/20260722/csr_idle_mode_lookahead_only.md``.
 
         Termination guard: when the chosen shift is 0, ``j`` is decremented to
         avoid an infinite loop.
@@ -1762,8 +1758,8 @@ class FFcSchedule:
                     # these MAGNITUDES (not weights) is what makes narrow windows
                     # correct — coarsening can leave a window with no in-grid
                     # cell, so a cell can leap early->tardy. Shift while the
-                    # earliness saved exceeds the tardiness added. ``idle_mode``
-                    # is irrelevant here (exact). See
+                    # earliness saved exceeds the tardiness added. The K == 1
+                    # heuristic below is not used here (this gate is exact). See
                     # plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md.
                     earliness_saved = 0
                     tardiness_added = 0
@@ -1811,68 +1807,32 @@ class FFcSchedule:
                     continue
 
                 if sum_e > sum_t:
-                    if idle_mode == "flooring":
-                        delta1_vals: list[int] = []
-                        for i in s_e:
-                            d_lo, _ = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_lo // K - ends[i])
-                        for i in s_d:
-                            _, d_hi = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_hi // K - ends[i])
-                        delta1 = min(delta1_vals) if delta1_vals else INF
-                        delta = min(delta1, delta2)
-                        if delta > 0:
-                            for i in range(j, block_end + 1):
-                                starts[i] += delta
-                                ends[i] += delta
-                        else:
-                            j -= 1
-                    elif idle_mode == "ceiling":
-                        delta1_vals = []
-                        for i in s_e:
-                            d_lo, _ = due_window_map[job_ids[i]]
-                            delta1_vals.append(-(-d_lo // K) - ends[i])  # ceil(d_lo/K)
-                        for i in s_d:
-                            _, d_hi = due_window_map[job_ids[i]]
-                            delta1_vals.append(-(-d_hi // K) - ends[i])  # ceil(d_hi/K)
-                        delta1 = min(delta1_vals) if delta1_vals else INF
-                        delta = min(
-                            delta1, delta2
-                        )  # >= 1 always -> unconditional shift
+                    delta1_vals: list[int] = []
+                    for i in s_e:
+                        d_lo, _ = due_window_map[job_ids[i]]
+                        delta1_vals.append(d_lo // K - ends[i])
+                    for i in s_d:
+                        _, d_hi = due_window_map[job_ids[i]]
+                        delta1_vals.append(d_hi // K - ends[i])
+                    delta1 = min(delta1_vals) if delta1_vals else INF
+                    da = min(delta1, delta2)
+                    db = min(delta1 + 1, delta2)
+                    # ``<=``, not ``<``: on an objective tie prefer the
+                    # LARGER shift Δ_b. Both land the block at the same E/T
+                    # cost, but Δ_b right-justifies it one cell further,
+                    # freeing earlier machine capacity for the blocks still
+                    # to be swept (``j`` walks backwards). Strict ``<``
+                    # would keep Δ_a and, when Δ_a == 0, stall the block
+                    # into the ``j -= 1`` guard for no objective gain.
+                    # Cannot loop: the chosen Δ_b > Δ_a >= 0 always
+                    # advances ``ends``.
+                    best = db if (db != da and block_obj(db) <= block_obj(da)) else da
+                    if best > 0:
                         for i in range(j, block_end + 1):
-                            starts[i] += delta
-                            ends[i] += delta
-                    elif idle_mode == "lookahead":
-                        delta1_vals = []
-                        for i in s_e:
-                            d_lo, _ = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_lo // K - ends[i])
-                        for i in s_d:
-                            _, d_hi = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_hi // K - ends[i])
-                        delta1 = min(delta1_vals) if delta1_vals else INF
-                        da = min(delta1, delta2)
-                        db = min(delta1 + 1, delta2)
-                        # ``<=``, not ``<``: on an objective tie prefer the
-                        # LARGER shift Δ_b. Both land the block at the same E/T
-                        # cost, but Δ_b right-justifies it one cell further,
-                        # freeing earlier machine capacity for the blocks still
-                        # to be swept (``j`` walks backwards). Strict ``<``
-                        # would keep Δ_a and, when Δ_a == 0, stall the block
-                        # into the ``j -= 1`` guard for no objective gain.
-                        # Cannot loop: the chosen Δ_b > Δ_a >= 0 always
-                        # advances ``ends``.
-                        best = (
-                            db if (db != da and block_obj(db) <= block_obj(da)) else da
-                        )
-                        if best > 0:
-                            for i in range(j, block_end + 1):
-                                starts[i] += best
-                                ends[i] += best
-                        else:
-                            j -= 1
+                            starts[i] += best
+                            ends[i] += best
                     else:
-                        raise ValueError(f"unknown idle_mode: {idle_mode!r}")
+                        j -= 1
                 else:
                     j -= 1
 
