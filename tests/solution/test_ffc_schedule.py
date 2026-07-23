@@ -515,15 +515,14 @@ def test_insert_idle_time_tf1_is_noop() -> None:
 def test_insert_idle_time_tf_effective_window() -> None:
     """tf=2 with original window (16,24) and tf=1 with (8,12) cost the same.
 
-    (16,24) is exactly divisible by K=2, so the multiplication-based partition
-    agrees with the old ``ceil(d/K)`` effective-window model. This tests the
-    K-aligned case only.
+    (16,24) is exactly divisible by tau=2, so the multiplication-based
+    partition agrees with the ``d/tau`` effective-window model. This tests the
+    tau-aligned case only.
 
-    The two paths land on *different* ends (K>1 takes the exact gate, K==1 the
-    lookahead heuristic whose tie-break right-justifies one unit further), so
-    the invariant is equal **E/T cost** — both reach zero — not equal end
-    times. Byte-equality held only while K==1 ran the flooring rule, removed
-    2026-07-22.
+    The invariant under test is equal **E/T cost**: each job's completion lands
+    inside its (scaled) due window, so both the coarse (tau=2) and fine (tau=1)
+    sweeps reach zero E/T. (With the tau==1 flooring rule the two paths also
+    happen to land on the same grid ends here, but that is not asserted.)
     """
     # Coarse schedule: j0 ends at 5, j1 ends at 7 on coarse grid
     coarse = FFcSchedule(
