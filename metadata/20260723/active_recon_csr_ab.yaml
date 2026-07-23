@@ -1,0 +1,71 @@
+# Experiment 1 — CSR reconstruct: semi_active vs active (paired deterministic A/B).
+#
+# Implements plans/experiment/20260723/active_schedule_reconstruction.md §5–6.
+# reconstruct_mode switches the coarse->original reconstruction between carrying
+# the coarse machine assignment (semi_active, prior behavior) and re-assigning
+# machines by earliest start while preserving the coarse start-order (active).
+#
+# Measurement design (§6.1, primary): seed-only CSR (solve: false) makes the
+# coarse schedule deterministic (no 8-worker CP noise), so within each factor
+# level the semi/active pair receives the SAME coarse input and any per-instance
+# obj delta is the pure reconstruction effect. Two factor levels:
+#   K=1  — active benefit is limited to greedy-coloring reassignment (§5.4).
+#   K=30 — adds coarsen rounding artifacts, where active should help more (D4).
+#
+# Scope: ins_index 60-64 (5 instances). reconstruct_mode default is semi_active
+# so the baseline scenarios equal current behavior.
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+ins_index: [60, 61, 62, 63, 64]
+
+output_dir: output/20260723_active_recon_csr_ab
+
+instance_worker_cnt: 5
+draw_gantt: false
+draw_progress_plot: false
+painter_thread_cnt: 1
+
+scenarios:
+  - name: k1_semi
+    timelimit: "5nc"
+    output_subdir: k1_semi
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        factor: 1
+        solve: false
+        seed_dispatch: v4
+        reconstruct_mode: semi_active
+
+  - name: k1_active
+    timelimit: "5nc"
+    output_subdir: k1_active
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        factor: 1
+        solve: false
+        seed_dispatch: v4
+        reconstruct_mode: active
+
+  - name: k30_semi
+    timelimit: "5nc"
+    output_subdir: k30_semi
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        factor: 30
+        solve: false
+        seed_dispatch: v4
+        reconstruct_mode: semi_active
+
+  - name: k30_active
+    timelimit: "5nc"
+    output_subdir: k30_active
+    subroutine_flow:
+      - method: coarsen_solve_reconstruct
+        factor: 30
+        solve: false
+        seed_dispatch: v4
+        reconstruct_mode: active

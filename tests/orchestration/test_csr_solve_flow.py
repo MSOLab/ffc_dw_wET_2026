@@ -300,6 +300,76 @@ def test_solve_flow_via_run_dispatch() -> None:
 
 
 # ---------------------------------------------------------------------------
+# solve_flow reconstruct_mode routing (the b30_* batch runs this path)
+# ---------------------------------------------------------------------------
+
+
+_MINIMAL_FLOW = [
+    {"method": "calc_mcf_lb_and_derive_full_sch"},
+    {"method": "solve_base_model_cpsat", "timelimit": 1.0},
+]
+
+
+def test_solve_flow_active_mode_routes_through_active_reconstruction() -> None:
+    """reconstruct_mode='active' reconstructs solve_flow candidates via the active
+    rebuild, never the semi-active one."""
+    import ffc_ddw_sum_et.orchestration.controller as ctrl_mod
+
+    controller = _make_controller(timelimit=60.0)
+    with (
+        patch.object(
+            ctrl_mod,
+            "reconstruct_active_coarse_schedule",
+            wraps=ctrl_mod.reconstruct_active_coarse_schedule,
+        ) as active_spy,
+        patch.object(
+            ctrl_mod,
+            "reconstruct_coarse_schedule",
+            wraps=ctrl_mod.reconstruct_coarse_schedule,
+        ) as semi_spy,
+    ):
+        controller.coarsen_solve_reconstruct(
+            factor=2,
+            timelimit=20.0,
+            reconstruct_mode="active",
+            solve_flow=_MINIMAL_FLOW,
+        )
+
+    assert active_spy.call_count >= 1
+    assert semi_spy.call_count == 0
+    assert controller.best_solution is not None
+
+
+def test_solve_flow_default_mode_routes_through_semi_active() -> None:
+    """Default (semi_active) reconstructs solve_flow candidates via the semi-active
+    rebuild — the switch is opt-in."""
+    import ffc_ddw_sum_et.orchestration.controller as ctrl_mod
+
+    controller = _make_controller(timelimit=60.0)
+    with (
+        patch.object(
+            ctrl_mod,
+            "reconstruct_active_coarse_schedule",
+            wraps=ctrl_mod.reconstruct_active_coarse_schedule,
+        ) as active_spy,
+        patch.object(
+            ctrl_mod,
+            "reconstruct_coarse_schedule",
+            wraps=ctrl_mod.reconstruct_coarse_schedule,
+        ) as semi_spy,
+    ):
+        controller.coarsen_solve_reconstruct(
+            factor=2,
+            timelimit=20.0,
+            solve_flow=_MINIMAL_FLOW,
+        )
+
+    assert semi_spy.call_count >= 1
+    assert active_spy.call_count == 0
+    assert controller.best_solution is not None
+
+
+# ---------------------------------------------------------------------------
 # solve_flow validation / warnings
 # ---------------------------------------------------------------------------
 
