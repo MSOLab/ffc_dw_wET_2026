@@ -179,7 +179,21 @@ class FlipMakespanCpDispatcher:
         if option.cp_tl_seconds is None:
             eff_tl = None
         else:
-            eff_tl = max(0.0, option.cp_tl_seconds - (time.monotonic() - start))
+            eff_tl = option.cp_tl_seconds - (time.monotonic() - start)
+            if eff_tl <= 0.0:
+                logger.warning(
+                    "FlipMakespanCpDispatcher: cp_tl budget exhausted before "
+                    "solver start (cp_tl=%.3fs, eff_tl=%.3fs), "
+                    "falling back to incumbent",
+                    option.cp_tl_seconds,
+                    eff_tl,
+                )
+                return self._incumbent_fallback_record(
+                    instance,
+                    option,
+                    spec.ref_solution,
+                    cpsat_status="budget_exhausted_before_solve",
+                )
 
         solver_cfg = CpsatSolverOptions(
             max_time_in_seconds=eff_tl,
@@ -228,34 +242,39 @@ class FlipMakespanCpDispatcher:
         # The makespan trajectory is kept available via _build_makespan_progress_log.
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
         if not has_solution:
+            if status == cp_model.INFEASIBLE:
+                logger.warning(
+                    "FlipMakespanCpDispatcher: proven infeasible (status=%s)",
+                    status_name,
+                )
+                return AlgRecord(
+                    work_status=WorkStatus.INFEASIBLE,
+                    instance_id=instance.name,
+                    algorithm_id=self.algorithm_id,
+                    option=option,
+                    result=AlgResult(
+                        schedule=None,
+                        obj_value=None,
+                        obj_bound=None,
+                        metrics={"cpsat_status": status_name},
+                    ),
+                    progress_log=(),
+                    termination_reason=TerminationReason.COMPLETED,
+                )
             logger.warning(
-                "FlipMakespanCpDispatcher: no feasible solution (status=%s)",
+                "FlipMakespanCpDispatcher: no feasible solution (status=%s, "
+                "cp_tl=%s, eff_tl=%s), falling back to incumbent",
                 status_name,
+                f"{option.cp_tl_seconds:.3f}s"
+                if option.cp_tl_seconds is not None
+                else "None",
+                f"{eff_tl:.3f}s" if eff_tl is not None else "None",
             )
-            return AlgRecord(
-                work_status=(
-                    WorkStatus.INFEASIBLE
-                    if status == cp_model.INFEASIBLE
-                    else WorkStatus.ERROR
-                ),
-                instance_id=instance.name,
-                algorithm_id=self.algorithm_id,
-                option=option,
-                result=AlgResult(
-                    schedule=None,
-                    obj_value=None,
-                    obj_bound=None,
-                    metrics={"cpsat_status": status_name},
-                ),
-                progress_log=(),
-                termination_reason=(
-                    TerminationReason.COMPLETED
-                    if status == cp_model.INFEASIBLE
-                    else TerminationReason.ERROR
-                ),
-                error=None
-                if status == cp_model.INFEASIBLE
-                else f"status={status_name}",
+            return self._incumbent_fallback_record(
+                instance,
+                option,
+                spec.ref_solution,
+                cpsat_status=status_name,
             )
 
         flipped_j_i_2_start = {
@@ -345,6 +364,45 @@ class FlipMakespanCpDispatcher:
                 if status == cp_model.OPTIMAL
                 else TerminationReason.TIME_LIMIT
             ),
+        )
+
+    @staticmethod
+    def _incumbent_fallback_record(
+        instance: FFcDDWParameters,
+        option: FlipMakespanCpOption,
+        incumbent: FFcSchedule,
+        cpsat_status: str,
+    ) -> AlgRecord:
+        """Return the incumbent unchanged as a FEASIBLE / TIME_LIMIT record.
+
+        Used when the CP step cannot improve the incumbent within its budget
+        (time cap exhausted before the solver starts, or CP-SAT stops with no
+        feasible solution). The incumbent is a genuine feasible schedule, so
+        this is FEASIBLE, not an error; ``cpsat_status`` records why the solver
+        produced nothing (``"budget_exhausted_before_solve"`` or a CP-SAT
+        status name).
+        """
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            incumbent, instance, time_factor=option.time_factor
+        )
+        obj_value = float(sum_e + sum_t)
+        return AlgRecord(
+            work_status=WorkStatus.FEASIBLE,
+            instance_id=instance.name,
+            algorithm_id=FlipMakespanCpDispatcher.algorithm_id,
+            option=option,
+            result=AlgResult(
+                schedule=incumbent,
+                obj_value=obj_value,
+                obj_bound=None,
+                metrics={
+                    "cpsat_status": cpsat_status,
+                    "fallback": "incumbent",
+                },
+            ),
+            progress_log=(),
+            termination_reason=TerminationReason.TIME_LIMIT,
+            error=None,
         )
 
     @staticmethod
