@@ -167,7 +167,7 @@ def test_reconstruct_mode_invalid_rejected() -> None:
 
 
 def test_all_valid_reconstruct_mode_values_accepted() -> None:
-    for mode in ("semi_active", "active"):
+    for mode in ("semi_active", "active", "active_but_last_semi"):
         opt = CoarsenSolveReconstructOption(reconstruct_mode=mode)
         assert opt.reconstruct_mode == mode
 

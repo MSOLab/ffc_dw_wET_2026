@@ -90,9 +90,11 @@ from ffc_ddw_sum_et.solution.objectives import (
     compute_weighted_earliness_tardiness,
 )
 from ffc_ddw_sum_et.solution.schedule_build import (
+    build_active_except_last_from_reference,
     build_active_from_reference,
     build_schedule_from_op_starts,
     reconstruct_active_coarse_schedule,
+    reconstruct_active_except_last_coarse_schedule,
     reconstruct_coarse_schedule,
     reconstruct_raw_coarse_schedule,
 )
@@ -732,13 +734,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             obj_bound=None,
         )
         self.last_stage_only_sol_p_increment = p_increment
-        self._record_mcf_lb_phases([
-            (f"2_{label}", sched) for label, sched in result.intermediate_schedules
-        ])
-        self._record_mcf_lb_phase((
-            "3_lastS_only_from_mcf_lb_after_sa_iti",
-            result.schedule,
-        ))
+        self._record_mcf_lb_phases(
+            [(f"2_{label}", sched) for label, sched in result.intermediate_schedules]
+        )
+        self._record_mcf_lb_phase(
+            (
+                "3_lastS_only_from_mcf_lb_after_sa_iti",
+                result.schedule,
+            )
+        )
 
         h_diag.status = result.status
         h_diag.obj_value = result.obj_value
@@ -833,10 +837,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             return report
 
         for label, sched in result.intermediate_schedules:
-            self._record_mcf_lb_phase((
-                f"{_BUILD_FULL_SCH_LABEL_TO_INDEX[label]}_{label}",
-                sched,
-            ))
+            self._record_mcf_lb_phase(
+                (
+                    f"{_BUILD_FULL_SCH_LABEL_TO_INDEX[label]}_{label}",
+                    sched,
+                )
+            )
 
         self.logger.info(
             "build_full_sch_from_last_stage_only_sch: dispatched obj=%.2f, "
@@ -2657,7 +2663,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         factor: int = DEFAULT_COARSEN_FACTOR,
         coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil",
-        reconstruct_mode: Literal["semi_active", "active"] = "semi_active",
+        reconstruct_mode: Literal[
+            "semi_active", "active", "active_but_last_semi"
+        ] = "semi_active",
         timelimit: float | str | None = None,
         solver_thread_cnt: int = 1,
         log_search_progress: bool = False,
@@ -2847,7 +2855,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         *,
         factor: int,
         coarsen_mode: Literal["ceil", "round", "floor", "cumulative"],
-        reconstruct_mode: Literal["semi_active", "active"],
+        reconstruct_mode: Literal["semi_active", "active", "active_but_last_semi"],
         timelimit: float | str | None,
         error_if_infeasible: bool,
         seed_dispatch: str,
@@ -2983,6 +2991,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     final_sch = reconstruct_active_coarse_schedule(
                         cand.coarse_schedule, instance
                     )
+                elif reconstruct_mode == "active_but_last_semi":
+                    final_sch = reconstruct_active_except_last_coarse_schedule(
+                        cand.coarse_schedule, instance
+                    )
                 else:
                     final_sch = reconstruct_coarse_schedule(
                         cand.coarse_schedule, instance, factor
@@ -3001,15 +3013,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 dropped_count += 1
                 final_sch = None
             recon_elapsed = time.monotonic() - recon_start
-            candidate_rows.append({
-                "source": cand.source,
-                "coarse_obj": cand.coarse_obj,
-                "coarse_bound": cand.coarse_bound,
-                "restored_obj": restored_obj,
-                "valid": valid,
-                "sec_elapsed_step": cand.sec_elapsed_step,
-                "sec_elapsed_recon": recon_elapsed,
-            })
+            candidate_rows.append(
+                {
+                    "source": cand.source,
+                    "coarse_obj": cand.coarse_obj,
+                    "coarse_bound": cand.coarse_bound,
+                    "restored_obj": restored_obj,
+                    "valid": valid,
+                    "sec_elapsed_step": cand.sec_elapsed_step,
+                    "sec_elapsed_recon": recon_elapsed,
+                }
+            )
             if valid and (winner_obj is None or restored_obj < winner_obj):
                 winner = cand
                 winner_final = final_sch
@@ -3092,8 +3106,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                         winner.coarse_schedule, instance, instance.stage_2_job_2_p_map
                     )
                     if reconstruct_mode == "active"
-                    else reconstruct_raw_coarse_schedule(
-                        winner.coarse_schedule, instance, factor
+                    else (
+                        build_active_except_last_from_reference(
+                            winner.coarse_schedule,
+                            instance,
+                            instance.stage_2_job_2_p_map,
+                        )
+                        if reconstruct_mode == "active_but_last_semi"
+                        else reconstruct_raw_coarse_schedule(
+                            winner.coarse_schedule, instance, factor
+                        )
                     )
                 )
                 self._record_csr_phase("2_reconstructed_raw", raw_snapshot)

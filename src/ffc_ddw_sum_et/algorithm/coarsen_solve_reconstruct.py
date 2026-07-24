@@ -36,9 +36,11 @@ from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
 from ..solution.objectives import compute_weighted_earliness_tardiness
 from ..solution.schedule_build import (
+    build_active_except_last_from_reference,
     build_active_from_reference,
     build_schedule_from_op_starts,
     reconstruct_active_coarse_schedule,
+    reconstruct_active_except_last_coarse_schedule,
     reconstruct_coarse_schedule,
     reconstruct_raw_coarse_schedule,
 )
@@ -122,17 +124,21 @@ def schedule_sequence_signature(schedule: FFcSchedule) -> tuple[tuple[Any, ...],
             machine_seq = tuple(job_id for job_id, _s, _e in seq)
             machine_parts.append(("m", stage_id, machine_id, machine_seq))
             for job_id, start_time, end_time in seq:
-                stage_ops.append((
-                    int(start_time),
-                    int(end_time),
-                    job_index[job_id],
-                    job_id,
-                ))
-        stage_parts.append((
-            "s",
-            stage_id,
-            tuple(job_id for *_unused, job_id in sorted(stage_ops)),
-        ))
+                stage_ops.append(
+                    (
+                        int(start_time),
+                        int(end_time),
+                        job_index[job_id],
+                        job_id,
+                    )
+                )
+        stage_parts.append(
+            (
+                "s",
+                stage_id,
+                tuple(job_id for *_unused, job_id in sorted(stage_ops)),
+            )
+        )
 
     return tuple(machine_parts + stage_parts)
 
@@ -173,15 +179,20 @@ class CoarsenSolveReconstructOption(AlgOption):
 
     factor: int = DEFAULT_COARSEN_FACTOR
     coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil"
-    reconstruct_mode: Literal["semi_active", "active"] = "semi_active"
+    reconstruct_mode: Literal["semi_active", "active", "active_but_last_semi"] = (
+        "semi_active"
+    )
     """How the coarse solution is reconstructed onto the original scale.
 
     ``"semi_active"`` (default, prior behavior): carry the coarse machine
     assignment and per-machine order verbatim, re-derive times
     (:func:`reconstruct_coarse_schedule`). ``"active"``: keep only the coarse
     per-stage operation start-order and re-assign machines by earliest start
-    (:func:`reconstruct_active_coarse_schedule`). The default preserves
-    existing behavior; see plans/experiment/20260723/active_schedule_reconstruction.md.
+    (:func:`reconstruct_active_coarse_schedule`). ``"active_but_last_semi"``:
+    active rebuild for all stages except the last, which preserves the coarse
+    machine assignment and per-machine order but reads previous-stage end times
+    from the actively rebuilt stages
+    (:func:`reconstruct_active_except_last_coarse_schedule`).
     """
     timelimit_sec: float | None = None
     solver_thread_cnt: int = 1
@@ -208,7 +219,7 @@ class CoarsenSolveReconstructOption(AlgOption):
             raise ValueError(
                 f"coarsen_mode must be one of {valid_modes}, got {self.coarsen_mode!r}"
             )
-        valid_reconstruct = {"semi_active", "active"}
+        valid_reconstruct = {"semi_active", "active", "active_but_last_semi"}
         if self.reconstruct_mode not in valid_reconstruct:
             raise ValueError(
                 f"reconstruct_mode must be one of {valid_reconstruct}, "
@@ -567,14 +578,22 @@ def run_coarsen_solve_reconstruct(
     # Raw snapshot BEFORE any postprocess, and the ET-aligned final schedule.
     # Built by separate calls so the final's in-place postprocess cannot mutate
     # the raw snapshot. Both share the reconstruct logic in schedule_build.
-    # reconstruct_mode selects semi-active (carry coarse machine assignment) or
-    # active (keep only the coarse start-order, re-assign machines).
+    # reconstruct_mode selects semi-active (carry coarse machine assignment),
+    # active (keep only the coarse start-order, re-assign machines), or
+    # active_but_last_semi (active for all but the last stage).
     factor = option.factor
     if option.reconstruct_mode == "active":
         reconstructed_raw_schedule = build_active_from_reference(
             coarse_schedule, instance, instance.stage_2_job_2_p_map
         )
         final_schedule = reconstruct_active_coarse_schedule(coarse_schedule, instance)
+    elif option.reconstruct_mode == "active_but_last_semi":
+        reconstructed_raw_schedule = build_active_except_last_from_reference(
+            coarse_schedule, instance, instance.stage_2_job_2_p_map
+        )
+        final_schedule = reconstruct_active_except_last_coarse_schedule(
+            coarse_schedule, instance
+        )
     else:
         reconstructed_raw_schedule = reconstruct_raw_coarse_schedule(
             coarse_schedule, instance, factor
