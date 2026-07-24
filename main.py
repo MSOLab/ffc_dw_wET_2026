@@ -27,7 +27,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260724/lastsemi_fullgrid.yaml")
+CONFIG_PATH = Path("metadata/20260724/lastsemi_rounding_robust.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
