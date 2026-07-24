@@ -155,6 +155,14 @@ artifacts:
   - scope: scenario
     kind: mcf_lb_analysis
     file_template: "{scenario_name}_mcf_lb_analysis.csv"
+  # Per-scenario CSR winner table — one row per instance, columns
+  # insIndex..time% (as in the analysis_long sheet) plus objValueC / objValueR,
+  # the coarse-scale and restored objective of the best CSR candidate (min
+  # restored_obj valid row of that instance's csr_candidates_csv). Written only
+  # for scenarios that ran coarsen_solve_reconstruct.
+  - scope: scenario
+    kind: csr_analysis
+    file_template: "{scenario_name}_csr_analysis.csv"
   # Per-scenario aggregated phase-metric summaries — wide-format CSVs with one
   # row per instance and one column per (round, label). Built by the reporter
   # by reading every instance's ``mcf_lb_phase_obj_csv`` /

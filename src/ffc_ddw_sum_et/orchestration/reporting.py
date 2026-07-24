@@ -21,6 +21,7 @@ from routix.type_defs import RunMode
 from ..io import schedule_keys as K
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
+from ..report.csr_candidate_analysis import read_csr_winner
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
 from .mcf_lb_phase_labels import MCF_LB_R1_LABEL_ORDER, MCF_LB_R2_LABEL_ORDER
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
@@ -42,6 +43,11 @@ def _last_non_empty_line(text: str | None) -> str | None:
         return None
     lines = [line for line in text.strip().splitlines() if line.strip()]
     return lines[-1] if lines else None
+
+
+def _csv_cell(value: Any) -> str:
+    """Stringify a value for a CSV cell, rendering None as an empty field."""
+    return "" if value is None else str(value)
 
 
 def _to_int(value: Any) -> int | None:
@@ -747,6 +753,7 @@ class FFcDDWReporter:
         self._write_mcf_preemptive_obj_csv()
         self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
+        self._write_csr_analysis_csv()
         self._write_calc_mcf_lb_phase_metric_summaries()
         self._write_calc_mcf_lb_summary_csv()
         self._write_calc_mcf_lb_run_summary_csv()
@@ -952,6 +959,21 @@ class FFcDDWReporter:
         "dispatchedObj",
         "mcfSolveSec",
         "dispatchSec",
+    )
+
+    _CSR_ANALYSIS_COLUMNS: tuple[str, ...] = (
+        "insIndex",
+        "n",
+        "c",
+        "totalMcCount",
+        "T",
+        "R",
+        "W",
+        "TL",
+        "elapsedSec",
+        "time%",
+        "objValueC",
+        "objValueR",
     )
 
     def _write_calc_mcf_lb_phase_metric_summaries(self) -> None:
@@ -1296,6 +1318,73 @@ class FFcDDWReporter:
             logger.info("MCF-LB analysis CSV written to %s", path)
 
         self._write_last_stage_only_obj_summary_csv()
+
+    def _write_csr_analysis_csv(self) -> None:
+        """Per-scenario CSR winner table, one row per instance.
+
+        Columns mirror the ``analysis_long`` sheet's ``insIndex``..``time%``
+        prefix, then ``objValueC`` / ``objValueR`` — the coarse-scale and
+        restored objective of the best CSR candidate (min ``restored_obj``
+        valid row of that instance's ``csr_candidates_csv``). A scenario with
+        no candidate CSV on disk (non-CSR scenario) is skipped. Rows are
+        sorted by ``insIndex``.
+        """
+
+        for sc in self.scenario_results:
+            collected: list[tuple[int, list[str]]] = []
+            for ir in sc.instance_results:
+                cand_csv = self.layout.artifact_path(
+                    "csr_candidates_csv",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                if not cand_csv.exists():
+                    continue
+                winner = read_csr_winner(cand_csv)
+                idx = self._resolve_ins_index(ir.instance_name)
+                collected.append(
+                    (
+                        idx if idx is not None else 10**9,
+                        self._csr_analysis_row(ir, winner),
+                    )
+                )
+            if not collected:
+                continue
+            collected.sort(key=lambda t: t[0])
+            path = self.layout.artifact_path("csr_analysis", scenario_name=sc.name)
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(self._CSR_ANALYSIS_COLUMNS)
+                for _, row in collected:
+                    writer.writerow(row)
+            logger.info("CSR analysis CSV written to %s", path)
+
+    def _csr_analysis_row(
+        self, ir: InstanceResult, winner: tuple[float, float] | None
+    ) -> list[str]:
+        ins_index = self._resolve_ins_index(ir.instance_name)
+        meta = self._index_to_meta.get(ins_index, {}) if ins_index is not None else {}
+        tl = None
+        if ir.job_count is not None and ir.stage_count is not None:
+            tl = TIMELIMIT_NC_MULTIPLIER * ir.job_count * ir.stage_count
+        elapsed = round(ir.elapsed_time, 3) if ir.elapsed_time is not None else None
+        time_pct = (elapsed / tl * 100) if (tl and elapsed is not None) else None
+        coarse, restored = winner if winner is not None else (None, None)
+        values: dict[str, Any] = {
+            "insIndex": ins_index if ins_index is not None else "",
+            "n": meta.get("n"),
+            "c": meta.get("c"),
+            "totalMcCount": meta.get("totalMcCount"),
+            "T": meta.get("T"),
+            "R": meta.get("R"),
+            "W": meta.get("W"),
+            "TL": tl,
+            "elapsedSec": elapsed,
+            "time%": time_pct,
+            "objValueC": coarse,
+            "objValueR": restored,
+        }
+        return [_csv_cell(values[col]) for col in self._CSR_ANALYSIS_COLUMNS]
 
     def _write_mcf_preemptive_obj_csv(self) -> None:
         """Run-scoped long-format CSV of MCF-preemptive objective values.
@@ -1691,9 +1780,6 @@ class FFcDDWReporter:
         ins_index = self._resolve_ins_index(ir.instance_name)
         meta = self._index_to_meta.get(ins_index, {}) if ins_index is not None else {}
 
-        def _s(v: Any) -> str:
-            return "" if v is None else str(v)
-
         mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
         mcf_solve_sec = mcf_diag.get("mcf_solve_sec") or calc_diag.get(
             "r1_mcf_solve_sec"
@@ -1716,7 +1802,7 @@ class FFcDDWReporter:
             "mcfSolveSec": mcf_solve_sec,
             "dispatchSec": build_diag.get("dispatch_sec"),
         }
-        return [_s(values[col]) for col in self._MCF_LB_ANALYSIS_COLUMNS]
+        return [_csv_cell(values[col]) for col in self._MCF_LB_ANALYSIS_COLUMNS]
 
     def _write_statistics_yaml(self) -> None:
         """Write per-scenario cross-instance aggregates as YAML."""

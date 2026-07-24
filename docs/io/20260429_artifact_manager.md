@@ -58,6 +58,7 @@ output/
             ├── <scenario_name>_benchmark.log    # (기존, 호환)
             ├── <scenario_name>_statistics.yaml
             ├── <scenario_name>_mcf_lb_analysis.csv
+            ├── <scenario_name>_csr_analysis.csv
             └── <instance_name>/             # 예: Instance_50_5_3_0,2_0,2_10_Rep0
                 │
                 │ ── final zone ──
@@ -226,6 +227,9 @@ artifacts:
   - scope: scenario
     kind: mcf_lb_analysis
     file_template: "{scenario_name}_mcf_lb_analysis.csv"
+  - scope: scenario
+    kind: csr_analysis
+    file_template: "{scenario_name}_csr_analysis.csv"
 
   # ---- run ----
   - scope: run
