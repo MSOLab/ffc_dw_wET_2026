@@ -21,11 +21,14 @@ from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeMan
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 from ffc_ddw_sum_et.solution.schedule_build import (
+    build_active_except_last_from_reference,
     build_active_from_reference,
     build_schedule_from_op_starts,
     reconstruct_active_coarse_schedule,
+    reconstruct_active_except_last_coarse_schedule,
     reconstruct_coarse_schedule,
     reconstruct_raw_coarse_schedule,
+    validate_reconstructed_schedule,
 )
 
 FACTOR = 10
@@ -533,3 +536,183 @@ def test_reconstruct_active_equals_build_plus_idle() -> None:
 
     assert final.get_jik_2_start_time_map() == built.get_jik_2_start_time_map()
     assert final.get_jik_2_end_time_map() == built.get_jik_2_end_time_map()
+
+
+# --- active_but_last_semi reconstruction -----------------------------------
+
+
+def test_build_active_except_last_preserves_last_stage_machine_assignment() -> None:
+    """Last stage keeps the coarse machine assignment verbatim."""
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    active = build_active_except_last_from_reference(
+        ref, inst, inst.stage_2_job_2_p_map
+    )
+
+    last_stage = inst.stage_id_list[-1]
+    for j in inst.job_id_list:
+        assert _ji_machines(active)[j, last_stage] == _ji_machines(ref)[j, last_stage]
+
+
+def test_build_active_except_last_preserves_last_stage_per_machine_order() -> None:
+    """Last stage preserves the coarse per-machine job order."""
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    active = build_active_except_last_from_reference(
+        ref, inst, inst.stage_2_job_2_p_map
+    )
+
+    last_stage = inst.stage_id_list[-1]
+    active_orders = _machine_orders(active, inst)
+    ref_orders = _machine_orders(ref, inst)
+    for mc in inst.stage_2_machines_map[last_stage]:
+        assert active_orders[last_stage, mc] == ref_orders[last_stage, mc]
+
+
+def test_build_active_except_last_reassigns_prior_stage_machines() -> None:
+    """Prior stages reassign machines (active behavior), unlike last stage."""
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    active = build_active_except_last_from_reference(
+        ref, inst, inst.stage_2_job_2_p_map
+    )
+
+    prior_stage = inst.stage_id_list[0]
+    assert _ji_machines(ref)["j1", prior_stage] == "i0_0"
+    assert _ji_machines(active)["j1", prior_stage] == "i0_1"
+
+
+def test_build_active_except_last_is_feasible() -> None:
+    """Result honors durations and precedence, same as other builders."""
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    active = build_active_except_last_from_reference(
+        ref, inst, inst.stage_2_job_2_p_map
+    )
+
+    validate_reconstructed_schedule(active, inst)
+
+
+def test_build_active_except_last_prior_stage_matches_build_active() -> None:
+    """In a 2-stage instance, stage 0 matches build_active_from_reference's stage 0."""
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    hybrid = build_active_except_last_from_reference(
+        ref, inst, inst.stage_2_job_2_p_map
+    )
+    full_active = build_active_from_reference(ref, inst, inst.stage_2_job_2_p_map)
+
+    prior_stage = inst.stage_id_list[0]
+    hybrid_starts = {
+        (j, mc): s
+        for (j, i, mc), s in hybrid.get_jik_2_start_time_map().items()
+        if i == prior_stage
+    }
+    active_starts = {
+        (j, mc): s
+        for (j, i, mc), s in full_active.get_jik_2_start_time_map().items()
+        if i == prior_stage
+    }
+    assert hybrid_starts == active_starts
+
+
+def test_build_active_except_last_is_semi_active() -> None:
+    """Like build_active, the hybrid is already semi-active (make_semi_active no-op)."""
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    active = build_active_except_last_from_reference(
+        ref, inst, inst.stage_2_job_2_p_map
+    )
+    before = active.get_jik_2_start_time_map()
+    active.make_semi_active(inst.stage_2_job_2_p_map)
+
+    assert active.get_jik_2_start_time_map() == before
+
+
+def test_reconstruct_active_except_last_covers_every_operation() -> None:
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    final = reconstruct_active_except_last_coarse_schedule(ref, inst)
+
+    present = {(j, i) for (j, i, _mc) in final.get_jik_2_start_time_map()}
+    expected = {(j, i) for i in inst.stage_id_list for j in inst.job_id_list}
+    assert present == expected
+
+
+def test_reconstruct_active_except_last_equals_build_plus_idle() -> None:
+    """The wrapper = build + insert_idle_time (no make_semi_active)."""
+    inst = _instance()
+    ref = _crowded_reference(inst)
+
+    final = reconstruct_active_except_last_coarse_schedule(ref, inst)
+
+    built = build_active_except_last_from_reference(ref, inst, inst.stage_2_job_2_p_map)
+    built.insert_idle_time(
+        inst.job_2_due_window_map,
+        inst.job_2_ewt_map,
+        inst.job_2_twt_map,
+    )
+
+    assert final.get_jik_2_start_time_map() == built.get_jik_2_start_time_map()
+    assert final.get_jik_2_end_time_map() == built.get_jik_2_end_time_map()
+
+
+# --- single-stage guard ---------------------------------------------------
+
+
+def _single_stage_instance() -> FFcDDWParameters:
+    return FFcDDWParameters(
+        name="single_stage_recon",
+        job_id_list=["j0", "j1"],
+        stage_id_list=["i0"],
+        stage_2_machines_map={"i0": ["i0_0", "i0_1"]},
+        p_manager=JobStageProcessingTimeManager(
+            name="ss_p", df=pd.DataFrame([[10], [10]])
+        ),
+        job_2_due_window_map={"j0": (10, 20), "j1": (20, 30)},
+        job_2_ewt_map={"j0": 1, "j1": 1},
+        job_2_twt_map={"j0": 1, "j1": 1},
+    )
+
+
+def test_single_stage_active_except_last_equals_semi() -> None:
+    """With one stage, active_but_last_semi == semi (last stage is the only stage)."""
+    inst = _single_stage_instance()
+    ref = FFcSchedule(
+        jobs=inst.job_id_list,
+        stages=inst.stage_id_list,
+        machines_per_stage=inst.stage_2_machines_map,
+    )
+    ref.add_ops_times_2_mc("i0", "i0_0", "j0", 0, 10)
+    ref.add_ops_times_2_mc("i0", "i0_1", "j1", 5, 15)
+
+    hybrid_raw = build_active_except_last_from_reference(
+        ref, inst, inst.stage_2_job_2_p_map
+    )
+    semi_raw = reconstruct_raw_coarse_schedule(ref, inst, 1)
+
+    assert _ji_machines(hybrid_raw) == _ji_machines(semi_raw)
+    assert _machine_orders(hybrid_raw, inst) == _machine_orders(semi_raw, inst)
+
+
+def test_validate_reconstructed_schedule_rejects_missing_ops() -> None:
+    """Missing operation must raise AssertionError."""
+    inst = _instance()
+    sched = FFcSchedule(
+        jobs=inst.job_id_list,
+        stages=inst.stage_id_list,
+        machines_per_stage=inst.stage_2_machines_map,
+    )
+    sched.add_ops_times_2_mc("i0", "i0_0", "j0", 0, 10)
+    sched.add_ops_times_2_mc("i0", "i0_1", "j1", 0, 10)
+    # j2@i0, j0@i1, j1@i1, j2@i1 intentionally missing
+
+    with pytest.raises(AssertionError, match="Missing"):
+        validate_reconstructed_schedule(sched, inst)
