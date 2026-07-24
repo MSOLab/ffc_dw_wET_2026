@@ -2667,6 +2667,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
         solve_flow: list[dict] | None = None,
+        dump_csr_coarse: bool = False,
     ) -> SubroutineReport:
         """Step method: coarsen the instance, solve the base CP, and
         reconstruct to the original scale.
@@ -2741,6 +2742,13 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         plans/experiment/20260711/csr_solve_flow.md §4. v1 solve_flow configs must keep
         child gantt / emission / log-search flags OFF (the child has no sink).
 
+        ``dump_csr_coarse`` (``False`` by default): when ``True`` and
+        ``solve_flow`` is set, dumps every deduped coarse candidate schedule
+        as a compact JSON in the instance progress directory
+        (``_csr_coarse_cand_<NN>_<source>.json``). Intended for offline
+        reconstruction replay experiments; kept off by default to avoid
+        high file counts on full-grid runs.
+
         Per CLAUDE.md subroutine step contract: a single ``_register`` per
         call, ``elapsed_time`` measured immediately before report
         construction with no work in between.
@@ -2761,6 +2769,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 solve=solve,
                 emit_phase_schedules=emit_phase_schedules,
                 solve_flow=solve_flow,
+                dump_csr_coarse=dump_csr_coarse,
             )
 
         instance = self.instance
@@ -2845,6 +2854,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         solve: bool,
         emit_phase_schedules: bool,
         solve_flow: list[dict],
+        dump_csr_coarse: bool = False,
     ) -> SubroutineReport:
         """``coarsen_solve_reconstruct`` in ``solve_flow`` mode (plan §4).
 
@@ -2941,6 +2951,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         # Preserve child history for coarse-scale inner obj_log emission.
         self.csr_child_history = list(child.solution_manager.history)
+
+        # --- dump coarse candidate schedules (config-flag-gated) ---
+        if dump_csr_coarse:
+            for idx, cand in enumerate(deduped):
+                source_slug = str(cand.source).replace("/", "_").replace(" ", "_")
+                fname = f"_csr_coarse_cand_{idx:02d}_{source_slug}.json"
+                path = self.try_get_file_path_for_subroutine(fname)
+                if path is not None:
+                    dump_solution_json(
+                        cand.coarse_schedule,
+                        path,
+                        compact=True,
+                        instance_name=instance.name,
+                        obj_value=cand.coarse_obj,
+                    )
 
         # --- reconstruct + validate + score every deduped candidate ---
         candidate_rows: list[dict[str, object]] = []
