@@ -608,6 +608,64 @@ uv run python scripts/20260719/analyze_csr_vs_baseline.py   # analysis/20260719_
 
 ---
 
+### 20260725/analyze_csr_winner_source.py
+
+Answers **"how deep into the inner `solve_flow` did the budget actually let the
+search get?"** — the algorithmic-depth diagnostic that objective means hide.
+
+`coarsen_solve_reconstruct` in `solve_flow` mode logs exactly one summary line
+per instance into `<scenario>/<instance>/*_SubroutineController.log`:
+
+```plaintext
+coarsen_solve_reconstruct[solve_flow]: candidates=3 deduped=3 dropped=0 \
+winner_source=2-run_flip_makespan_cp_from_incumbent winner_coarse_obj=... ...
+```
+
+`winner_source` is `<step_idx>-<method>` (with a `.<detail>` tail for per-batch
+registrations, e.g. `4-incremental_sw_cp.1-batch_002`), so **the step index is
+the depth the flow reached before the budget ran out**. The script scans those
+lines across a run, joins instance metadata, and pivots by scenario.
+
+**Input**: a run directory. Metadata (`n, c, T, R, RPDf_BKS_data, elapsedTime`)
+is joined from the run's `<ts>_rpdf_comparison.csv` through
+`pra2017_hybrid_match.csv` (instance dir name → `insIndex`); the loader is
+imported from `analyze_dispatch_sweep.py` so the join cannot drift. A run with
+no rpdf CSV still works, but slice flags and the RPDf block are unavailable.
+
+**Console output**: three blocks — winner_source counts by scenario, candidate
+count (mean/min/max) by scenario, and mean RPDf by scenario × winning depth.
+
+**File output** (`--outdir`, default `analysis/<run_id>_winner_source/`):
+
+- `winner_source_long.csv` — one row per (scenario, instance)
+- `winner_source_by_scenario.csv` — the scenario × depth pivot
+
+```bash
+# whole run
+uv run python scripts/20260725/analyze_csr_winner_source.py <run_dir>
+
+# the (n=200, c=10) slice of the lastsemi full grid, csr_* scenarios only
+uv run python scripts/20260725/analyze_csr_winner_source.py \
+    output/20260724_lastsemi_fullgrid/20260724T155337_875856 \
+    --scenario csr_k --n 200 --c 10
+```
+
+> **Finding that motivated the script** (the command above): at **f=5 %** on the
+> 180 `(n=200, c=10)` instances, K=1 lands on
+> `run_flip_makespan_cp_from_incumbent` 127/180 times and reaches
+> `incremental_sw_cp` only 10 times, while K=8 reaches `incremental_sw_cp`
+> 119/180. **Coarsening buys algorithmic depth** — and yet K=8 still loses badly
+> on RPDf (65.0 vs 26.6), so the depth gained does not pay for the resolution
+> lost. The starvation is specific to f≤5 %: at f=10/15 % K=1 also reaches
+> `incremental_sw_cp` on ~160/180. Used as the depth channel of
+> `plans/experiment/20260725/coarsening_short_budget_crossover.md`.
+
+> Scenarios whose CSR step runs the **legacy non-`solve_flow` path** (e.g. the
+> `solve=False` dispatch-only arms) log no such line and are absent from the
+> pivot — the script exits with an error if that leaves nothing to report.
+
+---
+
 ## 5. Experiment Config Validation
 
 ### validate_resume_config.py
