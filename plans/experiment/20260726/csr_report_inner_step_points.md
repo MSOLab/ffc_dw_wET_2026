@@ -1,6 +1,6 @@
 # W1 — CSR 내부 단계 점을 method-mean scatter에 표시 (사전 작성, 코드 변경 계획)
 
-**작성일**: 2026-07-26 · **종류**: 코드 변경 계획 (TDD) · **상태**: 미착수
+**작성일**: 2026-07-26 · **종류**: 코드 변경 계획 (TDD) · **상태**: 완료
 **상위**: `plans/experiment/20260726/csr_init_roadmap.md` (W1)
 **선행**: 없음 · **후속**: W2(`csr_init_tl_f35_f40.md`)가 이 변경 후의 차트를 쓴다
 
@@ -160,3 +160,102 @@ CLAUDE.md가 정의한 최적성 판정(`obj_value == obj_bound`)이 CSR 런에�
 - 커밋 (Conventional Commits): `feat(csr): label inner progress points` 등 C1/C2/C3를
   논리 단위로 분리
 - 별도 실행 결과물 없음 (실험 아님). W2 런의 차트가 첫 실사용처.
+
+---
+
+## 8. 구현 결과 보고 (2026-07-26)
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `controller.py:3060-3089` | C1: progress_log에 `note` 부여 (`{context}.inner-{entry_idx:02d}-{source}`) |
+| `controller.py:127-142` | `_best_valid_lb(bounds)` 모듈 헬퍼 — 유효 LB 중 **가장 tight한(= max)** 값 반환, 없으면 `None` |
+| `controller.py:2839-2841` | C3(legacy): τ=1일 때 `trace.cp_progress_log`에서 `_best_valid_lb`로 best LB 추출 |
+| `controller.py:3091-3098` | C3(solve_flow): τ=1일 때 `csr_child_history`에서 `_best_valid_lb`로 best LB 추출, `SubroutineReport.obj_bound`(3105)와 `FFcDDWSolution.obj_bound`(3113)에 설정 |
+| `ffcddw_single_instance_runner.py:125-131` | C1: progress_log entry의 note를 obj_log의 `value_notes`/`bound_notes`로 전파 (`setdefault`) |
+| `method_mean_scatter.py` | C2: `load_method_mean_metrics` 반환값에 `is_inner: bool` 추가 (`.inner-` 포함 여부 판정), `_build_payload`에 `is_inner` 배열 전달, HTML template에서 `is_inner=True` 점에 `"cross"` 심볼 고정 |
+
+### 계획 대비 차이
+
+- **note의 인덱스는 `candidate_rows`의 인덱스가 아니라 *실제로 emit된 entry*의 인덱스다.**
+  §3 의사코드는 `enumerate(candidate_rows)`의 `k`를 썼으나, `restored_obj is None`인 행은
+  `continue`로 건너뛰므로 그 `k`를 쓰면 라벨 번호에 구멍이 생긴다(`inner-00`, `inner-02`, …).
+  별도 `entry_idx` 카운터로 교체해 연속 번호를 보장한다.
+- **`source == "unknown"`인 행에는 note를 달지 않는다.** 라벨에 담을 의미 있는 단계명이
+  없어 십자가만 뜨고 hover가 무의미해지기 때문. 해당 점은 일반 마커로 남는다.
+- **커밋은 §7의 C1/C2/C3 분리 대신 단일 커밋**(`feat(csr): label inner points, emit τ=1 LB`).
+  C2의 `is_inner`는 C1이 note를 달아야만 의미가 생기고, 검증 config·테스트가 셋을 함께
+  건드려 논리 단위로 쪼개면 중간 커밋이 green이 아니게 된다.
+
+### 테스트 (+7 tests)
+
+| 파일 | 테스트 |
+|---|---|
+| `test_csr_solve_flow.py` | `test_solve_flow_progress_log_has_notes_at_factor_1` — note가 최소 1개 존재하고 `.inner-NN-` 패턴을 만족 |
+| | `test_solve_flow_progress_log_notes_in_obj_log` — parent history를 `_fold_history_into_obj_log_dicts`에 통과시켜 `value_notes`/`bound_notes` 양쪽에 `.inner-` note가 실리는지 검증 |
+| | `test_solve_flow_report_obj_bound_at_factor_1` — τ=1에서 report.obj_bound ≠ None **이고 `max(child LBs)`와 일치**, τ=2에서 None |
+| | `test_best_valid_lb_picks_the_largest_bound` — `_best_valid_lb`가 max로 축약, `None` 스킵, 빈 입력 → `None`, int → float 정규화 |
+| `test_method_mean_scatter.py` | `test_inner_points_have_is_inner_true` — `.inner-` 라벨 점에 is_inner=True |
+| | `test_regular_points_have_is_inner_false` — 일반 flow의 모든 점에 is_inner=False (회귀) |
+| | `test_batch_inner_mixed_regression` — inner 점 2개 + regular 점 3개 혼합 검증 |
+
+### 검증 결과
+
+- **ruff check**: clean
+- **pytest**: 669 tests pass
+- **단일 인스턴스 실험** (`insIndex=0`, τ=1, f ∈ {1,5,10,40}%),
+  config: `metadata/20260726/w1_csr_single_instance_verify.yaml`:
+
+| 시나리오 | inner 점 수 | 첫 점 obj | winner |
+|----------|------------|-----------|--------|
+| f01 | 1 | 10611 | calc_mcf_lb (r1 only) |
+| f05 | 4 | 10174 | isw_cp |
+| f10 | 4 | 10174 | isw_cp |
+| f40 | 4 | 10174 | isw_cp |
+
+- C1: 모든 시나리오에서 obj_log에 `.inner-{NN}-{source}` 형식 note 기록 확인
+- C2: inner 점 `is_inner=True`, CSR endpoint `is_inner=False`, HTML에서 cross symbol 선택
+- C3: τ=1에서 `instance_result.yaml`의 `obj_bound: 7261.0` 확인 (이전엔 항상 `null`)
+  — **단, 이 값은 아래 "LB 집계 방향 수정" 이전(`min` 집계) 런의 결과다.** `max`로
+  바뀐 뒤에는 child 중 MCF-LB보다 tight한 bound가 있으면 값이 올라간다. 재측정은
+  W2 런에 묻어가며, 그때까지 이 수치는 "min 기준"으로만 읽을 것.
+
+### 리뷰 반영: LB 집계 방향 수정
+
+C3의 최초 구현은 두 경로 모두 후보 bound를 **`min`**으로 축약했다. LB는 클수록 tight
+하므로 이는 "best LB"가 아니라 **가장 느슨한** bound를 고르는 것이고, 코드베이스의 다른
+두 집계 지점과도 어긋난다:
+
+| 지점 | 집계 |
+|---|---|
+| `solution_manager.py:46` `_a_is_better_obj_bound` | `bound_a > bound_b` (max) |
+| `ffcddw_single_instance_runner.py:441` `bestBound` | `max(bound_values)` |
+
+특히 legacy 경로가 심각했다 — `trace.cp_progress_log`는 CP-SAT best-bound 콜백
+시계열(`progress_log_builder.py:41-50`)이라 0 근처에서 시작해 증가하므로, `min`은
+사실상 **최초 bound(≈0)**를 집어온다. 결과적으로 CLAUDE.md의 최적성 판정
+(`obj_value == obj_bound`)에서 false negative가 난다 — sound하지만(과대주장 없음)
+증명된 최적해를 non-optimal로 보고하게 된다.
+
+두 경로의 축약 로직이 동일하므로 `_best_valid_lb` 헬퍼(`controller.py:127-142`)로
+빼고 `max`로 교정했다. 헬퍼 docstring에 "호출자가 유효성을 게이팅한다"는
+`_a_is_better_obj_bound`의 soundness 계약을 명시해 두었다.
+
+`test_best_valid_lb_picks_the_largest_bound`는 헬퍼를 `min`으로 되돌린 상태에서 실패함을
+확인했다 (`assert 0.0 == 10174.0`). 반면 `test_solve_flow_report_obj_bound_at_factor_1`의
+`max(child_bounds)` 단언은 그 픽스처의 child bound가 1개뿐이라 `min == max`가 되어
+red가 되지 않는다 — 방향을 실제로 고정하는 것은 유닛 테스트 쪽이다.
+
+### 발견: f01 첫 점 RPDf가 다른 이유
+
+f01의 첫 inner 점 obj=10611이 f05/f10/f40의 10174와 다른 것은 W1 변경과 무관하며, `calc_mcf_lb_and_derive_full_sch`의 **adjust round(r2) 스킵** 때문이다.
+
+`calc_mcf_lb_and_derive_full_sch`은 `adjust_p/r=True`일 때 r2에서 last-stage processing time을 조정해 더 나은 schedule을 만든다. r1 → r2 사이에 `stop_predicate` 체크(`mcf_lb_pipeline.py:746`)가 있어, child_timelimit이 극단적으로 짧은 f01(0.225s)에서는 r1 완료 직후 stop이 걸려 r2가 스킵된다:
+
+```
+f01 (child_tl=0.225s):  r1 obj=10999  →  r2 skipped (stop_guard)
+f05/f10/f40:            r1 obj=10999  →  r2 obj=10286 (개선)
+```
+
+자식 컨트롤러가 r1 schedule(f01)과 r2 schedule(f05/f10/f40)을 각각 등록하고, parent reconstruction도 당연히 다른 schedule에서 다른 obj를 복원한다. MCF-LB bound(7261)은 r1/r2와 무관하게 모든 run에서 일관되다. 이는 당초 계획 범위 밖이며, f05/10/40이 서로 일관되므로 검증 기준은 이 셋을 기준으로 한다.

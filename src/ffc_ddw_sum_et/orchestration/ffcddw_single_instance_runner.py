@@ -123,8 +123,12 @@ def _fold_history_into_obj_log_dicts(
             key = repr(t_global)
             if entry.obj_value is not None:
                 value_data.setdefault(key, float(entry.obj_value))
+                if entry.note:
+                    value_notes.setdefault(key, entry.note)
             if entry.obj_bound is not None:
                 bound_data.setdefault(key, float(entry.obj_bound))
+                if entry.note:
+                    bound_notes.setdefault(key, entry.note)
 
         end_global = report.start_time + report.elapsed_time
         end_key = repr(end_global)

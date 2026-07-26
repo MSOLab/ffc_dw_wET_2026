@@ -155,3 +155,85 @@ def test_endpoint_carries_forward_unreached_instances() -> None:
     points = load_method_mean_metrics([full, cut], baseline)
     solve = next(p for p in points if p["label"] == "solve_base_model_cpsat")
     assert solve["instance_count"] == 2  # carry-forward, not reacher-only (1)
+
+
+# ---------------------------------------------------------------------------
+# W1 C2 — is_inner flag
+# ---------------------------------------------------------------------------
+
+
+def test_inner_points_have_is_inner_true() -> None:
+    """C2 §5.3: CSR inner progress points (label containing '.inner-')
+    must have is_inner=True."""
+    progs = [
+        _progression(
+            "Inst1",
+            [
+                _seg(1, "calc_mcf_lb_and_derive_full_sch", 1.0, 100.0),
+                _seg(
+                    2,
+                    "coarsen_solve_reconstruct.inner-00-1-solve_base_model_cpsat",
+                    2.0,
+                    90.0,
+                ),
+                _seg(3, "solve_base_model_cpsat", 5.0, 80.0),
+            ],
+        )
+    ]
+    baseline = {"Inst1": 50.0}
+    points = load_method_mean_metrics(progs, baseline)
+    for p in points:
+        if "inner" in p["label"]:
+            assert p["is_inner"], f"expected is_inner=True for {p['label']}"
+        else:
+            assert not p["is_inner"], f"expected is_inner=False for {p['label']}"
+
+
+def test_regular_points_have_is_inner_false() -> None:
+    """C2 §5.4 (regression): a flow without '.inner-' labels must have
+    is_inner=False for every point."""
+    progs = [
+        _progression(
+            "Inst1",
+            [
+                _seg(1, "neh_cp", 3.0, 100.0),
+                _seg(2, "incremental_sw_cp.1-batch_002", 4.0, 90.0),
+                _seg(3, "solve_base_model_cpsat", 9.0, 80.0),
+            ],
+        )
+    ]
+    baseline = {"Inst1": 50.0}
+    points = load_method_mean_metrics(progs, baseline)
+    assert len(points) > 0
+    for p in points:
+        assert not p["is_inner"], f"expected is_inner=False for {p['label']}"
+
+
+def test_batch_inner_mixed_regression() -> None:
+    """A mixed flow: regular batch points + inner points. Batch points are
+    not inner (no '.inner-'), inner points are."""
+    progs = [
+        _progression(
+            "Inst1",
+            [
+                _seg(1, "neh_cp", 1.0, 100.0),
+                _seg(2, "coarsen_solve_reconstruct", 2.0, 90.0),
+                _seg(2, "coarsen_solve_reconstruct.inner-00-1-calc_mcf", 2.5, 88.0),
+                _seg(2, "coarsen_solve_reconstruct.inner-01-2-neh_cp", 3.0, 85.0),
+                _seg(3, "incremental_sw_cp.1-batch_002", 5.0, 82.0),
+            ],
+        )
+    ]
+    baseline = {"Inst1": 50.0}
+    points = load_method_mean_metrics(progs, baseline)
+    for p in points:
+        if "inner" in p["label"]:
+            assert p["is_inner"], f"expected is_inner=True for {p['label']}"
+        else:
+            assert not p["is_inner"], f"expected is_inner=False for {p['label']}"
+
+    # Verify the specific counts.
+    inner_count = sum(1 for p in points if p["is_inner"])
+    assert inner_count == 2, f"expected 2 inner points, got {inner_count}"
+    regular_count = sum(1 for p in points if not p["is_inner"])
+    assert regular_count == 3, f"expected 3 regular points, got {regular_count}"

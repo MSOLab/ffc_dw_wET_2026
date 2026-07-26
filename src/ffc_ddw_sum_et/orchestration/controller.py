@@ -5,7 +5,7 @@ import logging
 import math
 import time
 from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Callable, Iterable, Literal, Sequence
 
 from ortools.sat.python import cp_model
 from routix.constants import SubroutineFlowKeys
@@ -122,6 +122,24 @@ _BUILD_FULL_SCH_LABEL_TO_INDEX: dict[str, int] = {
     "fullS_after_unflip": 8,
     "fullS_after_sa_iti": 9,
 }
+
+
+def _best_valid_lb(bounds: Iterable[float | None]) -> float | None:
+    """Return the tightest lower bound in ``bounds``, or ``None`` when none is
+    present.
+
+    A lower bound is tighter the *larger* it is, so "best" means ``max``. This
+    matches the two other LB aggregation sites:
+    ``solution_manager.FFcDDWSolutionManager._a_is_better_obj_bound``
+    (``bound_a > bound_b``) and ``ffcddw_single_instance_runner``'s
+    ``bestBound = max(...)``.
+
+    Callers must gate validity themselves — every value passed in has to
+    already be a valid LB for the *original* problem (see the soundness
+    contract on ``_a_is_better_obj_bound``).
+    """
+    valid = [float(b) for b in bounds if b is not None]
+    return max(valid) if valid else None
 
 
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
@@ -2818,7 +2836,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         elapsed = time.monotonic() - start_elapsed
         obj_value = float(trace.obj_value) if trace.obj_value is not None else None
-        obj_bound = None  # CSR does not produce a valid global lower bound
+        obj_bound: float | None = None
+        if factor == 1:
+            obj_bound = _best_valid_lb(e.obj_bound for e in trace.cp_progress_log)
 
         report = SubroutineReport(
             elapsed_time=elapsed,
@@ -3038,8 +3058,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         # --- build progress_log from candidate_rows (plan §3) ---
+        call_context = self._get_call_context_of_current_method()
         progress_log_entries: list[ProgressLogEntry] = []
         running_min_obj: float | None = None
+        entry_idx = 0
         for row in candidate_rows:
             rst = row["restored_obj"]
             if rst is None:
@@ -3049,29 +3071,46 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 running_min_obj = rst_f
             elapsed_sec = child_offset + float(row["sec_elapsed_step"])
             obj_bound_val: float | None = None
+            note_val: str | None = None
             if factor == 1 and row.get("coarse_bound") is not None:
                 obj_bound_val = float(row["coarse_bound"])
+            src = str(row["source"])
+            if src != "unknown":
+                note_val = f"{call_context}.inner-{entry_idx:02d}-{src}"
             progress_log_entries.append(
                 ProgressLogEntry(
                     elapsed_sec=elapsed_sec,
                     obj_value=running_min_obj,
                     obj_bound=obj_bound_val,
+                    note=note_val,
                 )
             )
+            entry_idx += 1
         progress_log = tuple(progress_log_entries)
+
+        # --- compute best child LB at factor==1 (original-scale valid) ---
+        best_child_bound: float | None = None
+        if factor == 1:
+            best_child_bound = _best_valid_lb(
+                rec.report.obj_bound
+                for rec in self.csr_child_history
+                if rec.report is not None
+            )
 
         # --- measure elapsed, then register EXACTLY ONCE (contract) ---
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=winner_obj,
-            obj_bound=None,  # a coarse solve is never a valid original-scale LB
+            obj_bound=best_child_bound,
         )
         if winner_final is not None:
             self._register(
                 report,
                 FFcDDWSolution(
-                    schedule=winner_final, obj_value=winner_obj, obj_bound=None
+                    schedule=winner_final,
+                    obj_value=winner_obj,
+                    obj_bound=best_child_bound,
                 ),
                 progress_log=progress_log,
             )

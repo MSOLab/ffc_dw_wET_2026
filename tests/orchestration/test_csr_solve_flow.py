@@ -35,7 +35,10 @@ from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
     schedule_sequence_signature,
 )
 from ffc_ddw_sum_et.orchestration.artifact_layout import FFcArtifactLayout
-from ffc_ddw_sum_et.orchestration.controller import FFcDDWSubroutineController
+from ffc_ddw_sum_et.orchestration.controller import (
+    FFcDDWSubroutineController,
+    _best_valid_lb,
+)
 from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import (
     FFcDDWSingleInstanceRunner,
     _fold_history_into_obj_log_dicts,
@@ -902,3 +905,173 @@ def test_solve_flow_no_winner_registers_none() -> None:
     assert register_kwargs[0]["solution"] is None, (
         "no-winner path must register solution=None"
     )
+
+
+# ---------------------------------------------------------------------------
+# W1 C1 — CSR inner progress point notes
+# ---------------------------------------------------------------------------
+
+
+def test_solve_flow_progress_log_has_notes_at_factor_1() -> None:
+    """C1 §5.1: τ=1 -> every progress_log entry has a note, and the format
+    matches the ``<idx>-<subroutine_name>`` regex so the structured loader
+    picks them up."""
+    import re
+
+    controller = _make_controller(timelimit=60.0)
+
+    register_kwargs: list[dict] = []
+    original_register = controller._register
+
+    def spy_register(report, solution, **kwargs):
+        register_kwargs.append(kwargs)
+        return original_register(report, solution, **kwargs)
+
+    controller._register = spy_register  # type: ignore[method-assign]
+
+    controller.coarsen_solve_reconstruct(
+        factor=1,
+        timelimit=30.0,
+        solve_flow=_FULL_FIVE_STEP_FLOW,
+    )
+
+    assert len(register_kwargs) == 1
+    progress_log = register_kwargs[0].get("progress_log", ())
+    assert len(progress_log) > 0
+
+    notes_present = [e.note for e in progress_log if e.note is not None]
+    assert len(notes_present) > 0, "at least one progress_log entry must have a note"
+
+    # In a flow-run, call_context is e.g. "1-coarsen_solve_reconstruct";
+    # direct calls yield "ROOT". Either way, the note must end with
+    # ".inner-<k:02d>-<source>" and the loader regex `^\d+-(.+)$`
+    # must parse it when the call_context has the right form.
+    inner_pattern = re.compile(r"\.inner-\d{2}-")
+    for entry in progress_log:
+        if entry.note is not None:
+            assert inner_pattern.search(entry.note) is not None, (
+                f"note must contain '.inner-NN-': {entry.note!r}"
+            )
+
+
+def test_solve_flow_progress_log_notes_in_obj_log() -> None:
+    """C1 §5.1 (loader): notes from progress_log survive into the obj_log
+    value_notes / bound_notes dicts after _fold_history_into_obj_log_dicts
+    on the parent's history."""
+    controller = _make_controller(timelimit=60.0)
+
+    controller.coarsen_solve_reconstruct(
+        factor=1,
+        timelimit=30.0,
+        solve_flow=_FULL_FIVE_STEP_FLOW,
+    )
+
+    parent_history = controller.solution_manager.history
+    assert len(parent_history) > 0
+
+    value_data: dict[str, float] = {}
+    value_notes: dict[str, str] = {}
+    bound_data: dict[str, float] = {}
+    bound_notes: dict[str, str] = {}
+    _fold_history_into_obj_log_dicts(
+        parent_history, value_data, value_notes, bound_data, bound_notes
+    )
+
+    inner_notes = [v for v in value_notes.values() if ".inner-" in v]
+    assert len(inner_notes) > 0, (
+        f"parent obj_log value_notes must contain .inner- notes; "
+        f"got {list(value_notes.values())}"
+    )
+    # bound_notes also carry inner- notes when entries have obj_bound.
+    inner_bound_notes = [v for v in bound_notes.values() if ".inner-" in v]
+    assert len(inner_bound_notes) > 0, (
+        "parent obj_log bound_notes must contain .inner- notes for MCF-LB entry"
+    )
+
+
+# ---------------------------------------------------------------------------
+# W1 C3 — τ=1 obj_bound validity
+# ---------------------------------------------------------------------------
+
+
+def test_solve_flow_report_obj_bound_at_factor_1() -> None:
+    """C3 §5.5: factor=1 -> SubroutineReport.obj_bound is not None
+    (child best LB propagated); factor>1 -> obj_bound is None."""
+    instance = _make_instance()
+
+    # factor=1 with MCF-LB in flow -> should get a valid bound
+    ctrl1 = FFcDDWSubroutineController(
+        instance=instance,
+        subroutine_flow=[{"method": "coarsen_solve_reconstruct"}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    register_kwargs1: list[dict] = []
+    orig1 = ctrl1._register
+
+    def spy1(report, solution, **kwargs):
+        register_kwargs1.append({"report": report, "solution": solution, **kwargs})
+        return orig1(report, solution, **kwargs)
+
+    ctrl1._register = spy1  # type: ignore[method-assign]
+    ctrl1.coarsen_solve_reconstruct(
+        factor=1,
+        timelimit=30.0,
+        solve_flow=[
+            {"method": "calc_mcf_lb_and_derive_full_sch"},
+            {"method": "neh_cp", "job_priority": "weight-due-pos", "cp_tl": 1.0},
+        ],
+    )
+    assert len(register_kwargs1) == 1
+    rpt1 = register_kwargs1[0]["report"]
+    assert rpt1.obj_bound is not None, "factor=1: report.obj_bound must be populated"
+
+    # The propagated bound is the TIGHTEST (max) child LB, not the loosest.
+    child_bounds = [
+        float(rec.report.obj_bound)
+        for rec in ctrl1.csr_child_history
+        if rec.report is not None and rec.report.obj_bound is not None
+    ]
+    assert child_bounds, "flow must produce at least one child bound"
+    assert rpt1.obj_bound == max(child_bounds), (
+        f"factor=1: obj_bound must be max(child LBs)={max(child_bounds)}, "
+        f"got {rpt1.obj_bound}"
+    )
+
+    # factor=2 -> bound must be None
+    ctrl2 = FFcDDWSubroutineController(
+        instance=instance,
+        subroutine_flow=[{"method": "coarsen_solve_reconstruct"}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    register_kwargs2: list[dict] = []
+    orig2 = ctrl2._register
+
+    def spy2(report, solution, **kwargs):
+        register_kwargs2.append({"report": report, "solution": solution, **kwargs})
+        return orig2(report, solution, **kwargs)
+
+    ctrl2._register = spy2  # type: ignore[method-assign]
+    ctrl2.coarsen_solve_reconstruct(
+        factor=2,
+        timelimit=30.0,
+        solve_flow=[
+            {"method": "calc_mcf_lb_and_derive_full_sch"},
+            {"method": "neh_cp", "job_priority": "weight-due-pos", "cp_tl": 1.0},
+        ],
+    )
+    assert len(register_kwargs2) == 1
+    rpt2 = register_kwargs2[0]["report"]
+    assert rpt2.obj_bound is None, "factor=2: report.obj_bound must be None"
+
+
+def test_best_valid_lb_picks_the_largest_bound() -> None:
+    """A lower bound is tighter the larger it is, so ``_best_valid_lb`` must
+    reduce with ``max`` — matching ``_a_is_better_obj_bound`` (``a > b``) and
+    the runner's ``bestBound = max(...)``. ``None`` entries are skipped."""
+    assert _best_valid_lb([7261.0, 10174.0, 0.0]) == 10174.0
+    assert _best_valid_lb([None, 7261.0, None]) == 7261.0
+    assert _best_valid_lb([]) is None
+    assert _best_valid_lb([None, None]) is None
+    # Ints are normalised to float so callers can compare without surprises.
+    assert _best_valid_lb([3, 9]) == 9.0
+    assert isinstance(_best_valid_lb([3, 9]), float)

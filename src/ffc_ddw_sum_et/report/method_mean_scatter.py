@@ -82,10 +82,13 @@ def load_method_mean_metrics(
 
     Returns:
         list[dict[str, Any]]: ``{method, label, mean_time_pct, mean_rpdf,
-        instance_count}`` dicts in controller (first-appearance) order.
+        instance_count, is_inner}`` dicts in controller (first-appearance) order.
         ``method`` is the base name (pre-``.``) used for the marker
         symbol/colour; ``label`` is the full ``subroutine_name`` (carrying the
-        batch suffix) shown in the hover. ``mean_time_pct`` is
+        batch suffix) shown in the hover. ``is_inner`` is ``True`` when the
+        full label contains ``".inner-"`` (CSR inner progress points that should
+        get a cross marker regardless of the base method's symbol map entry).
+        ``mean_time_pct`` is
         ``global_end_sec / timelimit_sec`` in ``[0, 1]``; ``mean_rpdf`` is the
         mean of ``rpd_f(obj, ref) = 2*(obj-ref)/(obj+ref)``;
         ``instance_count`` is the carry-forward total (active instances), not
@@ -173,6 +176,7 @@ def load_method_mean_metrics(
     candidates: list[dict[str, Any]] = []
     for order_idx in sorted_order:
         base_name, full_name = step_labels[order_idx]
+        is_inner = ".inner-" in full_name
         reached: list[tuple[str, float, float, float]] = []
         improves = False
         for ins_id, steps in instance_data.items():
@@ -220,6 +224,7 @@ def load_method_mean_metrics(
                 "mean_time_pct": sum(time_pcts) / len(time_pcts),
                 "mean_rpdf": sum(rpdfs) / len(rpdfs),
                 "instance_count": len(time_pcts),
+                "is_inner": is_inner,
             }
         )
 
@@ -273,6 +278,7 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
         names = [str(p["method"]) for p in method_points]
         labels = [str(p.get("label", p["method"])) for p in method_points]
         counts = [int(p["instance_count"]) for p in method_points]
+        inners = [bool(p.get("is_inner", False)) for p in method_points]
         traces.append(
             {
                 "scenario": str(scenario["label"]),
@@ -281,6 +287,7 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
                 "method": names,
                 "label": labels,
                 "instance_count": counts,
+                "is_inner": inners,
             }
         )
         all_x.extend(xs)
@@ -329,7 +336,7 @@ _HTML_TEMPLATE = Template("""<!doctype html>
         marker: {
           size: 11,
           color: seriesColor,
-          symbol: trace.method.map((name) => SYMBOL_MAP[name] || "circle"),
+          symbol: trace.method.map((name, i) => trace.is_inner[i] ? "cross" : (SYMBOL_MAP[name] || "circle")),
           line: { width: 1, color: "#1b1b1b" }
         },
         hovertemplate:
