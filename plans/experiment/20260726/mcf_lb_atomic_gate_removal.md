@@ -1,7 +1,11 @@
 # MCF-LB 스텝의 stop gate 제거 후 CSR crossover ladder 재측정 (사전 작성)
 
 **작성일**: 2026-07-26 · **종류**: 코드 변경 + 실험 실행 계획(사전 작성)
-**상태**: 코드 변경·테스트 완료 · 재실행 진행 중 — §4 판정 미완.
+**상태**: **완료** — 코드 변경·테스트·재실행·§4 판정 모두 종료.
+판정 결과는 `plans/analysis/20260726/mcf_lb_atomic_rerun_verdict.md`.
+요약: G1·G2·G3 전부 통과, objective 결론 불변(0/200), feasibility 비대칭 소멸
+(378 → 0). 문제의 20개에서 K=1이 k≥4에 20/20 승 — before의 "K≥4 20/20 승"이
+완전히 뒤집혔다.
 **발단**: `plans/analysis/20260726/coarsening_short_budget_crossover.md` §4.4
 **재측정 대상 런 (before)**: `output/20260725_crossover_ladder/20260726T002619_971440`
 **재실행 런 (after)**: `output/20260725_crossover_ladder/20260726T173841_347539` (2026-07-26 17:38:41 시작)
@@ -230,18 +234,26 @@ G2가 실패하면 **재실행 결과를 해석하지 말고** 코드 변경부�
 ## 6. 산출물
 
 - 코드: `mcf_lb_pipeline.py` 변경 + 테스트 — **완료** (라운드 1 원자화, §2.1 표대로)
-- 런: `output/20260725_crossover_ladder/20260726T173841_347539` (run setting 커밋) —
-  **진행 중**. §6 초안은 `output/<date>_mcf_lb_atomic/`을 예정했으나, config를
-  무수정 재사용하기로 한 §3.1 원칙에 따라 `output_dir`도 원 런과 동일하게 두었다.
-- 분석: 재실행이 결론을 바꾼 경우에만 `plans/analysis/<date>/` 문서 신설,
-  아니면 본 계획서 하단에 "재실행 결과: 결론 불변" 한 줄로 마감
+- 런: `output/20260725_crossover_ladder/20260726T173841_347539` (run setting
+  `adb8e60`) — **완주** (17:38:41 → 19:20:57, 약 1시간 42분). §6 초안은
+  `output/<date>_mcf_lb_atomic/`을 예정했으나, config를 무수정 재사용하기로 한
+  §3.1 원칙에 따라 `output_dir`도 원 런과 동일하게 두었다.
+- 판정 스크립트: `scripts/20260726/verdict_mcf_lb_atomic.py` — before/after를
+  하드코딩 기본값으로 물고 G1·G2·G3를 순서대로 판정하고, G2 통과 시에만 결론
+  재독을 출력한다. 세 게이트 통과 시에만 exit 0.
+- 분석: `plans/analysis/20260726/mcf_lb_atomic_rerun_verdict.md` — **신설**.
+  본 §6 초안은 "결론이 바뀐 경우에만 신설"을 조건으로 걸었는데, objective 축은
+  불변이었으나 (a) 선행 문서의 feasibility crossover 결론이 철회되고 (b) f=1%
+  행이 140-instance 편향치에서 160-instance unbiased 값으로 대체되므로, 선행
+  문서만 읽는 독자를 위해 문서를 신설했다.
 
-## 7. 중간 관측 (재실행 진행 중)
+## 7. 중간 관측 (재실행 진행 중 — 기록으로 보존)
 
-- **G1 잠정 통과**: 중단된 선행 런(`20260726T171938_069293`, 동일 코드·동일 config,
-  약 20% 진행 후 중단)에서 `m1_k1_f01`이 **160/160 완주**했고 `obj_value: null`이
-  **0건**이었다. 원 런의 결측 20개가 사라진 것이 확인된다. 정식 판정은
-  `20260726T173841_347539` 완주 후 §4.1 커맨드로 다시 낸다.
+- **G1 잠정 통과 → 정식 통과 확인**: 중단된 선행 런(`20260726T171938_069293`,
+  동일 코드·동일 config, 약 20% 진행 후 중단)에서 `m1_k1_f01`이 **160/160 완주**
+  했고 `obj_value: null`이 **0건**이었다. 정식 판정(`20260726T173841_347539`
+  완주 후)도 동일하게 160/160 · 런 전체 null 0/33,600으로 나왔으므로 이 잠정
+  관측은 정확했다.
 - **§2.2 잔여 항목**: `tests/orchestration/test_csr_solve_flow.py`의 "child flow가
   `candidates=0`으로 끝나지 않는다" 통합 테스트는 아직 미작성이다.
 - **Red 테스트의 겨냥점**: `test_stop_after_r1_entry_still_produces_full_schedule`은

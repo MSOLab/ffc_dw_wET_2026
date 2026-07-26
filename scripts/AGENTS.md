@@ -716,6 +716,59 @@ uv run python scripts/20260726/analyze_crossover_ladder.py \
 
 ---
 
+### 20260726/verdict_mcf_lb_atomic.py
+
+Judges the **mcf_lb atomic-gate-removal re-run** against the run it replaces —
+the go/no-go for `plans/experiment/20260726/mcf_lb_atomic_gate_removal.md` §4.
+Run it once after the re-run finishes; it never polls or waits.
+
+Both runs live under the same output base (the re-run reuses the config
+unchanged), so they are told apart by timestamp only. Defaults are baked in:
+before = `20260726T002619_971440`, after = `20260726T173841_347539`.
+
+**Completion gate**: the run's `*_rpdf_comparison.csv` exists only after the
+final report pass, so its presence *is* the done signal and also the input every
+table needs. If it is missing the script prints `<done>/33600 instance results`
+and exits 1 — nothing else runs.
+
+**Gates, in order** (`load_run` / `paired_drpdf` are imported from
+`analyze_crossover_ladder.py`, so the verdict cannot drift from the tables the
+analysis document quotes):
+
+1. **G1 incumbents** — `bestObj` is never empty. Reports `m1_k1_f01` before→after
+   and, on failure, every affected scenario with its `(n, c)` cells.
+2. **G2 a/b control** — arms `a`/`b` bit-identical to the before-run (`a` never
+   calls mcf_lb; `b`'s budget was never binding). **A G2 failure suppresses the
+   conclusion section on purpose** — §4.1 says to re-read the code rather than
+   interpret the re-run, so the script exits 1 without printing it.
+3. **G3 c noise** — arm `c` mean `bestObj` delta within `NOISE_FLOOR_MEAN_OBJ`
+   (±350, established over the 1440-instance grid; the 160-instance slice here
+   is noisier per cell, so read a near-miss as "not distinguishable from noise",
+   not "proven unchanged").
+
+**Conclusion re-read** (only when G2 holds): how many of the 200
+(arm, f, k, mode) cells contradict "no crossover" (`dRPDf > 0 AND win < loss`)
+before vs after, whether the f=1 % `coarse_only_feasible` asymmetry went to zero,
+and the m1 k=2 dRPDf ladder as `before -> after` per mode. Then it shells out to
+`analyze_crossover_ladder.py` and `analyze_csr_winner_source.py --n 200 --c 10`
+to emit the standard CSVs (`--skip-artifacts` to suppress).
+
+Exits 0 only when all three gates pass.
+
+```bash
+uv run python scripts/20260726/verdict_mcf_lb_atomic.py
+uv run python scripts/20260726/verdict_mcf_lb_atomic.py --after <run_dir> --skip-artifacts
+```
+
+> **Self-check**: passing the same finished run as both `--before` and `--after`
+> reproduces the committed analysis exactly — `0/200` cells contradicting,
+> `m1_k1_f01` at 140/160, and the k=2 ladder at cumulative
+> +10.40/+12.34/+17.62/+18.48. G1 correctly fails there (42 nulls: 20 in
+> `m1_k1_f01`, 4–6 per `m1_k2_*_f01`), which is the defect the re-run exists to
+> remove.
+
+---
+
 ## 5. Experiment Config Validation
 
 ### validate_resume_config.py
