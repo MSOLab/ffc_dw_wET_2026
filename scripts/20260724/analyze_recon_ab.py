@@ -80,13 +80,19 @@ def _cell_table(paired: pd.DataFrame, label: str) -> pd.DataFrame:
     rows = []
     for (k, f), g in paired.groupby(["k", "f"]):
         win, tie, loss = _wtl(g["dRPDf"])
-        rows.append({
-            "k": k, "f": f, "n_paired": len(g),
-            "mean_dRPDf": g["dRPDf"].mean(),
-            "median_dRPDf": g["dRPDf"].median(),
-            "mean_dObj": g["dObj"].mean(),
-            "win": win, "tie": tie, "loss": loss,
-        })
+        rows.append(
+            {
+                "k": k,
+                "f": f,
+                "n_paired": len(g),
+                "mean_dRPDf": g["dRPDf"].mean(),
+                "median_dRPDf": g["dRPDf"].median(),
+                "mean_dObj": g["dObj"].mean(),
+                "win": win,
+                "tie": tie,
+                "loss": loss,
+            }
+        )
     out = pd.DataFrame(rows).sort_values(["k", "f"]).reset_index(drop=True)
     out.attrs["label"] = label
     return out
@@ -105,8 +111,7 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("run_dir", type=Path)
-    ap.add_argument("--out-dir", type=Path,
-                    default=Path("analysis/20260724_recon_ab"))
+    ap.add_argument("--out-dir", type=Path, default=Path("analysis/20260724_recon_ab"))
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -114,8 +119,7 @@ def main() -> int:
 
     # --- block 1: coverage ---
     print("=" * 70)
-    print("BLOCK 1  coverage (instances per k x f x mode; expect "
-          f"{EXPECTED_PER_CELL})")
+    print(f"BLOCK 1  coverage (instances per k x f x mode; expect {EXPECTED_PER_CELL})")
     cov = df.groupby(["k", "f", "mode"]).size().unstack("mode", fill_value=0)
     print(cov.to_string())
     short = cov[cov.lt(EXPECTED_PER_CELL).any(axis=1)]
@@ -126,8 +130,7 @@ def main() -> int:
     # --- block 2: per-cell mean RPDf by mode ---
     print("\n" + "=" * 70)
     print("BLOCK 2  mean RPDf by mode (pp; lower is better)")
-    mean_rpdf = (df.groupby(["k", "f", "mode"])["RPDf"].mean()
-                 .unstack("mode"))
+    mean_rpdf = df.groupby(["k", "f", "mode"])["RPDf"].mean().unstack("mode")
     cols = [c for c in ("prior", "semi", "active") if c in mean_rpdf.columns]
     mean_rpdf = mean_rpdf[cols]
     print(mean_rpdf.to_string(float_format=lambda v: f"{v:.3f}"))
@@ -135,28 +138,36 @@ def main() -> int:
 
     # --- block 3: PRIMARY AB active vs semi ---
     print("\n" + "=" * 70)
-    print("BLOCK 3  PRIMARY AB  active vs semi  (dRPDf = active - semi; "
-          "<0 => active better)")
+    print(
+        "BLOCK 3  PRIMARY AB  active vs semi  (dRPDf = active - semi; "
+        "<0 => active better)"
+    )
     ab = _pair(df, "active", "semi")
     ab_cells = _cell_table(ab, "active_vs_semi")
     print(_fmt(ab_cells))
-    print(f"\n  OVERALL  mean dRPDf {ab['dRPDf'].mean():+.4f} pp | "
-          f"mean dObj {ab['dObj'].mean():+.2f} | "
-          f"win/tie/loss {'/'.join(map(str, _wtl(ab['dRPDf'])))} | "
-          f"n={len(ab)}")
+    print(
+        f"\n  OVERALL  mean dRPDf {ab['dRPDf'].mean():+.4f} pp | "
+        f"mean dObj {ab['dObj'].mean():+.2f} | "
+        f"win/tie/loss {'/'.join(map(str, _wtl(ab['dRPDf'])))} | "
+        f"n={len(ab)}"
+    )
     ab_cells.to_csv(args.out_dir / "active_vs_semi_cells.csv", index=False)
 
     # --- block 4: reproducibility semi vs prior ---
     print("\n" + "=" * 70)
-    print("BLOCK 4  reproducibility  semi vs prior  (dRPDf = semi - prior; "
-          "expect ~0 within CP noise floor)")
+    print(
+        "BLOCK 4  reproducibility  semi vs prior  (dRPDf = semi - prior; "
+        "expect ~0 within CP noise floor)"
+    )
     rep = _pair(df, "semi", "prior")
     rep_cells = _cell_table(rep, "semi_vs_prior")
     print(_fmt(rep_cells))
-    print(f"\n  OVERALL  mean dRPDf {rep['dRPDf'].mean():+.4f} pp | "
-          f"mean dObj {rep['dObj'].mean():+.2f} | "
-          f"win/tie/loss {'/'.join(map(str, _wtl(rep['dRPDf'])))} | "
-          f"n={len(rep)}")
+    print(
+        f"\n  OVERALL  mean dRPDf {rep['dRPDf'].mean():+.4f} pp | "
+        f"mean dObj {rep['dObj'].mean():+.2f} | "
+        f"win/tie/loss {'/'.join(map(str, _wtl(rep['dRPDf'])))} | "
+        f"n={len(rep)}"
+    )
     rep_cells.to_csv(args.out_dir / "semi_vs_prior_cells.csv", index=False)
 
     # --- block 5: net vs baseline active vs prior ---
@@ -165,21 +176,21 @@ def main() -> int:
     net = _pair(df, "active", "prior")
     net_cells = _cell_table(net, "active_vs_prior")
     print(_fmt(net_cells))
-    print(f"\n  OVERALL  mean dRPDf {net['dRPDf'].mean():+.4f} pp | "
-          f"mean dObj {net['dObj'].mean():+.2f} | "
-          f"win/tie/loss {'/'.join(map(str, _wtl(net['dRPDf'])))} | "
-          f"n={len(net)}")
+    print(
+        f"\n  OVERALL  mean dRPDf {net['dRPDf'].mean():+.4f} pp | "
+        f"mean dObj {net['dObj'].mean():+.2f} | "
+        f"win/tie/loss {'/'.join(map(str, _wtl(net['dRPDf'])))} | "
+        f"n={len(net)}"
+    )
     net_cells.to_csv(args.out_dir / "active_vs_prior_cells.csv", index=False)
 
     # --- block 6: aggregate roll-ups ---
     print("\n" + "=" * 70)
     print("BLOCK 6  roll-ups of active-vs-semi mean dRPDf (pp)")
     print("  by kappa:")
-    print(ab.groupby("k")["dRPDf"].mean().to_string(
-        float_format=lambda v: f"{v:+.4f}"))
+    print(ab.groupby("k")["dRPDf"].mean().to_string(float_format=lambda v: f"{v:+.4f}"))
     print("  by f (TL %):")
-    print(ab.groupby("f")["dRPDf"].mean().to_string(
-        float_format=lambda v: f"{v:+.4f}"))
+    print(ab.groupby("f")["dRPDf"].mean().to_string(float_format=lambda v: f"{v:+.4f}"))
 
     print(f"\nwrote per-cell CSVs to {args.out_dir}/")
     return 0

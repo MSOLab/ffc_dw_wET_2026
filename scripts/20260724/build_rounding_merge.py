@@ -95,19 +95,38 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--rounding-run", type=Path, required=True,
-                    help="the {ceil,floor,round} x k{2,4,8} run (27 scenarios)")
-    ap.add_argument("--lastsemi-run", type=Path, required=True,
-                    help="the lastsemi full-grid run (12 scenarios: k1 + cumulative k>1)")
-    ap.add_argument("--dest", type=Path, required=True,
-                    help="parent dir for the synthetic merged run")
+    ap.add_argument(
+        "--rounding-run",
+        type=Path,
+        required=True,
+        help="the {ceil,floor,round} x k{2,4,8} run (27 scenarios)",
+    )
+    ap.add_argument(
+        "--lastsemi-run",
+        type=Path,
+        required=True,
+        help="the lastsemi full-grid run (12 scenarios: k1 + cumulative k>1)",
+    )
+    ap.add_argument(
+        "--dest",
+        type=Path,
+        required=True,
+        help="parent dir for the synthetic merged run",
+    )
     ap.add_argument("--config-out", type=Path, required=True)
-    ap.add_argument("--merged-dir", type=Path, default=None,
-                    help="reuse an already-built merged run dir (skip symlinking)")
+    ap.add_argument(
+        "--merged-dir",
+        type=Path,
+        default=None,
+        help="reuse an already-built merged run dir (skip symlinking)",
+    )
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--intersect-instances", action="store_true",
-                    help="symlink only instances common to every scenario "
-                         "(defensive; both runs are the full 1440 grid)")
+    ap.add_argument(
+        "--intersect-instances",
+        action="store_true",
+        help="symlink only instances common to every scenario "
+        "(defensive; both runs are the full 1440 grid)",
+    )
     args = ap.parse_args()
 
     rounding_cfg = _load(_find_config(args.rounding_run))
@@ -155,8 +174,10 @@ def main() -> int:
         print(f"restamped artifact_layout from rounding run: {r_layout.name}")
 
     # --- write the POST_PROCESS_ONLY config ---
-    post_cfg: dict = {"run_mode": "POST_PROCESS_ONLY",
-                      "analysis_dir_path": str(merged_dir)}
+    post_cfg: dict = {
+        "run_mode": "POST_PROCESS_ONLY",
+        "analysis_dir_path": str(merged_dir),
+    }
     for key in _PASSTHROUGH_KEYS:
         if key in rounding_cfg:
             post_cfg[key] = rounding_cfg[key]
@@ -169,11 +190,15 @@ def main() -> int:
     with args.config_out.open("w") as fh:
         yaml.safe_dump(post_cfg, fh, sort_keys=False, default_flow_style=False)
     print(f"wrote POST_PROCESS_ONLY config: {args.config_out}")
-    print(f"  scenarios: {len(merged_scenarios)} "
-          f"({len(lastsemi_names)} lastsemi + {len(rounding_names)} rounding)")
+    print(
+        f"  scenarios: {len(merged_scenarios)} "
+        f"({len(lastsemi_names)} lastsemi + {len(rounding_names)} rounding)"
+    )
     if args.dry_run:
-        print("  (dry-run: set analysis_dir_path to the real merged dir before "
-              "running main.py)")
+        print(
+            "  (dry-run: set analysis_dir_path to the real merged dir before "
+            "running main.py)"
+        )
     return 0
 
 

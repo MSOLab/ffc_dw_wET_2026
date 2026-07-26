@@ -348,9 +348,7 @@ def main() -> None:
     _assert_ceil_matches_production(by_name[names[0]])
     print("self-check: local ceil == coarsen_processing_times OK")
 
-    jobs = [
-        (by_name[n], paths[n], args.kappas, args.rules) for n in names
-    ]
+    jobs = [(by_name[n], paths[n], args.kappas, args.rules) for n in names]
     rows: list[dict] = []
     if args.workers <= 1:
         for k, job in enumerate(jobs, 1):

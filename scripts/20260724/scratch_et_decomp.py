@@ -15,9 +15,7 @@ from pathlib import Path
 
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 
-RUN = Path(
-    "output/20260724_merge_recon_ab_vs_prior/20260724T073347_605861"
-)
+RUN = Path("output/20260724_merge_recon_ab_vs_prior/20260724T073347_605861")
 BENCH = Path("benchmarks/PRA2017/large")
 
 _SCN = re.compile(r"^csr_k(\d+)_tl(\d+)_(active|semi)$")
@@ -98,10 +96,18 @@ def main() -> int:
             es, ts = et_from_solution(s_sol, name)
             rows.append(
                 {
-                    "k": k, "f": f, "name": name,
-                    "E_semi": es, "T_semi": ts, "obj_semi": es + ts,
-                    "E_active": ea, "T_active": ta, "obj_active": ea + ta,
-                    "dE": ea - es, "dT": ta - ts, "dObj": (ea + ta) - (es + ts),
+                    "k": k,
+                    "f": f,
+                    "name": name,
+                    "E_semi": es,
+                    "T_semi": ts,
+                    "obj_semi": es + ts,
+                    "E_active": ea,
+                    "T_active": ta,
+                    "obj_active": ea + ta,
+                    "dE": ea - es,
+                    "dT": ta - ts,
+                    "dObj": (ea + ta) - (es + ts),
                 }
             )
         print(f"  done cell k={k} f={f}: {len(rows)} rows so far", file=sys.stderr)
@@ -115,12 +121,22 @@ def main() -> int:
     print(f"mean dE   = {df['dE'].mean():+.1f}")
     print(f"mean dT   = {df['dT'].mean():+.1f}")
     print(f"mean dObj = {df['dObj'].mean():+.1f}")
-    print(f"instances with dE>0 (earliness up): {(df['dE']>0).sum()} / {len(df)}")
-    print(f"instances with dT>0 (tardiness up): {(df['dT']>0).sum()} / {len(df)}")
+    print(f"instances with dE>0 (earliness up): {(df['dE'] > 0).sum()} / {len(df)}")
+    print(f"instances with dT>0 (tardiness up): {(df['dT'] > 0).sum()} / {len(df)}")
 
     print("\n=== TOP 10 by earliness increase (dE) ===")
-    cols = ["k", "f", "name", "E_semi", "E_active", "dE",
-            "T_semi", "T_active", "dT", "dObj"]
+    cols = [
+        "k",
+        "f",
+        "name",
+        "E_semi",
+        "E_active",
+        "dE",
+        "T_semi",
+        "T_active",
+        "dT",
+        "dObj",
+    ]
     top = df.sort_values("dE", ascending=False).head(10)
     print(top[cols].to_string(index=False))
     return 0

@@ -94,13 +94,19 @@ def _cell_table(paired: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for (k, f), g in paired.groupby(["k", "f"]):
         win, tie, loss = _wtl(g["dRPDf"])
-        rows.append({
-            "k": k, "f": f, "n_paired": len(g),
-            "mean_dRPDf": g["dRPDf"].mean(),
-            "median_dRPDf": g["dRPDf"].median(),
-            "mean_dObj": g["dObj"].mean(),
-            "win": win, "tie": tie, "loss": loss,
-        })
+        rows.append(
+            {
+                "k": k,
+                "f": f,
+                "n_paired": len(g),
+                "mean_dRPDf": g["dRPDf"].mean(),
+                "median_dRPDf": g["dRPDf"].median(),
+                "mean_dObj": g["dObj"].mean(),
+                "win": win,
+                "tie": tie,
+                "loss": loss,
+            }
+        )
     return pd.DataFrame(rows).sort_values(["k", "f"]).reset_index(drop=True)
 
 
@@ -109,8 +115,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("run_dir", type=Path)
-    ap.add_argument("--out-dir", type=Path,
-                    default=Path("analysis/20260724_rounding_robust"))
+    ap.add_argument(
+        "--out-dir", type=Path, default=Path("analysis/20260724_rounding_robust")
+    )
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -118,11 +125,12 @@ def main() -> int:
 
     # --- block 1: coverage ---
     print("=" * 74)
-    print("BLOCK 1  coverage (instances per mode x k x f; expect "
-          f"{EXPECTED_PER_CELL}; K=1 only under 'cumulative')")
+    print(
+        "BLOCK 1  coverage (instances per mode x k x f; expect "
+        f"{EXPECTED_PER_CELL}; K=1 only under 'cumulative')"
+    )
     cov = df.groupby(["mode", "k", "f"]).size().rename("n").reset_index()
-    cov_p = cov.pivot_table(index=["mode", "k"], columns="f", values="n",
-                            fill_value=0)
+    cov_p = cov.pivot_table(index=["mode", "k"], columns="f", values="n", fill_value=0)
     print(cov_p.to_string())
     short = cov[cov["n"] < EXPECTED_PER_CELL]
     if len(short):
@@ -132,7 +140,7 @@ def main() -> int:
     # --- block 2: mean RPDf by mode x k x f ---
     print("\n" + "=" * 74)
     print("BLOCK 2  mean RPDf (pp; lower better). K=1 row is the shared baseline.")
-    mean_rpdf = (df.groupby(["k", "f", "mode"])["RPDf"].mean().unstack("mode"))
+    mean_rpdf = df.groupby(["k", "f", "mode"])["RPDf"].mean().unstack("mode")
     cols = [c for c in MODES if c in mean_rpdf.columns]
     mean_rpdf = mean_rpdf[cols]
     print(mean_rpdf.to_string(float_format=lambda v: f"{v:.3f}"))
@@ -140,12 +148,15 @@ def main() -> int:
 
     # --- block 3: PRIMARY -- coarsening penalty per mode (k>1 vs K=1) ---
     print("\n" + "=" * 74)
-    print("BLOCK 3  PRIMARY  coarsening penalty per mode  (dRPDf = k>1 - K=1; "
-          ">0 => coarsening hurts)")
+    print(
+        "BLOCK 3  PRIMARY  coarsening penalty per mode  (dRPDf = k>1 - K=1; "
+        ">0 => coarsening hurts)"
+    )
     per_mode_overall: dict[str, pd.DataFrame] = {}
     for mode in MODES:
-        paired = pd.concat([_pair_vs_k1(df, mode, k) for k in COARSE_K],
-                           ignore_index=True)
+        paired = pd.concat(
+            [_pair_vs_k1(df, mode, k) for k in COARSE_K], ignore_index=True
+        )
         if paired.empty:
             print(f"\n-- mode={mode}: no coarsened arms present, skipping")
             continue
@@ -159,22 +170,31 @@ def main() -> int:
             if g.empty:
                 continue
             w, t, ls = _wtl(g["dRPDf"])
-            print(f"   k={k}: mean dRPDf {g['dRPDf'].mean():+7.3f} pp | "
-                  f"mean dObj {g['dObj'].mean():+8.2f} | win/tie/loss {w}/{t}/{ls}")
+            print(
+                f"   k={k}: mean dRPDf {g['dRPDf'].mean():+7.3f} pp | "
+                f"mean dObj {g['dObj'].mean():+8.2f} | win/tie/loss {w}/{t}/{ls}"
+            )
 
     # --- block 4: headline roll-up -- mean dRPDf by mode x k (over all f) ---
     print("\n" + "=" * 74)
-    print("BLOCK 4  HEADLINE  mean dRPDf (pp) by mode x k  (cumulative col must "
-          "reproduce +27.33/+31.86/+34.78 for k=2/4/8)")
+    print(
+        "BLOCK 4  HEADLINE  mean dRPDf (pp) by mode x k  (cumulative col must "
+        "reproduce +27.33/+31.86/+34.78 for k=2/4/8)"
+    )
     roll_rows = []
     for mode, paired in per_mode_overall.items():
         for k in COARSE_K:
             g = paired[paired["k"] == k]
             if g.empty:
                 continue
-            roll_rows.append({"mode": mode, "k": k,
-                              "mean_dRPDf": g["dRPDf"].mean(),
-                              "mean_dObj": g["dObj"].mean()})
+            roll_rows.append(
+                {
+                    "mode": mode,
+                    "k": k,
+                    "mean_dRPDf": g["dRPDf"].mean(),
+                    "mean_dObj": g["dObj"].mean(),
+                }
+            )
     roll = pd.DataFrame(roll_rows)
     head = roll.pivot(index="k", columns="mode", values="mean_dRPDf")
     head = head[[m for m in MODES if m in head.columns]]
@@ -183,10 +203,11 @@ def main() -> int:
 
     # --- block 5: budget parity -- mean elapsedTime by mode x k x f ---
     print("\n" + "=" * 74)
-    print("BLOCK 5  budget parity  mean elapsedTime (s) by mode x k x f "
-          "(k-invariant within a mode+f => equal-budget comparison valid)")
-    et = (df.groupby(["mode", "f", "k"])["elapsedTime"].mean()
-          .unstack("k"))
+    print(
+        "BLOCK 5  budget parity  mean elapsedTime (s) by mode x k x f "
+        "(k-invariant within a mode+f => equal-budget comparison valid)"
+    )
+    et = df.groupby(["mode", "f", "k"])["elapsedTime"].mean().unstack("k")
     print(et.to_string(float_format=lambda v: f"{v:.2f}"))
 
     # --- block 6: verdict ---
@@ -211,8 +232,10 @@ def main() -> int:
         w, t, ls = _wtl(paired["dRPDf"])
         signal = "signal" if abs(mean_o) > NOISE_OBJ else f"<= noise {NOISE_OBJ:.0f}"
         verdict = "coarsening hurts" if _hurts(paired["dRPDf"]) else "DOES NOT hurt (!)"
-        print(f"  {mode:11s}: mean dRPDf {mean_d:+7.3f} pp | mean dObj "
-              f"{mean_o:+8.2f} ({signal}) | win/tie/loss {w}/{t}/{ls} | {verdict}")
+        print(
+            f"  {mode:11s}: mean dRPDf {mean_d:+7.3f} pp | mean dObj "
+            f"{mean_o:+8.2f} ({signal}) | win/tie/loss {w}/{t}/{ls} | {verdict}"
+        )
         for k in COARSE_K:
             g = paired[paired["k"] == k]
             if not g.empty and not _hurts(g["dRPDf"]):
@@ -220,14 +243,20 @@ def main() -> int:
 
     print()
     if not anomalies:
-        print("  => ROBUST: coarsening hurts in every (mode, k) cell; "
-              "'K=1 best' is rounding-invariant (H0 confirmed).")
+        print(
+            "  => ROBUST: coarsening hurts in every (mode, k) cell; "
+            "'K=1 best' is rounding-invariant (H0 confirmed)."
+        )
     else:
-        print("  => REFUTED: coarsening does NOT clearly hurt in these cells "
-              "(dRPDf<=0 or win/loss flipped) -- verdict is rounding-dependent:")
+        print(
+            "  => REFUTED: coarsening does NOT clearly hurt in these cells "
+            "(dRPDf<=0 or win/loss flipped) -- verdict is rounding-dependent:"
+        )
         for mode, k, md, (w, t, ls) in anomalies:
-            print(f"       {mode} k={k}: mean dRPDf {md:+.3f} pp | "
-                  f"win/tie/loss {w}/{t}/{ls}")
+            print(
+                f"       {mode} k={k}: mean dRPDf {md:+.3f} pp | "
+                f"win/tie/loss {w}/{t}/{ls}"
+            )
 
     print(f"\nwrote per-cell / roll-up CSVs to {args.out_dir}/")
     return 0

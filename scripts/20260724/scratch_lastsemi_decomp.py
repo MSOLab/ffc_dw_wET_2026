@@ -26,9 +26,11 @@ def load_instance(name: str):
         with open(BENCH / f"{name}.txt") as s:
             inst = FFcDDWParameters.from_pra_2017_data(name, s)
         _cache[name] = (
-            list(inst.job_id_list), inst.stage_id_list[-1],
+            list(inst.job_id_list),
+            inst.stage_id_list[-1],
             dict(inst.job_2_due_window_map),
-            dict(inst.job_2_ewt_map), dict(inst.job_2_twt_map),
+            dict(inst.job_2_ewt_map),
+            dict(inst.job_2_twt_map),
         )
     return _cache[name]
 
@@ -89,17 +91,34 @@ print(df[["obj_semi", "obj_active", "obj_lastsemi"]].mean().to_string())
 
 print("\n=== per-cell mean dObj (active-semi | lastsemi-semi) ===")
 g = df.groupby(["k", "f"]).apply(
-    lambda x: pd.Series({
-        "act-semi": (x.obj_active - x.obj_semi).mean(),
-        "last-semi": (x.obj_lastsemi - x.obj_semi).mean(),
-        "recovery%": 100 * (1 - (x.obj_lastsemi - x.obj_semi).sum()
-                            / max((x.obj_active - x.obj_semi).sum(), 1)),
-    }), include_groups=False)
+    lambda x: pd.Series(
+        {
+            "act-semi": (x.obj_active - x.obj_semi).mean(),
+            "last-semi": (x.obj_lastsemi - x.obj_semi).mean(),
+            "recovery%": 100
+            * (
+                1
+                - (x.obj_lastsemi - x.obj_semi).sum()
+                / max((x.obj_active - x.obj_semi).sum(), 1)
+            ),
+        }
+    ),
+    include_groups=False,
+)
 print(g.to_string(float_format=lambda v: f"{v:+.1f}"))
 
 print("\n=== the two headline instances (Rep3=1088, Rep4=1089) ===")
 h = df[df.name.str.contains("Rep3|Rep4")][
-    ["k", "f", "name", "E_semi", "E_active", "E_lastsemi",
-     "obj_semi", "obj_active", "obj_lastsemi"]
+    [
+        "k",
+        "f",
+        "name",
+        "E_semi",
+        "E_active",
+        "E_lastsemi",
+        "obj_semi",
+        "obj_active",
+        "obj_lastsemi",
+    ]
 ]
 print(h.to_string(index=False))

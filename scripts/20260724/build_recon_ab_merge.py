@@ -60,8 +60,11 @@ _DEPRECATED_STEP_KEYS = ("idle_mode",)
 def _scrub_deprecated(obj):
     """Recursively drop deprecated step kwargs from a scenario block."""
     if isinstance(obj, dict):
-        return {k: _scrub_deprecated(v) for k, v in obj.items()
-                if k not in _DEPRECATED_STEP_KEYS}
+        return {
+            k: _scrub_deprecated(v)
+            for k, v in obj.items()
+            if k not in _DEPRECATED_STEP_KEYS
+        }
     if isinstance(obj, list):
         return [_scrub_deprecated(v) for v in obj]
     return obj
@@ -95,7 +98,9 @@ def _relabel_prior(scenario: dict) -> dict:
     and scrubbing deprecated step kwargs."""
     out = _scrub_deprecated(scenario)
     out["name"] = scenario["name"] + PRIOR_SUFFIX
-    out["output_subdir"] = scenario.get("output_subdir", scenario["name"]) + PRIOR_SUFFIX
+    out["output_subdir"] = (
+        scenario.get("output_subdir", scenario["name"]) + PRIOR_SUFFIX
+    )
     return out
 
 
@@ -105,15 +110,26 @@ def main() -> int:
     )
     ap.add_argument("--cur-run", type=Path, required=True)
     ap.add_argument("--prior-run", type=Path, required=True)
-    ap.add_argument("--dest", type=Path, required=True,
-                    help="parent dir for the synthetic merged run")
+    ap.add_argument(
+        "--dest",
+        type=Path,
+        required=True,
+        help="parent dir for the synthetic merged run",
+    )
     ap.add_argument("--config-out", type=Path, required=True)
-    ap.add_argument("--merged-dir", type=Path, default=None,
-                    help="reuse an already-built merged run dir (skip symlinking)")
+    ap.add_argument(
+        "--merged-dir",
+        type=Path,
+        default=None,
+        help="reuse an already-built merged run dir (skip symlinking)",
+    )
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--intersect-instances", action="store_true",
-                    help="symlink only instances common to every scenario "
-                         "(defensive; both runs are the full 1440 grid)")
+    ap.add_argument(
+        "--intersect-instances",
+        action="store_true",
+        help="symlink only instances common to every scenario "
+        "(defensive; both runs are the full 1440 grid)",
+    )
     args = ap.parse_args()
 
     cur_cfg = _load(_find_config(args.cur_run))
@@ -151,8 +167,10 @@ def main() -> int:
         print(f"merged run dir: {merged_dir}")
 
     # --- write the POST_PROCESS_ONLY config ---
-    post_cfg: dict = {"run_mode": "POST_PROCESS_ONLY",
-                      "analysis_dir_path": str(merged_dir)}
+    post_cfg: dict = {
+        "run_mode": "POST_PROCESS_ONLY",
+        "analysis_dir_path": str(merged_dir),
+    }
     for key in _PASSTHROUGH_KEYS:
         if key in cur_cfg:
             post_cfg[key] = cur_cfg[key]
@@ -165,11 +183,15 @@ def main() -> int:
     with args.config_out.open("w") as fh:
         yaml.safe_dump(post_cfg, fh, sort_keys=False, default_flow_style=False)
     print(f"wrote POST_PROCESS_ONLY config: {args.config_out}")
-    print(f"  scenarios: {len(merged_scenarios)} "
-          f"({len(cur_names)} current + {len(prior_names)} prior)")
+    print(
+        f"  scenarios: {len(merged_scenarios)} "
+        f"({len(cur_names)} current + {len(prior_names)} prior)"
+    )
     if args.dry_run:
-        print("  (dry-run: set analysis_dir_path to the real merged dir before "
-              "running main.py)")
+        print(
+            "  (dry-run: set analysis_dir_path to the real merged dir before "
+            "running main.py)"
+        )
     return 0
 
 

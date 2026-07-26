@@ -67,8 +67,10 @@ def main() -> int:
     print(f"\nTOTALS over {n} instances:")
     for m in ("semi", "active"):
         e, t = tot[m]
-        print(f"  {m:6s}  sumE={e:>12,}  sumT={t:>12,}  obj={e + t:>12,}  "
-              f"E-share={e / (e + t) * 100:5.1f}%")
+        print(
+            f"  {m:6s}  sumE={e:>12,}  sumT={t:>12,}  obj={e + t:>12,}  "
+            f"E-share={e / (e + t) * 100:5.1f}%"
+        )
     return 0
 
 

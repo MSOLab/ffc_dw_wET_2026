@@ -73,10 +73,12 @@ def load(run_dir: Path) -> pd.DataFrame:
 
 
 def _overall(paired: pd.DataFrame, label: str) -> None:
-    print(f"\n  OVERALL {label}  mean dRPDf {paired['dRPDf'].mean():+.4f} pp | "
-          f"mean dObj {paired['dObj'].mean():+.2f} | "
-          f"win/tie/loss {'/'.join(map(str, _wtl(paired['dRPDf'])))} | "
-          f"n={len(paired)}")
+    print(
+        f"\n  OVERALL {label}  mean dRPDf {paired['dRPDf'].mean():+.4f} pp | "
+        f"mean dObj {paired['dObj'].mean():+.2f} | "
+        f"win/tie/loss {'/'.join(map(str, _wtl(paired['dRPDf'])))} | "
+        f"n={len(paired)}"
+    )
 
 
 def main() -> int:
@@ -84,8 +86,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("run_dir", type=Path)
-    ap.add_argument("--out-dir", type=Path,
-                    default=Path("analysis/20260724_lastsemi_3way"))
+    ap.add_argument(
+        "--out-dir", type=Path, default=Path("analysis/20260724_lastsemi_3way")
+    )
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -93,8 +96,7 @@ def main() -> int:
 
     # --- block 1: coverage ---
     print("=" * 70)
-    print("BLOCK 1  coverage (instances per k x f x mode; expect "
-          f"{EXPECTED_PER_CELL})")
+    print(f"BLOCK 1  coverage (instances per k x f x mode; expect {EXPECTED_PER_CELL})")
     cov = df.groupby(["k", "f", "mode"]).size().unstack("mode", fill_value=0)
     print(cov.to_string())
     short = cov[cov.lt(EXPECTED_PER_CELL).any(axis=1)]
@@ -113,8 +115,10 @@ def main() -> int:
 
     # --- block 3: PRIMARY lastsemi vs semi ---
     print("\n" + "=" * 70)
-    print("BLOCK 3  PRIMARY  lastsemi vs semi  (dRPDf = lastsemi - semi; "
-          "<0 => lastsemi better, ~0 => ties baseline)")
+    print(
+        "BLOCK 3  PRIMARY  lastsemi vs semi  (dRPDf = lastsemi - semi; "
+        "<0 => lastsemi better, ~0 => ties baseline)"
+    )
     ls = _pair(df, "lastsemi", "semi")
     ls_cells = _cell_table(ls, "lastsemi_vs_semi")
     print(_fmt(ls_cells))
@@ -123,8 +127,10 @@ def main() -> int:
 
     # --- block 4: RECOVERY lastsemi vs active ---
     print("\n" + "=" * 70)
-    print("BLOCK 4  RECOVERY  lastsemi vs active  (dRPDf = lastsemi - active; "
-          "<<0 => lastsemi recovers active's loss)")
+    print(
+        "BLOCK 4  RECOVERY  lastsemi vs active  (dRPDf = lastsemi - active; "
+        "<<0 => lastsemi recovers active's loss)"
+    )
     rec = _pair(df, "lastsemi", "active")
     rec_cells = _cell_table(rec, "lastsemi_vs_active")
     print(_fmt(rec_cells))
@@ -133,8 +139,10 @@ def main() -> int:
 
     # --- block 5: reference regression active vs semi ---
     print("\n" + "=" * 70)
-    print("BLOCK 5  reference  active vs semi  (dRPDf = active - semi; the known "
-          "regression)")
+    print(
+        "BLOCK 5  reference  active vs semi  (dRPDf = active - semi; the known "
+        "regression)"
+    )
     ab = _pair(df, "active", "semi")
     ab_cells = _cell_table(ab, "active_vs_semi")
     print(_fmt(ab_cells))
@@ -145,21 +153,21 @@ def main() -> int:
     print("\n" + "=" * 70)
     print("BLOCK 6  roll-ups of lastsemi-vs-semi mean dRPDf (pp)")
     print("  by kappa:")
-    print(ls.groupby("k")["dRPDf"].mean().to_string(
-        float_format=lambda v: f"{v:+.4f}"))
+    print(ls.groupby("k")["dRPDf"].mean().to_string(float_format=lambda v: f"{v:+.4f}"))
     print("  by f (TL %):")
-    print(ls.groupby("f")["dRPDf"].mean().to_string(
-        float_format=lambda v: f"{v:+.4f}"))
+    print(ls.groupby("f")["dRPDf"].mean().to_string(float_format=lambda v: f"{v:+.4f}"))
 
-    active_loss = ab["dRPDf"].mean()          # active - semi (>0, the regression)
-    residual = ls["dRPDf"].mean()             # lastsemi - semi (residual vs baseline)
+    active_loss = ab["dRPDf"].mean()  # active - semi (>0, the regression)
+    residual = ls["dRPDf"].mean()  # lastsemi - semi (residual vs baseline)
     print("\n  SUMMARY (mean pp vs semi baseline):")
     print(f"    active   regression : {active_loss:+.4f}")
     print(f"    lastsemi residual   : {residual:+.4f}")
     if abs(active_loss) > 1e-9:
         recovered = (1.0 - residual / active_loss) * 100.0
-        print(f"    => lastsemi recovers {recovered:.1f}% of active's loss "
-              "(100% = back to semi; >100% = beats semi)")
+        print(
+            f"    => lastsemi recovers {recovered:.1f}% of active's loss "
+            "(100% = back to semi; >100% = beats semi)"
+        )
 
     print(f"\nwrote per-cell CSVs to {args.out_dir}/")
     return 0
