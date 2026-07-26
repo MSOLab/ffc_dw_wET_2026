@@ -666,6 +666,56 @@ uv run python scripts/20260725/analyze_csr_winner_source.py \
 
 ---
 
+### 20260726/analyze_crossover_ladder.py
+
+Answers **"is there a budget f at which coarsening (K>1) beats K=1?"** — the
+objective half of the sub-5 % crossover analysis, whose depth half is
+`20260725/analyze_csr_winner_source.py`.
+
+Reads the run's `<ts>_rpdf_comparison.csv`, parses `{arm}_k{K}[_{mode}][_f{NN}]`
+scenario names, and pairs every coarsened scenario against **its own arm's and
+own f's K=1 baseline** by `insIndex`, so a positive dRPDf always means coarsening
+hurt. Four arms isolate the two channels: `a` (dispatch-only) and `b` (mcf_lb
+only) carry resolution loss alone, `c` adds an equal-budget flip CP, `m1` runs
+the full inner `solve_flow` and carries both channels.
+
+**Two things it emits that a hand-rolled pivot tends to miss.**
+
+1. **Fixed-mode and best-over-mode are kept separate.** The 20260724
+   rounding-robustness ladder is quoted in `cumulative`; splicing a
+   best-over-mode number onto it makes part of the resulting jump a mode
+   artifact. `m1_ladder.csv` carries all four modes so a document never has to
+   splice.
+2. **The feasibility asymmetry is counted, not dropped.** A scenario that
+   registers no incumbent has a NaN RPDf and vanishes from the paired
+   comparison — silently, and precisely on the instances where one side has
+   nothing to compare. `coarse_only_feasible` / `k1_only_feasible` count those,
+   and a console block lists every scenario whose `n_paired` fell short.
+
+**File output** (`--outdir`, default `analysis/<run_id>_crossover_ladder/`):
+
+- `drpdf_by_mode_k.csv` — one row per (arm, f, k, mode): dRPDf, win/tie/loss,
+  `n_paired`, and the two feasibility-only counts
+- `arm_summary.csv` — per (arm, f, k) the best mode and the K=1 RPDf
+- `m1_ladder.csv` — k=2 dRPDf vs f, per mode (the crossover ladder itself)
+- `elapsed_by_scenario.csv` — mean elapsed on the (n=200, c=10) slice
+
+```bash
+uv run python scripts/20260726/analyze_crossover_ladder.py \
+    output/20260725_crossover_ladder/20260726T002619_971440
+```
+
+> Conclusion (`plans/analysis/20260726/coarsening_short_budget_crossover.md`):
+> **no objective crossover** — all 200 (arm, f, k, mode) combinations have
+> dRPDf > 0 and win < loss, even at f=1 %. **But there is a feasibility
+> crossover**: at f=1 % the `m1` K=1 baseline registers no incumbent at all on
+> 20/160 instances (the (n=150,c=5) and (n=200,c=5) cells, where the
+> `0.0009·f·n·c` budget is smallest), while K≥4 solves all 20. Those 20 drop out
+> of the paired tables, so the f=1 % dRPDf row is a 140-instance mean **biased in
+> K=1's favour**. Quote that alongside the headline.
+
+---
+
 ## 5. Experiment Config Validation
 
 ### validate_resume_config.py
