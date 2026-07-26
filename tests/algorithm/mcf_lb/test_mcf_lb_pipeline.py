@@ -464,6 +464,81 @@ def test_last_stage_rebuild_config_best_picks_smaller_pre_unflip_makespan() -> N
     _assert_last_stage_durations_feasible(best.r2_build_full.schedule, instance)
 
 
+def test_round2_stop_guard_preserves_r1_result() -> None:
+    """When stop_predicate fires at a round-2 checkpoint (composite-level
+    stop gates), r2 is skipped with reason ``stop_guard`` but the r1
+    best_schedule and best_obj are preserved. Both r2 stop-gate positions
+    (before and after makespan_delta computation) are tested.
+    """
+    instance = _make_multi_stage_instance()
+    common_kw = dict(
+        adjust_p=True,
+        proceed_r2_when_nonpositive_cmax=True,
+    )
+
+    call_count = 0
+
+    def predicate_2nd() -> bool:
+        nonlocal call_count
+        call_count += 1
+        return call_count >= 2
+
+    result = calc_mcf_lb_and_derive_full_sch(
+        instance, stop_predicate=predicate_2nd, **common_kw
+    )
+    assert result.r1_build_full is not None
+    assert result.best_schedule is result.r1_build_full.schedule
+    assert result.r2_ran is False
+    assert result.r2_skip_reason == "stop_guard"
+
+    call_count = 0
+
+    def predicate_3rd() -> bool:
+        nonlocal call_count
+        call_count += 1
+        return call_count >= 3
+
+    result = calc_mcf_lb_and_derive_full_sch(
+        instance, stop_predicate=predicate_3rd, **common_kw
+    )
+    assert result.r1_build_full is not None
+    assert result.best_schedule is result.r1_build_full.schedule
+    assert result.r2_ran is False
+    assert result.r2_skip_reason == "stop_guard"
+
+
+def test_stop_after_r1_entry_still_produces_full_schedule() -> None:
+    """Once round 1 passes its entry gate it must produce a full schedule,
+    however soon the stop_predicate starts firing afterwards.
+
+    This is the invariant the atomic-round-1 policy promises: the entry gate
+    is the only place round 1 may decline to start, so passing it obliges the
+    pipeline to run through to ``build_full``.
+
+    The predicate lets exactly the first call through — the entry gate — and
+    fires on every call after it. That is deliberately independent of how many
+    gates exist downstream: adding or removing one cannot silently retarget the
+    test. Under the pre-fix code the very next check was r1's gate 2, which
+    discarded the already-computed MCF result and returned
+    ``build_full is None`` (the Red case).
+    """
+    instance = _make_multi_stage_instance()
+
+    call_count = 0
+
+    def predicate() -> bool:
+        nonlocal call_count
+        call_count += 1
+        return call_count > 1
+
+    result = calc_mcf_lb_and_derive_full_sch(instance, stop_predicate=predicate)
+
+    assert result.r1_build_full is not None, "r1_build_full must not be None"
+    assert result.r1_build_full.schedule is not None, "r1 schedule must not be None"
+    assert result.best_schedule is not None, "best_schedule must not be None"
+    assert result.best_obj is not None, "best_obj must not be None"
+
+
 def test_single_stage_both_configs_stay_feasible() -> None:
     """Single-stage instances skip reverse-dispatch's ``make_semi_active``,
     but both ``"original_pr"`` (original-p generation) and ``"increased_pr"``

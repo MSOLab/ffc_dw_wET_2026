@@ -213,9 +213,14 @@ def calc_mcf_lb_r1_and_derive_full_sch(
 
     Pipeline: ``apply_lb_by_mcf`` → ``heuristic_last_stage_only_from_mcf_lb``
     → ``build_full_sch_from_last_stage_only_sch`` (with
-    ``rebuild_last_stage_with_original_p=False``). Stop checks fire
-    between every substep; ``MCFLBStopRequested`` from the LP layer is
-    treated as a clean stop too.
+    ``rebuild_last_stage_with_original_p=False``).
+
+    Round 1 is **atomic** once started: a ``stop_predicate`` check fires only
+    at the entry gate; if it passes, the full pipeline runs to completion.
+    There is no mechanism to interrupt the MCF LP mid-solve, so mid-round
+    stop checks would only discard already-computed work — this policy
+    guarantees ``r1_build_full is not None`` whenever the entry gate is
+    passed.
 
     ``time_factor`` (CSR coarse-grid scale, ``>= 1``) is threaded into the
     heuristic and full-schedule builders so every schedule is positioned and
@@ -253,22 +258,16 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     if _stop_check():
         return _build(stop_reason="stop_guard")
 
-    try:
-        apply = apply_lb_by_mcf(
-            instance,
-            draw_heatmap=draw_pmtn_sch_heatmap,
-            heatmap_sort=heatmap_sort,
-            heatmap_yaml_path=heatmap_yaml_path,
-            stop_predicate=stop_predicate,
-            logger=logger,
-        )
-    except MCFLBStopRequested:
-        return _build(stop_reason="stop_guard")
+    apply = apply_lb_by_mcf(
+        instance,
+        draw_heatmap=draw_pmtn_sch_heatmap,
+        heatmap_sort=heatmap_sort,
+        heatmap_yaml_path=heatmap_yaml_path,
+        stop_predicate=None,
+        logger=logger,
+    )
 
     phase_schedules.append(("1_mcf_preemptive", apply.mcf_preemptive_schedule))
-
-    if _stop_check():
-        return _build(stop_reason="stop_guard", apply=apply)
 
     heuristic = heuristic_last_stage_only_from_mcf_lb(
         instance,
@@ -283,9 +282,6 @@ def calc_mcf_lb_r1_and_derive_full_sch(
     phase_schedules.append(
         ("3_lastS_only_from_mcf_lb_after_sa_iti", heuristic.schedule)
     )
-
-    if _stop_check():
-        return _build(stop_reason="stop_guard", apply=apply, heuristic=heuristic)
 
     build_full = build_full_sch_from_last_stage_only_sch(
         instance,
