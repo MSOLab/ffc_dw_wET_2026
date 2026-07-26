@@ -48,6 +48,7 @@ f=35 %, 40 %가 없어 **게이트를 판정할 수 없다.**
 | `b971761` | `idle_mode` 제거, 항상 lookahead | 옛 config는 `idle_mode: "lookahead"`를 명시했으므로 **동작은 동일**하나 `d442ac0`이 그 키를 **거부**한다 → 옛 config 그대로 재실행 불가 |
 | `5a68a8a` | `fix(ffc-schedule)`: τ==1에서 Pan flooring 복원 | **τ=1 경로를 직접 건드림** |
 | `adb8e60` | mcf_lb 라운드 1 원자화 | 짧은 예산에서 해가 나오는지가 달라짐 |
+| `2c7ef28` | CSR inner 점 note 라벨링(`.inner-NN-<source>`) + τ=1 obj_bound 방출 | **solve-time 기록**이라 후처리로 못 만든다. 옛 런의 obj_log에는 CSR 호출당 note가 `1-coarsen_solve_reconstruct` 하나뿐이고 `obj_bound.data`는 비어 있음 → §3 2급 3번(내부 단계 궤적)과 τ=1 LB를 **재실행 없이는 얻을 수 없음** |
 
 → **f ∈ {5,10,15,20,25,30,35,40} 8점을 한 런에서 새로 측정한다.** 단일 코드·단일
 머신 곡선이 되어 게이트 판정과 곡선 형태 판독이 동시에 가능해진다.
@@ -87,7 +88,7 @@ c5_init_only                                1   mcf_lb → flip → neh_cp (tail
 
 **outer**: `timelimit: "0.09nc"` (모든 시나리오 공통, CSR/C5 예산이 먼저 binding).
 
-**설계 고정값**: `factor: 1` (mode 무관 — 항등), `seed_dispatch: v4`,
+**설계 고정값**: `factor: 1` (mode 무관 — 항등),
 `reconstruct_mode`는 τ=1에서 무의미하나 명시적으로 `active_but_last_semi` 고정.
 
 ```bash
