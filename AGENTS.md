@@ -83,50 +83,12 @@ tolerance). Notes:
 
 ### PRA2017 instance parameters (generation grid & mapping source)
 
-When grouping/filtering results by instance-generation parameters (T, R, n, c,
-machine count, W), the **authoritative per-instance source is
-`benchmarks/PRA2017/pra2017_bks_table.csv`** — one row per `insIndex`
-(`0000`–`1439`, zero-padded 4-digit string). Columns:
-
-`insIndex, n, c, totalMcCount, T, R, W, BKS_data, BKS_calc, BKS_T, BKS_F`.
-
-Parameter meanings and the **full generation grid** (1440 = all combinations ×
-5 replicates; each `(n, c, totalMcCount)` cell has exactly 90 instances):
-
-| Param | Meaning | Values |
-|-------|---------|--------|
-| `n` | job count | 50, 100, 150, 200 |
-| `c` | stage count | 5, 10 |
-| `totalMcCount` | total machine count = `c × machines-per-stage` | 15, 25, 30, 50 |
-| `T` | tardiness factor (due-date tightness) | 0.2, 0.4, 0.6 |
-| `R` | due-date range factor | 0.2, 0.6, 1.0 |
-| `W` | weight range | 10, 20 |
-| (Rep) | replicate id, not a column — see filename | 0–4 |
-
-- **machines-per-stage is uniform** and ∈ {3, 5}: `totalMcCount = c × mps`
-  (so `c=5`→{15,25}, `c=10`→{30,50}). It is **not** a `bks_table` column; read
-  it from `totalMcCount / c` or the filename.
-- **Filename encoding** (via `pra2017_hybrid_match.csv`, `insIndex →
-  ffc_ddw_sum_et_filename`): `Instance_{n}_{c}_{mps}_{T}_{R}_{W}_Rep{k}.txt`,
-  e.g. `Instance_50_5_3_0,2_0,2_10_Rep0.txt`. **Decimals use a comma**
-  (`0,2` = 0.2). Verified: all 1440 filenames' decoded fields match
-  `bks_table` exactly.
-- **BKS variants** (all "best known solution" objective values):
-  - `BKS_T`: objective with `force_job_id_seq=True` (preserves best_seq order)
-  - `BKS_F`: objective with `force_job_id_seq=False` (FAM reordering)
-  - `BKS_calc`: `min(BKS_T, BKS_F)`
-  - `BKS_data`: the paper/data reference BKS — **this is the RPDf denominator**
-    used by report tooling (`RPDf_BKS_data`).
-  - See `benchmarks/PRA2017/README.md` for how the table is generated.
-- **How reports attach these**: `orchestration/post_run_pivot.py` merges each
-  run's `instanceName` → `insIndex` (via `pra2017_hybrid_match.csv`) →
-  `bks_table` metadata, emitting `<run>_rpdf_comparison.csv` with columns
-  `insIndex, scenarioName, n, c, totalMcCount, T, R, W, BKS_data, bestObj,
-  RPDf_BKS_data, elapsedTime, timelimit, time%`. **This CSV is the ready-made
-  source for any (T, R, size)-grouped RPDf comparison** — no need to re-join.
-- **RPDf is symmetric** (`ffc_ddw_sum_et._calc.rpd_f`):
-  `2·(obj − ref)/(obj + ref)`, **not** the classic `(obj − ref)/ref`. Range
-  (−2, 2); `obj == ref == 0 → 0`.
+The generation grid (T, R, n, c, machine count, W), the `insIndex` ↔ filename
+encoding, the BKS variants, and the symmetric RPDf definition live in the
+`pra2017-instance-params` skill
+(`.claude/skills/pra2017-instance-params/SKILL.md`). Read it before grouping,
+filtering, or slicing results by instance parameters, or before interpreting an
+RPDf number.
 
 ## Working Agreement
 
@@ -164,39 +126,11 @@ Parameter meanings and the **full generation grid** (1440 = all combinations ×
 
 ### Subroutine step contract (controller.py)
 
-Each step method on `FFcDDWSubroutineController` must follow these two
-invariants. They are load-bearing for the per-instance `_obj_log.json`
-aggregator (`_save_obj_log` in `ffcddw_single_instance_runner.py`), which
-re-bases each step's algorithm-frame trajectory onto the controller clock
-using `start_time = self.timer.elapsed_sec - report.elapsed_time`.
-
-1. **At most one register per step call.** A step body either calls
-   `self._register(report, sol, ...)` exactly once before returning, or
-   returns a stop-report from `_make_stop_report` without registering.
-Composite steps (e.g. `calc_mcf_lb_and_derive_full_sch`) delegate to
-    a pure algorithm pipeline function and call `self._register` exactly
-    once with the synthesized final report. Multiple registers per call would make
-   `solution_manager.history` ambiguous about which trajectory belongs to
-   which step.
-
-2. **`elapsed_time` is measured `monotonic()` from step entry to
-   `_register` call, with no work in between.** Pattern:
-
-   ```python
-   def my_step(self, ...):
-       start_elapsed = time.monotonic()
-       ...                                        # all the actual work
-       elapsed = time.monotonic() - start_elapsed # measure here
-       report = SubroutineReport(elapsed_time=elapsed, ...)
-       self._register(report, sol, ...)           # immediately
-       return report
-   ```
-
-   Wedging non-trivial work between `elapsed = ...` and `_register`
-   skews the derived `start_time` and shifts the step's obj_log
-   timestamps. If a step needs post-work that should not count toward
-   the trajectory, do it after `_register` (the controller has already
-   captured the trajectory at that point).
+The two invariants every `FFcDDWSubroutineController` step method must follow
+(at most one `_register` per call; `elapsed_time` measured with no work between
+the measurement and the `_register`) live in
+`src/ffc_ddw_sum_et/orchestration/AGENTS.md`, which loads when working in that
+package. Read it before adding or editing a step method.
 
 ## Deferred Design Notes
 
