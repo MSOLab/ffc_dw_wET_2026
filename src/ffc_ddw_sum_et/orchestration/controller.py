@@ -3061,7 +3061,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         call_context = self._get_call_context_of_current_method()
         progress_log_entries: list[ProgressLogEntry] = []
         running_min_obj: float | None = None
-        entry_idx = 0
         for row in candidate_rows:
             rst = row["restored_obj"]
             if rst is None:
@@ -3076,7 +3075,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 obj_bound_val = float(row["coarse_bound"])
             src = str(row["source"])
             if src != "unknown":
-                note_val = f"{call_context}.inner-{entry_idx:02d}-{src}"
+                note_val = f"{call_context}-{src}"
             progress_log_entries.append(
                 ProgressLogEntry(
                     elapsed_sec=elapsed_sec,
@@ -3085,7 +3084,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     note=note_val,
                 )
             )
-            entry_idx += 1
         progress_log = tuple(progress_log_entries)
 
         # --- compute best child LB at factor==1 (original-scale valid) ---

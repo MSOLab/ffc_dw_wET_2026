@@ -237,3 +237,147 @@ def test_batch_inner_mixed_regression() -> None:
     assert inner_count == 2, f"expected 2 inner points, got {inner_count}"
     regular_count = sum(1 for p in points if not p["is_inner"])
     assert regular_count == 3, f"expected 3 regular points, got {regular_count}"
+
+
+# ---------------------------------------------------------------------------
+# CSR inner labels without a candidate-row index
+# ---------------------------------------------------------------------------
+
+
+def test_index_free_inner_labels_are_recognised_as_inner() -> None:
+    """Given CSR inner labels in the index-free format
+    ``coarsen_solve_reconstruct-<child step label>``,
+    When the method-mean points are built,
+    Then they are still flagged is_inner (cross marker)."""
+    progs = [
+        _progression(
+            "Inst1",
+            [
+                _seg(1, "calc_mcf_lb_and_derive_full_sch", 1.0, 100.0),
+                _seg(2, "coarsen_solve_reconstruct-1-calc_mcf_lb", 1.5, 95.0),
+                _seg(2, "coarsen_solve_reconstruct-3-neh_cp", 2.0, 90.0),
+                _seg(2, "coarsen_solve_reconstruct", 2.5, 90.0),
+                _seg(3, "solve_base_model_cpsat", 5.0, 80.0),
+            ],
+        )
+    ]
+    points = load_method_mean_metrics(progs, {"Inst1": 50.0})
+    by_label = {p["label"]: p for p in points}
+
+    assert by_label["coarsen_solve_reconstruct-1-calc_mcf_lb"]["is_inner"]
+    assert by_label["coarsen_solve_reconstruct-3-neh_cp"]["is_inner"]
+    # The CSR step's own endpoint is not an inner point.
+    assert not by_label["coarsen_solve_reconstruct"]["is_inner"]
+    assert not by_label["solve_base_model_cpsat"]["is_inner"]
+
+
+def test_repeated_inner_label_merges_into_one_inner_point() -> None:
+    """Given the same CSR child step contributing several candidate rows,
+    When the method-mean points are built,
+    Then it yields exactly one marker — not one per row.
+
+    The pre-fix labels carried the candidate-row index
+    (``.inner-04-``/``.inner-05-``), so one child step scattered into several
+    markers and the connecting line zig-zagged between them.
+    """
+    progs = [
+        _progression(
+            "Inst1",
+            [
+                _seg(1, "neh_cp", 1.0, 100.0),
+                _seg(2, "coarsen_solve_reconstruct-2-neh_cp", 2.0, 95.0),
+                _seg(2, "coarsen_solve_reconstruct-2-neh_cp", 3.0, 90.0),
+                _seg(2, "coarsen_solve_reconstruct-2-neh_cp", 4.0, 88.0),
+            ],
+        )
+    ]
+    points = load_method_mean_metrics(progs, {"Inst1": 50.0})
+
+    inner = [p for p in points if p["label"].startswith("coarsen_solve_reconstruct-")]
+    assert len(inner) == 1, f"expected 1 merged inner point, got {len(inner)}"
+    assert inner[0]["is_inner"]
+
+
+def test_compound_step_endpoint_comes_after_its_inner_points() -> None:
+    """Given instances that ran a different number of CSR inner batches
+    before the compound step's own endpoint,
+    When the method-mean points are built,
+    Then the compound step's endpoint is emitted after every inner point.
+
+    Step order was first appearance across the concatenated per-instance
+    endpoint rows. With heterogeneous step sets that is not self-consistent:
+    the short instance contributed the CSR parent endpoint before the long
+    instance contributed its extra batches, so the parent — which sits at the
+    largest time — got stranded mid-sequence and the connecting line doubled
+    back to it.
+    """
+    short = _progression(
+        "InstShort",
+        [
+            _seg(1, "neh_cp", 1.0, 100.0),
+            _seg(
+                2,
+                "coarsen_solve_reconstruct-4-incremental_sw_cp.1-batch_002",
+                2.0,
+                95.0,
+            ),
+            _seg(
+                2,
+                "coarsen_solve_reconstruct-4-incremental_sw_cp.2-batch_003",
+                3.0,
+                92.0,
+            ),
+            _seg(2, "coarsen_solve_reconstruct", 4.0, 91.0),
+        ],
+    )
+    long = _progression(
+        "InstLong",
+        [
+            _seg(1, "neh_cp", 1.0, 110.0),
+            _seg(
+                2,
+                "coarsen_solve_reconstruct-4-incremental_sw_cp.1-batch_002",
+                2.0,
+                104.0,
+            ),
+            _seg(
+                2,
+                "coarsen_solve_reconstruct-4-incremental_sw_cp.2-batch_003",
+                3.0,
+                101.0,
+            ),
+            _seg(
+                2,
+                "coarsen_solve_reconstruct-4-incremental_sw_cp.3-batch_004",
+                4.0,
+                99.0,
+            ),
+            _seg(
+                2,
+                "coarsen_solve_reconstruct-4-incremental_sw_cp.4-batch_005",
+                5.0,
+                98.0,
+            ),
+            _seg(2, "coarsen_solve_reconstruct", 6.0, 97.0),
+        ],
+    )
+    baseline = {"InstShort": 50.0, "InstLong": 55.0}
+
+    points = load_method_mean_metrics([short, long], baseline)
+
+    labels = [p["label"] for p in points]
+    assert labels == [
+        "neh_cp",
+        "coarsen_solve_reconstruct-4-incremental_sw_cp.1-batch_002",
+        "coarsen_solve_reconstruct-4-incremental_sw_cp.2-batch_003",
+        "coarsen_solve_reconstruct-4-incremental_sw_cp.3-batch_004",
+        "coarsen_solve_reconstruct-4-incremental_sw_cp.4-batch_005",
+        "coarsen_solve_reconstruct",
+    ]
+    # The parent endpoint is the last point of that step, so the line reaches
+    # it going forwards in time.
+    times = [p["mean_time_pct"] for p in points]
+    assert times == sorted(times), (
+        "connecting line runs backwards; order was "
+        + ", ".join(f"{p['label']}@{p['mean_time_pct']:.3f}" for p in points)
+    )

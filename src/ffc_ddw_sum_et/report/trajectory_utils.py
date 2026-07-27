@@ -45,11 +45,14 @@ def build_best_so_far_progression_points(grp: pd.DataFrame) -> list[ProgressionP
         return []
     x_values = grp["norm_time"].tolist()
     best_y = _compute_best_so_far_y_values(grp["rpd_f"].tolist())
-    points = [
+    points: list[ProgressionPoint] = [
         ProgressionPoint(time=float(x), rpd_f=float(y))
         for x, y in zip(x_values, best_y)
     ]
-    return _dedupe_progression_points(points)
+    points = _dedupe_progression_points(points)
+    if points and points[0].time > 0.0:
+        points.insert(0, ProgressionPoint(time=0.0, rpd_f=points[0].rpd_f))
+    return points
 
 
 def keep_strict_global_improvements_or_endpoints(

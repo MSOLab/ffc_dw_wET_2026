@@ -649,6 +649,51 @@ def test_solve_flow_progress_log_non_increasing_obj_values() -> None:
         )
 
 
+def test_progress_log_note_is_pure_function_of_child_step_label() -> None:
+    """Given a CSR child flow whose registrations become candidate rows,
+    When the progress_log notes are built,
+    Then each note is exactly ``<call_context>-<child step_label>``.
+
+    The note must carry no candidate-row index: it is the step key the
+    run-level scatter groups markers by, so the same child step has to yield
+    the same label no matter how many rows precede it (in this instance or
+    any other). The pre-fix format ``<ctx>.inner-<NN>-<step_label>`` made the
+    label positional, scattering one child step across several markers.
+    """
+    controller = _make_controller(timelimit=60.0)
+
+    register_kwargs: list[dict] = []
+    original_register = controller._register
+
+    def spy_register(report, solution, **kwargs):
+        register_kwargs.append(kwargs)
+        return original_register(report, solution, **kwargs)
+
+    controller._register = spy_register  # type: ignore[method-assign]
+
+    controller.coarsen_solve_reconstruct(
+        factor=2,
+        timelimit=30.0,
+        solve_flow=_FULL_FIVE_STEP_FLOW,
+    )
+
+    progress_log = register_kwargs[0].get("progress_log", ())
+    notes = [e.note for e in progress_log if e.note is not None]
+    assert notes, "expected at least one labelled progress_log entry"
+
+    child_labels = {
+        rec.report.step_label
+        for rec in controller.csr_child_history
+        if rec.solution is not None and rec.solution.schedule is not None
+    }
+    allowed = {f"ROOT-{label}" for label in child_labels}
+    assert set(notes) <= allowed, (
+        f"notes must be '<call_context>-<child step_label>'; got {sorted(set(notes))}, "
+        f"allowed {sorted(allowed)}"
+    )
+    assert len(notes) == len(set(notes)), f"duplicate notes emitted: {notes}"
+
+
 # ---------------------------------------------------------------------------
 # CSR coarse-scale inner obj_log (§8 TDD)
 # ---------------------------------------------------------------------------
@@ -943,14 +988,18 @@ def test_solve_flow_progress_log_has_notes_at_factor_1() -> None:
     assert len(notes_present) > 0, "at least one progress_log entry must have a note"
 
     # In a flow-run, call_context is e.g. "1-coarsen_solve_reconstruct";
-    # direct calls yield "ROOT". Either way, the note must end with
-    # ".inner-<k:02d>-<source>" and the loader regex `^\d+-(.+)$`
-    # must parse it when the call_context has the right form.
-    inner_pattern = re.compile(r"\.inner-\d{2}-")
+    # direct calls yield "ROOT". Either way, the note is
+    # "<call_context>-<child step_label>", and the child step_label carries
+    # routix's own "<idx>-" call index — so the loader regex `^\d+-(.+)$`
+    # parses it when the call_context has the right form.
+    inner_pattern = re.compile(r"-\d+-")
     for entry in progress_log:
         if entry.note is not None:
             assert inner_pattern.search(entry.note) is not None, (
-                f"note must contain '.inner-NN-': {entry.note!r}"
+                f"note must end with '-<child step_label>': {entry.note!r}"
+            )
+            assert ".inner-" not in entry.note, (
+                f"note must not carry a candidate-row index: {entry.note!r}"
             )
 
 
@@ -977,15 +1026,20 @@ def test_solve_flow_progress_log_notes_in_obj_log() -> None:
         parent_history, value_data, value_notes, bound_data, bound_notes
     )
 
-    inner_notes = [v for v in value_notes.values() if ".inner-" in v]
+    # An inner note is "<call_context>-<child step_label>"; the parent's own
+    # endpoint note is the bare call_context ("ROOT" for a direct call).
+    def _is_inner(note: str) -> bool:
+        return note != "ROOT" and note.startswith("ROOT-")
+
+    inner_notes = [v for v in value_notes.values() if _is_inner(v)]
     assert len(inner_notes) > 0, (
-        f"parent obj_log value_notes must contain .inner- notes; "
+        f"parent obj_log value_notes must contain CSR inner notes; "
         f"got {list(value_notes.values())}"
     )
-    # bound_notes also carry inner- notes when entries have obj_bound.
-    inner_bound_notes = [v for v in bound_notes.values() if ".inner-" in v]
+    # bound_notes also carry inner notes when entries have obj_bound.
+    inner_bound_notes = [v for v in bound_notes.values() if _is_inner(v)]
     assert len(inner_bound_notes) > 0, (
-        "parent obj_log bound_notes must contain .inner- notes for MCF-LB entry"
+        "parent obj_log bound_notes must contain CSR inner notes for MCF-LB entry"
     )
 
 

@@ -19,6 +19,44 @@ _POSITIVE_AXIS_PADDING = 1.05
 _MIN_NORMALIZED_TIME_X_UPPER = 1.0
 
 
+def _is_compound_method_inner(full_name: str) -> bool:
+    """Detect CSR inner progress points in the post-contract format
+    ``coarsen_solve_reconstruct-<digit>-<child_step>``.
+    """
+    return full_name.startswith("coarsen_solve_reconstruct-")
+
+
+def _order_parents_after_children(
+    step_labels: dict[int, tuple[str, str]],
+) -> list[int]:
+    """Emission order for the step ids in ``step_labels``.
+
+    Base order is first appearance across the endpoint rows (controller
+    order). That is only self-consistent when every instance ran the same
+    steps: a compound step (``coarsen_solve_reconstruct``) registers its own
+    endpoint *after* its inner points, so an instance with few inner points
+    contributes the parent label before a longer instance contributes the
+    remaining inner ones — leaving the parent, which sits at the largest
+    time, stranded mid-sequence with the connecting line doubling back to it.
+
+    A label ``P`` is the parent of ``P-<child>`` / ``P.<child>``, so pull each
+    such ``P`` to just after its last child.
+    """
+    first_seen = {name: idx for idx, (_, name) in step_labels.items()}
+
+    def sort_key(idx: int) -> tuple[float, int]:
+        name = step_labels[idx][1]
+        child_ids = [
+            other_idx
+            for other_name, other_idx in first_seen.items()
+            if other_name != name
+            and (other_name.startswith(f"{name}-") or other_name.startswith(f"{name}."))
+        ]
+        return (max(child_ids) + 0.5, idx) if child_ids else (float(idx), idx)
+
+    return sorted(step_labels, key=sort_key)
+
+
 def _build_timelimit_map(
     progressions: list[InstanceProgression],
 ) -> dict[str, float]:
@@ -86,8 +124,9 @@ def load_method_mean_metrics(
         ``method`` is the base name (pre-``.``) used for the marker
         symbol/colour; ``label`` is the full ``subroutine_name`` (carrying the
         batch suffix) shown in the hover. ``is_inner`` is ``True`` when the
-        full label contains ``".inner-"`` (CSR inner progress points that should
-        get a cross marker regardless of the base method's symbol map entry).
+        full label matches ``".inner-"`` or ``"coarsen_solve_reconstruct-"``
+        (CSR inner progress points that should get a cross marker regardless of
+        the base method's symbol map entry).
         ``mean_time_pct`` is
         ``global_end_sec / timelimit_sec`` in ``[0, 1]``; ``mean_rpdf`` is the
         mean of ``rpd_f(obj, ref) = 2*(obj-ref)/(obj+ref)``;
@@ -107,9 +146,10 @@ def load_method_mean_metrics(
     # incremental_sw_cp batch (``incremental_sw_cp.<n>-batch_<id>``) as its
     # own point instead of collapsing the whole call_index into a single
     # marker. Order = first appearance across the endpoint frame (controller
-    # order), matching the flow-comparison guide markers. The display
-    # ``method`` is the base name (pre-``.``) so all batches share one
-    # symbol/colour; ``label`` carries the full name for the hover.
+    # order), matching the flow-comparison guide markers, then adjusted by
+    # ``_order_parents_after_children``. The display ``method`` is the base
+    # name (pre-``.``) so all batches share one symbol/colour; ``label``
+    # carries the full name for the hover.
     step_order = {
         name: idx
         for idx, name in enumerate(
@@ -167,7 +207,7 @@ def load_method_mean_metrics(
         for order_idx, base_name, full_name, _, _, _ in steps:
             if order_idx not in step_labels:
                 step_labels[order_idx] = (base_name, full_name)
-    sorted_order = sorted(step_labels)
+    sorted_order = _order_parents_after_children(step_labels)
 
     # Per-instance last observed (time_pct, rpdf, obj) — carry-forward source.
     prev_state_by_instance: dict[str, tuple[float, float, float]] = {}
@@ -176,7 +216,7 @@ def load_method_mean_metrics(
     candidates: list[dict[str, Any]] = []
     for order_idx in sorted_order:
         base_name, full_name = step_labels[order_idx]
-        is_inner = ".inner-" in full_name
+        is_inner = ".inner-" in full_name or _is_compound_method_inner(full_name)
         reached: list[tuple[str, float, float, float]] = []
         improves = False
         for ins_id, steps in instance_data.items():
