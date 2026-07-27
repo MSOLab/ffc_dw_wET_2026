@@ -8,7 +8,13 @@ the flow-comparison chart. These tests pin that contract.
 
 from __future__ import annotations
 
-from ffc_ddw_sum_et.report.method_mean_scatter import load_method_mean_metrics
+from pathlib import Path
+
+from ffc_ddw_sum_et.report._chart_constants import HOVER_PERCENT_DECIMALS
+from ffc_ddw_sum_et.report.method_mean_scatter import (
+    export_method_mean_scatter_html,
+    load_method_mean_metrics,
+)
 from ffc_ddw_sum_et.report.obj_log_loader import (
     CallSegment,
     InstanceProgression,
@@ -349,3 +355,63 @@ def test_compound_step_endpoint_comes_after_its_inner_points() -> None:
         "connecting line runs backwards; order was "
         + ", ".join(f"{p['label']}@{p['mean_time_pct']:.3f}" for p in points)
     )
+
+
+# ── C3 hover unification ────────────────────────────────────────────────
+
+
+def _render_method_mean_html(
+    tmp_path: Path,
+    *,
+    x_decimals: int = 1,
+    y_decimals: int = 1,
+) -> str:
+    def run(instance_id: str) -> InstanceProgression:
+        return _progression(
+            instance_id,
+            [
+                _seg(1, "neh_cp", 3.0, 100.0),
+                _seg(2, "solve_base_model_cpsat", 9.0, 80.0),
+            ],
+        )
+
+    progs = [run("InstA")]
+    baseline = {"InstA": 50.0}
+    points = load_method_mean_metrics(progs, baseline_obj_by_instance=baseline)
+    out_path = tmp_path / "test_method_mean.html"
+    ok = export_method_mean_scatter_html(
+        [{"label": "test", "method_points": points}],
+        out_path,
+        x_percent_decimals=x_decimals,
+        y_percent_decimals=y_decimals,
+    )
+    assert ok
+    return out_path.read_text(encoding="utf-8")
+
+
+def test_hover_uses_3_percent_for_both_axes(tmp_path: Path) -> None:
+    """C3-8: method-mean scatter hover is .3% for x and y."""
+    html = _render_method_mean_html(tmp_path)
+    hover_dec = str(HOVER_PERCENT_DECIMALS)
+    assert f"%{{x:.{hover_dec}%}}" in html, f"missing %{{x:.{hover_dec}%}}"
+    assert f"%{{y:.{hover_dec}%}}" in html, f"missing %{{y:.{hover_dec}%}}"
+    assert ".4%" not in html.split("hovertemplate")[1].split("extra>")[0], (
+        "stale .4% in hovertemplate"
+    )
+
+
+def test_tickformat_stays_at_1_percent(tmp_path: Path) -> None:
+    """C3-9: method-mean scatter tickformat stays at .1%, not .3%."""
+    html = _render_method_mean_html(tmp_path)
+    assert 'tickformat: ".1%"' in html, "tickformat regressed from .1%"
+
+
+def test_hover_unaffected_by_tick_decimals_arg(tmp_path: Path) -> None:
+    """C3-10: x/y_percent_decimals=2 affects ticks only, hover stays at .3%."""
+    html = _render_method_mean_html(tmp_path, x_decimals=2, y_decimals=2)
+    assert 'tickformat: ".2%"' in html, "tickformat should be .2%"
+    hover_dec = str(HOVER_PERCENT_DECIMALS)
+    assert f"%{{x:.{hover_dec}%}}" in html, (
+        f"hover regressed from {hover_dec} to tick decimals"
+    )
+    assert f"%{{y:.{hover_dec}%}}" in html

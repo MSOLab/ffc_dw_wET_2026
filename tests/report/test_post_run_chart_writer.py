@@ -10,16 +10,22 @@ shape.
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pytest
 import yaml
 from routix.io import RunRoot
 
 from ffc_ddw_sum_et.orchestration.artifact_layout import init_ffc_artifact_layout
+from ffc_ddw_sum_et.report import multi_scenario_method_chart as chart_mod
 from ffc_ddw_sum_et.report import write_post_run_subroutine_chart_artifacts
+from ffc_ddw_sum_et.report._chart_constants import HOVER_PERCENT_DECIMALS
+from ffc_ddw_sum_et.report.np_utils import round_step_series
+from ffc_ddw_sum_et.report.step_path import build_step_path
 
 
 def _write_instance(
@@ -258,3 +264,164 @@ def test_silently_skips_scenarios_without_obj_log(tmp_path: Path) -> None:
         instance_table_csv=inst_csv,
     )
     assert not flow_path.exists()
+
+
+# ── helpers for flow-chart payload tests ─────────────────────────────────
+
+
+def _gen_flow_chart_payload(
+    tmp_path: Path,
+    instances: list[str],
+    scenario: str = "scenario_x",
+) -> dict:
+    run_id = "20260507T000000_000000"
+    rr = RunRoot(path=tmp_path / run_id, run_id=run_id)
+    layout = init_ffc_artifact_layout(rr)
+
+    for ins in instances:
+        _write_instance(
+            layout,
+            scenario,
+            ins,
+            timelimit=10.0,
+            endpoints=[
+                (1.0, 9000.0, "1-step_alpha"),
+                (5.0, 8500.0, "2-step_beta"),
+            ],
+        )
+    _write_summary_csv(
+        layout,
+        [
+            {"scenarioName": scenario, "instanceName": ins, "bestObj": 8500.0}
+            for ins in instances
+        ],
+    )
+    match_csv, bks_csv, inst_csv = _write_baseline_files(tmp_path, instances)
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=match_csv,
+        bks_table_csv=bks_csv,
+        instance_table_csv=inst_csv,
+    )
+
+    flow_path = layout.artifact_path("multi_scenario_subroutine_flow_comparison_html")
+    flow_html = flow_path.read_text(encoding="utf-8")
+    payload_match = re.search(r"const payload = (\{.*?\});", flow_html, re.S)
+    assert payload_match is not None, "failed to parse payload from flow HTML"
+    return json.loads(payload_match.group(1))
+
+
+# ── C1: payload coordinate precision ─────────────────────────────────────
+
+
+def _decimal_places(value: float) -> int:
+    s = repr(value)
+    if "." not in s:
+        return 0
+    return len(s) - s.index(".") - 1
+
+
+def test_flow_chart_payload_coord_precision(tmp_path: Path) -> None:
+    """C1-5: step_x ≤6, step_y ≤5, guide_marker_x ≤6 decimal places."""
+    payload = _gen_flow_chart_payload(tmp_path, ["InstA", "InstB"])
+    for trace in payload["traces"]:
+        for v in trace["step_x"]:
+            assert _decimal_places(float(v)) <= 6, f"step_x {v!r} exceeds 6 decimals"
+        for v in trace["step_y"]:
+            assert _decimal_places(float(v)) <= 5, f"step_y {v!r} exceeds 5 decimals"
+        for v in trace["guide_marker_x"]:
+            assert _decimal_places(float(v)) <= 6, (
+                f"guide_marker_x {v!r} exceeds 6 decimals"
+            )
+
+
+# ── C1: order contract ───────────────────────────────────────────────────
+
+
+def test_round_step_series_preserves_step_path_order() -> None:
+    """C1-6: rounding a micro-drop to flat avoids a duplicate step_x entry."""
+    xs = [0.0, 0.5, 0.6, 1.0]
+    ys = [0.5, 0.500001, 0.5, 0.0]
+    rx, ry = round_step_series(xs, ys, x_decimals=6, y_decimals=5)
+    step_x_before, _ = build_step_path(xs, ys)
+    step_x_after, _ = build_step_path(rx, ry)
+    assert len(step_x_after) < len(step_x_before), (
+        f"with rounding: {len(step_x_after)} pts, without: {len(step_x_before)}"
+    )
+    assert step_x_after == [0.0, 0.5, 0.6, 1.0, 1.0]
+
+
+# ── C1: axis consistency ─────────────────────────────────────────────────
+
+
+def test_flow_chart_payload_axis_consistency(tmp_path: Path) -> None:
+    """C1-7: y_min/y_max/x_max derived from rounded step coords."""
+    payload = _gen_flow_chart_payload(tmp_path, ["InstA", "InstB"])
+    all_step_x: list[float] = []
+    all_step_y: list[float] = []
+    for trace in payload["traces"]:
+        all_step_x.extend(float(v) for v in trace["step_x"])
+        all_step_y.extend(float(v) for v in trace["step_y"])
+
+    expected_x_max = max(1.0, max(all_step_x))
+    assert math.isclose(payload["x_max"], expected_x_max), (
+        f"x_max {payload['x_max']} != {expected_x_max}"
+    )
+
+    max_y = max(all_step_y)
+    expected_y_max = 0.01 if max_y <= 0 else max_y * 1.05
+    assert math.isclose(payload["y_max"], expected_y_max), (
+        f"y_max {payload['y_max']} != {expected_y_max}"
+    )
+
+    expected_y_min = min(0.0, min(all_step_y))
+    assert math.isclose(payload["y_min"], expected_y_min), (
+        f"y_min {payload['y_min']} != {expected_y_min}"
+    )
+
+
+# ── C1-b: hovertemplate format ───────────────────────────────────────────
+
+
+def _flow_chart_html(tmp_path: Path) -> str:
+    _gen_flow_chart_payload(tmp_path, ["InstA", "InstB"])
+    run_id = "20260507T000000_000000"
+    rr = RunRoot(path=tmp_path / run_id, run_id=run_id)
+    layout = init_ffc_artifact_layout(rr)
+    flow_path = layout.artifact_path("multi_scenario_subroutine_flow_comparison_html")
+    return flow_path.read_text(encoding="utf-8")
+
+
+def test_flow_chart_hover_template_y_3_percent(tmp_path: Path) -> None:
+    """C1-b + C3-4: hovertemplate uses .3% for both x and y, ticks stay .1%."""
+    html = _flow_chart_html(tmp_path)
+    dec = HOVER_PERCENT_DECIMALS
+    assert re.search(rf"%\{{y:\.{dec}%}}", html), f"missing %{{y:.{dec}%}}"
+    assert re.search(rf"%\{{x:\.{dec}%}}", html), f"missing %{{x:.{dec}%}}"
+    assert not re.search(r"%\{[xy]:\.4%}", html), "stale .4% still present"
+    assert 'tickformat: ".1%"' in html, "tickformat regressed from .1%"
+
+
+def test_flow_chart_hover_follows_the_shared_constant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C3-8: every hover format is driven by HOVER_PERCENT_DECIMALS.
+
+    Pins that no axis keeps a hardcoded literal — raising the constant must
+    move x *and* y together, otherwise the two axes drift apart.
+    """
+    monkeypatch.setattr(chart_mod, "HOVER_PERCENT_DECIMALS", 4)
+    html = _flow_chart_html(tmp_path)
+    assert re.search(r"%\{x:\.4%}", html), "x hover ignored the constant"
+    assert re.search(r"%\{y:\.4%}", html), "y hover ignored the constant"
+    assert not re.search(r"%\{[xy]:\.3%}", html), "an axis kept a hardcoded .3%"
+
+
+# ── C2: max points constant ──────────────────────────────────────────────
+
+
+def test_mean_series_max_points_is_10000() -> None:
+    """C2: _MEAN_SERIES_MAX_POINTS == 10000."""
+    from ffc_ddw_sum_et.report import multi_scenario_method_chart as mod
+
+    assert mod._MEAN_SERIES_MAX_POINTS == 10000

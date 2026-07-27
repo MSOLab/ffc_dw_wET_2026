@@ -15,10 +15,15 @@ from typing import Any
 
 import pandas as pd
 
-from ._chart_constants import series_colors_json, symbol_map_json
+from ._chart_constants import (
+    HOVER_PERCENT_DECIMALS,
+    series_colors_json,
+    symbol_map_json,
+)
 from .np_utils import (
     decimate_step_series,
     progression_points_to_arrays,
+    round_step_series,
     step_function_mean_over_union,
 )
 from .step_path import build_step_path
@@ -45,8 +50,16 @@ _MIN_NORMALIZED_TIME_X_UPPER = 1.0
 # Upper bound on breakpoints kept per scenario mean step series. The raw
 # union-of-change-times mean carries 10^5-10^6 points (one per any
 # instance's improvement); at this resolution the sub-quantum thinning is
-# visually lossless while shrinking the emitted HTML from ~70MB to ~1MB.
-_MEAN_SERIES_MAX_POINTS = 4000
+# visually lossless while keeping the emitted HTML to ~1.5 MB.
+_MEAN_SERIES_MAX_POINTS = 10000
+
+# Stored coordinate precision. Hover renders both axes at
+# `HOVER_PERCENT_DECIMALS` (=1e-5), so y at 5 decimals exactly matches what
+# is displayed. x keeps one spare digit: normalized time is divided by a
+# per-instance limit, and 1e-6 stays finer than a millisecond for every
+# time limit up to ~1000 s (1e-5 would be 1.8 ms at a 180 s limit).
+_X_ROUND_DECIMALS = 6
+_Y_ROUND_DECIMALS = 5
 
 
 def _positive_axis_upper(values: list[float]) -> float:
@@ -214,6 +227,9 @@ def _build_scenario_mean_series(
     mean_x, mean_y = decimate_step_series(
         mean_x, mean_y, max_points=_MEAN_SERIES_MAX_POINTS
     )
+    mean_x, mean_y = round_step_series(
+        mean_x, mean_y, x_decimals=_X_ROUND_DECIMALS, y_decimals=_Y_ROUND_DECIMALS
+    )
 
     step_x, step_y = build_step_path(mean_x, mean_y)
     guide_df = (
@@ -221,7 +237,10 @@ def _build_scenario_mean_series(
         .groupby("subroutine_name", as_index=False, sort=False)
         .agg(avg_norm_time=("norm_time", "mean"))
     )
-    guide_x = guide_df["avg_norm_time"].astype(float).tolist()
+    guide_x = [
+        round(float(v), _X_ROUND_DECIMALS)
+        for v in guide_df["avg_norm_time"].astype(float)
+    ]
     guide_text = guide_df["subroutine_name"].astype(str).tolist()
     return {
         "scenario": scenario_label,
@@ -333,8 +352,8 @@ _HTML_TEMPLATE = Template("""<!doctype html>
           hovertemplate:
             "scenario=%{meta[0]}<br>" +
             "instance_cnt=%{meta[1]}<br>" +
-            "Time%=%{x:.4%}<br>" +
-            "Mean RPDf=%{y:.4%}<extra></extra>",
+            "Time%=%{x:.$hover_decimals%}<br>" +
+            "Mean RPDf=%{y:.$hover_decimals%}<extra></extra>",
           showlegend: true },
         { type: "scatter", mode: "markers",
           name: trace.scenario, legendgroup: trace.scenario,
@@ -349,7 +368,7 @@ _HTML_TEMPLATE = Template("""<!doctype html>
           hovertemplate:
             "scenario=%{customdata[0]}<br>" +
             "subroutine=%{customdata[1]}<br>" +
-            "avg end Time%=%{x:.4%}<extra></extra>",
+            "avg end Time%=%{x:.$hover_decimals%}<extra></extra>",
           showlegend: false }
       ];
     });
@@ -392,6 +411,7 @@ def _render_html(
         x_axis_label=_x_label,
         x_percent_decimals=x_decimals,
         y_percent_decimals=y_decimals,
+        hover_decimals=HOVER_PERCENT_DECIMALS,
         series_colors_json=series_colors_json(),
         symbol_map_json=symbol_map_json(),
     )

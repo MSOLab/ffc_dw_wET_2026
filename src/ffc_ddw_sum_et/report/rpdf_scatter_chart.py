@@ -30,7 +30,11 @@ from typing import TypeVar
 
 import pandas as pd
 
-from ._chart_constants import series_colors_json, symbol_map_json
+from ._chart_constants import (
+    HOVER_PERCENT_DECIMALS,
+    series_colors_json,
+    symbol_map_json,
+)
 from .np_utils import progression_points_to_arrays, step_function_mean_over_union
 from .step_path import build_step_path
 from .trajectory_utils import (
@@ -425,8 +429,8 @@ _HTML_TEMPLATE = """<!doctype html>
                  "T=%{{customdata[1]}}<br>" +
                  "R=%{{customdata[2]}}<br>" +
                  "subroutine=%{{customdata[3]}}<br>" +
-                 "Time%=%{{x:.4%}}<br>" +
-                 "RPDf=%{{y:.4%}}<extra></extra>",
+                 "Time%=%{{x:{hover_fmt}}}<br>" +
+                 "RPDf=%{{y:{hover_fmt}}}<extra></extra>",
                showlegend: false }}
           ];
         }}
@@ -440,8 +444,8 @@ _HTML_TEMPLATE = """<!doctype html>
                "T=%{{customdata[1]}}<br>" +
                "R=%{{customdata[2]}}<br>" +
                "instance_cnt=%{{customdata[3]}}<br>" +
-               "Time%=%{{x:.4%}}<br>" +
-               "RPDf=%{{y:.4%}}<extra></extra>",
+               "Time%=%{{x:{hover_fmt}}}<br>" +
+               "RPDf=%{{y:{hover_fmt}}}<extra></extra>",
              showlegend: false }},
           {{ type: "scatter", mode: "markers",
              x: s.guide_marker_x || [],
@@ -459,7 +463,7 @@ _HTML_TEMPLATE = """<!doctype html>
                "T=%{{customdata[1]}}<br>" +
                "R=%{{customdata[2]}}<br>" +
                "subroutine=%{{customdata[3]}}<br>" +
-               "avg end Time%=%{{x:.4%}}<extra></extra>",
+               "avg end Time%=%{{x:{hover_fmt}}}<extra></extra>",
              showlegend: false }}
         ];
       }});
@@ -501,6 +505,7 @@ def _render_html(payload: dict, x_decimals: int, y_decimals: int) -> str:
         for v in ["All", *payload["r_factor_values"]]
     )
     return _HTML_TEMPLATE.format(
+        hover_fmt=f".{HOVER_PERCENT_DECIMALS}%",
         t_options=t_options,
         r_options=r_options,
         data_json=json.dumps(payload, separators=(",", ":")),

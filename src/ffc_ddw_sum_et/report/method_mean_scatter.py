@@ -9,7 +9,7 @@ from typing import Any
 
 from ffc_ddw_sum_et._calc import rpd_f
 
-from ._chart_constants import series_colors_json
+from ._chart_constants import HOVER_PERCENT_DECIMALS, series_colors_json
 from .obj_log_loader import InstanceProgression, build_endpoint_df
 
 logger = logging.getLogger(__name__)
@@ -402,8 +402,8 @@ _HTML_TEMPLATE = Template("""<!doctype html>
           "scenario=%{customdata[0]}<br>" +
           "method=%{customdata[1]}<br>" +
           "instance_cnt=%{customdata[2]}<br>" +
-          "mean Time%=%{x:.$x_percent_decimals%}<br>" +
-          "mean RPDf=%{y:.$y_percent_decimals%}<extra></extra>"
+          "mean Time%=%{x:.$x_hover_decimals%}<br>" +
+          "mean RPDf=%{y:.$y_hover_decimals%}<extra></extra>"
       };
     });
 
@@ -432,6 +432,8 @@ def _render_html(
         title=title,
         x_percent_decimals=x_decimals,
         y_percent_decimals=y_decimals,
+        x_hover_decimals=HOVER_PERCENT_DECIMALS,
+        y_hover_decimals=HOVER_PERCENT_DECIMALS,
         series_colors_json=series_colors_json(),
     )
 
