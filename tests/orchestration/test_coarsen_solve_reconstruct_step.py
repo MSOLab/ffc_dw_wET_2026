@@ -1,6 +1,7 @@
 """Tests for FFcDDWSubroutineController.coarsen_solve_reconstruct step method.
 
-Verifies the two CLAUDE.md subroutine step contract invariants:
+Verifies the two subroutine step contract invariants
+(see AGENTS.md in src/ffc_ddw_sum_et/orchestration/):
 1. ``_register`` is called exactly once per step call (success path, no-solution
    path, and stopping-condition path each exercised separately).
 2. ``elapsed_time`` is measured from step entry to immediately before

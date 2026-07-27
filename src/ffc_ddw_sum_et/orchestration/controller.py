@@ -2352,7 +2352,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         into ``mcf_lb_phase_schedules`` so the post-run reporter renders
         them as PNGs (the container is generic despite the name).
 
-        Per CLAUDE.md subroutine step contract: a single ``_register``
+        Per AGENTS.md in this package: a single ``_register``
         per call, ``elapsed_time`` measured immediately before report
         construction with no work in between.
         """
@@ -2775,7 +2775,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         reconstruction replay experiments; kept off by default to avoid
         high file counts on full-grid runs.
 
-        Per CLAUDE.md subroutine step contract: a single ``_register`` per
+        Per AGENTS.md in this package: a single ``_register`` per
         call, ``elapsed_time`` measured immediately before report
         construction with no work in between.
         """
