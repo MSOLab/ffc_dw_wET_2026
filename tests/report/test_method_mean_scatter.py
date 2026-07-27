@@ -158,104 +158,43 @@ def test_endpoint_carries_forward_unreached_instances() -> None:
 
 
 # ---------------------------------------------------------------------------
-# W1 C2 — is_inner flag
+# is_top_level flag — marker-shape level split
 # ---------------------------------------------------------------------------
 
 
-def test_inner_points_have_is_inner_true() -> None:
-    """C2 §5.3: CSR inner progress points (label containing '.inner-')
-    must have is_inner=True."""
+def test_bare_controller_steps_are_top_level() -> None:
+    """Given a flow of bare controller step labels,
+    When the method-mean points are built,
+    Then every point is flagged is_top_level (open-circle marker)."""
     progs = [
         _progression(
             "Inst1",
             [
                 _seg(1, "calc_mcf_lb_and_derive_full_sch", 1.0, 100.0),
-                _seg(
-                    2,
-                    "coarsen_solve_reconstruct.inner-00-1-solve_base_model_cpsat",
-                    2.0,
-                    90.0,
-                ),
-                _seg(3, "solve_base_model_cpsat", 5.0, 80.0),
+                _seg(2, "run_flip_makespan_cp_from_incumbent", 2.0, 95.0),
+                _seg(3, "neh_cp", 3.0, 90.0),
+                _seg(4, "coarsen_solve_reconstruct", 5.0, 80.0),
             ],
         )
     ]
-    baseline = {"Inst1": 50.0}
-    points = load_method_mean_metrics(progs, baseline)
+    points = load_method_mean_metrics(progs, {"Inst1": 50.0})
+    assert len(points) == 4
     for p in points:
-        if "inner" in p["label"]:
-            assert p["is_inner"], f"expected is_inner=True for {p['label']}"
-        else:
-            assert not p["is_inner"], f"expected is_inner=False for {p['label']}"
+        assert p["is_top_level"], f"expected is_top_level=True for {p['label']}"
 
 
-def test_regular_points_have_is_inner_false() -> None:
-    """C2 §5.4 (regression): a flow without '.inner-' labels must have
-    is_inner=False for every point."""
-    progs = [
-        _progression(
-            "Inst1",
-            [
-                _seg(1, "neh_cp", 3.0, 100.0),
-                _seg(2, "incremental_sw_cp.1-batch_002", 4.0, 90.0),
-                _seg(3, "solve_base_model_cpsat", 9.0, 80.0),
-            ],
-        )
-    ]
-    baseline = {"Inst1": 50.0}
-    points = load_method_mean_metrics(progs, baseline)
-    assert len(points) > 0
-    for p in points:
-        assert not p["is_inner"], f"expected is_inner=False for {p['label']}"
-
-
-def test_batch_inner_mixed_regression() -> None:
-    """A mixed flow: regular batch points + inner points. Batch points are
-    not inner (no '.inner-'), inner points are."""
-    progs = [
-        _progression(
-            "Inst1",
-            [
-                _seg(1, "neh_cp", 1.0, 100.0),
-                _seg(2, "coarsen_solve_reconstruct", 2.0, 90.0),
-                _seg(2, "coarsen_solve_reconstruct.inner-00-1-calc_mcf", 2.5, 88.0),
-                _seg(2, "coarsen_solve_reconstruct.inner-01-2-neh_cp", 3.0, 85.0),
-                _seg(3, "incremental_sw_cp.1-batch_002", 5.0, 82.0),
-            ],
-        )
-    ]
-    baseline = {"Inst1": 50.0}
-    points = load_method_mean_metrics(progs, baseline)
-    for p in points:
-        if "inner" in p["label"]:
-            assert p["is_inner"], f"expected is_inner=True for {p['label']}"
-        else:
-            assert not p["is_inner"], f"expected is_inner=False for {p['label']}"
-
-    # Verify the specific counts.
-    inner_count = sum(1 for p in points if p["is_inner"])
-    assert inner_count == 2, f"expected 2 inner points, got {inner_count}"
-    regular_count = sum(1 for p in points if not p["is_inner"])
-    assert regular_count == 3, f"expected 3 regular points, got {regular_count}"
-
-
-# ---------------------------------------------------------------------------
-# CSR inner labels without a candidate-row index
-# ---------------------------------------------------------------------------
-
-
-def test_index_free_inner_labels_are_recognised_as_inner() -> None:
-    """Given CSR inner labels in the index-free format
-    ``coarsen_solve_reconstruct-<child step label>``,
+def test_csr_inner_points_are_not_top_level() -> None:
+    """Given CSR inner labels in both the ``.inner-`` and the index-free
+    ``coarsen_solve_reconstruct-<child>`` format,
     When the method-mean points are built,
-    Then they are still flagged is_inner (cross marker)."""
+    Then they are not top level while the CSR endpoint itself is."""
     progs = [
         _progression(
             "Inst1",
             [
                 _seg(1, "calc_mcf_lb_and_derive_full_sch", 1.0, 100.0),
                 _seg(2, "coarsen_solve_reconstruct-1-calc_mcf_lb", 1.5, 95.0),
-                _seg(2, "coarsen_solve_reconstruct-3-neh_cp", 2.0, 90.0),
+                _seg(2, "coarsen_solve_reconstruct.inner-00-3-neh_cp", 2.0, 90.0),
                 _seg(2, "coarsen_solve_reconstruct", 2.5, 90.0),
                 _seg(3, "solve_base_model_cpsat", 5.0, 80.0),
             ],
@@ -264,11 +203,40 @@ def test_index_free_inner_labels_are_recognised_as_inner() -> None:
     points = load_method_mean_metrics(progs, {"Inst1": 50.0})
     by_label = {p["label"]: p for p in points}
 
-    assert by_label["coarsen_solve_reconstruct-1-calc_mcf_lb"]["is_inner"]
-    assert by_label["coarsen_solve_reconstruct-3-neh_cp"]["is_inner"]
-    # The CSR step's own endpoint is not an inner point.
-    assert not by_label["coarsen_solve_reconstruct"]["is_inner"]
-    assert not by_label["solve_base_model_cpsat"]["is_inner"]
+    assert not by_label["coarsen_solve_reconstruct-1-calc_mcf_lb"]["is_top_level"]
+    assert not by_label["coarsen_solve_reconstruct.inner-00-3-neh_cp"]["is_top_level"]
+    assert by_label["coarsen_solve_reconstruct"]["is_top_level"]
+    assert by_label["solve_base_model_cpsat"]["is_top_level"]
+
+
+def test_batch_points_are_not_top_level() -> None:
+    """Given a top-level ``incremental_sw_cp`` registering per-batch points,
+    When the method-mean points are built,
+    Then each batch point is not top level (they are sub-steps of one call),
+    while the surrounding bare steps are."""
+    progs = [
+        _progression(
+            "Inst1",
+            [
+                _seg(1, "neh_cp", 3.0, 100.0),
+                _seg(2, "incremental_sw_cp.1-batch_002", 4.0, 90.0),
+                _seg(2, "incremental_sw_cp.2-batch_003", 5.0, 85.0),
+                _seg(3, "solve_base_model_cpsat", 9.0, 80.0),
+            ],
+        )
+    ]
+    points = load_method_mean_metrics(progs, {"Inst1": 50.0})
+    by_label = {p["label"]: p for p in points}
+
+    assert by_label["neh_cp"]["is_top_level"]
+    assert not by_label["incremental_sw_cp.1-batch_002"]["is_top_level"]
+    assert not by_label["incremental_sw_cp.2-batch_003"]["is_top_level"]
+    assert by_label["solve_base_model_cpsat"]["is_top_level"]
+
+
+# ---------------------------------------------------------------------------
+# CSR inner labels without a candidate-row index
+# ---------------------------------------------------------------------------
 
 
 def test_repeated_inner_label_merges_into_one_inner_point() -> None:
@@ -295,7 +263,7 @@ def test_repeated_inner_label_merges_into_one_inner_point() -> None:
 
     inner = [p for p in points if p["label"].startswith("coarsen_solve_reconstruct-")]
     assert len(inner) == 1, f"expected 1 merged inner point, got {len(inner)}"
-    assert inner[0]["is_inner"]
+    assert not inner[0]["is_top_level"]
 
 
 def test_compound_step_endpoint_comes_after_its_inner_points() -> None:

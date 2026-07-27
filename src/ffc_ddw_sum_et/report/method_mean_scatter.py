@@ -9,7 +9,7 @@ from typing import Any
 
 from ffc_ddw_sum_et._calc import rpd_f
 
-from ._chart_constants import series_colors_json, symbol_map_json
+from ._chart_constants import series_colors_json
 from .obj_log_loader import InstanceProgression, build_endpoint_df
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,20 @@ def _is_compound_method_inner(full_name: str) -> bool:
     ``coarsen_solve_reconstruct-<digit>-<child_step>``.
     """
     return full_name.startswith("coarsen_solve_reconstruct-")
+
+
+def _is_top_level_method(full_name: str) -> bool:
+    """Whether ``full_name`` is a bare top-level controller step.
+
+    Top level means the label is exactly a step name as the controller calls it
+    (``neh_cp``, ``coarsen_solve_reconstruct``, …). Anything registered *below*
+    one such call is not: CSR inner steps (``coarsen_solve_reconstruct-…`` /
+    ``….inner-…``) and per-batch endpoints of a single call
+    (``incremental_sw_cp.<n>-batch_<id>``, which carry a ``.`` suffix).
+
+    The chart draws the two levels with different marker shapes.
+    """
+    return "." not in full_name and not _is_compound_method_inner(full_name)
 
 
 def _order_parents_after_children(
@@ -120,13 +134,13 @@ def load_method_mean_metrics(
 
     Returns:
         list[dict[str, Any]]: ``{method, label, mean_time_pct, mean_rpdf,
-        instance_count, is_inner}`` dicts in controller (first-appearance) order.
-        ``method`` is the base name (pre-``.``) used for the marker
-        symbol/colour; ``label`` is the full ``subroutine_name`` (carrying the
-        batch suffix) shown in the hover. ``is_inner`` is ``True`` when the
-        full label matches ``".inner-"`` or ``"coarsen_solve_reconstruct-"``
-        (CSR inner progress points that should get a cross marker regardless of
-        the base method's symbol map entry).
+        instance_count, is_top_level}`` dicts in controller (first-appearance)
+        order. ``method`` is the base name (pre-``.``); ``label`` is the full
+        ``subroutine_name`` (carrying the batch suffix) shown in the hover.
+        ``is_top_level`` is ``True`` only for a bare controller step name and
+        drives the marker shape: top-level steps get an open circle, everything
+        registered below one call (CSR inner steps, per-batch endpoints) gets an
+        open star-diamond.
         ``mean_time_pct`` is
         ``global_end_sec / timelimit_sec`` in ``[0, 1]``; ``mean_rpdf`` is the
         mean of ``rpd_f(obj, ref) = 2*(obj-ref)/(obj+ref)``;
@@ -216,7 +230,7 @@ def load_method_mean_metrics(
     candidates: list[dict[str, Any]] = []
     for order_idx in sorted_order:
         base_name, full_name = step_labels[order_idx]
-        is_inner = ".inner-" in full_name or _is_compound_method_inner(full_name)
+        is_top_level = _is_top_level_method(full_name)
         reached: list[tuple[str, float, float, float]] = []
         improves = False
         for ins_id, steps in instance_data.items():
@@ -264,7 +278,7 @@ def load_method_mean_metrics(
                 "mean_time_pct": sum(time_pcts) / len(time_pcts),
                 "mean_rpdf": sum(rpdfs) / len(rpdfs),
                 "instance_count": len(time_pcts),
-                "is_inner": is_inner,
+                "is_top_level": is_top_level,
             }
         )
 
@@ -318,7 +332,7 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
         names = [str(p["method"]) for p in method_points]
         labels = [str(p.get("label", p["method"])) for p in method_points]
         counts = [int(p["instance_count"]) for p in method_points]
-        inners = [bool(p.get("is_inner", False)) for p in method_points]
+        top_levels = [bool(p.get("is_top_level", True)) for p in method_points]
         traces.append(
             {
                 "scenario": str(scenario["label"]),
@@ -327,7 +341,7 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
                 "method": names,
                 "label": labels,
                 "instance_count": counts,
-                "is_inner": inners,
+                "is_top_level": top_levels,
             }
         )
         all_x.extend(xs)
@@ -355,12 +369,15 @@ _HTML_TEMPLATE = Template("""<!doctype html>
 </head>
 <body>
   <h1>$title</h1>
-  <p>Per-method mean (Time%, RPDf) across instances. Methods without recorded obj_value are omitted.</p>
+  <p>Per-method mean (Time%, RPDf) across instances. Methods without recorded obj_value are omitted.
+  Marker shape marks the call level: open circle = top-level subroutine, open star-diamond = sub-step
+  (CSR inner step, or one batch of a single call).</p>
   <div id="method-mean-scatter" style="width: 100%; height: 760px;"></div>
   <script>
     const payload = $payload_json;
     const SERIES_COLORS = $series_colors_json;
-    const SYMBOL_MAP = $symbol_map_json;
+    const TOP_LEVEL_SYMBOL = "circle-open";
+    const SUB_LEVEL_SYMBOL = "star-diamond-open";
 
     const traces = payload.traces.map((trace, idx) => {
       const seriesColor = SERIES_COLORS[idx % SERIES_COLORS.length];
@@ -376,8 +393,10 @@ _HTML_TEMPLATE = Template("""<!doctype html>
         marker: {
           size: 11,
           color: seriesColor,
-          symbol: trace.method.map((name, i) => trace.is_inner[i] ? "cross" : (SYMBOL_MAP[name] || "circle")),
-          line: { width: 1, color: "#1b1b1b" }
+          symbol: trace.is_top_level.map((top) => top ? TOP_LEVEL_SYMBOL : SUB_LEVEL_SYMBOL),
+          // Open symbols are stroke-only: Plotly draws them in `marker.color`
+          // and takes only the width from `marker.line`.
+          line: { width: 2 }
         },
         hovertemplate:
           "scenario=%{customdata[0]}<br>" +
@@ -414,7 +433,6 @@ def _render_html(
         x_percent_decimals=x_decimals,
         y_percent_decimals=y_decimals,
         series_colors_json=series_colors_json(),
-        symbol_map_json=symbol_map_json(),
     )
 
 
