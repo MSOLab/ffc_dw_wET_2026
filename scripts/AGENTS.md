@@ -769,6 +769,49 @@ uv run python scripts/20260726/verdict_mcf_lb_atomic.py --after <run_dir> --skip
 
 ---
 
+### 20260726/analyze_csr_init_tl_curve.py
+
+Judges the **W2 P1 gate** (`plans/experiment/20260726/csr_init_roadmap.md` §2):
+does the τ=1 CSR initializer beat `best(MCF-LB → FMM, NEH-CP)` in **all nine
+(T, R) cells** while spending ≤ 40 % of the `0.09nc` budget? Both arms are
+initializer-only, so this scores **initial-solution quality**, not final
+objective.
+
+The baseline is the `c5_init_only` scenario measured **inside the same run**, so
+machine, code and load match — historical C5 numbers were read at an obj_log
+midpoint of a tail-carrying arm and are not a like-for-like comparator.
+
+Reads `<ts>_rpdf_comparison.csv` (verbatim `RPDf_BKS_data`) plus each instance's
+`_obj_log.json` for the inner-step breakdown, which the CSR inner-point notes
+(`...inner-NN-<idx>-<step>`, added in `2c7ef28`) make possible.
+
+**File output** (`--outdir`, default `analysis/<run_id>_csr_init_tl_curve/`):
+
+- `gate_cells.csv` — per (f, T, R): both arms' mean RPDf, Δ, `cell_pass`,
+  `indistinct` (|Δ| < 0.5 pp), win/tie/loss
+- `f_curve.csv` — per scenario: pooled + per-T mean RPDf, mean elapsed and its
+  share of the outer `0.09nc` cap (the budget-compliance check)
+- `win_tie_loss.csv` — paired counts vs the baseline, pooled and per T
+- `inner_steps.csv` — per (f, inner step) mean seconds, share, and objective drop
+- `gate_verdict.txt` — the verdict block printed to stdout
+
+Exits 1 when no f ≤ 40 % wins all nine cells.
+
+```bash
+uv run python scripts/20260726/analyze_csr_init_tl_curve.py \
+    output/20260726_csr_init_tl_curve/20260726T231158_246105
+```
+
+> Conclusion (`plans/analysis/20260726/csr_init_tl_curve.md`): **gate PASS,
+> minimum passing f = 20 %** — at half the baseline's wall time (15.9 s vs
+> 32.0 s). At equal budget (f=40, 37.2 % both) CSR wins pooled −17.18 pp,
+> 1227/132/81. Two caveats worth quoting: f=5 % **loses** (+16.16 pp) because the
+> ~2.0 s non-interruptible `mcf_lb` eats 46 % of that budget, and f=20's weakest
+> cell (T=0.6, R=1.0) is −0.56 pp / 88-72 — a tie in all but sign, so the robust
+> pick is f ≥ 25 %.
+
+---
+
 ## 5. Experiment Config Validation
 
 ### validate_resume_config.py
