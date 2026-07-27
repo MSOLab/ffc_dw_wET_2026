@@ -45,9 +45,16 @@ import pandas as pd
 # scripts/20260726/<this file> -- two levels of nesting below the repo root.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# "m1_k8_cumulative_f04" / "a_k1" / "b_k32_ceil" / "c_k1_f02"
+# "m1_k8_cumulative_f04" / "a_k1" / "b_k32_ceil" / "c_k1_f02" / "msemi_k4_round_f10"
+#
+# `msemi` / `mactive` (added 20260727) are the `m1` inner flow run under
+# reconstruct_mode semi_active / active. They are separate arms rather than a
+# mode of `m1` because reconstruct_mode is NOT an identity at k=1, so each one
+# needs its own k=1 baseline -- which is exactly what the per-arm pairing below
+# gives them for free.
 SCENARIO_RE = re.compile(
-    r"^(?P<arm>a|b|c|m1)_k(?P<k>\d+)(?:_(?P<mode>cumulative|ceil|floor|round))?"
+    r"^(?P<arm>msemi|mactive|m1|a|b|c)_k(?P<k>\d+)"
+    r"(?:_(?P<mode>cumulative|ceil|floor|round))?"
     r"(?:_f(?P<f>\d+))?$"
 )
 
