@@ -70,6 +70,7 @@ from ..base.alg_record import (
 from ..base.alg_spec import AlgSpec
 from ..cpsat_callbacks.obj_bound_recorder import ObjectiveBoundRecorder
 from ..cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
+from ..cpsat_search_log import write_cpsat_search_log
 from ..cpsat_solver_options import CpsatSolverOptions, get_solver
 from ..cumulative import BaseModelBuilder
 from .option import FlipMakespanCpOption
@@ -222,19 +223,13 @@ class FlipMakespanCpDispatcher:
         status = solver.solve(mdl, solution_callback=value_recorder)
         status_name = solver.status_name(status)
 
-        if option.log_search_progress and option.solver_log_path_getter is not None:
-            try:
-                solve_log = solver.response_proto.solve_log
-                if solve_log:
-                    log_path = option.solver_log_path_getter(
-                        "_flip_makespan_cp_search.log"
-                    )
-                    with open(log_path, "w", encoding="utf-8") as fp:
-                        fp.write(solve_log)
-                        if not solve_log.endswith("\n"):
-                            fp.write("\n")
-            except Exception:
-                logger.exception("Failed to write CP-SAT search log")
+        if option.log_search_progress:
+            write_cpsat_search_log(
+                solver.response_proto.solve_log,
+                option.solver_log_path_getter,
+                "_flip_makespan_cp_search.log",
+                logger=logger,
+            )
 
         # AlgRecord.progress_log records the problem objective (weighted E+T)
         # trajectory by contract; this dispatcher's CP-SAT minimises makespan,
