@@ -1776,16 +1776,52 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return report
 
     def initialize_by_dispatch_v4(
-        self, priorities: Sequence[DispatchSeqKey] = V4_PRIORITY_SET
+        self,
+        priorities: Sequence[DispatchSeqKey] = V4_PRIORITY_SET,
+        reconstruct_mode: Literal["none", "active", "active_but_last_semi"] = "none",
     ) -> SubroutineReport:
         """Step: justification-v4 paired dispatch pool. 각 priority 를 sd/rd 두
         방향으로 디코드(2·len(priorities) 스케줄)한 뒤 weighted-ET 최소 incumbent
         하나만 register — history 에 점 하나. 기본 P* = {wxd2, wspt_twt, wxd7}.
+
+        ``reconstruct_mode`` 는 pool 우승자에 적용할 재구성 방식이다. 어휘는
+        :meth:`coarsen_solve_reconstruct` 의 동명 인자와 같으며, coarsening 이
+        없는 여기서는 factor 되돌리기 경로인 ``"semi_active"`` 대신 "재구성하지
+        않음"을 뜻하는 ``"none"`` 을 쓴다.
+
+        * ``"none"`` (기본): seed 를 그대로 등록 — 기존 동작.
+        * ``"active"``: :func:`reconstruct_active_coarse_schedule` — stage 별
+          start-order 만 남기고 machine 을 earliest-start 로 재배정.
+        * ``"active_but_last_semi"``: 마지막 stage 만 seed 의 machine 배정과
+          순서를 유지 (:func:`reconstruct_active_except_last_coarse_schedule`).
+
+        재구성을 켜면 ``factor=1`` / ``solve=False`` 로 돌린
+        :meth:`coarsen_solve_reconstruct` 와 값이 같아진다 (CSR 래퍼를 빌려
+        쓰지 않고 같은 초기해를 얻는 경로). 재구성은 **우승자 1개에만** 적용하며
+        (후보 전체 재구성 후 최소 선택이 아님), seed 와 재구성 결과 중 좋은 쪽을
+        고르지도 않는다 — 두 경로의 값 동일성을 유지하기 위해서다. 설계 근거:
+        ``plans/experiment/20260728/dispatch_v4_reconstruct_mode.md``.
         """
+        reconstructors = {
+            "active": reconstruct_active_coarse_schedule,
+            "active_but_last_semi": reconstruct_active_except_last_coarse_schedule,
+        }
+        if reconstruct_mode != "none" and reconstruct_mode not in reconstructors:
+            raise ValueError(
+                "initialize_by_dispatch_v4: reconstruct_mode must be one of "
+                "'none', 'active', 'active_but_last_semi'; got "
+                f"{reconstruct_mode!r}"
+            )
+        mode_tag = "" if reconstruct_mode == "none" else f"/{reconstruct_mode}"
+
         start_elapsed = time.monotonic()
         best_sch, best_obj, best_label = build_v4_paired_dispatch_schedule(
             self.instance, priorities, self.logger
         )
+        if reconstruct_mode != "none":
+            best_sch = reconstructors[reconstruct_mode](best_sch, self.instance)
+            sum_e, sum_t = compute_weighted_earliness_tardiness(best_sch, self.instance)
+            best_obj = float(sum_e + sum_t)
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed, obj_value=best_obj, obj_bound=None
@@ -1794,7 +1830,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report,
             FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
         )
-        self._log_dispatch_seed_diagnostics(f"v4:{best_label}", best_sch)
+        self._log_dispatch_seed_diagnostics(f"v4{mode_tag}:{best_label}", best_sch)
         return report
 
     def run_profile_fixed_ns(
