@@ -701,6 +701,50 @@ uv run python scripts/20260726/analyze_csr_init_tl_curve.py \
 
 ---
 
+### 20260729/analyze_init_budget_curve.py
+
+Reads the **merged** run dir of the initialization-budget experiment
+(`dv4_c5init_f{10,20,40}` vs the 20260722 full-init scenarios) and emits every
+table `plans/analysis/20260729/init_budget_curve.md` quotes.
+
+Inputs are the merged run's own artifacts, so nothing is recomputed from raw
+solutions: `analysis_wide` (report.xlsx) for per-instance RPDf,
+`<run_id>_summary.csv` for the two initialization objectives, and the **scatter
+chart's embedded payload** for the step trajectory — parsing the chart's own
+numbers keeps the document and the figure from drifting apart.
+
+Three things it separates that a single mean hides:
+
+1. **Confounded vs unconfounded comparisons.** Deltas against
+   `a_v2_kappa005_max8` carry the v4 dispatch prefix and the 20260722→now code
+   drift on top of the budget effect; `within_family.csv` (f-vs-f inside one
+   run) is the only clean budget comparison. Both are printed, labelled.
+2. **The dispatch prefix's actual contribution** — `initObj` vs `dispatchedObj`
+   per instance, i.e. how often the dispatch schedule beats the MCF-derived one.
+   The same pair doubles as a **drift probe**: the deterministic MCF-LB step's
+   objective must match the older run instance-for-instance.
+3. **Where the curves cross.** The *last* sign change, not the first — a
+   shortened-init curve dips below early (the prefix) and comes back up while
+   the baseline is still inside its longer initialization.
+
+**Output** (`--out-dir`, default `analysis/20260729_init_budget_curve/`):
+`scenario_summary.csv`, `within_family.csv`, `prefix_value.csv`,
+`trajectory.csv`, `crossing.csv`, `tr_cells.csv`, `size_cells.csv`.
+
+```bash
+uv run python scripts/20260729/analyze_init_budget_curve.py \
+    output/20260728_init_budget_merge/20260729T041116_435991
+```
+
+> Conclusion (`plans/analysis/20260729/init_budget_curve.md`): cutting the
+> initialization from 40 % to 16 % of the `0.09nc` cap **gains** −1.09 %p mean
+> RPDf (728/564, 3.6 σ) and cutting to 4 % is indistinguishable from the
+> baseline — but within one run f10 < f20 < f40 monotonically, so the knee is at
+> **≥ 16 %** and the "saved time is worth more in the tail" hypothesis does not
+> hold over 4–16 %. Losses are local to T=0.6·R≥0.6 and mid/large c=5 cells.
+
+---
+
 ## 5. Experiment Config Validation
 
 ### validate_resume_config.py
