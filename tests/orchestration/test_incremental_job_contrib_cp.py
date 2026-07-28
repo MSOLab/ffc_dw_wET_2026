@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -393,3 +394,230 @@ def test_select_jd_jobs_zero_obj_returns_empty() -> None:
     selected = select_jd_jobs(incumbent.schedule, instance, 2, time_factor=1)
 
     assert selected == []
+
+
+# -------------------------------------------------------------- P8: progress json
+
+
+def test_progress_json_written(tmp_path: Path) -> None:
+    """Composite writes _incremental_job_contrib_cp_progress.json after running."""
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+
+    controller.incremental_job_contrib_cp(
+        jd_start=1,
+        jd_end="0.1n",
+        destroyed_op_tl_multiplier=0.005,
+    )
+
+    progress_files = list(tmp_path.rglob("*_incremental_job_contrib_cp_progress.json"))
+    assert progress_files, f"no progress json found under {tmp_path}"
+    data = json.loads(progress_files[0].read_text(encoding="utf-8"))
+    assert "same_set_skips" in data
+    assert "cp_progress" in data
+    assert isinstance(data["cp_progress"], list)
+    for entry in data["cp_progress"]:
+        assert "jd" in entry
+        assert "rep" in entry
+        assert "t" in entry
+        assert isinstance(entry["t"], (int, float))
+        assert "obj_value" in entry
+        assert "obj_bound" in entry
+
+
+def test_progress_json_skipped_without_working_dir() -> None:
+    """No working dir → progress json is skipped, no error."""
+    controller = _make_controller(_make_instance())
+    controller.run_fam()
+
+    controller.incremental_job_contrib_cp(
+        jd_start=1,
+        jd_end="0.1n",
+        destroyed_op_tl_multiplier=0.005,
+    )
+
+    assert controller.solution_manager.best_obj_value is not None
+
+
+# ------------------------------------------------------------ P5: try/finally
+
+
+def test_summary_log_written_on_inner_exception(tmp_path: Path) -> None:
+    """P5: 내부에서 예외 발생 시에도 summary log가 작성된다."""
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+
+    with patch.object(
+        controller,
+        "job_contrib_cp",
+        side_effect=RuntimeError("simulated solver error"),
+    ):
+        with pytest.raises(RuntimeError, match="simulated solver error"):
+            controller.incremental_job_contrib_cp(
+                jd_start=1,
+                jd_end="0.1n",
+                destroyed_op_tl_multiplier=0.005,
+            )
+
+    log_files = list(tmp_path.rglob("*_incremental_job_contrib_cp_log.yaml"))
+    assert log_files, "summary log must be written even on exception"
+    log = load_yaml(log_files[0])
+    assert log["exit_reason"].startswith("error:"), (
+        f"exit_reason should record the error, got {log['exit_reason']!r}"
+    )
+    assert "RuntimeError" in log["exit_reason"]
+
+
+def test_summary_log_written_on_inner_infeasible(tmp_path: Path) -> None:
+    """P5: error_if_infeasible + INFEASIBLE → 요약 로그가 작성된다."""
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+
+    with patch(
+        "ffc_ddw_sum_et.algorithm.job_contrib_cp.dispatcher.get_solver",
+    ) as mock_get_solver:
+        from unittest.mock import MagicMock
+
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = 3  # INFEASIBLE
+        mock_solver.status_name = MagicMock(return_value="INFEASIBLE")
+        mock_get_solver.return_value = mock_solver
+
+        with pytest.raises(RuntimeError, match="INFEASIBLE"):
+            controller.incremental_job_contrib_cp(
+                jd_start=1,
+                jd_end="0.1n",
+                destroyed_op_tl_multiplier=0.005,
+                error_if_infeasible=True,
+            )
+
+    log_files = list(tmp_path.rglob("*_incremental_job_contrib_cp_log.yaml"))
+    assert log_files, "summary log must be written even on infeasible"
+    log = load_yaml(log_files[0])
+    assert "error:RuntimeError" in log["exit_reason"]
+
+
+# ---------------------------------------------- P4: composite survives UNKNOWN
+
+
+def test_composite_survives_continuous_unknown(tmp_path: Path) -> None:
+    """P4: UNKNOWN이 계속 나오는 stub → 루프가 예외 없이 끝나고 incumbent 보존."""
+    from unittest.mock import MagicMock
+
+    instance = _make_instance()
+    controller = _make_controller(instance, working_dir=tmp_path)
+    controller.run_fam()
+    fam_obj = controller.solution_manager.best_obj_value
+
+    mock_solver = MagicMock()
+    mock_solver.solve.return_value = 0  # UNKNOWN
+    mock_solver.status_name = MagicMock(return_value="UNKNOWN")
+    mock_solver.objective_value = 0.0
+    mock_solver.value = MagicMock(return_value=0)
+    mock_solver.response_proto = MagicMock()
+    mock_solver.response_proto.solve_log = ""
+
+    with patch(
+        "ffc_ddw_sum_et.algorithm.job_contrib_cp.dispatcher.get_solver",
+        return_value=mock_solver,
+    ):
+        controller.incremental_job_contrib_cp(
+            jd_start=1,
+            jd_end="0.1n",
+            destroyed_op_tl_multiplier=0.005,
+            error_if_infeasible=True,
+        )
+
+    assert controller.solution_manager.best_obj_value == fam_obj, (
+        "incumbent must be preserved after UNKNOWN fallback"
+    )
+    log_files = list(tmp_path.rglob("*_incremental_job_contrib_cp_log.yaml"))
+    assert log_files, "summary log must be written"
+    log = load_yaml(log_files[0])
+    assert log["exit_reason"] == "completed"
+
+
+# --------------------------------------------------- P9: renderer smoke test
+
+
+def test_render_job_contrib_progress_plot_produces_png(
+    tmp_path: Path,
+) -> None:
+    """P9: renderer가 JSON에서 PNG를 생성하며 예외가 없어야 한다."""
+    from ffc_ddw_sum_et.orchestration.reporting import (
+        _render_job_contrib_progress_plot,
+    )
+
+    json_path = tmp_path / "test_progress.json"
+    png_path = tmp_path / "test_progress.png"
+
+    json_path.write_text(
+        json.dumps(
+            {
+                "same_set_skips": 0,
+                "global_lb": 15000.0,
+                "cp_progress": [
+                    {
+                        "jd": 3,
+                        "rep": 1,
+                        "t": 0.0,
+                        "obj_value": 42000.0,
+                        "obj_bound": 30000.0,
+                    },
+                    {
+                        "jd": 3,
+                        "rep": 1,
+                        "t": 1.0,
+                        "obj_value": 41500.0,
+                        "obj_bound": 31000.0,
+                    },
+                    {
+                        "jd": 4,
+                        "rep": 1,
+                        "t": 2.0,
+                        "obj_value": 41000.0,
+                        "obj_bound": None,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _render_job_contrib_progress_plot(json_path, png_path)
+    assert png_path.exists(), "PNG must be created"
+    assert png_path.stat().st_size > 0, "PNG must be non-empty"
+
+
+# ------------------------------------------- P10: obj_log regression
+
+
+def test_job_contrib_cp_step_report_obj_bound_none(tmp_path: Path) -> None:
+    """P10: job_contrib_cp의 report가 global obj_log에 LB를 흘리지 않는다.
+
+    ``_fold_history_into_obj_log_dicts``는 bound_data를 두 경로로 채운다 —
+    ``report.progress_log[].obj_bound`` (엔트리별) 와 ``report.obj_bound``
+    (스텝 종료점). 계획서 §2의 오염(스텝 구간 LB 60점 진동)은 **전자**가
+    원인이었으므로 둘 다 확인해야 회귀를 막는다.
+    """
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+
+    history_before = len(controller.solution_manager.history)
+    report = controller.job_contrib_cp(jd_target=2, cp_tl=5.0)
+
+    assert report.obj_bound is None, (
+        f"step report obj_bound must be None to prevent global LB pollution, "
+        f"got {report.obj_bound!r}"
+    )
+
+    # The registered (wrapped) report is what the runner folds into obj_log.
+    registered = controller.solution_manager.history[history_before:]
+    assert registered, "job_contrib_cp must register exactly one history record"
+    entries = [e for rec in registered for e in rec.report.progress_log]
+    assert entries, "progress_log must carry the CP trajectory"
+    leaked = [e for e in entries if e.obj_bound is not None]
+    assert not leaked, (
+        f"progress_log must not carry the restricted-model bound into the "
+        f"global obj_log; {len(leaked)} entr(ies) leaked, first={leaked[0]!r}"
+    )

@@ -611,3 +611,27 @@ fixed-assignment left-shift achieves (e.g. tightening makespan/E-T beyond the
 current polish), or when the CSR reconstruct's dependence on
 `build_schedule_from_op_starts` for reassignment is folded back into
 `make_semi_active` so the two share one time-sorted assignment implementation.
+
+## `sw_cp` dispatcher leaks restricted-model bound into global plot
+
+`sw_cp/dispatcher.py:343` writes `obj_bound=float(vb.bound) + offset` into
+`progress_log` entries -- the same pollution pattern fixed for
+`job_contrib_cp/dispatcher.py` in
+`plans/experiment/20260728/incremental_job_contrib_cp_pilot_followup.md` Work B.
+
+**Root cause:** the sliding-window CP model adds profile-fix arcs, so its
+bound is a restricted-model bound, not a valid global LB.  This leaks into
+the global `_obj_log.json` and contaminates the progress plot LB line.
+
+**Change (if acted on):** apply the same fix as
+`job_contrib_cp/dispatcher.py` -- set `obj_bound=None` on progress_log
+entries, store the restricted trajectory in `metrics["cp_progress"]`, and
+emit a dedicated progress artifact if the raw CP trajectory should be
+observable.
+
+**Why:** same rationale as the job_contrib_cp fix -- the restricted bound
+masks the true MCF LB on the global plot.  Deferred because it is a
+separate step/algorithm and the plan explicitly scoped it out.
+
+**When to act:** when targeting `sw_cp` specifically, or when the global
+LB contamination is observed on a `sw_cp`-containing run.

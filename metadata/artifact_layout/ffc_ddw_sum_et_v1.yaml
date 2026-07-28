@@ -141,6 +141,20 @@ artifacts:
     zone: report
     kind: progress_plot_png
     file_template: "{instance_name}_progress_plot.png"
+  # Per-instance incremental job-contrib CP progress: restricted-model
+  # trajectory of the composite step.  ``call_context`` is the composite's
+  # own call context (e.g. ``2-incremental_job_contrib_cp``), so one flow may
+  # carry several; the reporter discovers them with ``find_artifacts`` and
+  # renders one PNG per JSON.  Gated by ``draw_progress_plot`` (shared gate —
+  # silent skip when no cp_progress data).
+  - scope: instance
+    zone: progress
+    kind: job_contrib_progress_json
+    file_template: "{call_context}_incremental_job_contrib_cp_progress.json"
+  - scope: instance
+    zone: report
+    kind: job_contrib_progress_plot_png
+    file_template: "{call_context}_incremental_job_contrib_cp_progress.png"
   # Paired Gantt PNG for ``calc_mcf_lb_phase_schedule``. Two-level nested
   # layout mirrors the source JSON tree.
   - scope: instance

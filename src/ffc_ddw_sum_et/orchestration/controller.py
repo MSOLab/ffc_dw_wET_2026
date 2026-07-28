@@ -1,6 +1,7 @@
 """FFcDWwET subroutine controller for routix-based experiment orchestration."""
 
 import csv
+import json
 import logging
 import math
 import time
@@ -3266,6 +3267,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # Logged after _register so the log IO stays outside the measured
         # elapsed_time window (see orchestration/AGENTS.md, invariant 2).
         metrics = result.metrics if result is not None else None
+        self._last_cp_progress = (
+            metrics.get("cp_progress") if metrics is not None else None
+        )
         self.logger.info(
             "job_contrib_cp: work_status=%s, cpsat_status=%s, "
             "jd_count_eff=%s, obj=%s, elapsed=%.3fs",
@@ -3385,199 +3389,228 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # Skipped-iteration counter. ``rows`` holds one entry per CP solve, so
         # same-destroy-set skips would otherwise be invisible outside the log.
         same_set_skips = 0
+        step_start = time.monotonic()
+        all_cp_progress: list[dict] = []
 
-        _outer_break = False
-        for jd in level_list:
-            if jd >= n:
-                self.logger.info(
-                    "incremental_job_contrib_cp: jd=%d >= n=%d, "
-                    "stopping (no meaningful neighbourhood)",
-                    jd,
-                    n,
-                )
-                exit_reason = "jd_ge_n"
-                break
+        try:
+            _outer_break = False
+            for jd in level_list:
+                if jd >= n:
+                    self.logger.info(
+                        "incremental_job_contrib_cp: jd=%d >= n=%d, "
+                        "stopping (no meaningful neighbourhood)",
+                        jd,
+                        n,
+                    )
+                    exit_reason = "jd_ge_n"
+                    break
 
-            if self.is_stopping_condition():
-                self.logger.info(
-                    "incremental_job_contrib_cp: stopping condition met before jd=%d",
-                    jd,
-                )
-                exit_reason = "stopping_condition"
-                break
-
-            prev_selected: list[str] | None = None
-            rep = 0
-            while True:
                 if self.is_stopping_condition():
                     self.logger.info(
-                        "incremental_job_contrib_cp[jd=%d]: stopping "
-                        "condition met at rep=%d",
+                        "incremental_job_contrib_cp: stopping condition met before jd=%d",
                         jd,
-                        rep,
                     )
                     exit_reason = "stopping_condition"
-                    _outer_break = True
                     break
 
-                tl = self.stopping_criteria.timelimit
-                remaining = self.timer.get_remaining_sec(tl)
-                dynamic_min = (
-                    last_cp_tl_seconds / 2.0
-                    if last_cp_tl_seconds is not None
-                    else destroyed_op_tl_multiplier * jd * c / 2.0
-                )
-                effective_min = (
-                    min_remaining_sec if min_remaining_sec is not None else dynamic_min
-                )
-                if remaining < effective_min:
-                    self.logger.info(
-                        "incremental_job_contrib_cp[jd=%d]: budget "
-                        "exhausted before rep=%d "
-                        "(remaining=%.3fs < min=%.3fs)",
-                        jd,
-                        rep + 1,
-                        remaining,
-                        effective_min,
+                prev_selected: list[str] | None = None
+                rep = 0
+                while True:
+                    if self.is_stopping_condition():
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d]: stopping "
+                            "condition met at rep=%d",
+                            jd,
+                            rep,
+                        )
+                        exit_reason = "stopping_condition"
+                        _outer_break = True
+                        break
+
+                    tl = self.stopping_criteria.timelimit
+                    remaining = self.timer.get_remaining_sec(tl)
+                    dynamic_min = (
+                        last_cp_tl_seconds / 2.0
+                        if last_cp_tl_seconds is not None
+                        else destroyed_op_tl_multiplier * jd * c / 2.0
                     )
-                    exit_reason = "budget"
-                    _outer_break = True
-                    break
-
-                rep += 1
-                cur_incumbent = self.solution_manager.get_incumbent()
-                selected = select_jd_jobs(
-                    cur_incumbent.schedule,
-                    instance,
-                    jd,
-                    time_factor=self.time_factor,
-                )
-
-                if not selected:
-                    self.logger.info(
-                        "incremental_job_contrib_cp[jd=%d]: zero "
-                        "positive-contribution jobs, stopping",
-                        jd,
+                    effective_min = (
+                        min_remaining_sec
+                        if min_remaining_sec is not None
+                        else dynamic_min
                     )
-                    exit_reason = "zero_obj"
-                    _outer_break = True
-                    break
+                    if remaining < effective_min:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d]: budget "
+                            "exhausted before rep=%d "
+                            "(remaining=%.3fs < min=%.3fs)",
+                            jd,
+                            rep + 1,
+                            remaining,
+                            effective_min,
+                        )
+                        exit_reason = "budget"
+                        _outer_break = True
+                        break
 
-                jd_count_eff = len(selected)
-                saturated = jd_count_eff < jd
+                    rep += 1
+                    cur_incumbent = self.solution_manager.get_incumbent()
+                    selected = select_jd_jobs(
+                        cur_incumbent.schedule,
+                        instance,
+                        jd,
+                        time_factor=self.time_factor,
+                    )
 
-                if selected == prev_selected:
-                    # No row is appended: this iteration is *skipped* before any
-                    # CP solve, so counting it would break the summary's
-                    # "one row per CP solve" invariant (Phase B divides by it).
-                    # ``same_set_skips`` keeps the occurrence observable.
-                    same_set_skips += 1
+                    if not selected:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d]: zero "
+                            "positive-contribution jobs, stopping",
+                            jd,
+                        )
+                        exit_reason = "zero_obj"
+                        _outer_break = True
+                        break
+
+                    jd_count_eff = len(selected)
+                    saturated = jd_count_eff < jd
+
+                    if selected == prev_selected:
+                        # No row is appended: this iteration is *skipped* before any
+                        # CP solve, so counting it would break the summary's
+                        # "one row per CP solve" invariant (Phase B divides by it).
+                        # ``same_set_skips`` keeps the occurrence observable.
+                        same_set_skips += 1
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d, rep=%d]: "
+                            "same destroy set as previous; advancing jd "
+                            "(skipped, no CP solve)",
+                            jd,
+                            rep,
+                        )
+                        break
+
+                    prev_selected = list(selected)
+
+                    obj_before = self.solution_manager.best_obj_value
+                    iter_start = time.monotonic()
+                    context_name = f"jd{jd:03d}_r{rep:03d}"
+                    self._last_cp_progress = None
+                    with self.temporarily_extended_context(context_name):
+                        self.job_contrib_cp(
+                            jd_target=jd,
+                            **base_kwargs,
+                        )
+                    iter_elapsed = time.monotonic() - iter_start
+                    obj_after = self.solution_manager.best_obj_value
+
+                    cp = getattr(self, "_last_cp_progress", None)
+                    if cp:
+                        offset = iter_start - step_start
+                        for entry in cp:
+                            all_cp_progress.append(
+                                {
+                                    "jd": jd,
+                                    "rep": rep,
+                                    "t": offset + entry["t"],
+                                    "obj_value": entry["obj_value"],
+                                    "obj_bound": entry["obj_bound"],
+                                }
+                            )
+
+                    destroyed_op_count = jd_count_eff * c
+                    cp_tl_seconds = destroyed_op_tl_multiplier * destroyed_op_count
+                    last_cp_tl_seconds = cp_tl_seconds
+
+                    improved = (
+                        obj_before is not None
+                        and obj_after is not None
+                        and obj_before - obj_after > 1e-6
+                    )
+
+                    row_exit_reason: str
+                    if saturated:
+                        row_exit_reason = "saturated"
+                    elif improved:
+                        row_exit_reason = "improved"
+                    else:
+                        row_exit_reason = "no_improvement"
+
+                    summary_rows.append(
+                        {
+                            "jd": jd,
+                            "rep": rep,
+                            "jd_count_eff": jd_count_eff,
+                            "destroyed_op_count": destroyed_op_count,
+                            "cp_tl_seconds": cp_tl_seconds,
+                            "obj_before": (
+                                float(obj_before) if obj_before is not None else None
+                            ),
+                            "obj_after": (
+                                float(obj_after) if obj_after is not None else None
+                            ),
+                            "elapsed": round(iter_elapsed, 6),
+                            "exit_reason": row_exit_reason,
+                        }
+                    )
+
+                    if saturated:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d, rep=%d]: "
+                            "jd_count_eff=%d < jd=%d, saturated; "
+                            "stopping after this iteration",
+                            jd,
+                            rep,
+                            jd_count_eff,
+                            jd,
+                        )
+                        exit_reason = "saturated"
+                        _outer_break = True
+                        break
+
+                    if not improved:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d, rep=%d]: "
+                            "no improvement (%.1f -> %.1f); advancing jd",
+                            jd,
+                            rep,
+                            obj_before if obj_before is not None else float("nan"),
+                            obj_after if obj_after is not None else float("nan"),
+                        )
+                        break
+
                     self.logger.info(
                         "incremental_job_contrib_cp[jd=%d, rep=%d]: "
-                        "same destroy set as previous; advancing jd "
-                        "(skipped, no CP solve)",
+                        "improved %.1f -> %.1f; repeating",
                         jd,
                         rep,
+                        obj_before,
+                        obj_after,
                     )
+
+                if _outer_break:
                     break
 
-                prev_selected = list(selected)
-
-                obj_before = self.solution_manager.best_obj_value
-                iter_start = time.monotonic()
-                context_name = f"jd{jd:03d}_r{rep:03d}"
-                with self.temporarily_extended_context(context_name):
-                    self.job_contrib_cp(
-                        jd_target=jd,
-                        **base_kwargs,
-                    )
-                iter_elapsed = time.monotonic() - iter_start
-                obj_after = self.solution_manager.best_obj_value
-
-                destroyed_op_count = jd_count_eff * c
-                cp_tl_seconds = destroyed_op_tl_multiplier * destroyed_op_count
-                last_cp_tl_seconds = cp_tl_seconds
-
-                improved = (
-                    obj_before is not None
-                    and obj_after is not None
-                    and obj_before - obj_after > 1e-6
-                )
-
-                row_exit_reason: str
-                if saturated:
-                    row_exit_reason = "saturated"
-                elif improved:
-                    row_exit_reason = "improved"
-                else:
-                    row_exit_reason = "no_improvement"
-
-                summary_rows.append(
-                    {
-                        "jd": jd,
-                        "rep": rep,
-                        "jd_count_eff": jd_count_eff,
-                        "destroyed_op_count": destroyed_op_count,
-                        "cp_tl_seconds": cp_tl_seconds,
-                        "obj_before": (
-                            float(obj_before) if obj_before is not None else None
-                        ),
-                        "obj_after": (
-                            float(obj_after) if obj_after is not None else None
-                        ),
-                        "elapsed": round(iter_elapsed, 6),
-                        "exit_reason": row_exit_reason,
-                    }
-                )
-
-                if saturated:
-                    self.logger.info(
-                        "incremental_job_contrib_cp[jd=%d, rep=%d]: "
-                        "jd_count_eff=%d < jd=%d, saturated; "
-                        "stopping after this iteration",
-                        jd,
-                        rep,
-                        jd_count_eff,
-                        jd,
-                    )
-                    exit_reason = "saturated"
-                    _outer_break = True
-                    break
-
-                if not improved:
-                    self.logger.info(
-                        "incremental_job_contrib_cp[jd=%d, rep=%d]: "
-                        "no improvement (%.1f -> %.1f); advancing jd",
-                        jd,
-                        rep,
-                        obj_before if obj_before is not None else float("nan"),
-                        obj_after if obj_after is not None else float("nan"),
-                    )
-                    break
-
-                self.logger.info(
-                    "incremental_job_contrib_cp[jd=%d, rep=%d]: "
-                    "improved %.1f -> %.1f; repeating",
-                    jd,
-                    rep,
-                    obj_before,
-                    obj_after,
-                )
-
-            if _outer_break:
-                break
-
-        log_path = self._dump_incremental_job_contrib_cp_log(
-            exit_reason, summary_rows, same_set_skips=same_set_skips
-        )
-        self.logger.info(
-            "incremental_job_contrib_cp: done, exit_reason=%s, "
-            "total_iterations=%d, same_set_skips=%d, log=%s",
-            exit_reason,
-            len(summary_rows),
-            same_set_skips,
-            log_path,
-        )
+        except Exception as exc:
+            exit_reason = f"error:{type(exc).__name__}"
+            raise
+        finally:
+            log_path = self._dump_incremental_job_contrib_cp_log(
+                exit_reason, summary_rows, same_set_skips=same_set_skips
+            )
+            self._dump_incremental_job_contrib_cp_progress(
+                all_cp_progress,
+                same_set_skips=same_set_skips,
+                global_lb=self.solution_manager.best_obj_bound,
+            )
+            self.logger.info(
+                "incremental_job_contrib_cp: done, exit_reason=%s, "
+                "total_iterations=%d, same_set_skips=%d, log=%s",
+                exit_reason,
+                len(summary_rows),
+                same_set_skips,
+                log_path,
+            )
 
     def _dump_incremental_job_contrib_cp_log(
         self, exit_reason: str, rows: list[dict], *, same_set_skips: int = 0
@@ -3604,3 +3637,31 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             log_path,
         )
         return log_path
+
+    def _dump_incremental_job_contrib_cp_progress(
+        self,
+        cp_progress: list[dict],
+        *,
+        same_set_skips: int = 0,
+        global_lb: float | None = None,
+    ) -> None:
+        """Dump the step-local CP trajectory for the dedicated progress plot.
+
+        The resulting ``<call_context>_incremental_job_contrib_cp_progress.json``
+        matches the ``job_contrib_progress_json`` layout kind, whose template
+        carries ``{call_context}`` as a free placeholder so the reporter can
+        ``find_artifacts`` it.
+        """
+        path = self.try_get_file_path_for_subroutine(
+            "_incremental_job_contrib_cp_progress.json"
+        )
+        if path is None:
+            return
+        payload: dict = {
+            "same_set_skips": same_set_skips,
+            "cp_progress": cp_progress,
+        }
+        if global_lb is not None:
+            payload["global_lb"] = global_lb
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)

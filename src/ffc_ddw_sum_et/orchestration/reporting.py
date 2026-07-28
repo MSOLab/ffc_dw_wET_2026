@@ -463,6 +463,163 @@ def _render_progress_plot(json_path: Path, png_path: Path) -> None:
         logger.exception("Failed to render progress plot for %s", json_path)
 
 
+# Filename suffix the composite step appends to its call context (see
+# ``_dump_incremental_job_contrib_cp_progress`` in controller.py); mirrors the
+# ``job_contrib_progress_json`` template's constant part in the layout overlay.
+_JOB_CONTRIB_PROGRESS_SUFFIX = "_incremental_job_contrib_cp_progress.json"
+
+
+def _render_job_contrib_progress_plot(
+    json_path: Path, png_path: Path, title: str | None = None
+) -> None:
+    """Render incremental job-contrib CP progress plot from the composite's
+    ``_incremental_job_contrib_cp_progress.json``.
+
+    Plots:
+      - objValue: the raw inner-solve trajectory, solid step line.  No
+        best-so-far filter — the hint chain makes the sequence monotone
+        non-increasing already, so a running min would be a no-op and a
+        rise would be the bug signal worth seeing.
+      - restricted-model bound: dashed line
+      - global LB: horizontal reference line
+      - Round-boundary vertical lines, jd-boundaries bold
+
+    ``title`` names the chart; the filename carries the call context rather
+    than the instance name, so the caller supplies the instance label.  Falls
+    back to a filename-derived label when omitted.
+
+    Step-local time axis.  Module-level for ``ProcessPoolExecutor`` picklability.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not available, skipping %s", json_path)
+        return
+
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("Failed to load job_contrib_progress %s", json_path)
+        return
+
+    cp_progress = data.get("cp_progress", [])
+    same_set_skips = data.get("same_set_skips", 0)
+    global_lb = data.get("global_lb")
+
+    if not cp_progress:
+        return
+
+    ub_t: list[float] = []
+    ub_y: list[float] = []
+    lb_t: list[float] = []
+    lb_y: list[float] = []
+
+    for entry in cp_progress:
+        t = float(entry["t"])
+        ub_t.append(t)
+        ub_y.append(float(entry["obj_value"]))
+        ob = entry.get("obj_bound")
+        if ob is not None:
+            lb_t.append(t)
+            lb_y.append(float(ob))
+
+    if not ub_t and not lb_t:
+        return
+
+    base_label = title or png_path.stem.replace(
+        "_incremental_job_contrib_cp_progress", ""
+    )
+
+    try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        if ub_t:
+            ax.step(
+                ub_t,
+                ub_y,
+                where="post",
+                label="objValue",
+                linewidth=1.5,
+            )
+        if lb_t:
+            ax.step(
+                lb_t,
+                lb_y,
+                where="post",
+                label="restricted-model bound",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.7,
+            )
+
+        if global_lb is not None:
+            ax.axhline(
+                float(global_lb),
+                color="orange",
+                linestyle="-.",
+                linewidth=1.0,
+                alpha=0.7,
+                label="global LB",
+            )
+
+        # Round boundaries — group by (jd, rep), draw vertical lines at
+        # the start of each group.  JD-change boundaries (incl. the first)
+        # are bold.
+        prev_jd: int | None = None
+        group_starts: list[tuple[float, int, int, bool]] = []
+        for i, entry in enumerate(cp_progress):
+            jd = entry.get("jd")
+            rep = entry.get("rep")
+            if jd is None or rep is None:
+                continue
+            jd, rep = int(jd), int(rep)
+            if i == 0 or jd != prev_jd or rep != group_starts[-1][2]:
+                is_jd_boundary = prev_jd is None or jd != prev_jd
+                group_starts.append((float(entry["t"]), jd, rep, is_jd_boundary))
+            prev_jd = jd
+
+        ymin, ymax = ax.get_ylim()
+        yr = ymax - ymin
+        for t, jd, rep, is_jd_bdry in group_starts:
+            lw = 1.2 if is_jd_bdry else 0.6
+            alpha = 0.9 if is_jd_bdry else 0.4
+            ax.axvline(t, linestyle=":", linewidth=lw, alpha=alpha)
+            if is_jd_bdry:
+                ypos = ymin + yr * 0.95
+                ax.text(
+                    t,
+                    ypos,
+                    f"jd{jd}/r{rep}",
+                    rotation=90,
+                    va="top",
+                    ha="right",
+                    fontsize=6,
+                    alpha=0.7,
+                )
+
+        chart_title = base_label
+        if same_set_skips:
+            chart_title += f"  [same_set_skips={same_set_skips}]"
+        ax.set_title(chart_title)
+        ax.set_xlabel("step-local time (s)")
+        ax.set_ylabel("objective")
+        ax.legend(loc="lower right", fontsize=8)
+        ax.grid(True, linestyle="--", alpha=0.6)
+        fig.tight_layout()
+        fig.savefig(str(png_path), dpi=150)
+        plt.close(fig)
+    except Exception:
+        logger.exception(
+            "Failed to render job_contrib_progress plot for %s",
+            json_path,
+        )
+
+
 @dataclass
 class ScenarioResult:
     """Aggregated result for one scenario."""
@@ -789,6 +946,7 @@ class FFcDDWReporter:
         self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
         self._generate_progress_plots()
+        self._generate_job_contrib_progress_plots()
 
     def _write_post_run_pivot_artifacts(self) -> None:
         """Emit long-format RPDf comparison CSV + 3 PivotTable.js HTML files."""
@@ -2151,6 +2309,67 @@ class FFcDDWReporter:
                     future.result()
                 except Exception:
                     logger.exception("Progress plot worker failed")
+
+    def _generate_job_contrib_progress_plots(self) -> None:
+        """Render per-instance job-contrib CP progress plot PNGs.
+
+        Discovers ``job_contrib_progress_json`` with ``find_artifacts`` because
+        the composite writes with its own call-context prefix, which the
+        template carries as the free ``{call_context}`` placeholder.  The PNG
+        reuses that call context, so several composite calls in one flow each
+        get their own chart instead of overwriting one another.  Gated by
+        ``draw_progress_plot`` (shared gate — silent skip when no cp_progress
+        data exists).
+        """
+        if not self.draw_progress_plot:
+            return
+
+        jobs: list[tuple[Any, Path, Path, str]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {"scenario_name": sc.name, "instance_name": ins}
+                for prog_json in self.layout.find_artifacts(
+                    "job_contrib_progress_json", **scope
+                ):
+                    call_context = prog_json.name[: -len(_JOB_CONTRIB_PROGRESS_SUFFIX)]
+                    png = self.layout.artifact_path(
+                        "job_contrib_progress_plot_png",
+                        call_context=call_context,
+                        **scope,
+                    )
+                    title = f"{ins}  [{call_context}]"
+                    jobs.append(
+                        (_render_job_contrib_progress_plot, prog_json, png, title)
+                    )
+
+        if not jobs:
+            return
+
+        worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
+        logger.info(
+            "Rendering %d job-contrib progress plots with %d worker(s)",
+            len(jobs),
+            worker_cnt,
+        )
+        if worker_cnt == 1:
+            for fn, src, dst, title in jobs:
+                fn(src, dst, title)
+            return
+
+        pool_kwargs: dict[str, Any] = {"max_workers": worker_cnt}
+        if self._setup_logging_args is not None:
+            pool_kwargs["initializer"] = setup_logging
+            pool_kwargs["initargs"] = self._setup_logging_args
+        with ProcessPoolExecutor(**pool_kwargs) as executor:
+            futures = [
+                executor.submit(fn, src, dst, title) for fn, src, dst, title in jobs
+            ]
+            for future in futures:
+                try:
+                    future.result()
+                except Exception:
+                    logger.exception("Job-contrib progress plot worker failed")
 
     def _write_excel_report(self) -> None:
         """Write Excel report with dashboard, statistics, and analysis sheets."""

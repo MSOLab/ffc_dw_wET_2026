@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -401,6 +401,68 @@ class TestDispatcherBasics:
             == "budget_exhausted_before_solve:wall_clock_deadline"
         )
 
+    def test_progress_log_obj_bound_none(self) -> None:
+        """B-1: 모든 progress_log 엔트리의 obj_bound가 None."""
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [("j0", 5, 8), ("j1", 8, 10), ("j2", 10, 11), ("j3", 11, 13)],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    jd_count_target=1,
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        assert record.progress_log is not None
+        for entry in record.progress_log:
+            assert entry.obj_bound is None, (
+                f"progress_log entry obj_bound must be None, got {entry.obj_bound}"
+            )
+
+    def test_metrics_contains_cp_progress(self) -> None:
+        """B-2: metrics[cp_progress]에 t/obj_value/obj_bound 형식의 궤적이 존재."""
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [("j0", 5, 8), ("j1", 8, 10), ("j2", 10, 11), ("j3", 11, 13)],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    jd_count_target=1,
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        assert record.result is not None
+        assert record.result.metrics is not None
+        cp_progress = record.result.metrics.get("cp_progress")
+        assert cp_progress is not None, "metrics must contain 'cp_progress'"
+        assert isinstance(cp_progress, list), "cp_progress must be a list"
+        for entry in cp_progress:
+            assert "t" in entry
+            assert "obj_value" in entry
+            assert "obj_bound" in entry
+            assert isinstance(entry["t"], (int, float))
+        if len(cp_progress) >= 2:
+            ts = [e["t"] for e in cp_progress]
+            assert ts == sorted(ts), "cp_progress t must be monotonic non-decreasing"
+
 
 class TestProfileFixBridging:
     """P3: profile fix bridging — A->X->B with X removed produces A->B arc."""
@@ -512,6 +574,139 @@ class TestCompleteHint:
         assert "solution hint is incomplete" not in log_text.lower(), (
             f"Found an incomplete hint in the search log:\n{log_text[:2000]}"
         )
+
+
+class TestCpsatStatusBranching:
+    """Tests for CP-SAT status branching (UNKNOWN / INFEASIBLE / MODEL_INVALID)."""
+
+    def _make_solver_mock(self, status: int, status_name: str) -> object:
+        solver = MagicMock()
+        solver.solve.return_value = status
+        solver.status_name = MagicMock(return_value=status_name)
+        solver.objective_value = 0.0
+        solver.value = MagicMock(return_value=0)
+        solver.response_proto = MagicMock()
+        solver.response_proto.solve_log = ""
+        return solver
+
+    def test_unknown_returns_fallback_no_exception(self) -> None:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [("j0", 5, 8), ("j1", 8, 10), ("j2", 10, 11), ("j3", 11, 13)],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        mock_solver = self._make_solver_mock(0, "UNKNOWN")
+        with patch(
+            "ffc_ddw_sum_et.algorithm.job_contrib_cp.dispatcher.get_solver",
+            return_value=mock_solver,
+        ):
+            record = JobContribCpDispatcher().run(
+                AlgSpec(
+                    instance=instance,
+                    option=JobContribCpOption(
+                        jd_count_target=1,
+                        cp_tl_seconds=5.0,
+                        solver_thread_cnt=1,
+                        error_if_infeasible=True,
+                    ),
+                    ref_solution=seed,
+                )
+            )
+
+        assert record.work_status == WorkStatus.FEASIBLE
+        assert record.result is not None
+        assert record.result.schedule is seed
+        assert record.result.metrics is not None
+        assert record.result.metrics.get("fallback") == "incumbent"
+        assert record.result.metrics.get("cpsat_status") == "UNKNOWN"
+
+    def test_infeasible_with_flag_raises(self) -> None:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [("j0", 5, 8), ("j1", 8, 10), ("j2", 10, 11), ("j3", 11, 13)],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        mock_solver = self._make_solver_mock(3, "INFEASIBLE")
+        with patch(
+            "ffc_ddw_sum_et.algorithm.job_contrib_cp.dispatcher.get_solver",
+            return_value=mock_solver,
+        ):
+            with pytest.raises(RuntimeError, match="INFEASIBLE"):
+                JobContribCpDispatcher().run(
+                    AlgSpec(
+                        instance=instance,
+                        option=JobContribCpOption(
+                            jd_count_target=1,
+                            cp_tl_seconds=5.0,
+                            solver_thread_cnt=1,
+                            error_if_infeasible=True,
+                        ),
+                        ref_solution=seed,
+                    )
+                )
+
+    def test_infeasible_without_flag_falls_back(self) -> None:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [("j0", 5, 8), ("j1", 8, 10), ("j2", 10, 11), ("j3", 11, 13)],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        mock_solver = self._make_solver_mock(3, "INFEASIBLE")
+        with patch(
+            "ffc_ddw_sum_et.algorithm.job_contrib_cp.dispatcher.get_solver",
+            return_value=mock_solver,
+        ):
+            record = JobContribCpDispatcher().run(
+                AlgSpec(
+                    instance=instance,
+                    option=JobContribCpOption(
+                        jd_count_target=1,
+                        cp_tl_seconds=5.0,
+                        solver_thread_cnt=1,
+                        error_if_infeasible=False,
+                    ),
+                    ref_solution=seed,
+                )
+            )
+
+        assert record.work_status == WorkStatus.FEASIBLE
+        assert record.result is not None
+        assert record.result.metrics is not None
+        assert record.result.metrics.get("fallback") == "incumbent"
+        assert record.result.metrics.get("cpsat_status") == "INFEASIBLE"
+
+    def test_model_invalid_always_raises(self) -> None:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [("j0", 5, 8), ("j1", 8, 10), ("j2", 10, 11), ("j3", 11, 13)],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        mock_solver = self._make_solver_mock(1, "MODEL_INVALID")
+        with patch(
+            "ffc_ddw_sum_et.algorithm.job_contrib_cp.dispatcher.get_solver",
+            return_value=mock_solver,
+        ):
+            with pytest.raises(RuntimeError, match="MODEL_INVALID"):
+                JobContribCpDispatcher().run(
+                    AlgSpec(
+                        instance=instance,
+                        option=JobContribCpOption(
+                            jd_count_target=1,
+                            cp_tl_seconds=5.0,
+                            solver_thread_cnt=1,
+                            error_if_infeasible=False,
+                        ),
+                        ref_solution=seed,
+                    )
+                )
 
 
 class TestSearchLogOutput:

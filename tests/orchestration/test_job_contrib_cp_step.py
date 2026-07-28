@@ -105,6 +105,7 @@ def test_metrics_yaml_is_written_and_loadable(tmp_path: Path) -> None:
         "positive_contrib_job_count",
         "incumbent_obj",
         "selected_jobs",
+        "cp_progress",
     ):
         assert key in metrics, f"missing metrics key {key!r}: {metrics}"
     assert metrics["jd_count_target"] == 2

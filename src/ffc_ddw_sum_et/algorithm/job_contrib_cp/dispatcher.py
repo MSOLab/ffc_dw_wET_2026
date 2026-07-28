@@ -255,18 +255,45 @@ class JobContribCpDispatcher:
 
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
         if not has_solution:
+            if status == cp_model.MODEL_INVALID:
+                logger.error(
+                    "JobContribCpDispatcher: CP-SAT returned MODEL_INVALID; "
+                    "this is a model construction error.",
+                )
+                raise RuntimeError(
+                    f"JobContribCpDispatcher: CP-SAT returned status={status_name} "
+                    "(MODEL_INVALID); this is a model construction error."
+                )
+            if status == cp_model.UNKNOWN:
+                logger.warning(
+                    "JobContribCpDispatcher: no feasible solution (status=%s), "
+                    "falling back to incumbent",
+                    status_name,
+                )
+                return self._incumbent_fallback_record(
+                    instance,
+                    option,
+                    incumbent,
+                    incumbent_obj=incumbent_obj,
+                    jd_count_eff=jd_count_eff,
+                    destroyed_op_count=destroyed_op_count,
+                    positive_count=len(positive_jobs),
+                    cpsat_status=status_name,
+                    selected=selected,
+                )
+            # INFEASIBLE
             if option.error_if_infeasible:
                 logger.error(
-                    "JobContribCpDispatcher: no feasible solution (status=%s) "
+                    "JobContribCpDispatcher: infeasible solution (status=%s) "
                     "despite complete hint",
                     status_name,
                 )
                 raise RuntimeError(
                     f"JobContribCpDispatcher: CP-SAT returned status={status_name} "
-                    "despite complete hint; this is a bug signal."
+                    "(INFEASIBLE) despite complete hint; this is a bug signal."
                 )
             logger.warning(
-                "JobContribCpDispatcher: no feasible solution (status=%s), "
+                "JobContribCpDispatcher: infeasible solution (status=%s), "
                 "falling back to incumbent",
                 status_name,
             )
@@ -317,22 +344,38 @@ class JobContribCpDispatcher:
 
         final_elapsed = time.monotonic() - start
         progress_entries: list[ProgressLogEntry] = []
+        cp_progress: list[dict] = []
         if recorder.entries:
             offset_sec = recorder.time_started - start
-            progress_entries.extend(
-                ProgressLogEntry(
-                    elapsed_sec=t_rec + offset_sec,
-                    obj_value=float(vb.value),
-                    obj_bound=float(vb.bound),
+            for t_rec, vb in recorder.entries:
+                t_from_start = t_rec + offset_sec
+                progress_entries.append(
+                    ProgressLogEntry(
+                        elapsed_sec=t_from_start,
+                        obj_value=float(vb.value),
+                        obj_bound=None,
+                    )
                 )
-                for t_rec, vb in recorder.entries
-            )
+                cp_progress.append(
+                    {
+                        "t": t_from_start,
+                        "obj_value": float(vb.value),
+                        "obj_bound": float(vb.bound),
+                    }
+                )
         progress_entries.append(
             ProgressLogEntry(
                 elapsed_sec=final_elapsed,
                 obj_value=post_obj,
                 obj_bound=None,
             ),
+        )
+        cp_progress.append(
+            {
+                "t": final_elapsed,
+                "obj_value": post_obj,
+                "obj_bound": None,
+            }
         )
         progress_log = tuple(progress_entries)
 
@@ -362,6 +405,7 @@ class JobContribCpDispatcher:
                     "sum_earliness": float(sum_e),
                     "sum_tardiness": float(sum_t),
                     "selected_jobs": [str(j) for j in selected],
+                    "cp_progress": cp_progress,
                     # int(): FFcSchedule.makespan can be a numpy scalar, which
                     # the controller's dump_yaml cannot represent.
                     "makespan": int(schedule.makespan),
