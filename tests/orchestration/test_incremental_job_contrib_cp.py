@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,8 +14,25 @@ from routix.stopping_criteria import StoppingCriteria
 
 from ffc_ddw_sum_et.algorithm.job_contrib_cp.selection import select_jd_jobs
 from ffc_ddw_sum_et.orchestration.controller import FFcDDWSubroutineController
+from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import (
+    _fold_history_into_obj_log_dicts,
+)
 from ffc_ddw_sum_et.parameters.base.job_stage_p import JobStageProcessingTimeManager
 from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
+
+_INNER_CALL_LABEL_RE = re.compile(r"jd\d+_r\d+$")
+
+
+def _is_inner_call_label(step_label: str | None) -> bool:
+    """Whether a history entry came from an inner ``job_contrib_cp`` call.
+
+    ``incremental_job_contrib_cp`` namespaces every inner call as
+    ``jd<NNN>_r<MMM>`` via ``temporarily_extended_context``; its own endpoint
+    registration carries no such suffix. Matching the suffix keeps these tests
+    independent of how deep the controller's method-context stack is (a bare
+    step call has an empty stack, a flow-driven run does not).
+    """
+    return bool(step_label) and _INNER_CALL_LABEL_RE.search(step_label) is not None
 
 
 def _make_instance(
@@ -115,11 +133,14 @@ def test_invalid_range_raises_even_when_jd_start_ge_n(tmp_path: Path) -> None:
 # --------------------------------------------------------------- P4: composite pattern
 
 
-def test_composite_does_not_register_itself(tmp_path: Path) -> None:
-    """Composite never calls _register — inner steps do."""
+def test_composite_registers_self_endpoint(tmp_path: Path) -> None:
+    """C3: composite calls _register once at the end, even when inner steps
+    also registered. The current incumbent is passed through so the tail entry
+    keeps a solution (see ``test_composite_endpoint_keeps_work_status``)."""
     controller = _make_controller(_make_instance(), working_dir=tmp_path)
     controller.run_fam()
-    start_hist = len(controller.solution_manager.history)
+    history_before = len(controller.solution_manager.history)
+    incumbent_before = controller.solution_manager.get_incumbent()
 
     controller.incremental_job_contrib_cp(
         jd_start=1,
@@ -127,8 +148,95 @@ def test_composite_does_not_register_itself(tmp_path: Path) -> None:
         destroyed_op_tl_multiplier=0.005,
     )
 
-    # FAM (1) + some number of inner job_contrib_cp calls
-    assert len(controller.solution_manager.history) >= start_hist
+    history_after = len(controller.solution_manager.history)
+    # At least 2: one inner job_contrib_cp + composite self-registration
+    assert history_after >= history_before + 2
+
+    # Last entry is the composite's self-endpoint, carrying the incumbent.
+    last_entry = controller.solution_manager.history[-1]
+    assert last_entry.solution is controller.solution_manager.get_incumbent()
+    assert last_entry.report.obj_value == controller.solution_manager.best_obj_value
+    assert last_entry.report.obj_bound is None
+    # Re-registering the incumbent must not swap it for an equal-objective one.
+    if controller.solution_manager.best_obj_value == getattr(
+        incumbent_before, "obj_value", None
+    ):
+        assert controller.solution_manager.get_incumbent() is incumbent_before
+
+
+def test_composite_endpoint_keeps_work_status(tmp_path: Path) -> None:
+    """Given a run that ends with the composite step,
+    when its self-endpoint is registered,
+    then ``work_status`` still reports the feasible incumbent.
+
+    ``work_status`` reads ``history[-1]`` and returns None for a record with
+    ``solution=None``, which would write a successful run to
+    ``<instance>_instance_result.yaml`` as status-unknown.
+    """
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+    assert controller.work_status is not None
+
+    controller.incremental_job_contrib_cp(
+        jd_start=1,
+        jd_end="0.1n",
+        destroyed_op_tl_multiplier=0.005,
+    )
+
+    assert controller.work_status is not None, (
+        "composite self-endpoint erased work_status"
+    )
+
+
+def test_composite_endpoint_does_not_overwrite_last_inner_note(
+    tmp_path: Path,
+) -> None:
+    """Given the composite endpoint registered right after the last inner call,
+    when the history is folded into the obj_log maps,
+    then the last inner step keeps its own note label.
+
+    ``_fold_history_into_obj_log_dicts`` keys notes by
+    ``repr(start_time + elapsed_time)`` and assigns (not ``setdefault``s) the
+    label, so an endpoint timestamp identical to the last inner call's would
+    silently replace that call's label with the composite's.
+    """
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+
+    controller.incremental_job_contrib_cp(
+        jd_start=1,
+        jd_end="0.1n",
+        destroyed_op_tl_multiplier=0.005,
+    )
+
+    history = controller.solution_manager.history
+    inner_entry, composite_entry = history[-2], history[-1]
+    assert _is_inner_call_label(inner_entry.report.step_label), (
+        f"expected an inner call before the composite endpoint, "
+        f"got {inner_entry.report.step_label!r}"
+    )
+
+    def _end_key(record) -> str:
+        return repr(record.report.start_time + record.report.elapsed_time)
+
+    assert _end_key(composite_entry) != _end_key(inner_entry), (
+        "composite endpoint collides with the last inner call's timestamp"
+    )
+
+    value_data: dict[str, float] = {}
+    value_notes: dict[str, str] = {}
+    bound_data: dict[str, float] = {}
+    bound_notes: dict[str, str] = {}
+    _fold_history_into_obj_log_dicts(
+        controller.solution_manager.history,
+        value_data,
+        value_notes,
+        bound_data,
+        bound_notes,
+    )
+
+    assert value_notes[_end_key(inner_entry)] == inner_entry.report.step_label
+    assert value_notes[_end_key(composite_entry)] == composite_entry.report.step_label
 
 
 def test_inner_steps_register(tmp_path: Path) -> None:
@@ -189,7 +297,8 @@ def test_jd_step_size_levels(tmp_path: Path) -> None:
 
 
 def test_jd_start_ge_n_no_cp_calls(tmp_path: Path) -> None:
-    """jd_start >= n stops immediately without calling job_contrib_cp."""
+    """jd_start >= n stops immediately without calling job_contrib_cp.
+    With C3 the composite still registers its own endpoint (+1 history entry)."""
     controller = _make_controller(_make_instance(), working_dir=tmp_path)
     controller.run_fam()
     history_before = len(controller.solution_manager.history)
@@ -205,14 +314,21 @@ def test_jd_start_ge_n_no_cp_calls(tmp_path: Path) -> None:
             destroyed_op_tl_multiplier=0.005,
         )
 
-    assert len(controller.solution_manager.history) == history_before
+    # C3: composite registers self-endpoint even on early return
+    assert len(controller.solution_manager.history) == history_before + 1
+    assert (
+        controller.solution_manager.history[-1].solution
+        is controller.solution_manager.get_incumbent()
+    )
+    assert controller.work_status is not None
 
 
 # -------------------------------------------------------------- P9a: zero obj early exit
 
 
 def test_zero_obj_early_exit(tmp_path: Path) -> None:
-    """All jobs on time → zero obj → no CP calls."""
+    """All jobs on time → zero obj → no CP calls.
+    With C3 the composite still registers its own endpoint (+1 history entry)."""
     instance = _make_zero_contrib_instance()
     controller = _make_controller(instance, working_dir=tmp_path)
     controller.run_fam()
@@ -230,7 +346,12 @@ def test_zero_obj_early_exit(tmp_path: Path) -> None:
             destroyed_op_tl_multiplier=0.005,
         )
 
-    assert len(controller.solution_manager.history) == history_before
+    # C3: composite registers self-endpoint even on zero-obj early exit
+    assert len(controller.solution_manager.history) == history_before + 1
+    last_entry = controller.solution_manager.history[-1]
+    assert last_entry.solution is controller.solution_manager.get_incumbent()
+    assert last_entry.report.obj_value is not None
+    assert controller.work_status is not None
 
 
 # ------------------------------------------------------------------ P10: summary log
@@ -260,7 +381,8 @@ def test_summary_log_written(tmp_path: Path) -> None:
 
 
 def test_summary_log_rows_match_iterations(tmp_path: Path) -> None:
-    """Each CP-solve iteration produces one summary row."""
+    """Each CP-solve iteration produces one summary row;
+    the composite's self-endpoint is not a CP-solve iteration."""
     controller = _make_controller(_make_instance(), working_dir=tmp_path)
     controller.run_fam()
     history_before = len(controller.solution_manager.history)
@@ -271,13 +393,21 @@ def test_summary_log_rows_match_iterations(tmp_path: Path) -> None:
         destroyed_op_tl_multiplier=0.005,
     )
 
-    inner_regs = len(controller.solution_manager.history) - history_before
+    # Count the inner job_contrib_cp registrations by their step_label rather
+    # than subtracting a fixed offset: every inner call is namespaced
+    # ``…jdNNN_rMMM`` by temporarily_extended_context, the composite's own
+    # endpoint is not.
+    inner_regs = sum(
+        1
+        for record in controller.solution_manager.history[history_before:]
+        if _is_inner_call_label(record.report.step_label)
+    )
     log_files = list(tmp_path.rglob("*_incremental_job_contrib_cp_log.yaml"))
     assert log_files
     log = load_yaml(log_files[0])
     # Every row is a CP solve — skipped iterations (same destroy set) add no row.
     assert len(log["rows"]) == inner_regs, (
-        f"summary has {len(log['rows'])} rows for {inner_regs} registrations"
+        f"summary has {len(log['rows'])} rows for {inner_regs} inner registrations"
     )
     assert all(r["elapsed"] > 0 for r in log["rows"])
 

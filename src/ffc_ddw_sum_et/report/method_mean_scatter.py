@@ -135,8 +135,9 @@ def load_method_mean_metrics(
     Returns:
         list[dict[str, Any]]: ``{method, label, mean_time_pct, mean_rpdf,
         instance_count, is_top_level}`` dicts in controller (first-appearance)
-        order. ``method`` is the base name (pre-``.``); ``label`` is the full
-        ``subroutine_name`` (carrying the batch suffix) shown in the hover.
+        order. ``method`` is the base name (pre-``.``); ``label`` is the
+        ``subroutine_name`` shown in the hover (already collapsed for
+        ``incremental_job_contrib_cp`` — one point per jd level).
         ``is_top_level`` is ``True`` only for a bare controller step name and
         drives the marker shape: top-level steps get an open circle, everything
         registered below one call (CSR inner steps, per-batch endpoints) gets an
@@ -159,11 +160,13 @@ def load_method_mean_metrics(
     # Fine-grained step key: the *full* subroutine_name keeps each
     # incremental_sw_cp batch (``incremental_sw_cp.<n>-batch_<id>``) as its
     # own point instead of collapsing the whole call_index into a single
-    # marker. Order = first appearance across the endpoint frame (controller
-    # order), matching the flow-comparison guide markers, then adjusted by
-    # ``_order_parents_after_children``. The display ``method`` is the base
-    # name (pre-``.``) so all batches share one symbol/colour; ``label``
-    # carries the full name for the hover.
+    # marker. ``incremental_job_contrib_cp`` is an exception — its
+    # per-rep contexts are already collapsed at load time, yielding one
+    # point per jd level. Order = first appearance across the endpoint
+    # frame (controller order), matching the flow-comparison guide markers,
+    # then adjusted by ``_order_parents_after_children``. The display
+    # ``method`` is the base name (pre-``.``) so all batches share one
+    # symbol/colour; ``label`` carries the full name for the hover.
     step_order = {
         name: idx
         for idx, name in enumerate(

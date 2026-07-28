@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from ffc_ddw_sum_et.report.obj_log_loader import (
+    _normalize_subroutine_name,
     build_endpoint_df,
     build_raw_progression_df,
     load_instance_progression,
@@ -184,3 +185,86 @@ def test_malformed_series_block_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="expected mapping"):
         load_instance_progression(obj_log_path, manifest_path)
+
+
+# ── _normalize_subroutine_name unit tests ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw_name, expected",
+    [
+        (
+            "incremental_job_contrib_cp.3-jd006_r001",
+            "incremental_job_contrib_cp.jd006",
+        ),
+        (
+            "incremental_job_contrib_cp.4-jd006_r002",
+            "incremental_job_contrib_cp.jd006",
+        ),
+        (
+            "incremental_job_contrib_cp.12-jd006_r1000",
+            "incremental_job_contrib_cp.jd006",
+        ),
+        (
+            "coarsen_solve_reconstruct-5-incremental_job_contrib_cp.2-jd010_r001",
+            "coarsen_solve_reconstruct-5-incremental_job_contrib_cp.jd010",
+        ),
+        ("incremental_sw_cp.1-batch_002", "incremental_sw_cp.1-batch_002"),
+        (
+            "coarsen_solve_reconstruct-1-calc_mcf_lb_and_derive_full_sch",
+            "coarsen_solve_reconstruct-1-calc_mcf_lb_and_derive_full_sch",
+        ),
+        ("neh_cp", "neh_cp"),
+    ],
+)
+def test_normalize_subroutine_name(raw_name: str, expected: str) -> None:
+    assert _normalize_subroutine_name(raw_name) == expected
+
+
+def test_normalize_merges_same_jd_retries() -> None:
+    """Two rep variants of the same jd level normalize to the same name."""
+    a = _normalize_subroutine_name("incremental_job_contrib_cp.3-jd006_r001")
+    b = _normalize_subroutine_name("incremental_job_contrib_cp.4-jd006_r002")
+    assert a == b == "incremental_job_contrib_cp.jd006"
+
+
+# ── loader-level: rep collapse in CallSegment ──────────────────────────
+
+
+def test_rep_collapse_preserves_prefixed_name(tmp_path: Path) -> None:
+    """Two rep entries for the same jd produce CallSegments with identical
+    ``subroutine_name`` but original ``prefixed_subroutine_name`` values."""
+    obj_log = {
+        "obj_value": {
+            "name": "obj_value",
+            "data": {
+                "10.0": 100.0,
+                "12.0": 90.0,
+                "16.0": 85.0,
+            },
+            "notes": {
+                "12.0": "2-incremental_job_contrib_cp.3-jd006_r001",
+                "16.0": "2-incremental_job_contrib_cp.4-jd006_r002",
+            },
+        },
+        "obj_bound": {"name": "obj_bound", "data": {}, "notes": {}},
+    }
+    obj_log_path, manifest_path = _write_pair(
+        tmp_path, obj_log_payload=obj_log, manifest_payload=_manifest()
+    )
+    prog = load_instance_progression(obj_log_path, manifest_path)
+
+    calls = prog.obj_value_calls
+    assert len(calls) == 2
+
+    # Both have the same normalized subroutine_name
+    assert calls[0].subroutine_name == calls[1].subroutine_name
+    assert calls[0].subroutine_name == "incremental_job_contrib_cp.jd006"
+
+    # prefixed_subroutine_name keeps the original raw labels
+    assert calls[0].prefixed_subroutine_name == (
+        "2-incremental_job_contrib_cp.3-jd006_r001"
+    )
+    assert calls[1].prefixed_subroutine_name == (
+        "2-incremental_job_contrib_cp.4-jd006_r002"
+    )

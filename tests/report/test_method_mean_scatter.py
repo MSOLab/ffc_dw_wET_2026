@@ -1,15 +1,24 @@
-"""Unit tests for ``load_method_mean_metrics`` batch expansion.
+"""Unit tests for ``load_method_mean_metrics`` step-key expansion.
 
 The run-level method-mean scatter must plot one point *per* incremental_sw_cp
 batch (``incremental_sw_cp.<n>-batch_<id>``) instead of collapsing the whole
 call_index into a single marker — mirroring the per-batch guide markers on
-the flow-comparison chart. These tests pin that contract.
+the flow-comparison chart. ``incremental_job_contrib_cp`` is the opposite
+case: its per-rep contexts collapse to one point per jd level. These tests
+pin both contracts.
+
+``_seg`` runs its ``name`` through the loader's
+:func:`_normalize_subroutine_name` so fixtures can carry the *raw* obj_log
+label and exercise the same collapse the loader applies.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from ffc_ddw_sum_et._calc import rpd_f
 from ffc_ddw_sum_et.report._chart_constants import HOVER_PERCENT_DECIMALS
 from ffc_ddw_sum_et.report.method_mean_scatter import (
     export_method_mean_scatter_html,
@@ -19,13 +28,14 @@ from ffc_ddw_sum_et.report.obj_log_loader import (
     CallSegment,
     InstanceProgression,
     ProgPoint,
+    _normalize_subroutine_name,
 )
 
 
 def _seg(call_index: int, name: str, end: float, obj: float) -> CallSegment:
     return CallSegment(
         call_index=call_index,
-        subroutine_name=name,
+        subroutine_name=_normalize_subroutine_name(name),
         prefixed_subroutine_name=f"{call_index}-{name}",
         global_start_sec=end - 1.0,
         global_end_sec=end,
@@ -415,3 +425,109 @@ def test_hover_unaffected_by_tick_decimals_arg(tmp_path: Path) -> None:
         f"hover regressed from {hover_dec} to tick decimals"
     )
     assert f"%{{y:.{hover_dec}%}}" in html
+
+
+# ── job_contrib_cp rep collapse ─────────────────────────────────────────
+
+
+def test_job_contrib_rep_collapse_single_instance() -> None:
+    """Given one instance whose jd006 level ran two improving reps,
+    when the metrics are built,
+    then both reps collapse to one point carrying the *last* rep's
+    time and objective.
+    """
+    prog = _progression(
+        "InstA",
+        [
+            _seg(1, "neh_cp", 2.0, 100.0),
+            _seg(2, "incremental_job_contrib_cp.3-jd006_r001", 3.0, 95.0),
+            _seg(2, "incremental_job_contrib_cp.4-jd006_r002", 5.0, 90.0),
+        ],
+    )
+    baseline = {"InstA": 50.0}
+
+    points = load_method_mean_metrics([prog], baseline)
+    jd_pts = [p for p in points if p["method"] == "incremental_job_contrib_cp"]
+    assert len(jd_pts) == 1, f"expected 1 merged point, got {len(jd_pts)}"
+    pt = jd_pts[0]
+    # The point carries the normalized (rep-free) subroutine_name.
+    assert pt["label"] == "incremental_job_contrib_cp.jd006"
+    # Time is the last rep's (global_end_sec=5.0 / timelimit=10.0).
+    assert pt["mean_time_pct"] == pytest.approx(0.5)
+    # RPDf uses the best-so-far incumbent from the last rep (obj=90.0).
+    assert pt["mean_rpdf"] == pytest.approx(rpd_f(90.0, 50.0))
+    # A collapsed jd level stays a sub-step (star-diamond), not top level.
+    assert pt["is_top_level"] is False
+
+
+def test_job_contrib_rep_collapse_realigns_instances() -> None:
+    """Given two instances whose depth-2 step indices drifted apart because
+    only one of them ran a second rep on jd006,
+    when the metrics are built,
+    then each jd level is a single point averaging both instances.
+
+    Without normalization the raw labels differ per instance
+    (``5-jd007_r001`` vs ``4-jd007_r001``), so jd007 splits into two points
+    and the flow order zig-zags.
+    """
+    inst_a = _progression(
+        "InstA",
+        [
+            _seg(1, "neh_cp", 1.0, 100.0),
+            _seg(2, "incremental_job_contrib_cp.3-jd006_r001", 2.0, 95.0),
+            _seg(2, "incremental_job_contrib_cp.4-jd006_r002", 3.0, 90.0),
+            _seg(2, "incremental_job_contrib_cp.5-jd007_r001", 4.0, 85.0),
+        ],
+    )
+    inst_b = _progression(
+        "InstB",
+        [
+            _seg(1, "neh_cp", 1.0, 110.0),
+            _seg(2, "incremental_job_contrib_cp.3-jd006_r001", 2.0, 100.0),
+            _seg(2, "incremental_job_contrib_cp.4-jd007_r001", 3.0, 95.0),
+        ],
+    )
+    baseline = {"InstA": 50.0, "InstB": 55.0}
+
+    points = load_method_mean_metrics([inst_a, inst_b], baseline)
+    jd_labels = [
+        p["label"] for p in points if p["method"] == "incremental_job_contrib_cp"
+    ]
+    assert jd_labels == [
+        "incremental_job_contrib_cp.jd006",
+        "incremental_job_contrib_cp.jd007",
+    ], f"jd levels did not realign across instances: {jd_labels}"
+
+    by_label = {p["label"]: p for p in points}
+    # jd006: InstA's *last* rep (3.0) and InstB's only rep (2.0) → mean 0.25.
+    assert by_label["incremental_job_contrib_cp.jd006"][
+        "mean_time_pct"
+    ] == pytest.approx(0.25)
+    # jd007: InstA 4.0, InstB 3.0 → mean 0.35, both instances present.
+    jd007 = by_label["incremental_job_contrib_cp.jd007"]
+    assert jd007["mean_time_pct"] == pytest.approx(0.35)
+    assert jd007["instance_count"] == 2
+
+
+def test_composite_endpoint_is_top_level() -> None:
+    """C3: bare ``incremental_job_contrib_cp`` label (composite self-endpoint)
+    is ``is_top_level=True`` — it appears as an open circle closing the flow.
+    The jd-level sub-steps remain star-diamond."""
+    prog = _progression(
+        "InstA",
+        [
+            _seg(1, "neh_cp", 2.0, 100.0),
+            _seg(2, "incremental_job_contrib_cp.3-jd004_r001", 3.0, 95.0),
+            _seg(2, "incremental_job_contrib_cp.4-jd005_r001", 4.0, 90.0),
+            _seg(2, "incremental_job_contrib_cp", 5.0, 90.0),
+        ],
+    )
+    baseline = {"InstA": 50.0}
+
+    points = load_method_mean_metrics([prog], baseline)
+    by_label = {p["label"]: p for p in points}
+
+    assert "incremental_job_contrib_cp" in by_label
+    assert by_label["incremental_job_contrib_cp"]["is_top_level"] is True
+    assert not by_label["incremental_job_contrib_cp.jd004"]["is_top_level"]
+    assert not by_label["incremental_job_contrib_cp.jd005"]["is_top_level"]

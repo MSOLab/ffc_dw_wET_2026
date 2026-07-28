@@ -3321,8 +3321,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """Composite step: iterate :meth:`job_contrib_cp` over a ramp of
         ``jd`` (destroy-count) values.
 
-        Registers nothing — each inner ``job_contrib_cp`` call registers
-        independently via ``temporarily_extended_context`` namespacing.
+        Each inner ``job_contrib_cp`` call registers independently via
+        ``temporarily_extended_context`` namespacing. The composite registers
+        its own endpoint at the end (or on early exit) so charts show a
+        top-level marker closing this flow section.
         """
         incumbent = self.solution_manager.get_incumbent()
         if incumbent is None or incumbent.schedule is None:
@@ -3331,6 +3333,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 "chain it after a seeding subroutine such as "
                 "calc_mcf_lb_and_derive_full_sch."
             )
+
+        # Step entry — every ``_register`` below reports elapsed against this,
+        # and per-iteration CP progress is offset from it.
+        step_start = time.monotonic()
 
         instance = self.instance
         n = instance.job_count
@@ -3356,6 +3362,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 n,
             )
             self._dump_incremental_job_contrib_cp_log("jd_ge_n", [])
+            # C3: register the composite's own endpoint on early exit too.
+            elapsed = time.monotonic() - step_start
+            self._register(
+                SubroutineReport(
+                    elapsed_time=elapsed,
+                    obj_value=self.solution_manager.best_obj_value,
+                    obj_bound=None,
+                ),
+                self.solution_manager.get_incumbent(),
+            )
             return
 
         level_list = list(range(jd_start_cnt, jd_end_cnt + 1, jd_step_size))
@@ -3389,7 +3405,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # Skipped-iteration counter. ``rows`` holds one entry per CP solve, so
         # same-destroy-set skips would otherwise be invisible outside the log.
         same_set_skips = 0
-        step_start = time.monotonic()
         all_cp_progress: list[dict] = []
 
         try:
@@ -3591,6 +3606,24 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 if _outer_break:
                     break
 
+            # Composite step registers its own endpoint so charts show a
+            # top-level (open-circle) marker at the end of this flow
+            # section, matching coarsen_solve_reconstruct's convention.
+            # The current incumbent is passed (not None): ``work_status``
+            # reads ``history[-1].solution`` and would report None — i.e. a
+            # successful run recorded as status-unknown — for a solution-less
+            # tail entry. Re-registering the incumbent cannot displace it
+            # (``register`` only swaps on a strictly better objective).
+            # contract: elapsed measured immediately before _register.
+            elapsed = time.monotonic() - step_start
+            self._register(
+                SubroutineReport(
+                    elapsed_time=elapsed,
+                    obj_value=self.solution_manager.best_obj_value,
+                    obj_bound=None,
+                ),
+                self.solution_manager.get_incumbent(),
+            )
         except Exception as exc:
             exit_reason = f"error:{type(exc).__name__}"
             raise
