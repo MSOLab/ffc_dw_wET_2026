@@ -107,6 +107,24 @@ def _build_gantt_title(
     return f"{instance}\n{png_path.stem}\nobj={obj}, makespan={makespan}"
 
 
+def _build_highlight_op_set(
+    data: dict[str, Any],
+) -> set[tuple[str, str]] | None:
+    """Build ``highlight_op_set`` from ``highlightJobs`` in JSON data.
+
+    Returns ``{(job, stage) | job ∈ highlightJobs, stage ∈ data["stages"]}``
+    so every operation of each highlighted job gets the highlight treatment.
+    Returns ``None`` when ``highlightJobs`` is absent or empty.
+    """
+    hl_jobs = data.get(K.HIGHLIGHT_JOBS)
+    if not hl_jobs:
+        return None
+    stages = data.get(K.STAGES)
+    if not stages:
+        return None
+    return {(j, s) for j in hl_jobs for s in stages}
+
+
 def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> None:
     """Render a Gantt PNG from any ``dump_solution_json``-shaped file.
 
@@ -146,6 +164,7 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
 
     makespan = max(end_map.values()) if end_map else 0
     title = _build_gantt_title(data, png_path, makespan=makespan)
+    highlight_op_set = _build_highlight_op_set(data)
 
     try:
         png_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +177,7 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
             machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
             all_job_list=data.get(K.JOBS),
             title=title,
+            highlight_op_set=highlight_op_set,
         )
     except Exception:
         logger.exception("Failed to render Gantt for %s", solution_path)
@@ -235,6 +255,7 @@ def _render_phase_gantt_from_json(
         return
 
     is_preemptive = K.SEGMENTS in data
+    highlight_op_set = _build_highlight_op_set(data)
 
     try:
         png_path.parent.mkdir(parents=True, exist_ok=True)
@@ -269,6 +290,7 @@ def _render_phase_gantt_from_json(
                 force_start=force_start,
                 force_end=force_end,
                 title=title,
+                highlight_op_set=highlight_op_set,
             )
         else:
             operations = data.get(K.OPERATIONS) or []
@@ -293,6 +315,7 @@ def _render_phase_gantt_from_json(
                 force_start=force_start,
                 force_end=force_end,
                 title=title,
+                highlight_op_set=highlight_op_set,
             )
     except Exception:
         logger.exception("Failed to render Gantt for %s", json_path)

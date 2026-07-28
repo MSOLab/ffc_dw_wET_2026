@@ -14,6 +14,9 @@ STAGE_ID = "stageId"
 ALL_JOBS = "allJobs"
 SEGMENTS = "segments"
 
+# optional metadata
+HIGHLIGHT_JOBS = "highlightJobs"
+
 # operation / segment item fields
 OP_JOB = "job"
 OP_STAGE = "stage"

@@ -41,6 +41,10 @@ from ffc_ddw_sum_et.algorithm.flip_makespan_cp import (
     FlipMakespanCpDispatcher,
     FlipMakespanCpOption,
 )
+from ffc_ddw_sum_et.algorithm.job_contrib_cp import (
+    JobContribCpDispatcher,
+    JobContribCpOption,
+)
 from ffc_ddw_sum_et.algorithm.mcf_lb import (
     BuildFullSchDiagnostic,
     CalcMcfLbAndDeriveFullSchDiagnostic,
@@ -105,7 +109,7 @@ from .mcf_lb_phase_labels import (
     MCF_LB_R2_LABEL_ORDER,
 )
 from .solution_manager import FFcDDWSolution
-from .value_resolver import resolve_value_expr
+from .value_resolver import resolve_jd_count_target, resolve_value_expr
 
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
 
@@ -3157,5 +3161,122 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 )
                 self._record_csr_phase("2_reconstructed_raw", raw_snapshot)
                 self._record_csr_phase("3_final", winner_final)
+
+        return report
+
+    def job_contrib_cp(
+        self,
+        jd_target: int | str = 1,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+        log_search_progress: bool = False,
+        draw_gantt: bool = False,
+    ) -> SubroutineReport:
+        """Step method: destroy top-contributing jobs, CP-SAT re-inserts.
+
+        Resolves ``jd_target`` (``1`` / ``"2"`` / ``"0.05n"``) into
+        ``jd_count_target`` (int ≥ 1), hands it to
+        :class:`JobContribCpOption`, dispatches via
+        :class:`JobContribCpDispatcher`, then registers the result.
+        """
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
+
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            raise RuntimeError(
+                "job_contrib_cp requires an incumbent schedule; chain it after a "
+                "seeding subroutine such as calc_mcf_lb_and_derive_full_sch."
+            )
+
+        instance = self.instance
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+        cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
+        jd_count_target = resolve_jd_count_target(jd_target, n)
+        self.logger.info(
+            "job_contrib_cp: jd_target=%r -> jd_count_target=%d (n=%d)",
+            jd_target,
+            jd_count_target,
+            n,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+
+        incumbent_copy = incumbent.schedule.deepcopy() if draw_gantt else None
+
+        option = JobContribCpOption(
+            jd_count_target=jd_count_target,
+            pf_method=pf_method,
+            horizon_multiplier=horizon_multiplier,
+            cp_tl_seconds=cp_tl_seconds,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            time_factor=self.time_factor,
+            error_if_infeasible=error_if_infeasible,
+            log_search_progress=log_search_progress,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            ref_solution=incumbent.schedule,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = JobContribCpDispatcher().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        obj_bound = (
+            float(result.obj_bound)
+            if result is not None and result.obj_bound is not None
+            else None
+        )
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound,
+        )
+        progress_log = record.progress_log or ()
+        if result is not None and result.schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
+                progress_log=progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=progress_log)
+
+        if draw_gantt and incumbent_copy is not None:
+            selected = (
+                result.metrics.get("selected_jobs")
+                if result is not None and result.metrics is not None
+                else None
+            )
+            hl: set[str] | None = set(selected) if selected else None
+            self._record_mcf_lb_phase(
+                ("job_contrib_cp_before", incumbent_copy),
+                highlight_jobs=hl,
+            )
+            if result is not None and result.schedule is not None:
+                self._record_mcf_lb_phase(
+                    ("job_contrib_cp_after", result.schedule.deepcopy()),
+                    highlight_jobs=hl,
+                )
+
+        if result is not None and result.metrics is not None:
+            log_path = self.try_get_file_path_for_subroutine("_metrics.yaml")
+            if log_path is not None:
+                dump_yaml(dict(result.metrics), log_path)
 
         return report

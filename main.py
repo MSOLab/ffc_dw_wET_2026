@@ -27,7 +27,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260727/csr_usability_sweep.yaml")
+CONFIG_PATH = Path("metadata/20260728/job_contrib_cp_resume_smoke.yaml")
 
 
 def _parse_args() -> argparse.Namespace:
