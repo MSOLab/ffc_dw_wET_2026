@@ -27,7 +27,7 @@ run_mode: FULL_RUN
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [60, 61, 62, 63, 64]
+# ins_index: [60, 61, 62, 63, 64]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260728_dispatch_v4_init_tl
