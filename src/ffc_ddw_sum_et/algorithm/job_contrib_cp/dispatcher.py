@@ -28,10 +28,12 @@ from ..base.alg_record import (
     WorkStatus,
 )
 from ..base.alg_spec import AlgSpec
+from ..cpsat_callbacks.obj_value_recorder import ObjectiveValueRecorder
 from ..cpsat_search_log import write_cpsat_search_log
 from ..cpsat_solver_options import CpsatSolverOptions, get_solver
 from ..cumulative import BaseModelBuilder, decode_pf_method
 from .option import JobContribCpOption
+from .selection import select_jd_jobs
 
 __all__ = ["JobContribCpDispatcher"]
 
@@ -55,16 +57,19 @@ class JobContribCpDispatcher:
 
         start = time.monotonic()
 
+        selected = select_jd_jobs(
+            incumbent,
+            instance,
+            option.jd_count_target,
+            time_factor=option.time_factor,
+        )
+        jd_count_eff = len(selected)
+
         job_2_contrib = compute_job_2_obj_contrib_map(
             incumbent, instance, time_factor=option.time_factor
         )
         incumbent_obj = float(sum(job_2_contrib.values()))
-
         positive_jobs = [j for j, v in job_2_contrib.items() if v > 0]
-        selected = sorted(positive_jobs, key=lambda j: (-job_2_contrib[j], j))[
-            : option.jd_count_target
-        ]
-        jd_count_eff = len(selected)
 
         if jd_count_eff == 0:
             logger.info(
@@ -85,6 +90,7 @@ class JobContribCpDispatcher:
                     metrics={
                         "jd_count_target": option.jd_count_target,
                         "jd_count_eff": 0,
+                        "destroyed_op_count": 0,
                         "positive_contrib_job_count": 0,
                         "incumbent_obj": 0.0,
                         "selected_jobs": [],
@@ -165,7 +171,13 @@ class JobContribCpDispatcher:
         # experiment budget.
         now = time.monotonic()
         tl_bounds: dict[str, float] = {}
-        if option.cp_tl_seconds is not None:
+        destroyed_op_count = jd_count_eff * instance.stage_count
+        effective_cp_tl: float | None = None
+        if option.cp_tl_mode == "proportional":
+            effective_cp_tl = option.destroyed_op_tl_multiplier * destroyed_op_count
+            tl_bounds["cp_tl"] = effective_cp_tl - (now - start)
+        elif option.cp_tl_seconds is not None:
+            effective_cp_tl = option.cp_tl_seconds
             tl_bounds["cp_tl"] = option.cp_tl_seconds - (now - start)
         if option.wall_clock_deadline_sec is not None:
             tl_bounds["wall_clock_deadline"] = option.wall_clock_deadline_sec - now
@@ -185,6 +197,7 @@ class JobContribCpDispatcher:
                 incumbent,
                 incumbent_obj=incumbent_obj,
                 jd_count_eff=jd_count_eff,
+                destroyed_op_count=destroyed_op_count,
                 positive_count=len(positive_jobs),
                 cpsat_status=f"budget_exhausted_before_solve:{binding}",
                 selected=selected,
@@ -219,7 +232,8 @@ class JobContribCpDispatcher:
         if option.log_search_progress:
             solver.log_callback = search_log_lines.append
 
-        status = solver.solve(mdl)
+        recorder = ObjectiveValueRecorder()
+        status = solver.solve(mdl, solution_callback=recorder)
         status_name = solver.status_name(status)
 
         if option.log_search_progress:
@@ -262,6 +276,7 @@ class JobContribCpDispatcher:
                 incumbent,
                 incumbent_obj=incumbent_obj,
                 jd_count_eff=jd_count_eff,
+                destroyed_op_count=destroyed_op_count,
                 positive_count=len(positive_jobs),
                 cpsat_status=status_name,
                 selected=selected,
@@ -301,13 +316,25 @@ class JobContribCpDispatcher:
             )
 
         final_elapsed = time.monotonic() - start
-        progress_log: tuple[ProgressLogEntry, ...] = (
+        progress_entries: list[ProgressLogEntry] = []
+        if recorder.entries:
+            offset_sec = recorder.time_started - start
+            progress_entries.extend(
+                ProgressLogEntry(
+                    elapsed_sec=t_rec + offset_sec,
+                    obj_value=float(vb.value),
+                    obj_bound=float(vb.bound),
+                )
+                for t_rec, vb in recorder.entries
+            )
+        progress_entries.append(
             ProgressLogEntry(
                 elapsed_sec=final_elapsed,
                 obj_value=post_obj,
                 obj_bound=None,
             ),
         )
+        progress_log = tuple(progress_entries)
 
         return AlgRecord(
             work_status=(
@@ -325,6 +352,8 @@ class JobContribCpDispatcher:
                 metrics={
                     "jd_count_target": option.jd_count_target,
                     "jd_count_eff": jd_count_eff,
+                    "destroyed_op_count": destroyed_op_count,
+                    "cp_tl_seconds": effective_cp_tl,
                     "positive_contrib_job_count": len(positive_jobs),
                     "incumbent_obj": incumbent_obj,
                     "cpsat_status": status_name,
@@ -354,6 +383,7 @@ class JobContribCpDispatcher:
         *,
         incumbent_obj: float,
         jd_count_eff: int,
+        destroyed_op_count: int,
         positive_count: int,
         cpsat_status: str,
         selected: list[str],
@@ -370,6 +400,7 @@ class JobContribCpDispatcher:
                 metrics={
                     "jd_count_target": option.jd_count_target,
                     "jd_count_eff": jd_count_eff,
+                    "destroyed_op_count": destroyed_op_count,
                     "positive_contrib_job_count": positive_count,
                     "incumbent_obj": incumbent_obj,
                     "cpsat_status": cpsat_status,

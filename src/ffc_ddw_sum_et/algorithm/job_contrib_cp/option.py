@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from os import PathLike
-from typing import Callable
+from typing import Callable, Literal
 
 from ..base.alg_option import AlgOption
 from ..cumulative import PFMethod
@@ -27,6 +27,8 @@ class JobContribCpOption(AlgOption):
     pf_method: PFMethod = "PF1"
     horizon_multiplier: float = 1.25
     cp_tl_seconds: float | None = None
+    cp_tl_mode: Literal["constant", "proportional"] = "constant"
+    destroyed_op_tl_multiplier: float | None = None
     wall_clock_deadline_sec: float | None = None
     solver_thread_cnt: int = 1
     time_factor: int = 1
@@ -49,4 +51,17 @@ class JobContribCpOption(AlgOption):
         if self.horizon_multiplier <= 0:
             raise ValueError(
                 f"horizon_multiplier must be > 0, got {self.horizon_multiplier}"
+            )
+        if self.destroyed_op_tl_multiplier is not None:
+            if self.destroyed_op_tl_multiplier <= 0:
+                raise ValueError(
+                    "destroyed_op_tl_multiplier must be > 0, "
+                    f"got {self.destroyed_op_tl_multiplier}"
+                )
+        if (
+            self.cp_tl_mode == "proportional"
+            and self.destroyed_op_tl_multiplier is None
+        ):
+            raise ValueError(
+                "destroyed_op_tl_multiplier is required when cp_tl_mode='proportional'"
             )
