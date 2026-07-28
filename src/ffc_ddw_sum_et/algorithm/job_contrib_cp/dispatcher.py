@@ -28,6 +28,7 @@ from ..base.alg_record import (
     WorkStatus,
 )
 from ..base.alg_spec import AlgSpec
+from ..cpsat_search_log import write_cpsat_search_log
 from ..cpsat_solver_options import CpsatSolverOptions, get_solver
 from ..cumulative import BaseModelBuilder, decode_pf_method
 from .option import JobContribCpOption
@@ -220,6 +221,14 @@ class JobContribCpDispatcher:
 
         status = solver.solve(mdl)
         status_name = solver.status_name(status)
+
+        if option.log_search_progress:
+            write_cpsat_search_log(
+                solver.response_proto.solve_log,
+                option.solver_log_path_getter,
+                "_job_contrib_cp_search.log",
+                logger=logger,
+            )
 
         if option.log_search_progress and any(
             "solution hint is incomplete" in line.lower() for line in search_log_lines

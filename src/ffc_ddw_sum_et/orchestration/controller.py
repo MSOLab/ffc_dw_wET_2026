@@ -3220,6 +3220,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             time_factor=self.time_factor,
             error_if_infeasible=error_if_infeasible,
             log_search_progress=log_search_progress,
+            solver_log_path_getter=self.get_file_path_for_subroutine,
         )
         spec = AlgSpec(
             instance=instance,
@@ -3256,6 +3257,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
         else:
             self._register(report, None, progress_log=progress_log)
+
+        # Logged after _register so the log IO stays outside the measured
+        # elapsed_time window (see orchestration/AGENTS.md, invariant 2).
+        metrics = result.metrics if result is not None else None
+        self.logger.info(
+            "job_contrib_cp: work_status=%s, cpsat_status=%s, "
+            "jd_count_eff=%s, obj=%s, elapsed=%.3fs",
+            record.work_status.name,
+            metrics.get("cpsat_status", "N/A") if metrics is not None else "N/A",
+            metrics.get("jd_count_eff", "N/A") if metrics is not None else "N/A",
+            f"{obj_value:.1f}" if obj_value is not None else "N/A",
+            elapsed,
+        )
 
         if draw_gantt and incumbent_copy is not None:
             selected = (

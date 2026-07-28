@@ -90,3 +90,14 @@ class TestJobContribCpOption:
     def test_horizon_multiplier_zero_raises(self) -> None:
         with pytest.raises(ValueError, match="horizon_multiplier"):
             JobContribCpOption(jd_count_target=1, horizon_multiplier=0)
+
+    def test_solver_log_path_getter_defaults_to_none(self) -> None:
+        opt = JobContribCpOption(jd_count_target=1)
+        assert opt.solver_log_path_getter is None
+
+    def test_solver_log_path_getter_accepts_callable(self) -> None:
+        def my_getter(s: str) -> str:
+            return s
+
+        opt = JobContribCpOption(jd_count_target=1, solver_log_path_getter=my_getter)
+        assert opt.solver_log_path_getter is my_getter

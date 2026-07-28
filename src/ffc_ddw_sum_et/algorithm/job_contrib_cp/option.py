@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from os import PathLike
+from typing import Callable
 
 from ..base.alg_option import AlgOption
 from ..cumulative import PFMethod
@@ -30,6 +32,7 @@ class JobContribCpOption(AlgOption):
     time_factor: int = 1
     error_if_infeasible: bool = False
     log_search_progress: bool = False
+    solver_log_path_getter: Callable[[str], PathLike[str] | str] | None = None
 
     def __post_init__(self) -> None:
         if self.jd_count_target < 1:

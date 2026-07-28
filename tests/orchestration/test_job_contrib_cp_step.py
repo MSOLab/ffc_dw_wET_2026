@@ -8,6 +8,7 @@ numpy scalars, and ``FFcSchedule`` time values are numpy-backed.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -124,3 +125,20 @@ def test_jd_target_ratio_expression(tmp_path: Path) -> None:
 
     metrics = load_yaml(metrics_files[0])
     assert metrics["jd_count_target"] == 2  # ceil(4 * 0.5)
+
+
+def test_logs_solver_status(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Controller must log work_status and cpsat_status after solve."""
+    caplog.set_level(logging.INFO)
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+
+    controller.job_contrib_cp(jd_target=2, cp_tl=5.0)
+
+    combined = "\n".join(caplog.messages)
+    assert "work_status=" in combined, (
+        f"work_status not found in log messages: {caplog.messages}"
+    )
+    assert "cpsat_status=" in combined, (
+        f"cpsat_status not found in log messages: {caplog.messages}"
+    )

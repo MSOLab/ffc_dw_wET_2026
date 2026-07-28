@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -510,4 +511,107 @@ class TestCompleteHint:
         )
         assert "solution hint is incomplete" not in log_text.lower(), (
             f"Found an incomplete hint in the search log:\n{log_text[:2000]}"
+        )
+
+
+class TestSearchLogOutput:
+    def test_search_log_written_when_enabled(self, tmp_path: Path) -> None:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [
+                ("j0", 5, 8),
+                ("j1", 8, 10),
+                ("j2", 10, 11),
+                ("j3", 11, 13),
+            ],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    jd_count_target=1,
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                    log_search_progress=True,
+                    solver_log_path_getter=(lambda suffix: str(tmp_path / suffix)),
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        assert record.work_status in (WorkStatus.FEASIBLE, WorkStatus.OPTIMAL)
+        log_path = tmp_path / "_job_contrib_cp_search.log"
+        assert log_path.is_file(), (
+            f"Expected search log at {log_path}, but file not found"
+        )
+        content = log_path.read_text(encoding="utf-8")
+        assert "Starting CP-SAT solver" in content, (
+            f"search log should carry CP-SAT's own output, got: {content[:500]}"
+        )
+        assert content.endswith("\n"), "search log should end with a newline"
+
+    def test_search_log_not_written_when_disabled(self, tmp_path: Path) -> None:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [
+                ("j0", 5, 8),
+                ("j1", 8, 10),
+                ("j2", 10, 11),
+                ("j3", 11, 13),
+            ],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    jd_count_target=1,
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                    log_search_progress=False,
+                    solver_log_path_getter=(lambda suffix: str(tmp_path / suffix)),
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        log_path = tmp_path / "_job_contrib_cp_search.log"
+        assert not log_path.is_file(), (
+            "search log should NOT be written when log_search_progress is False"
+        )
+
+    def test_search_log_not_written_when_no_getter(self, tmp_path: Path) -> None:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [
+                ("j0", 5, 8),
+                ("j1", 8, 10),
+                ("j2", 10, 11),
+                ("j3", 11, 13),
+            ],
+        )
+        seed = _apply_postprocess(seed, instance)
+
+        JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    jd_count_target=1,
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                    log_search_progress=True,
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        log_path = tmp_path / "_job_contrib_cp_search.log"
+        assert not log_path.is_file(), (
+            "search log should NOT be written when solver_log_path_getter is None"
         )
