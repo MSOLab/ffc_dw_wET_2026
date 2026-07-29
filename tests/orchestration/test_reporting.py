@@ -9,6 +9,7 @@ from ffc_ddw_sum_et.orchestration.ffcddw_single_instance_runner import InstanceR
 from ffc_ddw_sum_et.orchestration.reporting import (
     FFcDDWReporter,
     ScenarioResult,
+    _csv_cell,
     _last_non_empty_line,
 )
 
@@ -54,6 +55,17 @@ def test_last_non_empty_line_single() -> None:
 def test_last_non_empty_line_multi() -> None:
     assert _last_non_empty_line("first\nmiddle\nlast") == "last"
     assert _last_non_empty_line("first\nlast\n\n") == "last"
+
+
+def test_csv_cell_none_is_empty() -> None:
+    assert _csv_cell(None) == ""
+
+
+def test_csv_cell_stringifies_values() -> None:
+    assert _csv_cell(0) == "0"  # falsy-but-not-None must not become ""
+    assert _csv_cell("") == ""
+    assert _csv_cell(22.5) == "22.5"
+    assert _csv_cell("txt") == "txt"
 
 
 def test_aggregate_scenario_basic(tmp_path: Path) -> None:

@@ -37,117 +37,6 @@ uv run python scripts/analyze_batchsize_deep_dive.py
 uv run python scripts/analyze_batchsize_deep_dive.py batch_size_5_10_15_20.csv
 ```
 
-### Script catalog
-
-#### analyze_batchsize_regression.py
-
-Fits two OLS regression models (main effects / interaction) and predicts the
-best batch size per scenario. Also computes the actual per-instance winner and
-pairwise comparisons.
-
-**Input**: command-line argument, or default `batch_size_5_10_15.csv` (inside
-`ANALYSIS_DIR`).
-
-**Console output**:
-
-- Model 1 / Model 2 regression summaries
-- VIF values
-- Prediction-based distribution of the best batch size
-- Actual per-instance winner and pairwise comparison results
-- R², RMSE validation metrics
-
-**File output** (inside `ANALYSIS_DIR`):
-
-- `batch_size_regression_recommendations.csv` — prediction-based recommendation
-- `batch_size_actual_winner.csv` — actual winner
-
-**Use for**: quick exploratory analysis of the batch-size effect — whether the
-interaction term is significant, and which parameters matter.
-
----
-
-#### analyze_batchsize_deep_dive.py
-
-Goes beyond regression: difference regression, per-slice ANOVA, interaction
-decomposition, and model diagnostics. The output prefix is derived automatically
-from the input filename, so it applies to 3-way (5/10/15), 4-way
-(5/10/15/20), and other configurations alike.
-
-**Input**: command-line argument, or default `batch_size_5_10_15.csv` (inside
-`ANALYSIS_DIR`).
-
-**Analysis stages**:
-
-- **Section 0**: load data, pivot, compute pairwise batch-size differences
-- **Section 0.5**: fit Model 1 (main effects) and Model 2 (interaction)
-- **Section 1**: Difference Regression — regress `diff_avsb ~ params` to find
-  which parameters explain the gap between batch sizes
-- **Section 2**: Slicing Analysis — ANOVA + Tukey HSD post-hoc per parameter
-  value
-- **Section 3**: Interaction Effect Decomposition — decompose interaction
-  effects via Model 2 predictions (significance judged by z-score)
-- **Section 4**: Recommendation Table — prediction-based recommendation over the
-  full parameter grid, plus an R×n matrix
-- **Section 5**: Model Diagnostics — nested F-test, Breusch-Pagan test, residual
-  analysis
-
-**File output** (inside `ANALYSIS_DIR`; `prefix` auto-derived from the input
-filename):
-
-- `{prefix}_model2_summary.csv` — Model 2 coefficients
-- `{prefix}_diff_descriptive.csv` — difference distribution statistics
-- `{prefix}_diff_regression.csv` — difference-regression coefficients
-- `{prefix}_slicing_analysis.csv` — per-slice ANOVA / Tukey results
-- `{prefix}_interaction_effects.csv` — interaction decomposition
-- `{prefix}_recommendations_full.csv` — recommendation over the full grid
-- `{prefix}_recommendation_matrix.csv` — R×n matrix
-- `{prefix}_model_diagnostics.csv` — model diagnostic metrics
-
----
-
-#### visualize_batchsize_evidence.py
-
-Visualizes the output of `analyze_batchsize_deep_dive.py`. Answers "why is one
-batch size different from another" with a 4-panel summary and a 6-panel detail
-figure.
-
-**Input**: the CSVs produced by `analyze_batchsize_deep_dive.py` (auto-loaded
-from `ANALYSIS_DIR`; default prefix `batch_size_5_10_15`).
-
-**File output** (inside `ANALYSIS_DIR`):
-
-- `{prefix}_evidence_overview.png` — 4-panel summary
-  - pairwise box plot (difference distribution)
-  - per-slice heatmap
-  - R×n recommendation matrix
-  - actual-winner bar chart
-- `{prefix}_evidence_detail.png` — 6-panel detail
-  - difference histogram (threshold + mean/median marked)
-  - key-statistics text summary
-  - RPDf vs R and RPDf vs T prediction curves
-  - ANOVA F-stat bar chart
-  - per-slice box plot
-
----
-
-#### visualize_batchsize_15vs20.py
-
-For the 4-way experiment (5/10/15/20), focuses on the bs=15 vs bs=20 gap. Answers
-"is a larger batch size always better?"
-
-**Input**: the CSVs produced by
-`analyze_batchsize_deep_dive.py batch_size_5_10_15_20.csv` (auto-loaded from
-`ANALYSIS_DIR`).
-
-**File output** (inside `ANALYSIS_DIR`):
-
-- `{prefix}_evidence_15vs20.png` — 4 panels focused on bs15 vs bs20
-  - `diff_15vs20` histogram
-  - key statistics (difference, win rate, diminishing returns)
-  - prediction curves for all four batch sizes (vs R)
-  - R×n recommendation matrix
-- `{prefix}_evidence_all.png` — 6 panels comparing all batch sizes
-
 ### Execution order
 
 ```plaintext
@@ -605,6 +494,254 @@ uv run python scripts/20260719/analyze_csr_vs_baseline.py   # analysis/20260719_
 > the NEH family it then **loses the whole R=1.0 column** (4/9 cells, paired
 > 628/83/729 vs `neh`). Its −2.67 %p mean there is a big win at R=0.2 cancelling
 > a big loss at R=1.0, so that diagonal comparison is parity, not victory.
+
+---
+
+### 20260725/analyze_csr_winner_source.py
+
+Answers **"how deep into the inner `solve_flow` did the budget actually let the
+search get?"** — the algorithmic-depth diagnostic that objective means hide.
+
+`coarsen_solve_reconstruct` in `solve_flow` mode logs exactly one summary line
+per instance into `<scenario>/<instance>/*_SubroutineController.log`:
+
+```plaintext
+coarsen_solve_reconstruct[solve_flow]: candidates=3 deduped=3 dropped=0 \
+winner_source=2-run_flip_makespan_cp_from_incumbent winner_coarse_obj=... ...
+```
+
+`winner_source` is `<step_idx>-<method>` (with a `.<detail>` tail for per-batch
+registrations, e.g. `4-incremental_sw_cp.1-batch_002`), so **the step index is
+the depth the flow reached before the budget ran out**. The script scans those
+lines across a run, joins instance metadata, and pivots by scenario.
+
+**Input**: a run directory. Metadata (`n, c, T, R, RPDf_BKS_data, elapsedTime`)
+is joined from the run's `<ts>_rpdf_comparison.csv` through
+`pra2017_hybrid_match.csv` (instance dir name → `insIndex`); the loader is
+imported from `analyze_dispatch_sweep.py` so the join cannot drift. A run with
+no rpdf CSV still works, but slice flags and the RPDf block are unavailable.
+
+**Console output**: three blocks — winner_source counts by scenario, candidate
+count (mean/min/max) by scenario, and mean RPDf by scenario × winning depth.
+
+**File output** (`--outdir`, default `analysis/<run_id>_winner_source/`):
+
+- `winner_source_long.csv` — one row per (scenario, instance)
+- `winner_source_by_scenario.csv` — the scenario × depth pivot
+
+```bash
+# whole run
+uv run python scripts/20260725/analyze_csr_winner_source.py <run_dir>
+
+# the (n=200, c=10) slice of the lastsemi full grid, csr_* scenarios only
+uv run python scripts/20260725/analyze_csr_winner_source.py \
+    output/20260724_lastsemi_fullgrid/20260724T155337_875856 \
+    --scenario csr_k --n 200 --c 10
+```
+
+> **Finding that motivated the script** (the command above): at **f=5 %** on the
+> 180 `(n=200, c=10)` instances, K=1 lands on
+> `run_flip_makespan_cp_from_incumbent` 127/180 times and reaches
+> `incremental_sw_cp` only 10 times, while K=8 reaches `incremental_sw_cp`
+> 119/180. **Coarsening buys algorithmic depth** — and yet K=8 still loses badly
+> on RPDf (65.0 vs 26.6), so the depth gained does not pay for the resolution
+> lost. The starvation is specific to f≤5 %: at f=10/15 % K=1 also reaches
+> `incremental_sw_cp` on ~160/180. Used as the depth channel of
+> `plans/experiment/20260725/coarsening_short_budget_crossover.md`.
+
+> Scenarios whose CSR step runs the **legacy non-`solve_flow` path** (e.g. the
+> `solve=False` dispatch-only arms) log no such line and are absent from the
+> pivot — the script exits with an error if that leaves nothing to report.
+
+---
+
+### 20260726/analyze_crossover_ladder.py
+
+Answers **"is there a budget f at which coarsening (K>1) beats K=1?"** — the
+objective half of the sub-5 % crossover analysis, whose depth half is
+`20260725/analyze_csr_winner_source.py`.
+
+Reads the run's `<ts>_rpdf_comparison.csv`, parses `{arm}_k{K}[_{mode}][_f{NN}]`
+scenario names, and pairs every coarsened scenario against **its own arm's and
+own f's K=1 baseline** by `insIndex`, so a positive dRPDf always means coarsening
+hurt. Four arms isolate the two channels: `a` (dispatch-only) and `b` (mcf_lb
+only) carry resolution loss alone, `c` adds an equal-budget flip CP, `m1` runs
+the full inner `solve_flow` and carries both channels.
+
+**Two things it emits that a hand-rolled pivot tends to miss.**
+
+1. **Fixed-mode and best-over-mode are kept separate.** The 20260724
+   rounding-robustness ladder is quoted in `cumulative`; splicing a
+   best-over-mode number onto it makes part of the resulting jump a mode
+   artifact. `m1_ladder.csv` carries all four modes so a document never has to
+   splice.
+2. **The feasibility asymmetry is counted, not dropped.** A scenario that
+   registers no incumbent has a NaN RPDf and vanishes from the paired
+   comparison — silently, and precisely on the instances where one side has
+   nothing to compare. `coarse_only_feasible` / `k1_only_feasible` count those,
+   and a console block lists every scenario whose `n_paired` fell short.
+
+**File output** (`--outdir`, default `analysis/<run_id>_crossover_ladder/`):
+
+- `drpdf_by_mode_k.csv` — one row per (arm, f, k, mode): dRPDf, win/tie/loss,
+  `n_paired`, and the two feasibility-only counts
+- `arm_summary.csv` — per (arm, f, k) the best mode and the K=1 RPDf
+- `m1_ladder.csv` — k=2 dRPDf vs f, per mode (the crossover ladder itself)
+- `elapsed_by_scenario.csv` — mean elapsed on the (n=200, c=10) slice
+
+```bash
+uv run python scripts/20260726/analyze_crossover_ladder.py \
+    output/20260725_crossover_ladder/20260726T002619_971440
+```
+
+> Conclusion (`plans/analysis/20260726/coarsening_short_budget_crossover.md`):
+> **no objective crossover** — all 200 (arm, f, k, mode) combinations have
+> dRPDf > 0 and win < loss, even at f=1 %. **But there is a feasibility
+> crossover**: at f=1 % the `m1` K=1 baseline registers no incumbent at all on
+> 20/160 instances (the (n=150,c=5) and (n=200,c=5) cells, where the
+> `0.0009·f·n·c` budget is smallest), while K≥4 solves all 20. Those 20 drop out
+> of the paired tables, so the f=1 % dRPDf row is a 140-instance mean **biased in
+> K=1's favour**. Quote that alongside the headline.
+
+---
+
+### 20260726/verdict_mcf_lb_atomic.py
+
+Judges the **mcf_lb atomic-gate-removal re-run** against the run it replaces —
+the go/no-go for `plans/experiment/20260726/mcf_lb_atomic_gate_removal.md` §4.
+Run it once after the re-run finishes; it never polls or waits.
+
+Both runs live under the same output base (the re-run reuses the config
+unchanged), so they are told apart by timestamp only. Defaults are baked in:
+before = `20260726T002619_971440`, after = `20260726T173841_347539`.
+
+**Completion gate**: the run's `*_rpdf_comparison.csv` exists only after the
+final report pass, so its presence *is* the done signal and also the input every
+table needs. If it is missing the script prints `<done>/33600 instance results`
+and exits 1 — nothing else runs.
+
+**Gates, in order** (`load_run` / `paired_drpdf` are imported from
+`analyze_crossover_ladder.py`, so the verdict cannot drift from the tables the
+analysis document quotes):
+
+1. **G1 incumbents** — `bestObj` is never empty. Reports `m1_k1_f01` before→after
+   and, on failure, every affected scenario with its `(n, c)` cells.
+2. **G2 a/b control** — arms `a`/`b` bit-identical to the before-run (`a` never
+   calls mcf_lb; `b`'s budget was never binding). **A G2 failure suppresses the
+   conclusion section on purpose** — §4.1 says to re-read the code rather than
+   interpret the re-run, so the script exits 1 without printing it.
+3. **G3 c noise** — arm `c` mean `bestObj` delta within `NOISE_FLOOR_MEAN_OBJ`
+   (±350, established over the 1440-instance grid; the 160-instance slice here
+   is noisier per cell, so read a near-miss as "not distinguishable from noise",
+   not "proven unchanged").
+
+**Conclusion re-read** (only when G2 holds): how many of the 200
+(arm, f, k, mode) cells contradict "no crossover" (`dRPDf > 0 AND win < loss`)
+before vs after, whether the f=1 % `coarse_only_feasible` asymmetry went to zero,
+and the m1 k=2 dRPDf ladder as `before -> after` per mode. Then it shells out to
+`analyze_crossover_ladder.py` and `analyze_csr_winner_source.py --n 200 --c 10`
+to emit the standard CSVs (`--skip-artifacts` to suppress).
+
+Exits 0 only when all three gates pass.
+
+```bash
+uv run python scripts/20260726/verdict_mcf_lb_atomic.py
+uv run python scripts/20260726/verdict_mcf_lb_atomic.py --after <run_dir> --skip-artifacts
+```
+
+> **Self-check**: passing the same finished run as both `--before` and `--after`
+> reproduces the committed analysis exactly — `0/200` cells contradicting,
+> `m1_k1_f01` at 140/160, and the k=2 ladder at cumulative
+> +10.40/+12.34/+17.62/+18.48. G1 correctly fails there (42 nulls: 20 in
+> `m1_k1_f01`, 4–6 per `m1_k2_*_f01`), which is the defect the re-run exists to
+> remove.
+
+---
+
+### 20260726/analyze_csr_init_tl_curve.py
+
+Judges the **W2 P1 gate** (`plans/experiment/20260726/csr_init_roadmap.md` §2):
+does the τ=1 CSR initializer beat `best(MCF-LB → FMM, NEH-CP)` in **all nine
+(T, R) cells** while spending ≤ 40 % of the `0.09nc` budget? Both arms are
+initializer-only, so this scores **initial-solution quality**, not final
+objective.
+
+The baseline is the `c5_init_only` scenario measured **inside the same run**, so
+machine, code and load match — historical C5 numbers were read at an obj_log
+midpoint of a tail-carrying arm and are not a like-for-like comparator.
+
+Reads `<ts>_rpdf_comparison.csv` (verbatim `RPDf_BKS_data`) plus each instance's
+`_obj_log.json` for the inner-step breakdown, which the CSR inner-point notes
+(`...inner-NN-<idx>-<step>`, added in `2c7ef28`) make possible.
+
+**File output** (`--outdir`, default `analysis/<run_id>_csr_init_tl_curve/`):
+
+- `gate_cells.csv` — per (f, T, R): both arms' mean RPDf, Δ, `cell_pass`,
+  `indistinct` (|Δ| < 0.5 pp), win/tie/loss
+- `f_curve.csv` — per scenario: pooled + per-T mean RPDf, mean elapsed and its
+  share of the outer `0.09nc` cap (the budget-compliance check)
+- `win_tie_loss.csv` — paired counts vs the baseline, pooled and per T
+- `inner_steps.csv` — per (f, inner step) mean seconds, share, and objective drop
+- `gate_verdict.txt` — the verdict block printed to stdout
+
+Exits 1 when no f ≤ 40 % wins all nine cells.
+
+```bash
+uv run python scripts/20260726/analyze_csr_init_tl_curve.py \
+    output/20260726_csr_init_tl_curve/20260726T231158_246105
+```
+
+> Conclusion (`plans/analysis/20260726/csr_init_tl_curve.md`): **gate PASS,
+> minimum passing f = 20 %** — at half the baseline's wall time (15.9 s vs
+> 32.0 s). At equal budget (f=40, 37.2 % both) CSR wins pooled −17.18 pp,
+> 1227/132/81. Two caveats worth quoting: f=5 % **loses** (+16.16 pp) because the
+> ~2.0 s non-interruptible `mcf_lb` eats 46 % of that budget, and f=20's weakest
+> cell (T=0.6, R=1.0) is −0.56 pp / 88-72 — a tie in all but sign, so the robust
+> pick is f ≥ 25 %.
+
+---
+
+### 20260729/analyze_init_budget_curve.py
+
+Reads the **merged** run dir of the initialization-budget experiment
+(`dv4_c5init_f{10,20,40}` vs the 20260722 full-init scenarios) and emits every
+table `plans/analysis/20260729/init_budget_curve.md` quotes.
+
+Inputs are the merged run's own artifacts, so nothing is recomputed from raw
+solutions: `analysis_wide` (report.xlsx) for per-instance RPDf,
+`<run_id>_summary.csv` for the two initialization objectives, and the **scatter
+chart's embedded payload** for the step trajectory — parsing the chart's own
+numbers keeps the document and the figure from drifting apart.
+
+Three things it separates that a single mean hides:
+
+1. **Confounded vs unconfounded comparisons.** Deltas against
+   `a_v2_kappa005_max8` carry the v4 dispatch prefix and the 20260722→now code
+   drift on top of the budget effect; `within_family.csv` (f-vs-f inside one
+   run) is the only clean budget comparison. Both are printed, labelled.
+2. **The dispatch prefix's actual contribution** — `initObj` vs `dispatchedObj`
+   per instance, i.e. how often the dispatch schedule beats the MCF-derived one.
+   The same pair doubles as a **drift probe**: the deterministic MCF-LB step's
+   objective must match the older run instance-for-instance.
+3. **Where the curves cross.** The *last* sign change, not the first — a
+   shortened-init curve dips below early (the prefix) and comes back up while
+   the baseline is still inside its longer initialization.
+
+**Output** (`--out-dir`, default `analysis/20260729_init_budget_curve/`):
+`scenario_summary.csv`, `within_family.csv`, `prefix_value.csv`,
+`trajectory.csv`, `crossing.csv`, `tr_cells.csv`, `size_cells.csv`.
+
+```bash
+uv run python scripts/20260729/analyze_init_budget_curve.py \
+    output/20260728_init_budget_merge/20260729T041116_435991
+```
+
+> Conclusion (`plans/analysis/20260729/init_budget_curve.md`): cutting the
+> initialization from 40 % to 16 % of the `0.09nc` cap **gains** −1.09 %p mean
+> RPDf (728/564, 3.6 σ) and cutting to 4 % is indistinguishable from the
+> baseline — but within one run f10 < f20 < f40 monotonically, so the knee is at
+> **≥ 16 %** and the "saved time is worth more in the tail" hypothesis does not
+> hold over 4–16 %. Losses are local to T=0.6·R≥0.6 and mid/large c=5 cells.
 
 ---
 

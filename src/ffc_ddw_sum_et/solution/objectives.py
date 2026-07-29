@@ -81,6 +81,31 @@ def compute_weighted_et_from_preemptive(
     return sum_earliness, sum_tardiness
 
 
+def compute_job_2_obj_contrib_map(
+    schedule: FFcSchedule, instance: FFcDDWParameters, *, time_factor: int = 1
+) -> dict[str, int]:
+    """job_id -> f_j(C_j). Sum equals ``compute_weighted_earliness_tardiness`` total.
+
+    Missing weights default to 1 — same convention as
+    ``compute_weighted_earliness_tardiness`` (FAM original inline calculation).
+    """
+    last_stage_id = instance.stage_id_list[-1]
+    ewt_map = instance.job_2_ewt_map
+    twt_map = instance.job_2_twt_map
+    due_window_map = instance.job_2_due_window_map
+
+    job_2_contrib: dict[str, int] = {}
+    for job_id in instance.job_id_list:
+        completion_time = time_factor * schedule.get_job_end_time(last_stage_id, job_id)
+        due_lower, due_upper = due_window_map[job_id]
+        ewt = ewt_map.get(job_id, 1)
+        twt = twt_map.get(job_id, 1)
+        job_2_contrib[job_id] = ewt * max(due_lower - completion_time, 0) + twt * max(
+            completion_time - due_upper, 0
+        )
+    return job_2_contrib
+
+
 def compute_phase_obj_value(sched: Any, instance: FFcDDWParameters) -> float | None:
     """Return weighted ET on ``sched`` against ``instance``, or ``None`` when
     ``sched`` is on the reversed instance (its "last stage" is then the

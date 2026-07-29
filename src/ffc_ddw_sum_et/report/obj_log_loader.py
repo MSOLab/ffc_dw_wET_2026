@@ -13,6 +13,12 @@ per controller step so the chart code can treat each subroutine call as an
 atomic interval with a ``global_start_sec``, ``global_end_sec``, and a list
 of progress points.
 
+``CallSegment.subroutine_name`` is a **normalized** display name:
+``incremental_job_contrib_cp``'s per-rep contexts are collapsed to one name
+per jd level (``….3-jd006_r001`` → ``….jd006``).
+``CallSegment.prefixed_subroutine_name`` keeps the original raw label,
+unchanged.
+
 Failure policy: if ``<instance>_instance_result.yaml`` is missing, or the
 note label does not match ``^\\d+-(.+)$``, raise. We never emit "best
 effort" rows because partial averages mislead the resulting chart.
@@ -33,6 +39,7 @@ from routix.io import ArtifactLayout, load_yaml
 logger = logging.getLogger(__name__)
 
 _STEP_LABEL_RE = re.compile(r"^(\d+)-(.+)$")
+_JOB_CONTRIB_REP_RE = re.compile(r"^(.*incremental_job_contrib_cp)\.\d+-(jd\d+)_r\d+$")
 
 
 @dataclass(frozen=True)
@@ -48,8 +55,8 @@ class CallSegment:
     """One controller-step's contribution to a single series."""
 
     call_index: int  # 1-based, taken from the step-label prefix
-    subroutine_name: str
-    prefixed_subroutine_name: str
+    subroutine_name: str  # normalized display name (per-rep contexts collapsed)
+    prefixed_subroutine_name: str  # original raw label, unchanged
     global_start_sec: float
     global_end_sec: float
     points: tuple[ProgPoint, ...]
@@ -80,6 +87,14 @@ def _parse_step_label(label: str) -> tuple[int, str]:
     return int(match.group(1)), match.group(2)
 
 
+def _normalize_subroutine_name(name: str) -> str:
+    """Collapse ``incremental_job_contrib_cp``'s per-rep contexts to one name
+    per jd level: ``….3-jd006_r001`` / ``….4-jd006_r002`` → ``….jd006``.
+    """
+    match = _JOB_CONTRIB_REP_RE.match(name)
+    return f"{match.group(1)}.{match.group(2)}" if match else name
+
+
 def _build_calls_for_series(
     data: dict[str, float],
     notes: dict[str, str],
@@ -98,7 +113,8 @@ def _build_calls_for_series(
     prev_end = 0.0
     cursor = 0
     for end_sec, label in sorted_endpoints:
-        idx, sub_name = _parse_step_label(label)
+        idx, raw_name = _parse_step_label(label)
+        sub_name = _normalize_subroutine_name(raw_name)
         seg_points: list[ProgPoint] = []
         # Each data point belongs to the segment whose interval
         # (prev_end, end_sec] contains its timestamp. _save_obj_log writes

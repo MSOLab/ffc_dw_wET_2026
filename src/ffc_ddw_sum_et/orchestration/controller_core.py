@@ -131,6 +131,7 @@ class FFcDDWSubroutineControllerCore(
         # 2_last_stage_only_init, ..., 7_final). Only populated entries
         # are appended so early returns retain partial progress.
         self.mcf_lb_phase_schedules: list[tuple[str, MCFLBPhaseSchedule]] = []
+        self._mcf_lb_phase_highlight_jobs: dict[str, set[str]] = {}
         # Ordered (name, schedule) pairs per CSR phase (3-Gantt artifact).
         # Populated only when coarsen_solve_reconstruct is called with
         # emit_phase_schedules=True and a solution is found.
@@ -348,14 +349,25 @@ class FFcDDWSubroutineControllerCore(
             return zone_dir / filename
         return super().get_file_path_for_subroutine(filename_suffix)
 
-    def _record_mcf_lb_phase(self, item: tuple[str, MCFLBPhaseSchedule]) -> None:
+    def _record_mcf_lb_phase(
+        self,
+        item: tuple[str, MCFLBPhaseSchedule],
+        *,
+        highlight_jobs: set[str] | None = None,
+    ) -> None:
         """Append one ``(name, schedule)`` tuple to ``mcf_lb_phase_schedules``,
         prefixing ``name`` with the current method's call_context so the
         runner-side artifact filenames sort by subroutine-flow step on disk
         and don't collide across step calls.
+
+        ``highlight_jobs``: optional set of job IDs whose operation bars
+        should be rendered thicker/full-opacity in the phase Gantt PNG.
         """
         name, sched = item
-        self.mcf_lb_phase_schedules.append((self._mcf_lb_phase_name(name), sched))
+        prefixed = self._mcf_lb_phase_name(name)
+        self.mcf_lb_phase_schedules.append((prefixed, sched))
+        if highlight_jobs is not None:
+            self._mcf_lb_phase_highlight_jobs[prefixed] = highlight_jobs
 
     def _record_mcf_lb_phases(
         self, items: Iterable[tuple[str, MCFLBPhaseSchedule]]

@@ -58,6 +58,7 @@ output/
             ├── <scenario_name>_benchmark.log    # (기존, 호환)
             ├── <scenario_name>_statistics.yaml
             ├── <scenario_name>_mcf_lb_analysis.csv
+            ├── <scenario_name>_csr_analysis.csv
             └── <instance_name>/             # 예: Instance_50_5_3_0,2_0,2_10_Rep0
                 │
                 │ ── final zone ──
@@ -72,11 +73,13 @@ output/
                 │   ├── <ins>_<step_idx>-<method>_step_log.yaml
                 │   ├── <ins>_mcf_lb_diagnostic.yaml
                 │   ├── <ins>_<phase_name>.yaml          # MCF-LB phase schedules
-                │   └── <ins>_last_stage_only_schedule.yaml
+                │   ├── <ins>_last_stage_only_schedule.yaml
+                │   └── <call_context>_incremental_job_contrib_cp_progress.json
                 │
                 │ ── report zone ──
                 └── report/
                     ├── <ins>_gantt.png
+                    ├── <call_context>_incremental_job_contrib_cp_progress.png
                     ├── <ins>_<phase_name>_gantt.png
                     └── <ins>_<phase_name>_mcf_preemptive_gantt.png
 ```
@@ -226,6 +229,19 @@ artifacts:
   - scope: scenario
     kind: mcf_lb_analysis
     file_template: "{scenario_name}_mcf_lb_analysis.csv"
+  - scope: scenario
+    kind: csr_analysis
+    file_template: "{scenario_name}_csr_analysis.csv"
+
+  # ---- instance ----
+  - scope: instance
+    zone: progress
+    kind: job_contrib_progress_json
+    file_template: "{call_context}_incremental_job_contrib_cp_progress.json"
+  - scope: instance
+    zone: report
+    kind: job_contrib_progress_plot_png
+    file_template: "{call_context}_incremental_job_contrib_cp_progress.png"
 
   # ---- run ----
   - scope: run

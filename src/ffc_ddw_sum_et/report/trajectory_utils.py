@@ -45,7 +45,7 @@ def build_best_so_far_progression_points(grp: pd.DataFrame) -> list[ProgressionP
         return []
     x_values = grp["norm_time"].tolist()
     best_y = _compute_best_so_far_y_values(grp["rpd_f"].tolist())
-    points = [
+    points: list[ProgressionPoint] = [
         ProgressionPoint(time=float(x), rpd_f=float(y))
         for x, y in zip(x_values, best_y)
     ]

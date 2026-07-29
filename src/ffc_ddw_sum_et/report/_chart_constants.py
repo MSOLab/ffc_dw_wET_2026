@@ -1,14 +1,15 @@
-"""Shared chart-template constants used by ``rpdf_scatter_chart`` and
-``multi_scenario_method_chart``.
+"""Shared chart-template constants used by ``rpdf_scatter_chart``,
+``multi_scenario_method_chart``, and ``method_mean_scatter``.
 
-Both chart modules emit Plotly HTML and previously duplicated identical
-``SERIES_COLORS`` and ``SUBROUTINE_SYMBOL_MAP`` JS literals inline. Adding
-or renaming a subroutine then required editing both files in lockstep.
+All three chart modules emit Plotly HTML. ``SERIES_COLORS``,
+``SUBROUTINE_SYMBOL_MAP``, and ``HOVER_PERCENT_DECIMALS`` were previously
+duplicated inline or in separate modules. Adding or renaming a subroutine
+then required editing multiple files in lockstep.
 
 This module owns the canonical Python-side values; the chart modules
 inject them as JSON via their respective template substitution
 (``.format`` for ``rpdf_scatter_chart``, ``string.Template`` for
-``multi_scenario_method_chart``).
+``multi_scenario_method_chart`` and ``method_mean_scatter``).
 """
 
 from __future__ import annotations
@@ -36,6 +37,13 @@ SUBROUTINE_SYMBOL_MAP: dict[str, str] = {
     "build_full_sch_from_last_stage_only_sch": "triangle-down",
     "coarsen_solve_reconstruct": "cross",
 }
+
+# Decimal places for percent values in hover readouts (RPDf and Time%
+# alike) across every chart. Axis ticks deliberately stay at 1 decimal —
+# ticks read the scale, hover reads the data, and a ".3%" tick label is
+# both long and prone to collisions on the x axis. Raising this must move
+# every axis of every chart together; do not hardcode a literal instead.
+HOVER_PERCENT_DECIMALS = 3
 
 
 def series_colors_json() -> str:

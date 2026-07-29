@@ -21,6 +21,7 @@ from routix.type_defs import RunMode
 from ..io import schedule_keys as K
 from ..logging_setup import get_logging_args, setup_logging
 from ..parameters.ffc_ddw_params import FFcDDWParameters
+from ..report.csr_candidate_analysis import read_csr_winner
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
 from .mcf_lb_phase_labels import MCF_LB_R1_LABEL_ORDER, MCF_LB_R2_LABEL_ORDER
 from .summary import FFcDDWInputSummary, FFcDDWOutputSummary, FFcDDWSummary
@@ -42,6 +43,11 @@ def _last_non_empty_line(text: str | None) -> str | None:
         return None
     lines = [line for line in text.strip().splitlines() if line.strip()]
     return lines[-1] if lines else None
+
+
+def _csv_cell(value: Any) -> str:
+    """Stringify a value for a CSV cell, rendering None as an empty field."""
+    return "" if value is None else str(value)
 
 
 def _to_int(value: Any) -> int | None:
@@ -101,6 +107,24 @@ def _build_gantt_title(
     return f"{instance}\n{png_path.stem}\nobj={obj}, makespan={makespan}"
 
 
+def _build_highlight_op_set(
+    data: dict[str, Any],
+) -> set[tuple[str, str]] | None:
+    """Build ``highlight_op_set`` from ``highlightJobs`` in JSON data.
+
+    Returns ``{(job, stage) | job ∈ highlightJobs, stage ∈ data["stages"]}``
+    so every operation of each highlighted job gets the highlight treatment.
+    Returns ``None`` when ``highlightJobs`` is absent or empty.
+    """
+    hl_jobs = data.get(K.HIGHLIGHT_JOBS)
+    if not hl_jobs:
+        return None
+    stages = data.get(K.STAGES)
+    if not stages:
+        return None
+    return {(j, s) for j in hl_jobs for s in stages}
+
+
 def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> None:
     """Render a Gantt PNG from any ``dump_solution_json``-shaped file.
 
@@ -140,6 +164,7 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
 
     makespan = max(end_map.values()) if end_map else 0
     title = _build_gantt_title(data, png_path, makespan=makespan)
+    highlight_op_set = _build_highlight_op_set(data)
 
     try:
         png_path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +177,7 @@ def _render_gantt_from_solution_json(solution_path: Path, png_path: Path) -> Non
             machine_list_per_stage=data.get(K.MACHINES_PER_STAGE),
             all_job_list=data.get(K.JOBS),
             title=title,
+            highlight_op_set=highlight_op_set,
         )
     except Exception:
         logger.exception("Failed to render Gantt for %s", solution_path)
@@ -229,6 +255,7 @@ def _render_phase_gantt_from_json(
         return
 
     is_preemptive = K.SEGMENTS in data
+    highlight_op_set = _build_highlight_op_set(data)
 
     try:
         png_path.parent.mkdir(parents=True, exist_ok=True)
@@ -263,6 +290,7 @@ def _render_phase_gantt_from_json(
                 force_start=force_start,
                 force_end=force_end,
                 title=title,
+                highlight_op_set=highlight_op_set,
             )
         else:
             operations = data.get(K.OPERATIONS) or []
@@ -287,6 +315,7 @@ def _render_phase_gantt_from_json(
                 force_start=force_start,
                 force_end=force_end,
                 title=title,
+                highlight_op_set=highlight_op_set,
             )
     except Exception:
         logger.exception("Failed to render Gantt for %s", json_path)
@@ -432,6 +461,163 @@ def _render_progress_plot(json_path: Path, png_path: Path) -> None:
         plt.close(fig)
     except Exception:
         logger.exception("Failed to render progress plot for %s", json_path)
+
+
+# Filename suffix the composite step appends to its call context (see
+# ``_dump_incremental_job_contrib_cp_progress`` in controller.py); mirrors the
+# ``job_contrib_progress_json`` template's constant part in the layout overlay.
+_JOB_CONTRIB_PROGRESS_SUFFIX = "_incremental_job_contrib_cp_progress.json"
+
+
+def _render_job_contrib_progress_plot(
+    json_path: Path, png_path: Path, title: str | None = None
+) -> None:
+    """Render incremental job-contrib CP progress plot from the composite's
+    ``_incremental_job_contrib_cp_progress.json``.
+
+    Plots:
+      - objValue: the raw inner-solve trajectory, solid step line.  No
+        best-so-far filter — the hint chain makes the sequence monotone
+        non-increasing already, so a running min would be a no-op and a
+        rise would be the bug signal worth seeing.
+      - restricted-model bound: dashed line
+      - global LB: horizontal reference line
+      - Round-boundary vertical lines, jd-boundaries bold
+
+    ``title`` names the chart; the filename carries the call context rather
+    than the instance name, so the caller supplies the instance label.  Falls
+    back to a filename-derived label when omitted.
+
+    Step-local time axis.  Module-level for ``ProcessPoolExecutor`` picklability.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not available, skipping %s", json_path)
+        return
+
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("Failed to load job_contrib_progress %s", json_path)
+        return
+
+    cp_progress = data.get("cp_progress", [])
+    same_set_skips = data.get("same_set_skips", 0)
+    global_lb = data.get("global_lb")
+
+    if not cp_progress:
+        return
+
+    ub_t: list[float] = []
+    ub_y: list[float] = []
+    lb_t: list[float] = []
+    lb_y: list[float] = []
+
+    for entry in cp_progress:
+        t = float(entry["t"])
+        ub_t.append(t)
+        ub_y.append(float(entry["obj_value"]))
+        ob = entry.get("obj_bound")
+        if ob is not None:
+            lb_t.append(t)
+            lb_y.append(float(ob))
+
+    if not ub_t and not lb_t:
+        return
+
+    base_label = title or png_path.stem.replace(
+        "_incremental_job_contrib_cp_progress", ""
+    )
+
+    try:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        if ub_t:
+            ax.step(
+                ub_t,
+                ub_y,
+                where="post",
+                label="objValue",
+                linewidth=1.5,
+            )
+        if lb_t:
+            ax.step(
+                lb_t,
+                lb_y,
+                where="post",
+                label="restricted-model bound",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.7,
+            )
+
+        if global_lb is not None:
+            ax.axhline(
+                float(global_lb),
+                color="orange",
+                linestyle="-.",
+                linewidth=1.0,
+                alpha=0.7,
+                label="global LB",
+            )
+
+        # Round boundaries — group by (jd, rep), draw vertical lines at
+        # the start of each group.  JD-change boundaries (incl. the first)
+        # are bold.
+        prev_jd: int | None = None
+        group_starts: list[tuple[float, int, int, bool]] = []
+        for i, entry in enumerate(cp_progress):
+            jd = entry.get("jd")
+            rep = entry.get("rep")
+            if jd is None or rep is None:
+                continue
+            jd, rep = int(jd), int(rep)
+            if i == 0 or jd != prev_jd or rep != group_starts[-1][2]:
+                is_jd_boundary = prev_jd is None or jd != prev_jd
+                group_starts.append((float(entry["t"]), jd, rep, is_jd_boundary))
+            prev_jd = jd
+
+        ymin, ymax = ax.get_ylim()
+        yr = ymax - ymin
+        for t, jd, rep, is_jd_bdry in group_starts:
+            lw = 1.2 if is_jd_bdry else 0.6
+            alpha = 0.9 if is_jd_bdry else 0.4
+            ax.axvline(t, linestyle=":", linewidth=lw, alpha=alpha)
+            if is_jd_bdry:
+                ypos = ymin + yr * 0.95
+                ax.text(
+                    t,
+                    ypos,
+                    f"jd{jd}/r{rep}",
+                    rotation=90,
+                    va="top",
+                    ha="right",
+                    fontsize=6,
+                    alpha=0.7,
+                )
+
+        chart_title = base_label
+        if same_set_skips:
+            chart_title += f"  [same_set_skips={same_set_skips}]"
+        ax.set_title(chart_title)
+        ax.set_xlabel("step-local time (s)")
+        ax.set_ylabel("objective")
+        ax.legend(loc="lower right", fontsize=8)
+        ax.grid(True, linestyle="--", alpha=0.6)
+        fig.tight_layout()
+        fig.savefig(str(png_path), dpi=150)
+        plt.close(fig)
+    except Exception:
+        logger.exception(
+            "Failed to render job_contrib_progress plot for %s",
+            json_path,
+        )
 
 
 @dataclass
@@ -747,6 +933,7 @@ class FFcDDWReporter:
         self._write_mcf_preemptive_obj_csv()
         self._write_last_stage_only_obj_csv()
         self._write_mcf_lb_analysis_csv()
+        self._write_csr_analysis_csv()
         self._write_calc_mcf_lb_phase_metric_summaries()
         self._write_calc_mcf_lb_summary_csv()
         self._write_calc_mcf_lb_run_summary_csv()
@@ -759,6 +946,7 @@ class FFcDDWReporter:
         self._write_post_run_subroutine_chart_artifacts()
         self._generate_gantt_charts()
         self._generate_progress_plots()
+        self._generate_job_contrib_progress_plots()
 
     def _write_post_run_pivot_artifacts(self) -> None:
         """Emit long-format RPDf comparison CSV + 3 PivotTable.js HTML files."""
@@ -952,6 +1140,21 @@ class FFcDDWReporter:
         "dispatchedObj",
         "mcfSolveSec",
         "dispatchSec",
+    )
+
+    _CSR_ANALYSIS_COLUMNS: tuple[str, ...] = (
+        "insIndex",
+        "n",
+        "c",
+        "totalMcCount",
+        "T",
+        "R",
+        "W",
+        "TL",
+        "elapsedSec",
+        "time%",
+        "objValueC",
+        "objValueR",
     )
 
     def _write_calc_mcf_lb_phase_metric_summaries(self) -> None:
@@ -1296,6 +1499,73 @@ class FFcDDWReporter:
             logger.info("MCF-LB analysis CSV written to %s", path)
 
         self._write_last_stage_only_obj_summary_csv()
+
+    def _write_csr_analysis_csv(self) -> None:
+        """Per-scenario CSR winner table, one row per instance.
+
+        Columns mirror the ``analysis_long`` sheet's ``insIndex``..``time%``
+        prefix, then ``objValueC`` / ``objValueR`` — the coarse-scale and
+        restored objective of the best CSR candidate (min ``restored_obj``
+        valid row of that instance's ``csr_candidates_csv``). A scenario with
+        no candidate CSV on disk (non-CSR scenario) is skipped. Rows are
+        sorted by ``insIndex``.
+        """
+
+        for sc in self.scenario_results:
+            collected: list[tuple[int, list[str]]] = []
+            for ir in sc.instance_results:
+                cand_csv = self.layout.artifact_path(
+                    "csr_candidates_csv",
+                    scenario_name=sc.name,
+                    instance_name=ir.instance_name,
+                )
+                if not cand_csv.exists():
+                    continue
+                winner = read_csr_winner(cand_csv)
+                idx = self._resolve_ins_index(ir.instance_name)
+                collected.append(
+                    (
+                        idx if idx is not None else 10**9,
+                        self._csr_analysis_row(ir, winner),
+                    )
+                )
+            if not collected:
+                continue
+            collected.sort(key=lambda t: t[0])
+            path = self.layout.artifact_path("csr_analysis", scenario_name=sc.name)
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(self._CSR_ANALYSIS_COLUMNS)
+                for _, row in collected:
+                    writer.writerow(row)
+            logger.info("CSR analysis CSV written to %s", path)
+
+    def _csr_analysis_row(
+        self, ir: InstanceResult, winner: tuple[float, float] | None
+    ) -> list[str]:
+        ins_index = self._resolve_ins_index(ir.instance_name)
+        meta = self._index_to_meta.get(ins_index, {}) if ins_index is not None else {}
+        tl = None
+        if ir.job_count is not None and ir.stage_count is not None:
+            tl = TIMELIMIT_NC_MULTIPLIER * ir.job_count * ir.stage_count
+        elapsed = round(ir.elapsed_time, 3) if ir.elapsed_time is not None else None
+        time_pct = (elapsed / tl * 100) if (tl and elapsed is not None) else None
+        coarse, restored = winner if winner is not None else (None, None)
+        values: dict[str, Any] = {
+            "insIndex": ins_index if ins_index is not None else "",
+            "n": meta.get("n"),
+            "c": meta.get("c"),
+            "totalMcCount": meta.get("totalMcCount"),
+            "T": meta.get("T"),
+            "R": meta.get("R"),
+            "W": meta.get("W"),
+            "TL": tl,
+            "elapsedSec": elapsed,
+            "time%": time_pct,
+            "objValueC": coarse,
+            "objValueR": restored,
+        }
+        return [_csv_cell(values[col]) for col in self._CSR_ANALYSIS_COLUMNS]
 
     def _write_mcf_preemptive_obj_csv(self) -> None:
         """Run-scoped long-format CSV of MCF-preemptive objective values.
@@ -1691,9 +1961,6 @@ class FFcDDWReporter:
         ins_index = self._resolve_ins_index(ir.instance_name)
         meta = self._index_to_meta.get(ins_index, {}) if ins_index is not None else {}
 
-        def _s(v: Any) -> str:
-            return "" if v is None else str(v)
-
         mcf_lb = mcf_diag.get("mcf_lb") or calc_diag.get("r1_mcf_lb")
         mcf_solve_sec = mcf_diag.get("mcf_solve_sec") or calc_diag.get(
             "r1_mcf_solve_sec"
@@ -1716,7 +1983,7 @@ class FFcDDWReporter:
             "mcfSolveSec": mcf_solve_sec,
             "dispatchSec": build_diag.get("dispatch_sec"),
         }
-        return [_s(values[col]) for col in self._MCF_LB_ANALYSIS_COLUMNS]
+        return [_csv_cell(values[col]) for col in self._MCF_LB_ANALYSIS_COLUMNS]
 
     def _write_statistics_yaml(self) -> None:
         """Write per-scenario cross-instance aggregates as YAML."""
@@ -2042,6 +2309,67 @@ class FFcDDWReporter:
                     future.result()
                 except Exception:
                     logger.exception("Progress plot worker failed")
+
+    def _generate_job_contrib_progress_plots(self) -> None:
+        """Render per-instance job-contrib CP progress plot PNGs.
+
+        Discovers ``job_contrib_progress_json`` with ``find_artifacts`` because
+        the composite writes with its own call-context prefix, which the
+        template carries as the free ``{call_context}`` placeholder.  The PNG
+        reuses that call context, so several composite calls in one flow each
+        get their own chart instead of overwriting one another.  Gated by
+        ``draw_progress_plot`` (shared gate — silent skip when no cp_progress
+        data exists).
+        """
+        if not self.draw_progress_plot:
+            return
+
+        jobs: list[tuple[Any, Path, Path, str]] = []
+        for sc in self.scenario_results:
+            for ir in sc.instance_results:
+                ins = ir.instance_name
+                scope = {"scenario_name": sc.name, "instance_name": ins}
+                for prog_json in self.layout.find_artifacts(
+                    "job_contrib_progress_json", **scope
+                ):
+                    call_context = prog_json.name[: -len(_JOB_CONTRIB_PROGRESS_SUFFIX)]
+                    png = self.layout.artifact_path(
+                        "job_contrib_progress_plot_png",
+                        call_context=call_context,
+                        **scope,
+                    )
+                    title = f"{ins}  [{call_context}]"
+                    jobs.append(
+                        (_render_job_contrib_progress_plot, prog_json, png, title)
+                    )
+
+        if not jobs:
+            return
+
+        worker_cnt = max(1, min(self.painter_thread_cnt, len(jobs)))
+        logger.info(
+            "Rendering %d job-contrib progress plots with %d worker(s)",
+            len(jobs),
+            worker_cnt,
+        )
+        if worker_cnt == 1:
+            for fn, src, dst, title in jobs:
+                fn(src, dst, title)
+            return
+
+        pool_kwargs: dict[str, Any] = {"max_workers": worker_cnt}
+        if self._setup_logging_args is not None:
+            pool_kwargs["initializer"] = setup_logging
+            pool_kwargs["initargs"] = self._setup_logging_args
+        with ProcessPoolExecutor(**pool_kwargs) as executor:
+            futures = [
+                executor.submit(fn, src, dst, title) for fn, src, dst, title in jobs
+            ]
+            for future in futures:
+                try:
+                    future.result()
+                except Exception:
+                    logger.exception("Job-contrib progress plot worker failed")
 
     def _write_excel_report(self) -> None:
         """Write Excel report with dashboard, statistics, and analysis sheets."""

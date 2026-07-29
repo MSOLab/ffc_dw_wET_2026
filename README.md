@@ -23,6 +23,20 @@ Reference: Pan, Ruiz, Alfaro-Fernández (2017). *Computers and Operations Resear
 - [`docs/algorithm-principles.md`](docs/algorithm-principles.md) — algorithm execution contract
 - [`TODO.md`](TODO.md) — deferred design notes
 
+## Algorithms (step method names for config)
+
+| Step method | Description |
+|---|---|
+| `run_fam` | Fast dispatching (EDD, WEDD, ECT) |
+| `calc_mcf_lb_and_derive_full_sch` | MCF-based lower bound and full schedule construction |
+| `neh_cp` | NEH heuristic + CP-SAT refinement |
+| `run_flip_makespan_cp_from_incumbent` | Makespan-flipping CP-SAT for last stage |
+| `incremental_sw_cp` | Sliding-window CP with coarsened grid |
+| `coarsen_solve_reconstruct` | CSR pipeline (coarsen → CP solve → reconstruct) |
+| `job_contrib_cp` | D&C: remove top-contributing jobs, let CP-SAT re-insert |
+| `incremental_job_contrib_cp` | Ramp over jd values calling job_contrib_cp |
+| `initialize_by_dispatch_v4` | EDD dispatch with v4 ordering + optional active reconstruction |
+
 ## Results
 
 - output/20260509/20260510T033853_487093/mcf_lb_best_neh_cp_best_base_cpsat/

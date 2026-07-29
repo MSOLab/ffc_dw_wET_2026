@@ -1,0 +1,180 @@
+# v4-dispatch prefix + shortened MCF-LB/FMM/NEH-CP initialization.
+#
+# Purpose: data analysis says the initialization phase does not need the full
+# 0.036nc it currently spends. Test that by (a) putting a v4 paired dispatch
+# step in front as a cheap deterministic incumbent, then (b) running the usual
+# 3-step initialization (calc_mcf_lb_and_derive_full_sch ->
+# run_flip_makespan_cp_from_incumbent -> neh_cp) at 10% / 20% / 40% of its
+# metadata/20260710/sw_cp_tl_kappa_0.005.yaml time limits. The improvement tail
+# (incremental_sw_cp -> solve_base_model_cpsat) is identical in all three
+# scenarios, so any difference is attributable to the initialization budget
+# alone.
+#
+# TL scaling (fractions of the kappa_0.005 baseline):
+#   run_flip_makespan_cp_from_incumbent.cp_tl  0.009nc -> 0.0009 / 0.0018 / 0.0036
+#   neh_cp.total_timelimit                     0.027nc -> 0.0027 / 0.0054 / 0.0108
+# The dispatch prefix takes no time limit — it is a deterministic dispatch pool
+# (2 x |P*| candidates, min-wET) plus one active-but-last-semi reconstruction.
+# It is value-identical to the coarsen_solve_reconstruct(factor=1, solve=false,
+# seed_dispatch=v4, reconstruct_mode=active_but_last_semi) route this config
+# used before 2026-07-28; see
+# plans/experiment/20260728/dispatch_v4_reconstruct_mode.md.
+#
+# Run:
+#   uv run python main.py --config metadata/20260728/dispatch_v4_init_tl.yaml
+
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+# ins_index: [60, 61, 62, 63, 64]
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260728_dispatch_v4_init_tl
+
+instance_worker_cnt: 12
+draw_gantt: false
+draw_progress_plot: false
+painter_thread_cnt: 48
+
+scenarios:
+  - name: dv4_c5init_f10
+    timelimit: "0.09nc"
+    output_subdir: dv4_c5init_f10
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0009nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0027nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+      - method: incremental_sw_cp
+        solver_thread_cnt: 8
+        batch_size: "m"
+        step_size: 1
+        unfixed_batch_count_min: 2
+        unfixed_batch_count_max: 8
+        increment_unfixed_batch_count_flag: "always"
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        enable_promotion_profile_fixed: true
+        pf_method: "PF1"
+        batch_tl_mode: "proportional"
+        non_time_fixed_op_time_limit_multiplier: 0.005
+      - method: solve_base_model_cpsat
+        solver_thread_cnt: 8
+
+  - name: dv4_c5init_f20
+    timelimit: "0.09nc"
+    output_subdir: dv4_c5init_f20
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0018nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0054nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+      - method: incremental_sw_cp
+        solver_thread_cnt: 8
+        batch_size: "m"
+        step_size: 1
+        unfixed_batch_count_min: 2
+        unfixed_batch_count_max: 8
+        increment_unfixed_batch_count_flag: "always"
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        enable_promotion_profile_fixed: true
+        pf_method: "PF1"
+        batch_tl_mode: "proportional"
+        non_time_fixed_op_time_limit_multiplier: 0.005
+      - method: solve_base_model_cpsat
+        solver_thread_cnt: 8
+
+  - name: dv4_c5init_f40
+    timelimit: "0.09nc"
+    output_subdir: dv4_c5init_f40
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0036nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0108nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+      - method: incremental_sw_cp
+        solver_thread_cnt: 8
+        batch_size: "m"
+        step_size: 1
+        unfixed_batch_count_min: 2
+        unfixed_batch_count_max: 8
+        increment_unfixed_batch_count_flag: "always"
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        enable_promotion_profile_fixed: true
+        pf_method: "PF1"
+        batch_tl_mode: "proportional"
+        non_time_fixed_op_time_limit_multiplier: 0.005
+      - method: solve_base_model_cpsat
+        solver_thread_cnt: 8

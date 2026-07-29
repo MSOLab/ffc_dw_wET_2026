@@ -54,6 +54,27 @@ def step_function_mean_over_union(
     return event_times.tolist(), mean_y_arr.tolist()
 
 
+def round_step_series(
+    xs: list[float], ys: list[float], *, x_decimals: int, y_decimals: int
+) -> tuple[list[float], list[float]]:
+    """Round step-series coords to display resolution without dropping points.
+
+    Coordinates are rounded to the given decimal places to shrink the
+    serialised byte size (17-digit ``repr`` strings → bounded decimals).
+    No point is ever removed; length is always preserved.
+
+    When combined with ``decimate_step_series`` the effective y resolution
+    is ``max(quantum, 10**-y_decimals)`` — if the quantum is finer than
+    the rounding grid, the grid acts as an upper bound on resolution,
+    which is desirable (sub-display precision should not inflate the
+    point count).
+    """
+    return (
+        [round(float(x), x_decimals) for x in xs],
+        [round(float(y), y_decimals) for y in ys],
+    )
+
+
 def decimate_step_series(
     xs: list[float],
     ys: list[float],

@@ -98,6 +98,7 @@ def dump_solution_json(
     obj_value: float | None = None,
     obj_bound: float | None = None,
     compact: bool = False,
+    highlight_jobs: set[str] | None = None,
 ) -> None:
     """Write a solution schedule as JSON.
 
@@ -117,6 +118,8 @@ def dump_solution_json(
         },
         K.OPERATIONS: operations,
     }
+    if highlight_jobs is not None:
+        data[K.HIGHLIGHT_JOBS] = sorted(highlight_jobs)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
@@ -145,6 +148,7 @@ def dump_preemptive_schedule_json(
     obj_value: float | None = None,
     obj_bound: float | None = None,
     compact: bool = False,
+    highlight_jobs: set[str] | None = None,
 ) -> None:
     """Write a preemptive schedule as JSON (mirror of dump_preemptive_schedule_yaml).
 
@@ -176,6 +180,8 @@ def dump_preemptive_schedule_json(
         K.MACHINES_PER_STAGE: {stage_id: list(machines)},
         K.SEGMENTS: segment_records,
     }
+    if highlight_jobs is not None:
+        data[K.HIGHLIGHT_JOBS] = sorted(highlight_jobs)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:

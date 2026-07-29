@@ -123,9 +123,14 @@ def test_seed_dispatch_invalid_rejected() -> None:
         CoarsenSolveReconstructOption(seed_dispatch="mied")  # type: ignore[arg-type]
 
 
-def test_idle_mode_invalid_rejected() -> None:
-    with pytest.raises(ValueError, match="idle_mode"):
-        CoarsenSolveReconstructOption(idle_mode="turbo")  # type: ignore[arg-type]
+def test_idle_mode_field_removed() -> None:
+    """``idle_mode`` was removed 2026-07-22 — CSR always uses ``"lookahead"``.
+
+    Constructing the option with the key must fail outright rather than
+    silently accepting a value that is no longer honoured.
+    """
+    with pytest.raises(TypeError, match="idle_mode"):
+        CoarsenSolveReconstructOption(idle_mode="lookahead")  # type: ignore[call-arg]
 
 
 def test_coarsen_mode_invalid_rejected() -> None:
@@ -136,7 +141,6 @@ def test_coarsen_mode_invalid_rejected() -> None:
 def test_valid_option_defaults_accepted() -> None:
     opt = CoarsenSolveReconstructOption()
     assert opt.seed_dispatch == "mixed"
-    assert opt.idle_mode == "flooring"
     assert opt.coarsen_mode == "ceil"
 
 
@@ -146,16 +150,26 @@ def test_all_valid_seed_dispatch_values_accepted() -> None:
         assert opt.seed_dispatch == strategy
 
 
-def test_all_valid_idle_mode_values_accepted() -> None:
-    for mode in ("flooring", "ceiling", "lookahead"):
-        opt = CoarsenSolveReconstructOption(idle_mode=mode)
-        assert opt.idle_mode == mode
-
-
 def test_all_valid_coarsen_mode_values_accepted() -> None:
     for mode in ("ceil", "round", "floor", "cumulative"):
         opt = CoarsenSolveReconstructOption(coarsen_mode=mode)
         assert opt.coarsen_mode == mode
+
+
+def test_option_reconstruct_mode_default_is_semi_active() -> None:
+    """Default preserves prior behavior (semi-active reconstruction)."""
+    assert CoarsenSolveReconstructOption().reconstruct_mode == "semi_active"
+
+
+def test_reconstruct_mode_invalid_rejected() -> None:
+    with pytest.raises(ValueError, match="reconstruct_mode"):
+        CoarsenSolveReconstructOption(reconstruct_mode="bogus")  # type: ignore[arg-type]
+
+
+def test_all_valid_reconstruct_mode_values_accepted() -> None:
+    for mode in ("semi_active", "active", "active_but_last_semi"):
+        opt = CoarsenSolveReconstructOption(reconstruct_mode=mode)
+        assert opt.reconstruct_mode == mode
 
 
 # ---------------------------------------------------------------------------
@@ -1136,6 +1150,77 @@ def test_solve_false_deterministic() -> None:
     for key in start1:
         assert start1[key] == start2[key]
         assert end1[key] == end2[key]
+
+
+def test_active_reconstruct_routes_final_through_active_rebuild() -> None:
+    """reconstruct_mode='active' makes final_schedule the active reconstruction of
+    the coarse schedule (deterministic seed-only path, 2-machine first stage)."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        run_coarsen_solve_reconstruct,
+    )
+    from ffc_ddw_sum_et.solution.schedule_build import (
+        build_active_from_reference,
+        reconstruct_active_coarse_schedule,
+    )
+
+    instance = _make_small_ddw_instance(stage_2_machine_count=(2, 1))
+    factor = 50
+    option = CoarsenSolveReconstructOption(
+        factor=factor,
+        solver_thread_cnt=1,
+        solve=False,
+        reconstruct_mode="active",
+    )
+
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.final_schedule is not None
+    assert trace.coarse_schedule is not None
+    expected_final = reconstruct_active_coarse_schedule(trace.coarse_schedule, instance)
+    assert (
+        trace.final_schedule.get_jik_2_start_time_map()
+        == expected_final.get_jik_2_start_time_map()
+    )
+    # Per decision D1 the raw snapshot is the active build (pre-idle), too.
+    expected_raw = build_active_from_reference(
+        trace.coarse_schedule, instance, instance.stage_2_job_2_p_map
+    )
+    assert trace.reconstructed_raw_schedule is not None
+    assert (
+        trace.reconstructed_raw_schedule.get_jik_2_start_time_map()
+        == expected_raw.get_jik_2_start_time_map()
+    )
+
+
+def test_semi_active_reconstruct_is_default_path() -> None:
+    """Default (reconstruct_mode='semi_active') still routes through the
+    semi-active reconstruction — the switch is opt-in, non-breaking."""
+    import logging
+
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        run_coarsen_solve_reconstruct,
+    )
+    from ffc_ddw_sum_et.solution.schedule_build import reconstruct_coarse_schedule
+
+    instance = _make_small_ddw_instance(stage_2_machine_count=(2, 1))
+    factor = 50
+    option = CoarsenSolveReconstructOption(
+        factor=factor, solver_thread_cnt=1, solve=False
+    )
+
+    trace = run_coarsen_solve_reconstruct(instance, option, logging.getLogger("test"))
+
+    assert trace.final_schedule is not None
+    assert trace.coarse_schedule is not None
+    expected_final = reconstruct_coarse_schedule(
+        trace.coarse_schedule, instance, factor
+    )
+    assert (
+        trace.final_schedule.get_jik_2_start_time_map()
+        == expected_final.get_jik_2_start_time_map()
+    )
 
 
 def test_solve_false_seed_only_equivalence() -> None:

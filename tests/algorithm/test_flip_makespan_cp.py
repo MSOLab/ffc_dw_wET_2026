@@ -159,6 +159,30 @@ def test_flip_makespan_cp_phase_emission_off_by_default(tmp_path: Path) -> None:
     assert called is False
 
 
+def test_flip_makespan_cp_budget_guard_returns_incumbent_fallback() -> None:
+    instance = _make_instance()
+    incumbent_schedule, incumbent_obj = _seed_incumbent(instance)
+
+    record = FlipMakespanCpDispatcher().run(
+        AlgSpec(
+            instance=instance,
+            option=FlipMakespanCpOption(cp_tl_seconds=0.0, solver_thread_cnt=1),
+            ref_solution=incumbent_schedule,
+        )
+    )
+
+    assert record.work_status == WorkStatus.FEASIBLE
+    assert record.termination_reason is not None
+    assert record.termination_reason.value == "time_limit"
+    assert record.error is None
+    assert record.result is not None
+    assert record.result.schedule is incumbent_schedule
+    assert record.result.obj_value == incumbent_obj
+    assert record.result.metrics is not None
+    assert record.result.metrics["cpsat_status"] == "budget_exhausted_before_solve"
+    assert record.result.metrics["fallback"] == "incumbent"
+
+
 def test_flip_makespan_cp_rejects_non_ddw_instance() -> None:
     from ffc_ddw_sum_et.parameters.ffc_params import FFcParameters
 

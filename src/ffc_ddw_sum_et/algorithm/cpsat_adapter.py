@@ -130,7 +130,44 @@ class CpsatAdapter:
         if option.timelimit_sec is None:
             eff_tl = None
         else:
-            eff_tl = max(0.0, option.timelimit_sec - (time.monotonic() - start))
+            eff_tl = option.timelimit_sec - (time.monotonic() - start)
+            if eff_tl <= 0.0:
+                if ref_schedule is not None:
+                    logger.warning(
+                        "CpsatAdapter: timelimit budget exhausted before "
+                        "solver start (eff_tl=%.3fs), falling back to "
+                        "incumbent",
+                        eff_tl,
+                    )
+                    return self._incumbent_fallback_record(
+                        instance,
+                        option,
+                        ref_schedule,
+                        cpsat_status="budget_exhausted_before_solve",
+                    )
+                logger.warning(
+                    "CpsatAdapter: timelimit budget exhausted before "
+                    "solver start (eff_tl=%.3fs)",
+                    eff_tl,
+                )
+                return AlgRecord(
+                    work_status=WorkStatus.ERROR,
+                    instance_id=instance.name,
+                    algorithm_id=self.algorithm_id,
+                    option=option,
+                    result=AlgResult(
+                        schedule=None,
+                        obj_value=None,
+                        obj_bound=None,
+                        metrics={"cpsat_status": "budget_exhausted_before_solve"},
+                    ),
+                    progress_log=(),
+                    termination_reason=TerminationReason.TIME_LIMIT,
+                    error=(
+                        "timelimit budget exhausted before solver start "
+                        f"(eff_tl={eff_tl:.3f})"
+                    ),
+                )
 
         solver_cfg = CpsatSolverOptions(
             max_time_in_seconds=eff_tl,
@@ -164,19 +201,47 @@ class CpsatAdapter:
         )
 
         if not has_solution:
-            if status == cp_model.INFEASIBLE and option.error_if_infeasible:
-                raise RuntimeError(
-                    f"CpsatAdapter: CP-SAT proved INFEASIBLE for {instance.name}."
+            if status == cp_model.INFEASIBLE:
+                if option.error_if_infeasible:
+                    raise RuntimeError(
+                        f"CpsatAdapter: CP-SAT proved INFEASIBLE for {instance.name}."
+                    )
+                logger.warning(
+                    "CpsatAdapter: proven infeasible (status=%s)",
+                    status_name,
+                )
+                return AlgRecord(
+                    work_status=WorkStatus.INFEASIBLE,
+                    instance_id=instance.name,
+                    algorithm_id=self.algorithm_id,
+                    option=option,
+                    result=AlgResult(
+                        schedule=None,
+                        obj_value=None,
+                        obj_bound=None,
+                        metrics={"cpsat_status": status_name},
+                    ),
+                    progress_log=progress_log,
+                    termination_reason=TerminationReason.COMPLETED,
+                )
+            if ref_schedule is not None:
+                logger.warning(
+                    "CpsatAdapter: no feasible solution (status=%s), "
+                    "falling back to incumbent",
+                    status_name,
+                )
+                return self._incumbent_fallback_record(
+                    instance,
+                    option,
+                    ref_schedule,
+                    cpsat_status=status_name,
+                    base_progress_log=progress_log,
                 )
             logger.warning(
                 "CpsatAdapter: no feasible solution (status=%s)", status_name
             )
             return AlgRecord(
-                work_status=(
-                    WorkStatus.INFEASIBLE
-                    if status == cp_model.INFEASIBLE
-                    else WorkStatus.ERROR
-                ),
+                work_status=WorkStatus.ERROR,
                 instance_id=instance.name,
                 algorithm_id=self.algorithm_id,
                 option=option,
@@ -187,14 +252,8 @@ class CpsatAdapter:
                     metrics={"cpsat_status": status_name},
                 ),
                 progress_log=progress_log,
-                termination_reason=(
-                    TerminationReason.COMPLETED
-                    if status == cp_model.INFEASIBLE
-                    else TerminationReason.ERROR
-                ),
-                error=None
-                if status == cp_model.INFEASIBLE
-                else f"status={status_name}",
+                termination_reason=TerminationReason.ERROR,
+                error=f"status={status_name}",
             )
 
         j_i_2_start = {
@@ -298,6 +357,47 @@ class CpsatAdapter:
                 if status == cp_model.OPTIMAL
                 else TerminationReason.TIME_LIMIT
             ),
+        )
+
+    @staticmethod
+    def _incumbent_fallback_record(
+        instance: FFcDDWParameters,
+        option: CpsatOption,
+        incumbent: FFcSchedule,
+        cpsat_status: str,
+        *,
+        base_progress_log: tuple[ProgressLogEntry, ...] = (),
+    ) -> AlgRecord:
+        """Return the incumbent unchanged as a FEASIBLE / TIME_LIMIT record.
+
+        Used when the CP step cannot improve the incumbent within its budget
+        (time cap exhausted before the solver starts, or CP-SAT stops with no
+        feasible solution). The incumbent is a genuine feasible schedule, so
+        this is FEASIBLE, not an error; ``cpsat_status`` records why the solver
+        produced nothing. ``base_progress_log`` carries any CP-SAT bound
+        trajectory already recorded on the post-solve path (empty pre-solve).
+        """
+        sum_e, sum_t = compute_weighted_earliness_tardiness(
+            incumbent, instance, time_factor=option.time_factor
+        )
+        obj_value = float(sum_e + sum_t)
+        return AlgRecord(
+            work_status=WorkStatus.FEASIBLE,
+            instance_id=instance.name,
+            algorithm_id=CpsatAdapter.algorithm_id,
+            option=option,
+            result=AlgResult(
+                schedule=incumbent,
+                obj_value=obj_value,
+                obj_bound=None,
+                metrics={
+                    "cpsat_status": cpsat_status,
+                    "fallback": "incumbent",
+                },
+            ),
+            progress_log=base_progress_log,
+            termination_reason=TerminationReason.TIME_LIMIT,
+            error=None,
         )
 
     @staticmethod

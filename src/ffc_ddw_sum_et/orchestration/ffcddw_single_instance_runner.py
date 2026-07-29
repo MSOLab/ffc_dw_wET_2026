@@ -123,8 +123,12 @@ def _fold_history_into_obj_log_dicts(
             key = repr(t_global)
             if entry.obj_value is not None:
                 value_data.setdefault(key, float(entry.obj_value))
+                if entry.note:
+                    value_notes.setdefault(key, entry.note)
             if entry.obj_bound is not None:
                 bound_data.setdefault(key, float(entry.obj_bound))
+                if entry.note:
+                    bound_notes.setdefault(key, entry.note)
 
         end_global = report.start_time + report.elapsed_time
         end_key = repr(end_global)
@@ -461,6 +465,7 @@ class FFcDDWSingleInstanceRunner(
                 self.logger.exception("Error saving solution for %s", self.ins_name)
 
         phase_schedules = getattr(controller, "mcf_lb_phase_schedules", None) or []
+        highlights = getattr(controller, "_mcf_lb_phase_highlight_jobs", None) or {}
         for name, sched in phase_schedules:
             if sched is None:
                 continue
@@ -469,6 +474,7 @@ class FFcDDWSingleInstanceRunner(
             )
             try:
                 phase_obj = compute_phase_obj_value(sched, self.instance)
+                hl_jobs = highlights.get(name)
                 if isinstance(sched, MCFPreemptiveSchedule):
                     dump_preemptive_schedule_json(
                         json_path,
@@ -480,6 +486,7 @@ class FFcDDWSingleInstanceRunner(
                         all_jobs=self.instance.job_id_list,
                         obj_value=phase_obj,
                         compact=True,
+                        highlight_jobs=hl_jobs,
                     )
                 else:
                     dump_solution_json(
@@ -488,6 +495,7 @@ class FFcDDWSingleInstanceRunner(
                         instance_name=self.ins_name,
                         obj_value=phase_obj,
                         compact=True,
+                        highlight_jobs=hl_jobs,
                     )
             except Exception:
                 self.logger.exception(

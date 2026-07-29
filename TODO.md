@@ -492,6 +492,13 @@ uv run python scripts/dump_csr_coarse_obj.py \
     --out <out>.csv --workers 96      # ~5 min, 21600 rows
 ```
 
+> ⚠️ That script (and its pivot companion `scripts/analyze_csr_idle_modes.py`)
+> were **deleted 2026-07-22** together with the `idle_mode` parameter — nothing
+> in the tree can build a three-mode dump any more. Re-running the command
+> requires checking out a commit from before that change. The numbers below
+> stand as the record; the CSVs live in
+> `analysis/20260702T013931_438875/`.
+
 Two findings, pulling in opposite directions:
 
 1. **`K > 1`: confirmed fully dead.** All three modes now produce *identical*
@@ -533,6 +540,31 @@ Before touching `K == 1`, verify two things the measurement does not settle:
 no longer shrunk). Note also that the seed-only dump never exercises
 CP-SAT-produced coarse schedules — which is where the original "left E/T on the
 table" warnings came from — so it bounds the *seed* impact only.
+
+**Status (2026-07-22): DONE — `idle_mode` no longer exists anywhere.** The
+parameter was deleted from `CoarsenSolveReconstructOption`, `SwCpOption`, the
+three controller steps (`coarsen_solve_reconstruct`, `sw_cp`,
+`incremental_sw_cp`), the four `dispatcher/paired.py` builders, and finally
+`FFcSchedule.insert_idle_time` itself, whose `K == 1` path now keeps only the
+lookahead rule (flooring/ceiling branches deleted). A launch-time preflight
+(`main._reject_deprecated_step_kwargs`) rejects the key in any scenario flow,
+nested `solve_flow` included.
+
+The 11 call sites that passed nothing (and so ran flooring) — including
+`reconstruct_coarse_schedule`, `neh_cp`, `flip_makespan_cp`, the `mcf_lb`
+builders and `initialize_by_dispatch_v3` / `_v4` — moved to lookahead. That was
+a deliberate correction, not a compatibility break: relying on the flooring
+default was an oversight, never a design choice. A/B over 32 instances × 2
+scenarios found every effect smaller than the harness's ±0.006 RPDf run-to-run
+noise. Plan + evidence:
+`plans/experiment/20260722/csr_idle_mode_lookahead_only.md`.
+
+**What remains** (still deferred, conditions unchanged): widen the exact gate
+from `if K > 1:` to `K >= 1` so the `K == 1` heuristic disappears too. Blocked
+on (a) whether the exact gate is genuinely optimal at `K == 1` and (b) whether
+its `O(n²)` unit-stepping is acceptable at `n = 200, K = 1`. Note this would
+also replace `K == 1`'s `sum_e > sum_t` weight-sum gate with the magnitude
+comparison — see the 2026-07-19 status above for why that is the stronger rule.
 
 ## `make_semi_active` — allow machine reassignment (time-sorted per stage)
 
@@ -579,3 +611,27 @@ fixed-assignment left-shift achieves (e.g. tightening makespan/E-T beyond the
 current polish), or when the CSR reconstruct's dependence on
 `build_schedule_from_op_starts` for reassignment is folded back into
 `make_semi_active` so the two share one time-sorted assignment implementation.
+
+## `sw_cp` dispatcher leaks restricted-model bound into global plot
+
+`sw_cp/dispatcher.py:343` writes `obj_bound=float(vb.bound) + offset` into
+`progress_log` entries -- the same pollution pattern fixed for
+`job_contrib_cp/dispatcher.py` in
+`plans/experiment/20260728/incremental_job_contrib_cp_pilot_followup.md` Work B.
+
+**Root cause:** the sliding-window CP model adds profile-fix arcs, so its
+bound is a restricted-model bound, not a valid global LB.  This leaks into
+the global `_obj_log.json` and contaminates the progress plot LB line.
+
+**Change (if acted on):** apply the same fix as
+`job_contrib_cp/dispatcher.py` -- set `obj_bound=None` on progress_log
+entries, store the restricted trajectory in `metrics["cp_progress"]`, and
+emit a dedicated progress artifact if the raw CP trajectory should be
+observable.
+
+**Why:** same rationale as the job_contrib_cp fix -- the restricted bound
+masks the true MCF LB on the global plot.  Deferred because it is a
+separate step/algorithm and the plan explicitly scoped it out.
+
+**When to act:** when targeting `sw_cp` specifically, or when the global
+LB contamination is observed on a `sw_cp`-containing run.

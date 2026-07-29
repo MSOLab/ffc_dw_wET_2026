@@ -102,3 +102,13 @@ def test_rj_scope_all_ops_is_valid() -> None:
 def test_rj_scope_invalid_rejected() -> None:
     with pytest.raises(ValueError, match="rj_right_justify_scope must be one of"):
         SwCpOption(rj_right_justify_scope="everything")  # type: ignore[arg-type]
+
+
+def test_idle_mode_field_removed() -> None:
+    """``idle_mode`` was removed 2026-07-22 — sw_cp always uses ``"lookahead"``.
+
+    Constructing the option with the key must fail outright rather than
+    silently accepting a value that is no longer honoured.
+    """
+    with pytest.raises(TypeError, match="idle_mode"):
+        SwCpOption(idle_mode="lookahead")  # type: ignore[call-arg]

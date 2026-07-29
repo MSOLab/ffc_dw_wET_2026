@@ -1,11 +1,12 @@
 """FFcDWwET subroutine controller for routix-based experiment orchestration."""
 
 import csv
+import json
 import logging
 import math
 import time
 from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Callable, Iterable, Literal, Sequence
 
 from ortools.sat.python import cp_model
 from routix.constants import SubroutineFlowKeys
@@ -40,6 +41,11 @@ from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.flip_makespan_cp import (
     FlipMakespanCpDispatcher,
     FlipMakespanCpOption,
+)
+from ffc_ddw_sum_et.algorithm.job_contrib_cp import (
+    JobContribCpDispatcher,
+    JobContribCpOption,
+    select_jd_jobs,
 )
 from ffc_ddw_sum_et.algorithm.mcf_lb import (
     BuildFullSchDiagnostic,
@@ -90,7 +96,11 @@ from ffc_ddw_sum_et.solution.objectives import (
     compute_weighted_earliness_tardiness,
 )
 from ffc_ddw_sum_et.solution.schedule_build import (
+    build_active_except_last_from_reference,
+    build_active_from_reference,
     build_schedule_from_op_starts,
+    reconstruct_active_coarse_schedule,
+    reconstruct_active_except_last_coarse_schedule,
     reconstruct_coarse_schedule,
     reconstruct_raw_coarse_schedule,
 )
@@ -101,10 +111,11 @@ from .mcf_lb_phase_labels import (
     MCF_LB_R2_LABEL_ORDER,
 )
 from .solution_manager import FFcDDWSolution
-from .value_resolver import resolve_value_expr
+from .value_resolver import resolve_jd_count_target, resolve_value_expr
 
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
 
+_OBJ_IMPROVEMENT_TOLERANCE = 1e-6
 
 # Maps unprefixed phase labels emitted by
 # ``build_full_sch_from_last_stage_only_sch`` (algorithm-side) onto the
@@ -118,6 +129,24 @@ _BUILD_FULL_SCH_LABEL_TO_INDEX: dict[str, int] = {
     "fullS_after_unflip": 8,
     "fullS_after_sa_iti": 9,
 }
+
+
+def _best_valid_lb(bounds: Iterable[float | None]) -> float | None:
+    """Return the tightest lower bound in ``bounds``, or ``None`` when none is
+    present.
+
+    A lower bound is tighter the *larger* it is, so "best" means ``max``. This
+    matches the two other LB aggregation sites:
+    ``solution_manager.FFcDDWSolutionManager._a_is_better_obj_bound``
+    (``bound_a > bound_b``) and ``ffcddw_single_instance_runner``'s
+    ``bestBound = max(...)``.
+
+    Callers must gate validity themselves — every value passed in has to
+    already be a valid LB for the *original* problem (see the soundness
+    contract on ``_a_is_better_obj_bound``).
+    """
+    valid = [float(b) for b in bounds if b is not None]
+    return max(valid) if valid else None
 
 
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
@@ -734,7 +763,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             [(f"2_{label}", sched) for label, sched in result.intermediate_schedules]
         )
         self._record_mcf_lb_phase(
-            ("3_lastS_only_from_mcf_lb_after_sa_iti", result.schedule)
+            (
+                "3_lastS_only_from_mcf_lb_after_sa_iti",
+                result.schedule,
+            )
         )
 
         h_diag.status = result.status
@@ -831,7 +863,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         for label, sched in result.intermediate_schedules:
             self._record_mcf_lb_phase(
-                (f"{_BUILD_FULL_SCH_LABEL_TO_INDEX[label]}_{label}", sched)
+                (
+                    f"{_BUILD_FULL_SCH_LABEL_TO_INDEX[label]}_{label}",
+                    sched,
+                )
             )
 
         self.logger.info(
@@ -1742,16 +1777,52 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         return report
 
     def initialize_by_dispatch_v4(
-        self, priorities: Sequence[DispatchSeqKey] = V4_PRIORITY_SET
+        self,
+        priorities: Sequence[DispatchSeqKey] = V4_PRIORITY_SET,
+        reconstruct_mode: Literal["none", "active", "active_but_last_semi"] = "none",
     ) -> SubroutineReport:
         """Step: justification-v4 paired dispatch pool. 각 priority 를 sd/rd 두
         방향으로 디코드(2·len(priorities) 스케줄)한 뒤 weighted-ET 최소 incumbent
         하나만 register — history 에 점 하나. 기본 P* = {wxd2, wspt_twt, wxd7}.
+
+        ``reconstruct_mode`` 는 pool 우승자에 적용할 재구성 방식이다. 어휘는
+        :meth:`coarsen_solve_reconstruct` 의 동명 인자와 같으며, coarsening 이
+        없는 여기서는 factor 되돌리기 경로인 ``"semi_active"`` 대신 "재구성하지
+        않음"을 뜻하는 ``"none"`` 을 쓴다.
+
+        * ``"none"`` (기본): seed 를 그대로 등록 — 기존 동작.
+        * ``"active"``: :func:`reconstruct_active_coarse_schedule` — stage 별
+          start-order 만 남기고 machine 을 earliest-start 로 재배정.
+        * ``"active_but_last_semi"``: 마지막 stage 만 seed 의 machine 배정과
+          순서를 유지 (:func:`reconstruct_active_except_last_coarse_schedule`).
+
+        재구성을 켜면 ``factor=1`` / ``solve=False`` 로 돌린
+        :meth:`coarsen_solve_reconstruct` 와 값이 같아진다 (CSR 래퍼를 빌려
+        쓰지 않고 같은 초기해를 얻는 경로). 재구성은 **우승자 1개에만** 적용하며
+        (후보 전체 재구성 후 최소 선택이 아님), seed 와 재구성 결과 중 좋은 쪽을
+        고르지도 않는다 — 두 경로의 값 동일성을 유지하기 위해서다. 설계 근거:
+        ``plans/experiment/20260728/dispatch_v4_reconstruct_mode.md``.
         """
+        reconstructors = {
+            "active": reconstruct_active_coarse_schedule,
+            "active_but_last_semi": reconstruct_active_except_last_coarse_schedule,
+        }
+        if reconstruct_mode != "none" and reconstruct_mode not in reconstructors:
+            raise ValueError(
+                "initialize_by_dispatch_v4: reconstruct_mode must be one of "
+                "'none', 'active', 'active_but_last_semi'; got "
+                f"{reconstruct_mode!r}"
+            )
+        mode_tag = "" if reconstruct_mode == "none" else f"/{reconstruct_mode}"
+
         start_elapsed = time.monotonic()
         best_sch, best_obj, best_label = build_v4_paired_dispatch_schedule(
             self.instance, priorities, self.logger
         )
+        if reconstruct_mode != "none":
+            best_sch = reconstructors[reconstruct_mode](best_sch, self.instance)
+            sum_e, sum_t = compute_weighted_earliness_tardiness(best_sch, self.instance)
+            best_obj = float(sum_e + sum_t)
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed, obj_value=best_obj, obj_bound=None
@@ -1760,7 +1831,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             report,
             FFcDDWSolution(schedule=best_sch, obj_value=best_obj, obj_bound=None),
         )
-        self._log_dispatch_seed_diagnostics(f"v4:{best_label}", best_sch)
+        self._log_dispatch_seed_diagnostics(f"v4{mode_tag}:{best_label}", best_sch)
         return report
 
     def run_profile_fixed_ns(
@@ -2310,7 +2381,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
         rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> SubroutineReport:
         """Step method: refine the incumbent via :class:`SwCpDispatcher`.
 
@@ -2325,7 +2395,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         into ``mcf_lb_phase_schedules`` so the post-run reporter renders
         them as PNGs (the container is generic despite the name).
 
-        Per CLAUDE.md subroutine step contract: a single ``_register``
+        Per AGENTS.md in this package: a single ``_register``
         per call, ``elapsed_time`` measured immediately before report
         construction with no work in between.
         """
@@ -2406,7 +2476,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             debug_partition_gantt_path_getter=debug_partition_gantt_path_getter,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
             rj_right_justify_scope=rj_right_justify_scope,
-            idle_mode=idle_mode,
             time_factor=self.time_factor,
         )
         spec = AlgSpec(
@@ -2484,7 +2553,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         draw_gantt: bool = False,
         horizon_makespan_multiplier: float = 1.25,
         rj_right_justify_scope: Literal["rtf_only", "all_ops"] = "rtf_only",
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> None:
         """Composite step: iterate :meth:`sw_cp` over a range of
         ``unfixed_batch_count`` values.
@@ -2575,7 +2643,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             draw_gantt=draw_gantt,
             horizon_makespan_multiplier=horizon_makespan_multiplier,
             rj_right_justify_scope=rj_right_justify_scope,
-            idle_mode=idle_mode,
         )
 
         batch_count = math.ceil(instance.job_count / batch_size_resolved)
@@ -2657,16 +2724,19 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         self,
         factor: int = DEFAULT_COARSEN_FACTOR,
         coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil",
+        reconstruct_mode: Literal[
+            "semi_active", "active", "active_but_last_semi"
+        ] = "semi_active",
         timelimit: float | str | None = None,
         solver_thread_cnt: int = 1,
         log_search_progress: bool = False,
         error_if_infeasible: bool = False,
         seed_dispatch: str = "mixed",
         solve: bool = True,
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
         draw_gantt: bool = False,
         emit_phase_schedules: bool = False,
         solve_flow: list[dict] | None = None,
+        dump_csr_coarse: bool = False,
     ) -> SubroutineReport:
         """Step method: coarsen the instance, solve the base CP, and
         reconstruct to the original scale.
@@ -2679,6 +2749,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         the original scale by carrying machine assignment and per-machine
         job order. Post-processing (``insert_idle_time``) and objective
         evaluation are done against the original instance.
+
+        ``reconstruct_mode`` selects how the coarse solution is carried onto
+        the original scale: ``"semi_active"`` (default, prior behavior) freezes
+        the coarse machine assignment and per-machine order; ``"active"`` keeps
+        only the coarse per-stage operation start-order and re-assigns machines
+        by earliest start (:func:`reconstruct_active_coarse_schedule`). The
+        mode threads through both the direct path and ``solve_flow`` candidate
+        reconstruction. Default preserves existing behavior; see
+        plans/experiment/20260723/active_schedule_reconstruction.md.
 
         ``timelimit`` is the user-specified per-call cap (absolute seconds,
         or any expression supported by :func:`resolve_value_expr`). The
@@ -2700,11 +2779,12 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         re-run variance. ``cp_progress_log`` is empty; ``coarsened_status``
         is ``"SEED_ONLY"``. Default is ``True`` (preserve existing behavior).
 
-        ``idle_mode`` selects the ``insert_idle_time`` breakpoint rule used
-        when building the coarse-grid dispatch seed: ``"flooring"``
-        (default, byte-identical to prior behavior), ``"ceiling"``, or
-        ``"lookahead"``. Does not affect the final original-scale
-        post-process (always standard flooring).
+        Idle insertion has a single rule since 2026-07-22 — the former
+        ``idle_mode`` parameter (``"flooring"`` / ``"ceiling"`` /
+        ``"lookahead"``) was removed from every layer and only the lookahead
+        rule survives, on the coarse-grid seed and on the final original-scale
+        post-process alike. See
+        ``plans/experiment/20260722/csr_idle_mode_lookahead_only.md``.
 
         ``draw_gantt`` is accepted for API consistency but does not
         currently render a Gantt chart; any post-work would be placed after
@@ -2731,7 +2811,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         plans/experiment/20260711/csr_solve_flow.md §4. v1 solve_flow configs must keep
         child gantt / emission / log-search flags OFF (the child has no sink).
 
-        Per CLAUDE.md subroutine step contract: a single ``_register`` per
+        ``dump_csr_coarse`` (``False`` by default): when ``True`` and
+        ``solve_flow`` is set, dumps every deduped coarse candidate schedule
+        as a compact JSON in the instance progress directory
+        (``_csr_coarse_cand_<NN>_<source>.json``). Intended for offline
+        reconstruction replay experiments; kept off by default to avoid
+        high file counts on full-grid runs.
+
+        Per AGENTS.md in this package: a single ``_register`` per
         call, ``elapsed_time`` measured immediately before report
         construction with no work in between.
         """
@@ -2744,12 +2831,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 start_elapsed,
                 factor=factor,
                 coarsen_mode=coarsen_mode,
+                reconstruct_mode=reconstruct_mode,
                 timelimit=timelimit,
                 error_if_infeasible=error_if_infeasible,
                 seed_dispatch=seed_dispatch,
                 solve=solve,
                 emit_phase_schedules=emit_phase_schedules,
                 solve_flow=solve_flow,
+                dump_csr_coarse=dump_csr_coarse,
             )
 
         instance = self.instance
@@ -2778,19 +2867,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         option = CoarsenSolveReconstructOption(
             factor=factor,
             coarsen_mode=coarsen_mode,
+            reconstruct_mode=reconstruct_mode,
             timelimit_sec=eff_timelimit_sec,
             solver_thread_cnt=solver_thread_cnt,
             log_search_progress=log_search_progress,
             error_if_infeasible=error_if_infeasible,
             seed_dispatch=seed_dispatch,
             solve=solve,
-            idle_mode=idle_mode,
         )
         trace = run_coarsen_solve_reconstruct(instance, option, self.logger)
 
         elapsed = time.monotonic() - start_elapsed
         obj_value = float(trace.obj_value) if trace.obj_value is not None else None
-        obj_bound = None  # CSR does not produce a valid global lower bound
+        obj_bound: float | None = None
+        if factor == 1:
+            obj_bound = _best_valid_lb(e.obj_bound for e in trace.cp_progress_log)
 
         report = SubroutineReport(
             elapsed_time=elapsed,
@@ -2827,12 +2918,14 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         *,
         factor: int,
         coarsen_mode: Literal["ceil", "round", "floor", "cumulative"],
+        reconstruct_mode: Literal["semi_active", "active", "active_but_last_semi"],
         timelimit: float | str | None,
         error_if_infeasible: bool,
         seed_dispatch: str,
         solve: bool,
         emit_phase_schedules: bool,
         solve_flow: list[dict],
+        dump_csr_coarse: bool = False,
     ) -> SubroutineReport:
         """``coarsen_solve_reconstruct`` in ``solve_flow`` mode (plan §4).
 
@@ -2930,6 +3023,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         # Preserve child history for coarse-scale inner obj_log emission.
         self.csr_child_history = list(child.solution_manager.history)
 
+        # --- dump coarse candidate schedules (config-flag-gated) ---
+        if dump_csr_coarse:
+            for idx, cand in enumerate(deduped):
+                source_slug = str(cand.source).replace("/", "_").replace(" ", "_")
+                fname = f"_csr_coarse_cand_{idx:02d}_{source_slug}.json"
+                path = self.try_get_file_path_for_subroutine(fname)
+                if path is not None:
+                    dump_solution_json(
+                        cand.coarse_schedule,
+                        path,
+                        compact=True,
+                        instance_name=instance.name,
+                        obj_value=cand.coarse_obj,
+                    )
+
         # --- reconstruct + validate + score every deduped candidate ---
         candidate_rows: list[dict[str, object]] = []
         winner: CsrCandidate | None = None
@@ -2942,9 +3050,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             valid = False
             final_sch: FFcSchedule | None = None
             try:
-                final_sch = reconstruct_coarse_schedule(
-                    cand.coarse_schedule, instance, factor
-                )
+                if reconstruct_mode == "active":
+                    final_sch = reconstruct_active_coarse_schedule(
+                        cand.coarse_schedule, instance
+                    )
+                elif reconstruct_mode == "active_but_last_semi":
+                    final_sch = reconstruct_active_except_last_coarse_schedule(
+                        cand.coarse_schedule, instance
+                    )
+                else:
+                    final_sch = reconstruct_coarse_schedule(
+                        cand.coarse_schedule, instance, factor
+                    )
                 self.check_feasibility(final_sch.get_jik_2_start_time_map())
                 sum_e, sum_t = compute_weighted_earliness_tardiness(final_sch, instance)
                 restored_obj = float(sum_e + sum_t)
@@ -2984,6 +3101,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         # --- build progress_log from candidate_rows (plan §3) ---
+        call_context = self._get_call_context_of_current_method()
         progress_log_entries: list[ProgressLogEntry] = []
         running_min_obj: float | None = None
         for row in candidate_rows:
@@ -2995,29 +3113,45 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 running_min_obj = rst_f
             elapsed_sec = child_offset + float(row["sec_elapsed_step"])
             obj_bound_val: float | None = None
+            note_val: str | None = None
             if factor == 1 and row.get("coarse_bound") is not None:
                 obj_bound_val = float(row["coarse_bound"])
+            src = str(row["source"])
+            if src != "unknown":
+                note_val = f"{call_context}-{src}"
             progress_log_entries.append(
                 ProgressLogEntry(
                     elapsed_sec=elapsed_sec,
                     obj_value=running_min_obj,
                     obj_bound=obj_bound_val,
+                    note=note_val,
                 )
             )
         progress_log = tuple(progress_log_entries)
+
+        # --- compute best child LB at factor==1 (original-scale valid) ---
+        best_child_bound: float | None = None
+        if factor == 1:
+            best_child_bound = _best_valid_lb(
+                rec.report.obj_bound
+                for rec in self.csr_child_history
+                if rec.report is not None
+            )
 
         # --- measure elapsed, then register EXACTLY ONCE (contract) ---
         elapsed = time.monotonic() - start_elapsed
         report = SubroutineReport(
             elapsed_time=elapsed,
             obj_value=winner_obj,
-            obj_bound=None,  # a coarse solve is never a valid original-scale LB
+            obj_bound=best_child_bound,
         )
         if winner_final is not None:
             self._register(
                 report,
                 FFcDDWSolution(
-                    schedule=winner_final, obj_value=winner_obj, obj_bound=None
+                    schedule=winner_final,
+                    obj_value=winner_obj,
+                    obj_bound=best_child_bound,
                 ),
                 progress_log=progress_log,
             )
@@ -3047,12 +3181,557 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         if winner_final is not None:
             if emit_phase_schedules:
                 self._record_csr_phase("1_coarse_solver_result", winner.coarse_schedule)
-                self._record_csr_phase(
-                    "2_reconstructed_raw",
-                    reconstruct_raw_coarse_schedule(
-                        winner.coarse_schedule, instance, factor
-                    ),
+                raw_snapshot = (
+                    build_active_from_reference(
+                        winner.coarse_schedule, instance, instance.stage_2_job_2_p_map
+                    )
+                    if reconstruct_mode == "active"
+                    else (
+                        build_active_except_last_from_reference(
+                            winner.coarse_schedule,
+                            instance,
+                            instance.stage_2_job_2_p_map,
+                        )
+                        if reconstruct_mode == "active_but_last_semi"
+                        else reconstruct_raw_coarse_schedule(
+                            winner.coarse_schedule, instance, factor
+                        )
+                    )
                 )
+                self._record_csr_phase("2_reconstructed_raw", raw_snapshot)
                 self._record_csr_phase("3_final", winner_final)
 
         return report
+
+    def job_contrib_cp(
+        self,
+        jd_target: int | str = 1,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        cp_tl_mode: Literal["constant", "proportional"] = "constant",
+        destroyed_op_tl_multiplier: float | None = None,
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+        log_search_progress: bool = False,
+        draw_gantt: bool = False,
+    ) -> SubroutineReport:
+        """Step method: destroy top-contributing jobs, CP-SAT re-inserts.
+
+        Resolves ``jd_target`` (``1`` / ``"2"`` / ``"0.05n"``) into
+        ``jd_count_target`` (int ≥ 1), hands it to
+        :class:`JobContribCpOption`, dispatches via
+        :class:`JobContribCpDispatcher`, then registers the result.
+        """
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
+
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            raise RuntimeError(
+                "job_contrib_cp requires an incumbent schedule; chain it after a "
+                "seeding subroutine such as calc_mcf_lb_and_derive_full_sch."
+            )
+
+        instance = self.instance
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+        cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
+        jd_count_target = resolve_jd_count_target(jd_target, n)
+        self.logger.info(
+            "job_contrib_cp: jd_target=%r -> jd_count_target=%d (n=%d)",
+            jd_target,
+            jd_count_target,
+            n,
+        )
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+
+        incumbent_copy = incumbent.schedule.deepcopy() if draw_gantt else None
+
+        option = JobContribCpOption(
+            jd_count_target=jd_count_target,
+            pf_method=pf_method,
+            horizon_multiplier=horizon_multiplier,
+            cp_tl_seconds=cp_tl_seconds,
+            cp_tl_mode=cp_tl_mode,
+            destroyed_op_tl_multiplier=destroyed_op_tl_multiplier,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            time_factor=self.time_factor,
+            error_if_infeasible=error_if_infeasible,
+            log_search_progress=log_search_progress,
+            solver_log_path_getter=self.get_file_path_for_subroutine,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            ref_solution=incumbent.schedule,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = JobContribCpDispatcher().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        obj_bound = (
+            float(result.obj_bound)
+            if result is not None and result.obj_bound is not None
+            else None
+        )
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=obj_bound,
+        )
+        progress_log = record.progress_log or ()
+        if result is not None and result.schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
+                progress_log=progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=progress_log)
+
+        # Logged after _register so the log IO stays outside the measured
+        # elapsed_time window (see orchestration/AGENTS.md, invariant 2).
+        metrics = result.metrics if result is not None else None
+        self._last_cp_progress = (
+            metrics.get("cp_progress") if metrics is not None else None
+        )
+        self.logger.info(
+            "job_contrib_cp: work_status=%s, cpsat_status=%s, "
+            "jd_count_eff=%s, obj=%s, elapsed=%.3fs",
+            record.work_status.name,
+            metrics.get("cpsat_status", "N/A") if metrics is not None else "N/A",
+            metrics.get("jd_count_eff", "N/A") if metrics is not None else "N/A",
+            f"{obj_value:.1f}" if obj_value is not None else "N/A",
+            elapsed,
+        )
+
+        if draw_gantt and incumbent_copy is not None:
+            selected = (
+                result.metrics.get("selected_jobs")
+                if result is not None and result.metrics is not None
+                else None
+            )
+            hl: set[str] | None = set(selected) if selected else None
+            self._record_mcf_lb_phase(
+                ("job_contrib_cp_before", incumbent_copy),
+                highlight_jobs=hl,
+            )
+            if result is not None and result.schedule is not None:
+                self._record_mcf_lb_phase(
+                    ("job_contrib_cp_after", result.schedule.deepcopy()),
+                    highlight_jobs=hl,
+                )
+
+        if result is not None and result.metrics is not None:
+            log_path = self.try_get_file_path_for_subroutine("_metrics.yaml")
+            if log_path is not None:
+                dump_yaml(dict(result.metrics), log_path)
+
+        return report
+
+    def incremental_job_contrib_cp(
+        self,
+        jd_start: int | str = 1,
+        jd_end: int | str = "0.1n",
+        jd_step_size: int = 1,
+        destroyed_op_tl_multiplier: float = 0.005,
+        min_remaining_sec: float | None = None,
+        pf_method: PFMethod = "PF1",
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+        log_search_progress: bool = False,
+        draw_gantt: bool = False,
+    ) -> None:
+        """Composite step: iterate :meth:`job_contrib_cp` over a ramp of
+        ``jd`` (destroy-count) values.
+
+        Each inner ``job_contrib_cp`` call registers independently via
+        ``temporarily_extended_context`` namespacing. The composite registers
+        its own endpoint at the end (or on early exit) so charts show a
+        top-level marker closing this flow section.
+        """
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            raise RuntimeError(
+                "incremental_job_contrib_cp requires an incumbent schedule; "
+                "chain it after a seeding subroutine such as "
+                "calc_mcf_lb_and_derive_full_sch."
+            )
+
+        # Step entry — every ``_register`` below reports elapsed against this,
+        # and per-iteration CP progress is offset from it.
+        step_start = time.monotonic()
+
+        instance = self.instance
+        n = instance.job_count
+        c = instance.stage_count
+
+        jd_start_cnt = resolve_jd_count_target(jd_start, n)
+        jd_end_cnt = resolve_jd_count_target(jd_end, n)
+
+        if jd_step_size < 1:
+            raise ValueError(f"jd_step_size must be >= 1, got {jd_step_size}")
+
+        if jd_end_cnt < jd_start_cnt:
+            raise ValueError(
+                f"jd_end ({jd_end!r} -> {jd_end_cnt}) must be >= "
+                f"jd_start ({jd_start!r} -> {jd_start_cnt})"
+            )
+
+        if jd_start_cnt >= n:
+            self.logger.info(
+                "incremental_job_contrib_cp: jd_start=%d >= n=%d, "
+                "nothing to do (no meaningful neighbourhood)",
+                jd_start_cnt,
+                n,
+            )
+            self._dump_incremental_job_contrib_cp_log("jd_ge_n", [])
+            # C3: register the composite's own endpoint on early exit too.
+            elapsed = time.monotonic() - step_start
+            self._register(
+                SubroutineReport(
+                    elapsed_time=elapsed,
+                    obj_value=self.solution_manager.best_obj_value,
+                    obj_bound=None,
+                ),
+                self.solution_manager.get_incumbent(),
+            )
+            return
+
+        level_list = list(range(jd_start_cnt, jd_end_cnt + 1, jd_step_size))
+        self.logger.info(
+            "incremental_job_contrib_cp: jd_start=%r -> %d, jd_end=%r -> %d, "
+            "jd_step_size=%d, levels=%s (n=%d, c=%d)",
+            jd_start,
+            jd_start_cnt,
+            jd_end,
+            jd_end_cnt,
+            jd_step_size,
+            level_list,
+            n,
+            c,
+        )
+
+        base_kwargs: dict = dict(
+            cp_tl_mode="proportional",
+            destroyed_op_tl_multiplier=destroyed_op_tl_multiplier,
+            pf_method=pf_method,
+            solver_thread_cnt=solver_thread_cnt,
+            horizon_multiplier=horizon_multiplier,
+            error_if_infeasible=error_if_infeasible,
+            log_search_progress=log_search_progress,
+            draw_gantt=draw_gantt,
+        )
+
+        summary_rows: list[dict] = []
+        exit_reason: str = "completed"
+        last_cp_tl_seconds: float | None = None
+        # Skipped-iteration counter. ``rows`` holds one entry per CP solve, so
+        # same-destroy-set skips would otherwise be invisible outside the log.
+        same_set_skips = 0
+        all_cp_progress: list[dict] = []
+
+        try:
+            _outer_break = False
+            for jd in level_list:
+                if jd >= n:
+                    self.logger.info(
+                        "incremental_job_contrib_cp: jd=%d >= n=%d, "
+                        "stopping (no meaningful neighbourhood)",
+                        jd,
+                        n,
+                    )
+                    exit_reason = "jd_ge_n"
+                    break
+
+                if self.is_stopping_condition():
+                    self.logger.info(
+                        "incremental_job_contrib_cp: stopping condition met before jd=%d",
+                        jd,
+                    )
+                    exit_reason = "stopping_condition"
+                    break
+
+                prev_selected: list[str] | None = None
+                rep = 0
+                while True:
+                    if self.is_stopping_condition():
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d]: stopping "
+                            "condition met at rep=%d",
+                            jd,
+                            rep,
+                        )
+                        exit_reason = "stopping_condition"
+                        _outer_break = True
+                        break
+
+                    tl = self.stopping_criteria.timelimit
+                    remaining = self.timer.get_remaining_sec(tl)
+                    dynamic_min = (
+                        last_cp_tl_seconds / 2.0
+                        if last_cp_tl_seconds is not None
+                        else destroyed_op_tl_multiplier * jd * c / 2.0
+                    )
+                    effective_min = (
+                        min_remaining_sec
+                        if min_remaining_sec is not None
+                        else dynamic_min
+                    )
+                    if remaining < effective_min:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d]: budget "
+                            "exhausted before rep=%d "
+                            "(remaining=%.3fs < min=%.3fs)",
+                            jd,
+                            rep + 1,
+                            remaining,
+                            effective_min,
+                        )
+                        exit_reason = "budget"
+                        _outer_break = True
+                        break
+
+                    rep += 1
+                    cur_incumbent = self.solution_manager.get_incumbent()
+                    selected = select_jd_jobs(
+                        cur_incumbent.schedule,
+                        instance,
+                        jd,
+                        time_factor=self.time_factor,
+                    )
+
+                    if not selected:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d]: zero "
+                            "positive-contribution jobs, stopping",
+                            jd,
+                        )
+                        exit_reason = "zero_obj"
+                        _outer_break = True
+                        break
+
+                    jd_count_eff = len(selected)
+                    saturated = jd_count_eff < jd
+
+                    if selected == prev_selected:
+                        # No row is appended: this iteration is *skipped* before any
+                        # CP solve, so counting it would break the summary's
+                        # "one row per CP solve" invariant (Phase B divides by it).
+                        # ``same_set_skips`` keeps the occurrence observable.
+                        same_set_skips += 1
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d, rep=%d]: "
+                            "same destroy set as previous; advancing jd "
+                            "(skipped, no CP solve)",
+                            jd,
+                            rep,
+                        )
+                        break
+
+                    prev_selected = list(selected)
+
+                    obj_before = self.solution_manager.best_obj_value
+                    iter_start = time.monotonic()
+                    context_name = f"jd{jd:03d}_r{rep:03d}"
+                    self._last_cp_progress = None
+                    with self.temporarily_extended_context(context_name):
+                        self.job_contrib_cp(
+                            jd_target=jd,
+                            **base_kwargs,
+                        )
+                    iter_elapsed = time.monotonic() - iter_start
+                    obj_after = self.solution_manager.best_obj_value
+
+                    cp = getattr(self, "_last_cp_progress", None)
+                    if cp:
+                        offset = iter_start - step_start
+                        for entry in cp:
+                            all_cp_progress.append(
+                                {
+                                    "jd": jd,
+                                    "rep": rep,
+                                    "t": offset + entry["t"],
+                                    "obj_value": entry["obj_value"],
+                                    "obj_bound": entry["obj_bound"],
+                                }
+                            )
+
+                    destroyed_op_count = jd_count_eff * c
+                    cp_tl_seconds = destroyed_op_tl_multiplier * destroyed_op_count
+                    last_cp_tl_seconds = cp_tl_seconds
+
+                    improved = (
+                        obj_before is not None
+                        and obj_after is not None
+                        and obj_before - obj_after > _OBJ_IMPROVEMENT_TOLERANCE
+                    )
+
+                    row_exit_reason: str
+                    if saturated:
+                        row_exit_reason = "saturated"
+                    elif improved:
+                        row_exit_reason = "improved"
+                    else:
+                        row_exit_reason = "no_improvement"
+
+                    summary_rows.append(
+                        {
+                            "jd": jd,
+                            "rep": rep,
+                            "jd_count_eff": jd_count_eff,
+                            "destroyed_op_count": destroyed_op_count,
+                            "cp_tl_seconds": cp_tl_seconds,
+                            "obj_before": (
+                                float(obj_before) if obj_before is not None else None
+                            ),
+                            "obj_after": (
+                                float(obj_after) if obj_after is not None else None
+                            ),
+                            "elapsed": round(iter_elapsed, 6),
+                            "exit_reason": row_exit_reason,
+                        }
+                    )
+
+                    if saturated:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d, rep=%d]: "
+                            "jd_count_eff=%d < jd=%d, saturated; "
+                            "stopping after this iteration",
+                            jd,
+                            rep,
+                            jd_count_eff,
+                            jd,
+                        )
+                        exit_reason = "saturated"
+                        _outer_break = True
+                        break
+
+                    if not improved:
+                        self.logger.info(
+                            "incremental_job_contrib_cp[jd=%d, rep=%d]: "
+                            "no improvement (%.1f -> %.1f); advancing jd",
+                            jd,
+                            rep,
+                            obj_before if obj_before is not None else float("nan"),
+                            obj_after if obj_after is not None else float("nan"),
+                        )
+                        break
+
+                    self.logger.info(
+                        "incremental_job_contrib_cp[jd=%d, rep=%d]: "
+                        "improved %.1f -> %.1f; repeating",
+                        jd,
+                        rep,
+                        obj_before,
+                        obj_after,
+                    )
+
+                if _outer_break:
+                    break
+
+            # Composite step registers its own endpoint so charts show a
+            # top-level (open-circle) marker at the end of this flow
+            # section, matching coarsen_solve_reconstruct's convention.
+            # The current incumbent is passed (not None): ``work_status``
+            # reads ``history[-1].solution`` and would report None — i.e. a
+            # successful run recorded as status-unknown — for a solution-less
+            # tail entry. Re-registering the incumbent cannot displace it
+            # (``register`` only swaps on a strictly better objective).
+            # contract: elapsed measured immediately before _register.
+            elapsed = time.monotonic() - step_start
+            self._register(
+                SubroutineReport(
+                    elapsed_time=elapsed,
+                    obj_value=self.solution_manager.best_obj_value,
+                    obj_bound=None,
+                ),
+                self.solution_manager.get_incumbent(),
+            )
+        except Exception as exc:
+            exit_reason = f"error:{type(exc).__name__}"
+            raise
+        finally:
+            log_path = self._dump_incremental_job_contrib_cp_log(
+                exit_reason, summary_rows, same_set_skips=same_set_skips
+            )
+            self._dump_incremental_job_contrib_cp_progress(
+                all_cp_progress,
+                same_set_skips=same_set_skips,
+                global_lb=self.solution_manager.best_obj_bound,
+            )
+            self.logger.info(
+                "incremental_job_contrib_cp: done, exit_reason=%s, "
+                "total_iterations=%d, same_set_skips=%d, log=%s",
+                exit_reason,
+                len(summary_rows),
+                same_set_skips,
+                log_path,
+            )
+
+    def _dump_incremental_job_contrib_cp_log(
+        self, exit_reason: str, rows: list[dict], *, same_set_skips: int = 0
+    ) -> Path | None:
+        """Emit the composite's per-run summary, or skip when no working dir.
+
+        Uses ``try_get_file_path_for_subroutine`` so a run without a working
+        directory (tests, scripted calls) silently skips the artifact instead
+        of raising ``AttributeError`` after all the work is done — same
+        convention as ``sw_cp``'s ``_step_log.yaml`` and ``job_contrib_cp``'s
+        ``_metrics.yaml``.
+        """
+        log_path = self.try_get_file_path_for_subroutine(
+            "_incremental_job_contrib_cp_log.yaml"
+        )
+        if log_path is None:
+            return None
+        dump_yaml(
+            {
+                "exit_reason": exit_reason,
+                "same_set_skips": same_set_skips,
+                "rows": rows,
+            },
+            log_path,
+        )
+        return log_path
+
+    def _dump_incremental_job_contrib_cp_progress(
+        self,
+        cp_progress: list[dict],
+        *,
+        same_set_skips: int = 0,
+        global_lb: float | None = None,
+    ) -> None:
+        """Dump the step-local CP trajectory for the dedicated progress plot.
+
+        The resulting ``<call_context>_incremental_job_contrib_cp_progress.json``
+        matches the ``job_contrib_progress_json`` layout kind, whose template
+        carries ``{call_context}`` as a free placeholder so the reporter can
+        ``find_artifacts`` it.
+        """
+        path = self.try_get_file_path_for_subroutine(
+            "_incremental_job_contrib_cp_progress.json"
+        )
+        if path is None:
+            return
+        payload: dict = {
+            "same_set_skips": same_set_skips,
+            "cp_progress": cp_progress,
+        }
+        if global_lb is not None:
+            payload["global_lb"] = global_lb
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)

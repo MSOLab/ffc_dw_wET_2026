@@ -1,15 +1,17 @@
-"""Unit tests for ``ffc_ddw_sum_et.report.np_utils.decimate_step_series``.
+"""Unit tests for ``ffc_ddw_sum_et.report.np_utils``.
 
 The mean step function emitted by ``step_function_mean_over_union`` samples
 at the union of every instance's change times — 10^5-10^6 points at scale.
 ``decimate_step_series`` collapses that to a bounded, visually-lossless set.
-These tests pin the contract the flow-comparison chart depends on: bounded
-output, preserved endpoints, and sub-quantum thinning.
+``round_step_series`` rounds coords to display resolution, reducing payload
+byte size without dropping any points.
 """
 
 from __future__ import annotations
 
-from ffc_ddw_sum_et.report.np_utils import decimate_step_series
+import math
+
+from ffc_ddw_sum_et.report.np_utils import decimate_step_series, round_step_series
 
 
 def test_short_series_returned_unchanged() -> None:
@@ -52,3 +54,50 @@ def test_max_points_two_or_less_is_noop() -> None:
     xs = [0.0, 0.5, 1.0]
     ys = [1.0, 0.5, 0.0]
     assert decimate_step_series(xs, ys, max_points=2) == (xs, ys)
+
+
+# ── round_step_series ──────────────────────────────────────────────────
+
+
+def test_round_step_series_rounds_preserves_length() -> None:
+    xs = [0.0, 0.123456789, 1.0]
+    ys = [0.5, 0.4834094857291839, 0.0]
+    rx, ry = round_step_series(xs, ys, x_decimals=6, y_decimals=5)
+    assert len(rx) == len(xs)
+    assert len(ry) == len(ys)
+    assert rx == [0.0, 0.123457, 1.0]
+    assert ry == [0.5, 0.48341, 0.0]
+
+
+def test_round_step_series_preserves_monotonicity() -> None:
+    xs = [0.0, 0.3, 0.7, 1.0]
+    ys = [0.5, 0.49999, 0.49998, 0.0]
+    _, ry = round_step_series(xs, ys, x_decimals=6, y_decimals=5)
+    for i in range(1, len(ry)):
+        assert ry[i] <= ry[i - 1], f"y broke monotonicity at i={i}"
+
+
+def test_round_step_series_preserves_endpoints() -> None:
+    xs = [0.0, 0.25, 0.75, 1.0]
+    ys = [0.6, 0.49999, 0.30001, 0.0]
+    rx, ry = round_step_series(xs, ys, x_decimals=6, y_decimals=5)
+    assert math.isclose(rx[0], round(xs[0], 6))
+    assert math.isclose(rx[-1], round(xs[-1], 6))
+    assert math.isclose(ry[0], round(ys[0], 5))
+    assert math.isclose(ry[-1], round(ys[-1], 5))
+
+
+def test_round_step_series_idempotent() -> None:
+    xs = [0.0, 0.123457, 1.0]
+    ys = [0.5, 0.48341, 0.0]
+    rx, ry = round_step_series(xs, ys, x_decimals=6, y_decimals=5)
+    assert rx == xs
+    assert ry == ys
+
+
+def test_round_step_series_flat_equal_ys_no_reorder() -> None:
+    xs = [0.0, 0.1, 0.2]
+    ys = [0.500001, 0.500003, 0.500002]
+    _, ry = round_step_series(xs, ys, x_decimals=6, y_decimals=5)
+    for i in range(1, len(ry)):
+        assert ry[i] <= ry[i - 1], f"flat y reordered at i={i}"

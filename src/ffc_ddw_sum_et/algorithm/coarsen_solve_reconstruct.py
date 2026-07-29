@@ -36,7 +36,11 @@ from ..parameters.ffc_ddw_params import FFcDDWParameters
 from ..solution.ffc_schedule import FFcSchedule
 from ..solution.objectives import compute_weighted_earliness_tardiness
 from ..solution.schedule_build import (
+    build_active_except_last_from_reference,
+    build_active_from_reference,
     build_schedule_from_op_starts,
+    reconstruct_active_coarse_schedule,
+    reconstruct_active_except_last_coarse_schedule,
     reconstruct_coarse_schedule,
     reconstruct_raw_coarse_schedule,
 )
@@ -121,10 +125,19 @@ def schedule_sequence_signature(schedule: FFcSchedule) -> tuple[tuple[Any, ...],
             machine_parts.append(("m", stage_id, machine_id, machine_seq))
             for job_id, start_time, end_time in seq:
                 stage_ops.append(
-                    (int(start_time), int(end_time), job_index[job_id], job_id)
+                    (
+                        int(start_time),
+                        int(end_time),
+                        job_index[job_id],
+                        job_id,
+                    )
                 )
         stage_parts.append(
-            ("s", stage_id, tuple(job_id for *_unused, job_id in sorted(stage_ops)))
+            (
+                "s",
+                stage_id,
+                tuple(job_id for *_unused, job_id in sorted(stage_ops)),
+            )
         )
 
     return tuple(machine_parts + stage_parts)
@@ -166,6 +179,21 @@ class CoarsenSolveReconstructOption(AlgOption):
 
     factor: int = DEFAULT_COARSEN_FACTOR
     coarsen_mode: Literal["ceil", "round", "floor", "cumulative"] = "ceil"
+    reconstruct_mode: Literal["semi_active", "active", "active_but_last_semi"] = (
+        "semi_active"
+    )
+    """How the coarse solution is reconstructed onto the original scale.
+
+    ``"semi_active"`` (default, prior behavior): carry the coarse machine
+    assignment and per-machine order verbatim, re-derive times
+    (:func:`reconstruct_coarse_schedule`). ``"active"``: keep only the coarse
+    per-stage operation start-order and re-assign machines by earliest start
+    (:func:`reconstruct_active_coarse_schedule`). ``"active_but_last_semi"``:
+    active rebuild for all stages except the last, which preserves the coarse
+    machine assignment and per-machine order but reads previous-stage end times
+    from the actively rebuilt stages
+    (:func:`reconstruct_active_except_last_coarse_schedule`).
+    """
     timelimit_sec: float | None = None
     solver_thread_cnt: int = 1
     log_search_progress: bool = False
@@ -178,11 +206,6 @@ class CoarsenSolveReconstructOption(AlgOption):
     A/B testing seed quality changes. The ``coarse_schedule`` becomes the seed
     itself; ``cp_progress_log`` is empty; ``coarsened_status`` is ``"SEED_ONLY"``.
     """
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring"
-    """``insert_idle_time`` mode used when building the coarse-grid seed
-    schedule. Does not affect the final original-scale post-process, which
-    always uses standard flooring (see ``schedule_build.reconstruct_coarse_schedule``).
-    """
 
     def __post_init__(self) -> None:
         valid_dispatch = {"job_wise", "mixed", "v3", "v4"}
@@ -191,15 +214,16 @@ class CoarsenSolveReconstructOption(AlgOption):
                 f"seed_dispatch must be one of {valid_dispatch}, "
                 f"got {self.seed_dispatch!r}"
             )
-        valid_idle = {"flooring", "ceiling", "lookahead"}
-        if self.idle_mode not in valid_idle:
-            raise ValueError(
-                f"idle_mode must be one of {valid_idle}, got {self.idle_mode!r}"
-            )
         valid_modes = {"ceil", "round", "floor", "cumulative"}
         if self.coarsen_mode not in valid_modes:
             raise ValueError(
                 f"coarsen_mode must be one of {valid_modes}, got {self.coarsen_mode!r}"
+            )
+        valid_reconstruct = {"semi_active", "active", "active_but_last_semi"}
+        if self.reconstruct_mode not in valid_reconstruct:
+            raise ValueError(
+                f"reconstruct_mode must be one of {valid_reconstruct}, "
+                f"got {self.reconstruct_mode!r}"
             )
 
 
@@ -240,7 +264,6 @@ def _build_dispatch_seed_schedule(
     coarsened: FFcDDWParameters,
     factor: int,
     strategy: Literal["job_wise", "mixed", "v3", "v4"],
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> FFcSchedule:
     """Build a seed schedule via dispatch + idle insertion on coarsened scale.
 
@@ -253,21 +276,16 @@ def _build_dispatch_seed_schedule(
     against the **original** due window (preserved on the coarsened instance),
     so the seed is consistent with the CP model's objective function.
 
-    ``idle_mode`` selects the ``insert_idle_time`` mode used on the coarse
-    grid (see ``FFcSchedule.insert_idle_time``); default ``"flooring"``
-    preserves prior behaviour.
+    Idle insertion on the coarse grid uses the CSR path
+    (``tau > 1`` → :func:`_iit_csr_shift`).
     """
     if strategy not in {"job_wise", "mixed", "v3", "v4"}:
         raise ValueError(f"Unknown seed_dispatch strategy: {strategy!r}")
     if strategy == "v3":
-        seed, _obj, _label = build_v3_paired_dispatch_schedule(
-            coarsened, factor=factor, idle_mode=idle_mode
-        )
+        seed, _obj, _label = build_v3_paired_dispatch_schedule(coarsened, factor=factor)
         return seed
     if strategy == "v4":
-        seed, _obj, _label = build_v4_paired_dispatch_schedule(
-            coarsened, factor=factor, idle_mode=idle_mode
-        )
+        seed, _obj, _label = build_v4_paired_dispatch_schedule(coarsened, factor=factor)
         return seed
 
     seq = coarsened.get_eddub_twt_job_sequence()
@@ -278,7 +296,7 @@ def _build_dispatch_seed_schedule(
     if strategy == "job_wise":
         schedule = BaseDispatcher(coarsened)._create_empty_schedule(coarsened)
         dispatch_job_sequence_by_stages(schedule, seq, coarsened.job_2_stage_2_p_map)
-        schedule.insert_idle_time(dw, ewt, twt, time_factor=factor, idle_mode=idle_mode)
+        schedule.insert_idle_time(dw, ewt, twt, time_factor=factor)
         return schedule
 
     # strategy == "mixed": pick the candidate with minimum wET under the CSR
@@ -289,7 +307,7 @@ def _build_dispatch_seed_schedule(
     best_obj: float | None = None
     best_sch: FFcSchedule | None = None
     for cand in dispatcher.iter_mixed_schedules_by_sequence(seq):
-        cand.insert_idle_time(dw, ewt, twt, time_factor=factor, idle_mode=idle_mode)
+        cand.insert_idle_time(dw, ewt, twt, time_factor=factor)
         sum_e, sum_t = compute_weighted_earliness_tardiness(
             cand, coarsened, time_factor=factor
         )
@@ -308,7 +326,6 @@ def _seed_and_obj(
     coarsened: FFcDDWParameters,
     factor: int,
     strategy: Literal["job_wise", "mixed", "v3", "v4"],
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[FFcSchedule, float]:
     """Build a dispatch seed schedule and evaluate its coarsened wET.
 
@@ -316,9 +333,7 @@ def _seed_and_obj(
     is the weighted earliness+tardiness computed under the CSR objective
     (``factor * C^c`` vs the original due window).
     """
-    seed_schedule = _build_dispatch_seed_schedule(
-        coarsened, factor, strategy, idle_mode=idle_mode
-    )
+    seed_schedule = _build_dispatch_seed_schedule(coarsened, factor, strategy)
     seed_sum_e, seed_sum_t = compute_weighted_earliness_tardiness(
         seed_schedule, coarsened, time_factor=factor
     )
@@ -335,7 +350,6 @@ def _solve_coarsened_model(
     log_search_progress: bool,
     build_start: float,
     seed_dispatch: Literal["job_wise", "mixed", "v3", "v4"] = "mixed",
-    idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
 ) -> tuple[
     str,
     dict[tuple[str, str], int] | None,
@@ -370,7 +384,7 @@ def _solve_coarsened_model(
     # (single source of truth with the seed-only path), then apply it as a
     # warm-start hint before solving.
     seed_schedule, dispatch_seed_obj = _seed_and_obj(
-        coarsened_instance, factor, seed_dispatch, idle_mode=idle_mode
+        coarsened_instance, factor, seed_dispatch
     )
     BaseModelBuilder.apply_hints_from_schedule(
         mdl, params, op_vars, et_vars, seed_schedule
@@ -491,7 +505,6 @@ def run_coarsen_solve_reconstruct(
             log_search_progress=option.log_search_progress,
             build_start=build_start,
             seed_dispatch=option.seed_dispatch,
-            idle_mode=option.idle_mode,
         )
 
         has_solution = coarse_j_i_2_start is not None
@@ -552,7 +565,7 @@ def run_coarsen_solve_reconstruct(
     else:
         # Seed-only deterministic mode: skip CP-SAT, use dispatch seed directly.
         seed_schedule, dispatch_seed_obj = _seed_and_obj(
-            coarsened, option.factor, option.seed_dispatch, idle_mode=option.idle_mode
+            coarsened, option.factor, option.seed_dispatch
         )
         coarse_schedule = seed_schedule
         coarsened_status_name = "SEED_ONLY"
@@ -565,11 +578,27 @@ def run_coarsen_solve_reconstruct(
     # Raw snapshot BEFORE any postprocess, and the ET-aligned final schedule.
     # Built by separate calls so the final's in-place postprocess cannot mutate
     # the raw snapshot. Both share the reconstruct logic in schedule_build.
+    # reconstruct_mode selects semi-active (carry coarse machine assignment),
+    # active (keep only the coarse start-order, re-assign machines), or
+    # active_but_last_semi (active for all but the last stage).
     factor = option.factor
-    reconstructed_raw_schedule = reconstruct_raw_coarse_schedule(
-        coarse_schedule, instance, factor
-    )
-    final_schedule = reconstruct_coarse_schedule(coarse_schedule, instance, factor)
+    if option.reconstruct_mode == "active":
+        reconstructed_raw_schedule = build_active_from_reference(
+            coarse_schedule, instance, instance.stage_2_job_2_p_map
+        )
+        final_schedule = reconstruct_active_coarse_schedule(coarse_schedule, instance)
+    elif option.reconstruct_mode == "active_but_last_semi":
+        reconstructed_raw_schedule = build_active_except_last_from_reference(
+            coarse_schedule, instance, instance.stage_2_job_2_p_map
+        )
+        final_schedule = reconstruct_active_except_last_coarse_schedule(
+            coarse_schedule, instance
+        )
+    else:
+        reconstructed_raw_schedule = reconstruct_raw_coarse_schedule(
+            coarse_schedule, instance, factor
+        )
+        final_schedule = reconstruct_coarse_schedule(coarse_schedule, instance, factor)
 
     sum_e, sum_t = compute_weighted_earliness_tardiness(final_schedule, instance)
     obj_value = float(sum_e + sum_t)

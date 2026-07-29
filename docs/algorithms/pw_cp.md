@@ -371,3 +371,7 @@ For each `(step, unfixed_start)`:
 - `mcf_lb` — seeding subroutine that produces the initial incumbent
   required by `sw_cp`. `sw_cp` is typically chained after
   `calc_mcf_lb_and_derive_full_sch` or `neh_cp`.
+- `job_contrib_cp` — complementary D&C refinement that removes
+  top-contributing jobs and lets CP-SAT re-insert them. Unlike `sw_cp`
+  which partitions by time, `job_contrib_cp` partitions by contribution.
+  The two can be composed via CSR's `solve_flow`.

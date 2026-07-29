@@ -595,6 +595,110 @@ def test_initialize_by_dispatch_v4_is_deterministic() -> None:
 
 
 # ---------------------------------------------------------------------------
+# initialize_by_dispatch_v4(reconstruct_mode=...)
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_by_dispatch_v4_reconstruct_mode_default_is_none() -> None:
+    """Locks the default: an argument-less call must stay the raw seed.
+
+    Existing configs carry no ``reconstruct_mode`` key, so a changed default
+    would silently alter every historical flow.
+    """
+    instance = _make_instance()
+
+    implicit = _make_controller(instance).initialize_by_dispatch_v4()
+    explicit = _make_controller(instance).initialize_by_dispatch_v4(
+        reconstruct_mode="none"
+    )
+
+    assert implicit.obj_value == explicit.obj_value
+
+
+def test_initialize_by_dispatch_v4_active_but_last_semi_matches_csr_seed_only() -> None:
+    """The option reproduces ``coarsen_solve_reconstruct(factor=1, solve=False)``.
+
+    That CSR route is what metadata/20260728/dispatch_v4_init_tl.yaml used
+    before this step gained the option; equality here is what makes the swap
+    result-preserving.
+    """
+    from ffc_ddw_sum_et.algorithm.coarsen_solve_reconstruct import (
+        CoarsenSolveReconstructOption,
+        run_coarsen_solve_reconstruct,
+    )
+
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_dispatch_v4(
+        reconstruct_mode="active_but_last_semi"
+    )
+    csr_trace = run_coarsen_solve_reconstruct(
+        instance,
+        CoarsenSolveReconstructOption(
+            factor=1,
+            coarsen_mode="round",
+            reconstruct_mode="active_but_last_semi",
+            seed_dispatch="v4",
+            solve=False,
+            timelimit_sec=None,
+        ),
+        controller.logger,
+    )
+
+    assert report.obj_value == csr_trace.obj_value
+
+
+def test_initialize_by_dispatch_v4_active_matches_reconstruct_helper() -> None:
+    from ffc_ddw_sum_et.algorithm.dispatcher import build_v4_paired_dispatch_schedule
+    from ffc_ddw_sum_et.solution.schedule_build import (
+        reconstruct_active_coarse_schedule,
+    )
+
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_dispatch_v4(reconstruct_mode="active")
+
+    seed_sch, _seed_obj, _label = build_v4_paired_dispatch_schedule(instance)
+    expected_sch = reconstruct_active_coarse_schedule(seed_sch, instance)
+    sum_e, sum_t = compute_weighted_earliness_tardiness(expected_sch, instance)
+
+    assert report.obj_value == float(sum_e + sum_t)
+
+
+def test_initialize_by_dispatch_v4_reconstruct_registers_consistent_incumbent() -> None:
+    instance = _make_instance()
+    controller = _make_controller(instance)
+
+    report = controller.initialize_by_dispatch_v4(
+        reconstruct_mode="active_but_last_semi"
+    )
+
+    assert report.obj_bound is None
+    assert len(controller.solution_manager.history) == 1
+
+    incumbent = controller.solution_manager.get_incumbent()
+    assert incumbent is not None
+    assert incumbent.schedule is not None
+    assert incumbent.obj_value == report.obj_value
+
+    for stage_id in instance.stage_id_list:
+        for job_id in instance.job_id_list:
+            incumbent.schedule.get_job_end_time(stage_id, job_id)
+
+    sum_e, sum_t = compute_weighted_earliness_tardiness(incumbent.schedule, instance)
+    assert float(sum_e + sum_t) == report.obj_value
+
+
+def test_initialize_by_dispatch_v4_rejects_unknown_reconstruct_mode() -> None:
+    controller = _make_controller(_make_instance())
+
+    with pytest.raises(ValueError, match="reconstruct_mode"):
+        controller.initialize_by_dispatch_v4(reconstruct_mode="semi_active")
+
+
+# ---------------------------------------------------------------------------
 # run(flow_resume_idx=...) flow-skipping (RESUME)
 # ---------------------------------------------------------------------------
 

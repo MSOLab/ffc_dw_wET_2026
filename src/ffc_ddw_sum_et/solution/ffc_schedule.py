@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import bisect
 import logging
-from typing import Iterable, Iterator, Literal, Mapping, Sequence
+from typing import Iterable, Iterator, Mapping, Sequence
 
 JobIdType = str
 StageIdType = str
@@ -1652,228 +1652,86 @@ class FFcSchedule:
         twt_map: Mapping[JobIdType, int],
         *,
         time_factor: int = 1,
-        idle_mode: Literal["flooring", "ceiling", "lookahead"] = "flooring",
     ) -> None:
-        """Insert idle time on the last stage to minimise earliness-tardiness.
+        """Insert idle time on the last stage to minimize earliness-tardiness.
 
-        Implements the pseudocode from the paper exactly:
-          j starts at the last job and counts down to 0.
-          j is only decremented (j -= 1) when the current block is NOT
-          shifted. When a shift is applied, j stays fixed so the same
-          starting position is re-evaluated with updated completion times
-          (sets S_E/S_D/S_T may have changed, or S_M grew by merging with
-          the next block when delta == delta2).
+        Sweeps each last-stage machine's jobs from the last backward, greedily
+        right-shifting blocks of time-consecutive operations toward their due
+        windows. The per-block shift depends on the time scale ``tau``:
 
-        When ``time_factor > 1`` (``K > 1``) the schedule lives on a coarse
-        time grid while the due window belongs to the original (fine) scale.
-        In that regime each block is shifted to its **exact coarse-grid
-        optimum** by the CSR idle-time-insertion of
-        ``vault/20260713_p3_csr.pdf``: the gate is the ACTUAL objective change
-        from shifting the block one coarse cell — earliness saved (a full
-        ``K*w-`` while the job stays early, or the partial ``w-*(lo - K*C)`` on
-        the cell it crosses out) vs tardiness added (``K*w+`` while already
-        tardy, or the partial ``w+*(K*(C+1) - hi)`` on the cell it crosses in).
-        Comparing these MAGNITUDES (not weights) is what makes narrow windows
-        correct: coarsening can leave a window with no in-grid cell, so a single
-        cell can leap early -> tardy. The block jumps across each full-marginal
-        region (``floor(lo/K)``/``floor(hi/K)`` boundaries) and unit-steps
-        through window-edge cells. This supersedes the ``idle_mode`` heuristics
-        below — **``idle_mode`` has no effect when ``K > 1``** — which undershoot
-        on the coarse grid (the ``K*(C+1)`` partition misclassifies
-        genuinely-early jobs as on-time, leaving residual earliness). See
-        ``plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md``.
+        - ``tau == 1`` (fine grid) → :func:`_iit_pan_shift`: idle time insertion
+          of Pan et al. (2017), Fig. 3; ``Δ = min(Δ₁, Δ₂)`` with
+          ``Δ₁ = min{min_{S_E} E_j, min_{S_D}(d⁺_j - C_j)}`` (plain flooring).
+        - ``tau > 1`` (coarse grid, CSR) → :func:`_iit_csr_shift`: the
+          coarse-grid variant whose S_E1/S_E2/S_T1/S_T2 gate weighs the actual
+          one-cell objective change; ``Δ₁ = 1`` when a partial-benefit/penalty
+          job is present, else the jump to the next window edge.
 
-        At ``time_factor == 1`` (fine grid, the only regime for non-CSR
-        callers) the original paper heuristic runs and ``idle_mode`` selects the
-        Δ₁ breakpoint rule. Floor equals ceil there, so the shift is exact; the
-        three modes agree for aligned windows:
-
-        - ``"flooring"`` (default): Δ₁ uses **floor** (``lo // K`` /
-          ``hi // K``); byte-identical to the original (pre-idle_mode)
-          behaviour. When Δ₁ == 0 the shift stalls and ``j`` is decremented.
-        - ``"ceiling"``: Δ₁ uses **ceil** (``-(-lo // K)`` / ``-(-hi // K)``).
-        - ``"lookahead"``: picks the floor candidate Δ_a or Δ_a + 1, whichever
-          minimises ``block_obj``. **Ties go to the larger shift Δ_b** (the
-          comparison is ``block_obj(Δ_b) <= block_obj(Δ_a)``, not ``<``) — see
-          the inline note at the comparison for why.
-
-        Termination guard: when the chosen shift is 0, ``j`` is decremented to
-        avoid an infinite loop.
+        A returned ``delta == 0`` decrements ``j``; ``delta > 0`` shifts the
+        block and re-evaluates the same ``j``.
         """
         last_stage_id = self.stages[-1]
-        INF = 10**9
-        K = time_factor
+        tau = time_factor
+        delta_big_M = self.makespan
 
         for mc_id in self.machines_per_stage[last_stage_id]:
             seq = self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id]
             if not seq:
                 continue
 
-            job_ids = [j for j, _, _ in seq]
+            job_ids = [jid for jid, _, _ in seq]
             starts = [s for _, s, _ in seq]
             ends = [e for _, _, e in seq]
             n = len(seq)
 
             j = n - 1
             while j >= 0:
+                # Create a block of time-consecutive operations
+                # with j as the leftmost operation
                 block_end = j
                 while block_end < n - 1 and starts[block_end + 1] == ends[block_end]:
                     block_end += 1
-
+                block = range(j, block_end + 1)
                 delta2 = (
                     starts[block_end + 1] - ends[block_end]
                     if block_end < n - 1
-                    else INF
+                    else delta_big_M
                 )
 
-                s_e, s_t, s_d = [], [], []
-                for i in range(j, block_end + 1):
-                    d_lo, d_hi = due_window_map[job_ids[i]]
-                    K_times_Cj_plus_single_unit = K * (ends[i] + 1)
-                    if K_times_Cj_plus_single_unit <= d_lo:
-                        s_e.append(i)
-                    elif d_hi < K_times_Cj_plus_single_unit:
-                        s_t.append(i)
-                    else:
-                        s_d.append(i)
-
-                sum_e = sum(ewt_map.get(job_ids[i], 1) for i in s_e)
-                sum_t = sum(twt_map.get(job_ids[i], 1) for i in s_t)
-
-                def block_obj(shift: int) -> int:
-                    total = 0
-                    for i in range(j, block_end + 1):
-                        d_lo, d_hi = due_window_map[job_ids[i]]
-                        c = ends[i] + shift
-                        ewt = ewt_map.get(job_ids[i], 1)
-                        twt = twt_map.get(job_ids[i], 1)
-                        total += ewt * max(0, d_lo - K * c) + twt * max(0, K * c - d_hi)
-                    return total
-
-                if K > 1:
-                    # Exact coarse-grid optimal block shift (O(n^2), the CSR
-                    # idle-time-insertion of vault/20260713_p3_csr.pdf). The gate
-                    # is the ACTUAL objective change from shifting the block one
-                    # coarse cell (+K real): a job reduces earliness by a full K
-                    # while it stays early, or partially (``d_lo - K*C``) on the
-                    # cell it crosses out of its window; symmetrically it grows
-                    # tardiness by K while already tardy, or partially
-                    # (``K*(C+1) - d_hi``) on the cell it crosses in. Comparing
-                    # these MAGNITUDES (not weights) is what makes narrow windows
-                    # correct — coarsening can leave a window with no in-grid
-                    # cell, so a cell can leap early->tardy. Shift while the
-                    # earliness saved exceeds the tardiness added. ``idle_mode``
-                    # is irrelevant here (exact). See
-                    # plans/experiment/20260714/cpsat_reconstruct_coarse_et_gap.md.
-                    earliness_saved = 0
-                    tardiness_added = 0
-                    for i in range(j, block_end + 1):
-                        d_lo, d_hi = due_window_map[job_ids[i]]
-                        c = ends[i]
-                        if K * c < d_lo:  # early: shifting +1 cell cuts earliness
-                            ewt = ewt_map.get(job_ids[i], 1)
-                            earliness_saved += (
-                                ewt * K if K * (c + 1) <= d_lo else ewt * (d_lo - K * c)
-                            )
-                        if K * (c + 1) > d_hi:  # tardy after the shift
-                            twt = twt_map.get(job_ids[i], 1)
-                            tardiness_added += (
-                                twt * K if K * c >= d_hi else twt * (K * (c + 1) - d_hi)
-                            )
-                    if earliness_saved > tardiness_added:
-                        # Jump across the full-marginal region (every job stays
-                        # on the same early/on-time/tardy piece, so the per-cell
-                        # gate above holds for the whole jump); unit-step through
-                        # a cell where some job crosses a window edge (the gate
-                        # is re-evaluated with the new magnitudes there).
-                        jump = INF
-                        for i in range(j, block_end + 1):
-                            d_lo, d_hi = due_window_map[job_ids[i]]
-                            c = ends[i]
-                            if K * c < d_lo:  # early: full until it reaches d_lo
-                                jump = min(
-                                    jump, (d_lo // K - c) if K * (c + 1) <= d_lo else 0
-                                )
-                            elif K * c <= d_hi:  # on-time: rate 0 until it reaches d_hi
-                                jump = min(
-                                    jump, (d_hi // K - c) if K * (c + 1) <= d_hi else 0
-                                )
-                            # tardy: constant +K rate, no boundary ahead -> no cap
-                        delta = min(1 if jump <= 0 else jump, delta2)
-                        if delta > 0:
-                            for i in range(j, block_end + 1):
-                                starts[i] += delta
-                                ends[i] += delta
-                        else:
-                            j -= 1
-                    else:
-                        j -= 1
-                    continue
-
-                if sum_e > sum_t:
-                    if idle_mode == "flooring":
-                        delta1_vals: list[int] = []
-                        for i in s_e:
-                            d_lo, _ = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_lo // K - ends[i])
-                        for i in s_d:
-                            _, d_hi = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_hi // K - ends[i])
-                        delta1 = min(delta1_vals) if delta1_vals else INF
-                        delta = min(delta1, delta2)
-                        if delta > 0:
-                            for i in range(j, block_end + 1):
-                                starts[i] += delta
-                                ends[i] += delta
-                        else:
-                            j -= 1
-                    elif idle_mode == "ceiling":
-                        delta1_vals = []
-                        for i in s_e:
-                            d_lo, _ = due_window_map[job_ids[i]]
-                            delta1_vals.append(-(-d_lo // K) - ends[i])  # ceil(d_lo/K)
-                        for i in s_d:
-                            _, d_hi = due_window_map[job_ids[i]]
-                            delta1_vals.append(-(-d_hi // K) - ends[i])  # ceil(d_hi/K)
-                        delta1 = min(delta1_vals) if delta1_vals else INF
-                        delta = min(
-                            delta1, delta2
-                        )  # >= 1 always -> unconditional shift
-                        for i in range(j, block_end + 1):
-                            starts[i] += delta
-                            ends[i] += delta
-                    elif idle_mode == "lookahead":
-                        delta1_vals = []
-                        for i in s_e:
-                            d_lo, _ = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_lo // K - ends[i])
-                        for i in s_d:
-                            _, d_hi = due_window_map[job_ids[i]]
-                            delta1_vals.append(d_hi // K - ends[i])
-                        delta1 = min(delta1_vals) if delta1_vals else INF
-                        da = min(delta1, delta2)
-                        db = min(delta1 + 1, delta2)
-                        # ``<=``, not ``<``: on an objective tie prefer the
-                        # LARGER shift Δ_b. Both land the block at the same E/T
-                        # cost, but Δ_b right-justifies it one cell further,
-                        # freeing earlier machine capacity for the blocks still
-                        # to be swept (``j`` walks backwards). Strict ``<``
-                        # would keep Δ_a and, when Δ_a == 0, stall the block
-                        # into the ``j -= 1`` guard for no objective gain.
-                        # Cannot loop: the chosen Δ_b > Δ_a >= 0 always
-                        # advances ``ends``.
-                        best = (
-                            db if (db != da and block_obj(db) <= block_obj(da)) else da
-                        )
-                        if best > 0:
-                            for i in range(j, block_end + 1):
-                                starts[i] += best
-                                ends[i] += best
-                        else:
-                            j -= 1
-                    else:
-                        raise ValueError(f"unknown idle_mode: {idle_mode!r}")
+                if tau == 1:
+                    # Fine grid: Pan et al. (2017), Fig. 3
+                    delta = _iit_pan_shift(
+                        block,
+                        job_ids,
+                        ends,
+                        due_window_map,
+                        ewt_map,
+                        twt_map,
+                        delta2,
+                        delta_big_M,
+                    )
                 else:
+                    # Coarse grid: CSR (coarsen-solve-reconstruct)
+                    delta = _iit_csr_shift(
+                        tau,
+                        block,
+                        job_ids,
+                        ends,
+                        due_window_map,
+                        ewt_map,
+                        twt_map,
+                        delta2,
+                        delta_big_M,
+                    )
+
+                if delta > 0:
+                    # If shifting reduces obj.func., do not decrement j;
+                    # re-evaluate the same j
+                    for i in block:
+                        starts[i] += delta
+                        ends[i] += delta
+                else:
+                    # If shifting does not reduce obj.func., decrement j
                     j -= 1
 
             self.__stage_2_mc_2_job_tuple_seq[last_stage_id][mc_id] = list(
@@ -1881,6 +1739,129 @@ class FFcSchedule:
             )
 
         self._rebuild_stage_time_caches(last_stage_id)
+
+
+def _iit_pan_shift(
+    block: range,
+    job_ids: list[JobIdType],
+    ends: list[int],
+    due_window_map: Mapping[JobIdType, tuple[int, int]],
+    ewt_map: Mapping[JobIdType, int],
+    twt_map: Mapping[JobIdType, int],
+    delta2: int,
+    delta_big_M: int,
+) -> int:
+    """Pan et al. (2017), Fig. 3 idle-time insertion (tau == 1, plain flooring).
+
+    C_j := ends[i] (fine grid, so τ = 1). Subsets of the block S_M:
+
+    - ``S_E = {j : C_j < d⁻_j}``           (early, E_j > 0)
+    - ``S_D = {j : d⁻_j ≤ C_j < d⁺_j}``    (on time within the window)
+    - ``S_T = {j : C_j ≥ d⁺_j}``           (tardy; C_j == d⁺_j is tardy after
+      one unit and so belongs here per the paper's note)
+
+    Shift iff ``Σ_{S_E} w⁻_j > Σ_{S_T} w⁺_j``; the amount is
+    ``Δ = min(Δ₁, Δ₂)`` with ``Δ₁ = min{min_{S_E} E_j, min_{S_D}(d⁺_j - C_j)}``.
+    Returns 0 (→ decrement j) when the block should not move.
+    """
+    s_e: list[int] = []
+    s_d: list[int] = []
+    sum_e = sum_t = 0
+    for i in block:
+        d_lo, d_hi = due_window_map[job_ids[i]]
+        c = ends[i]
+        if c < d_lo:  # S_E
+            s_e.append(i)
+            sum_e += ewt_map.get(job_ids[i], 1)
+        elif c >= d_hi:  # S_T
+            sum_t += twt_map.get(job_ids[i], 1)
+        else:  # S_D
+            s_d.append(i)
+
+    if sum_e <= sum_t:
+        return 0
+
+    delta1 = delta_big_M
+    for i in s_e:
+        d_lo, _ = due_window_map[job_ids[i]]
+        delta1 = min(delta1, d_lo - ends[i])  # E_j
+    for i in s_d:
+        _, d_hi = due_window_map[job_ids[i]]
+        delta1 = min(delta1, d_hi - ends[i])  # d⁺_j - C_j
+    return min(delta1, delta2)
+
+
+def _iit_csr_shift(
+    tau: int,
+    block: range,
+    job_ids: list[JobIdType],
+    ends: list[int],
+    due_window_map: Mapping[JobIdType, tuple[int, int]],
+    ewt_map: Mapping[JobIdType, int],
+    twt_map: Mapping[JobIdType, int],
+    delta2: int,
+    delta_big_M: int,
+) -> int:
+    """CSR (coarsen-solve-reconstruct) coarse-grid idle-time insertion (τ > 1).
+
+    C'_j := ends[i] (coarse grid); real completion is ``τ·C'_j = tau·ends[i]``.
+    Step ③ subsets of the block S_M (S_E / S_T may overlap when τ > 1):
+
+    - ``S_E = {j : τC'_j < d⁻_j}``  (early now), split by one-unit effect
+      ``S_E1 = {τ(C'_j+1) ≤ d⁻_j}`` (full benefit τ),
+      ``S_E2 = {τ(C'_j+1) > d⁻_j}`` (partial benefit ``d⁻_j - τC'_j``)
+    - ``S_D = {j : d⁻_j ≤ τC'_j and τ(C'_j+1) ≤ d⁺_j}``  (on time, stays on time)
+    - ``S_T = {j : d⁺_j < τ(C'_j+1)}``  (tardy after one unit), split by
+      ``S_T1 = {d⁺_j ≤ τC'_j}`` (full penalty τ),
+      ``S_T2 = {d⁺_j > τC'_j}`` (partial penalty ``τ(C'_j+1) - d⁺_j``)
+
+    Step ④ gate: shift iff the one-unit earliness saved exceeds the tardiness
+    added: ``Σ_{S_E1} w⁻τ + Σ_{S_E2} w⁻(d⁻-τC') > Σ_{S_T1} w⁺τ +
+    Σ_{S_T2} w⁺(τ(C'+1)-d⁺)``. When shifting: ``Δ₁ = 1`` if any partial job
+    (S_E2 ∪ S_T2) is present, else ``Δ₁ = min{min_{S_E}⌊d⁻/τ⌋-C',
+    min_{S_D}⌊d⁺/τ⌋-C'}``; then ``Δ = min(Δ₁, Δ₂)``. Returns 0 → decrement j.
+    """
+    s_e: list[int] = []
+    s_d: list[int] = []
+    has_partial = False
+    saved = 0  # LHS of the step-④ gate
+    added = 0  # RHS of the step-④ gate
+    for i in block:
+        d_lo, d_hi = due_window_map[job_ids[i]]
+        tc = tau * ends[i]  # τC'_j
+        tc1 = tc + tau  # τ(C'_j + 1)
+        if tc < d_lo:  # S_E
+            s_e.append(i)
+            ewt = ewt_map.get(job_ids[i], 1)
+            if tc1 <= d_lo:  # S_E1
+                saved += ewt * tau
+            else:  # S_E2
+                saved += ewt * (d_lo - tc)
+                has_partial = True
+        if d_hi < tc1:  # S_T
+            twt = twt_map.get(job_ids[i], 1)
+            if d_hi <= tc:  # S_T1
+                added += twt * tau
+            else:  # S_T2
+                added += twt * (tc1 - d_hi)
+                has_partial = True
+        if d_lo <= tc and tc1 <= d_hi:  # S_D
+            s_d.append(i)
+
+    if saved <= added:
+        return 0
+
+    if has_partial:
+        delta1 = 1
+    else:
+        delta1 = delta_big_M
+        for i in s_e:
+            d_lo, _ = due_window_map[job_ids[i]]
+            delta1 = min(delta1, d_lo // tau - ends[i])
+        for i in s_d:
+            _, d_hi = due_window_map[job_ids[i]]
+            delta1 = min(delta1, d_hi // tau - ends[i])
+    return min(delta1, delta2)
 
 
 def validate_schedule(
