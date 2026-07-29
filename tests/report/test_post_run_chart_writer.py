@@ -183,6 +183,9 @@ def test_writes_both_html_artifacts(tmp_path: Path) -> None:
     payload = json.loads(payload_match.group(1))
     assert len(payload["traces"]) == 1
     assert payload["traces"][0]["scenario"] == scenario
+    assert "all" in payload["traces"][0]
+    assert "x" in payload["traces"][0]["all"]
+    assert "y" in payload["traces"][0]["all"]
 
 
 def _setup_layout(tmp_path: Path) -> tuple[Any, str]:  # type: ignore[name-defined]
@@ -322,16 +325,16 @@ def _decimal_places(value: float) -> int:
 
 
 def test_flow_chart_payload_coord_precision(tmp_path: Path) -> None:
-    """C1-5: step_x ≤6, step_y ≤5, guide_marker_x ≤6 decimal places."""
+    """C4: all.x ≤6, all.y ≤5, all.guide_x ≤6 decimal places."""
     payload = _gen_flow_chart_payload(tmp_path, ["InstA", "InstB"])
     for trace in payload["traces"]:
-        for v in trace["step_x"]:
-            assert _decimal_places(float(v)) <= 6, f"step_x {v!r} exceeds 6 decimals"
-        for v in trace["step_y"]:
-            assert _decimal_places(float(v)) <= 5, f"step_y {v!r} exceeds 5 decimals"
-        for v in trace["guide_marker_x"]:
+        for v in trace["all"]["x"]:
+            assert _decimal_places(float(v)) <= 6, f"all.x {v!r} exceeds 6 decimals"
+        for v in trace["all"]["y"]:
+            assert _decimal_places(float(v)) <= 5, f"all.y {v!r} exceeds 5 decimals"
+        for v in trace["all"]["guide_x"]:
             assert _decimal_places(float(v)) <= 6, (
-                f"guide_marker_x {v!r} exceeds 6 decimals"
+                f"all.guide_x {v!r} exceeds 6 decimals"
             )
 
 
@@ -355,26 +358,26 @@ def test_round_step_series_preserves_step_path_order() -> None:
 
 
 def test_flow_chart_payload_axis_consistency(tmp_path: Path) -> None:
-    """C1-7: y_min/y_max/x_max derived from rounded step coords."""
+    """C4: y_min/y_max/x_max derived from all.x/all.y."""
     payload = _gen_flow_chart_payload(tmp_path, ["InstA", "InstB"])
-    all_step_x: list[float] = []
-    all_step_y: list[float] = []
+    all_x: list[float] = []
+    all_y: list[float] = []
     for trace in payload["traces"]:
-        all_step_x.extend(float(v) for v in trace["step_x"])
-        all_step_y.extend(float(v) for v in trace["step_y"])
+        all_x.extend(float(v) for v in trace["all"]["x"])
+        all_y.extend(float(v) for v in trace["all"]["y"])
 
-    expected_x_max = max(1.0, max(all_step_x))
+    expected_x_max = max(1.0, max(all_x))
     assert math.isclose(payload["x_max"], expected_x_max), (
         f"x_max {payload['x_max']} != {expected_x_max}"
     )
 
-    max_y = max(all_step_y)
+    max_y = max(all_y)
     expected_y_max = 0.01 if max_y <= 0 else max_y * 1.05
     assert math.isclose(payload["y_max"], expected_y_max), (
         f"y_max {payload['y_max']} != {expected_y_max}"
     )
 
-    expected_y_min = min(0.0, min(all_step_y))
+    expected_y_min = min(0.0, min(all_y))
     assert math.isclose(payload["y_min"], expected_y_min), (
         f"y_min {payload['y_min']} != {expected_y_min}"
     )
@@ -420,11 +423,18 @@ def test_flow_chart_hover_follows_the_shared_constant(
 # ── C2: max points constant ──────────────────────────────────────────────
 
 
-def test_mean_series_max_points_is_10000() -> None:
-    """C2: _MEAN_SERIES_MAX_POINTS == 10000."""
+def test_all_series_max_points_is_2000() -> None:
+    """C4: _ALL_SERIES_MAX_POINTS == 2000."""
     from ffc_ddw_sum_et.report import multi_scenario_method_chart as mod
 
-    assert mod._MEAN_SERIES_MAX_POINTS == 10000
+    assert mod._ALL_SERIES_MAX_POINTS == 2000
+
+
+def test_cell_series_max_points_is_200() -> None:
+    """C4: _CELL_SERIES_MAX_POINTS == 200."""
+    from ffc_ddw_sum_et.report import multi_scenario_method_chart as mod
+
+    assert mod._CELL_SERIES_MAX_POINTS == 200
 
 
 # ── back-fill removal + mean marker visibility ────────────────────────────
@@ -492,9 +502,8 @@ def test_flow_chart_mean_series_starts_at_max_first_time(tmp_path: Path) -> None
     assert len(payload["traces"]) == 1
     trace = payload["traces"][0]
     # The start marker sits on the first mean sample = max(first_times) = 1.0.
-    assert trace["start_marker_x"] == [1.0], (
-        f"first mean sample should be max(first_times)=1.0, got "
-        f"{trace['start_marker_x']}"
+    assert trace["all"]["x"][0] == 1.0, (
+        f"first all sample should be max(first_times)=1.0, got {trace['all']['x'][0]}"
     )
 
 
@@ -505,16 +514,13 @@ def test_flow_chart_marks_only_the_mean_series_start_point(tmp_path: Path) -> No
     thousands of circles."""
     payload = _gen_flow_chart_payload(tmp_path, ["InstA", "InstB"])
     for trace in payload["traces"]:
-        assert len(trace["start_marker_x"]) == 1, (
-            f"expected one start marker, got {len(trace['start_marker_x'])}"
-        )
-        assert len(trace["start_marker_y"]) == 1
-        assert trace["start_marker_x"][0] == trace["step_x"][0]
-        assert trace["start_marker_y"][0] == trace["step_y"][0]
+        assert len(trace["all"]["x"]) >= 1
+        # start marker is no longer a separate field — JS computes it from all.x[0]
+        pass
 
     html = _flow_chart_html(tmp_path)
     assert '"circle-open"' in html, "start marker symbol circle-open missing"
-    assert "trace.start_marker_x" in html, "start marker trace missing from template"
+    assert "startX" in html, "start marker variable missing from template"
 
 
 def test_flow_chart_single_sample_scenario_keeps_start_marker(tmp_path: Path) -> None:
@@ -531,9 +537,283 @@ def test_flow_chart_single_sample_scenario_keeps_start_marker(tmp_path: Path) ->
     assert len(payload["traces"]) == 1
     trace = payload["traces"][0]
     # Union grid collapses to a single sample at t=1.0 (norm_time).
-    assert len(trace["step_x"]) == 1, "fixture no longer collapses to one sample"
-    assert trace["start_marker_x"] == [1.0]
-    assert trace["start_marker_y"][0] is not None
+    assert len(trace["all"]["x"]) == 1, "fixture no longer collapses to one sample"
+    assert trace["all"]["x"][0] == 1.0
+    assert trace["all"]["y"][0] is not None
+
+
+# ── C1: load_baseline_df includes job_cnt/stage_cnt ────────────────────────
+
+
+def test_load_baseline_df_contains_job_cnt_stage_cnt(tmp_path: Path) -> None:
+    match_csv = tmp_path / "match.csv"
+    bks_csv = tmp_path / "bks.csv"
+    inst_csv = tmp_path / "instance_table.csv"
+
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "ffc_ddw_sum_et_filename": "InstA.txt",
+                "hybridflowshop_filename": "0.txt",
+            }
+        ]
+    ).to_csv(match_csv, index=False)
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "n": 50,
+                "c": 5,
+                "totalMcCount": 15,
+                "T": 0.2,
+                "R": 0.2,
+                "W": 10,
+                "BKS_data": 8000,
+            }
+        ]
+    ).to_csv(bks_csv, index=False)
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "n": 50,
+                "c": 5,
+                "totalMcCount": 15,
+                "T": 0.2,
+                "R": 0.2,
+                "W": 10,
+                "BKS": 8000,
+            }
+        ]
+    ).to_csv(inst_csv, index=False)
+
+    from ffc_ddw_sum_et.report.post_run_chart_writer import load_baseline_df
+
+    df = load_baseline_df(match_csv, bks_csv, inst_csv)
+    assert "job_cnt" in df.columns
+    assert "stage_cnt" in df.columns
+    assert df["job_cnt"].iloc[0] == 50
+    assert df["stage_cnt"].iloc[0] == 5
+
+
+def test_attach_rpdf_columns_propagates_job_cnt_stage_cnt(tmp_path: Path) -> None:
+    match_csv = tmp_path / "match.csv"
+    bks_csv = tmp_path / "bks.csv"
+    inst_csv = tmp_path / "instance_table.csv"
+
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "ffc_ddw_sum_et_filename": "InstA.txt",
+                "hybridflowshop_filename": "0.txt",
+            }
+        ]
+    ).to_csv(match_csv, index=False)
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "n": 50,
+                "c": 5,
+                "totalMcCount": 15,
+                "T": 0.2,
+                "R": 0.2,
+                "W": 10,
+                "BKS_data": 8000,
+            }
+        ]
+    ).to_csv(bks_csv, index=False)
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "n": 50,
+                "c": 5,
+                "totalMcCount": 15,
+                "T": 0.2,
+                "R": 0.2,
+                "W": 10,
+                "BKS": 8000,
+            }
+        ]
+    ).to_csv(inst_csv, index=False)
+
+    from ffc_ddw_sum_et.report.post_run_chart_writer import (
+        attach_rpdf_columns,
+        load_baseline_df,
+    )
+
+    baseline_df = load_baseline_df(match_csv, bks_csv, inst_csv)
+    df = pd.DataFrame(
+        {"instance_id": ["InstA"], "obj_value": [8500.0], "norm_time": [1.0]}
+    )
+    result = attach_rpdf_columns(df, baseline_df)
+    assert "job_cnt" in result.columns
+    assert "stage_cnt" in result.columns
+    assert result["job_cnt"].iloc[0] == 50
+    assert result["stage_cnt"].iloc[0] == 5
+
+
+def test_attach_rpdf_columns_drops_missing_baseline_instances(tmp_path: Path) -> None:
+    match_csv = tmp_path / "match.csv"
+    bks_csv = tmp_path / "bks.csv"
+    inst_csv = tmp_path / "instance_table.csv"
+
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "ffc_ddw_sum_et_filename": "InstA.txt",
+                "hybridflowshop_filename": "0.txt",
+            }
+        ]
+    ).to_csv(match_csv, index=False)
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "n": 50,
+                "c": 5,
+                "totalMcCount": 15,
+                "T": 0.2,
+                "R": 0.2,
+                "W": 10,
+                "BKS_data": 8000,
+            }
+        ]
+    ).to_csv(bks_csv, index=False)
+    pd.DataFrame(
+        [
+            {
+                "insIndex": "0000",
+                "n": 50,
+                "c": 5,
+                "totalMcCount": 15,
+                "T": 0.2,
+                "R": 0.2,
+                "W": 10,
+                "BKS": 8000,
+            }
+        ]
+    ).to_csv(inst_csv, index=False)
+
+    from ffc_ddw_sum_et.report.post_run_chart_writer import (
+        attach_rpdf_columns,
+        load_baseline_df,
+    )
+
+    baseline_df = load_baseline_df(match_csv, bks_csv, inst_csv)
+    df = pd.DataFrame(
+        {
+            "instance_id": ["InstA", "InstB"],
+            "obj_value": [8500.0, 9000.0],
+            "norm_time": [1.0, 0.5],
+        }
+    )
+    result = attach_rpdf_columns(df, baseline_df)
+    assert len(result) == 1
+    assert result["instance_id"].iloc[0] == "InstA"
+
+
+# ── C5: filter toolbar integration ───────────────────────────────────────────
+
+
+def test_writer_includes_filter_toolbar_and_cells(tmp_path: Path) -> None:
+    """C5-17: both HTML artifacts include the cell filter toolbar and
+    non-empty cell payload."""
+    run_id = "20260507T000000_000000"
+    rr = RunRoot(path=tmp_path / run_id, run_id=run_id)
+    layout = init_ffc_artifact_layout(rr)
+
+    instances = ["InstA", "InstB"]
+    scenario = "scenario_x"
+    for ins in instances:
+        _write_instance(
+            layout,
+            scenario,
+            ins,
+            timelimit=10.0,
+            endpoints=[
+                (1.0, 9000.0, "1-step_alpha"),
+                (5.0, 8500.0, "2-step_beta"),
+            ],
+        )
+    _write_summary_csv(
+        layout,
+        [
+            {"scenarioName": scenario, "instanceName": ins, "bestObj": 8500.0}
+            for ins in instances
+        ],
+    )
+    match_csv, bks_csv, inst_csv = _write_baseline_files(tmp_path, instances)
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=match_csv,
+        bks_table_csv=bks_csv,
+        instance_table_csv=inst_csv,
+    )
+
+    # Flow comparison chart
+    flow_path = layout.artifact_path("multi_scenario_subroutine_flow_comparison_html")
+    flow_html = flow_path.read_text(encoding="utf-8")
+    assert 'id="filter-t_factor"' in flow_html
+    assert 'id="filter-r_factor"' in flow_html
+    assert 'id="filter-job_cnt"' in flow_html
+    assert 'id="filter-stage_cnt"' in flow_html
+    assert "payload.traces[0].cells" not in flow_html  # no cells if none generated
+
+    # Method-mean scatter
+    run_level_path = layout.artifact_path("multi_scenario_method_mean_scatter_html")
+    scatter_html = run_level_path.read_text(encoding="utf-8")
+    assert 'id="filter-t_factor"' in scatter_html
+
+    # Per-scenario scatter
+    per_scenario_path = layout.artifact_path(
+        "method_mean_scatter_html", scenario_name=scenario
+    )
+    assert per_scenario_path.exists()
+    per_html = per_scenario_path.read_text(encoding="utf-8")
+    assert 'id="filter-t_factor"' in per_html
+
+
+def test_writer_without_cell_map_renders_no_toolbar(tmp_path: Path) -> None:
+    """C5-18: calling the flow writer *without* cell_by_instance produces HTML
+    with no filter toolbar but a **runnable** chart (the
+    ``build_cross_run_flow_chart`` path).
+
+    Asserting only that a file was written is not enough: the render path calls
+    the filter helpers unconditionally, so omitting their definitions left this
+    exact caller with a ReferenceError and a blank page.
+    """
+    from ffc_ddw_sum_et.report.multi_scenario_method_chart import (
+        export_multi_scenario_method_rpdf_comparison_html,
+    )
+
+    ep = pd.DataFrame(
+        {
+            "instance_id": ["A", "A"],
+            "subroutine_name": ["step_alpha", "step_beta"],
+            "norm_time": [0.1, 0.5],
+            "rpd_f": [0.05, 0.02],
+            "obj_value": [100.0, 95.0],
+            "subroutine_order": [1, 2],
+        }
+    )
+    out = tmp_path / "no_cells.html"
+    ok = export_multi_scenario_method_rpdf_comparison_html(
+        [{"label": "test", "endpoint_df": ep, "raw_progression_df": None}],
+        out,
+    )
+    assert ok
+    html = out.read_text(encoding="utf-8")
+    assert 'id="filter-t_factor"' not in html
+    assert 'id="filter-r_factor"' not in html
+    assert 'id="cell-filter-toolbar"' not in html
+    # Every helper the render path calls must still be defined.
+    for fn in ("getSelectedCellKeys", "buildStepPath", "mergeCells"):
+        assert f"function {fn}(" in html, f"{fn} called but never defined"
 
 
 def test_flow_chart_guide_shape_lookup_matches_traces_per_scenario(

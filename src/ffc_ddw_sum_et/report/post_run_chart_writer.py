@@ -36,6 +36,7 @@ from routix.io import ArtifactLayout
 
 from ffc_ddw_sum_et._calc import rpd_f
 
+from .instance_cells import cell_dim_values, cell_key_by_instance
 from .method_mean_scatter import (
     export_method_mean_scatter_html,
     load_method_mean_metrics,
@@ -78,9 +79,9 @@ def load_baseline_df(
     * ``hybrid_match_csv`` (``ffc_ddw_sum_et_filename`` ↔ ``insIndex``)
     * ``bks_table_csv`` (``insIndex`` → ``BKS_data`` reference objective)
     * ``instance_table_csv`` (``insIndex`` → PRA2017 generator factors
-      ``T`` (tardiness) and ``R`` (due-date range))
+      ``T`` (tardiness), ``R`` (due-date range), ``n``, ``c``)
 
-    Output columns: ``instance_id, t_factor, r_factor, ref_obj``.
+    Output columns: ``instance_id, t_factor, r_factor, job_cnt, stage_cnt, ref_obj``.
     """
     match = pd.read_csv(hybrid_match_csv, dtype={"insIndex": str})
     match["instance_id"] = match["ffc_ddw_sum_et_filename"].str.removesuffix(".txt")
@@ -90,8 +91,8 @@ def load_baseline_df(
     bks = bks[["insIndex", "BKS_data"]].rename(columns={"BKS_data": "ref_obj"})
 
     instance = pd.read_csv(instance_table_csv, dtype={"insIndex": str})
-    instance = instance[["insIndex", "T", "R"]].rename(
-        columns={"T": "t_factor", "R": "r_factor"}
+    instance = instance[["insIndex", "T", "R", "n", "c"]].rename(
+        columns={"T": "t_factor", "R": "r_factor", "n": "job_cnt", "c": "stage_cnt"}
     )
 
     merged = match.merge(bks, on="insIndex", how="inner").merge(
@@ -100,14 +101,19 @@ def load_baseline_df(
     merged["ref_obj"] = pd.to_numeric(merged["ref_obj"], errors="coerce")
     merged["t_factor"] = pd.to_numeric(merged["t_factor"], errors="coerce")
     merged["r_factor"] = pd.to_numeric(merged["r_factor"], errors="coerce")
-    return merged[["instance_id", "t_factor", "r_factor", "ref_obj"]]
+    merged["job_cnt"] = pd.to_numeric(merged["job_cnt"], errors="coerce")
+    merged["stage_cnt"] = pd.to_numeric(merged["stage_cnt"], errors="coerce")
+    return merged[
+        ["instance_id", "t_factor", "r_factor", "job_cnt", "stage_cnt", "ref_obj"]
+    ]
 
 
 def attach_rpdf_columns(
     df: pd.DataFrame,
     baseline_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Add ``rpd_f, t_factor, r_factor`` to ``df`` by joining on ``instance_id``.
+    """Add ``rpd_f, t_factor, r_factor, job_cnt, stage_cnt`` to ``df`` by joining
+    on ``instance_id``.
 
     ``df`` must already have ``obj_value, instance_id`` populated by
     :func:`build_endpoint_df` / :func:`build_raw_progression_df`.  Rows
@@ -122,7 +128,9 @@ def attach_rpdf_columns(
         )
 
     merged = df.merge(
-        baseline_df[["instance_id", "t_factor", "r_factor", "ref_obj"]],
+        baseline_df[
+            ["instance_id", "t_factor", "r_factor", "job_cnt", "stage_cnt", "ref_obj"]
+        ],
         on="instance_id",
         how="left",
     )
@@ -202,6 +210,9 @@ def write_post_run_subroutine_chart_artifacts(
 
     baseline_df = load_baseline_df(hybrid_match_csv, bks_table_csv, instance_table_csv)
 
+    ck_map = cell_key_by_instance(baseline_df)
+    dv = cell_dim_values(baseline_df)
+
     summary_csv = layout.artifact_path("summary_csv")
     scenarios = _read_scenarios_from_summary(summary_csv)
     if not scenarios:
@@ -237,7 +248,11 @@ def write_post_run_subroutine_chart_artifacts(
                 scenario_name,
             )
 
-        method_points = load_method_mean_metrics(progressions, baseline_obj_map)
+        method_points = load_method_mean_metrics(
+            progressions,
+            baseline_obj_map,
+            cell_by_instance=ck_map,
+        )
         if method_points:
             scenario_entry = {"label": scenario_name, "method_points": method_points}
             per_scenario_path = layout.artifact_path(
@@ -247,6 +262,7 @@ def write_post_run_subroutine_chart_artifacts(
                 [scenario_entry],
                 per_scenario_path,
                 title=f"Method mean RPDf vs mean Time% — {scenario_name}",
+                dim_values=dv,
             )
             if ok:
                 logger.info(
@@ -268,6 +284,8 @@ def write_post_run_subroutine_chart_artifacts(
     ok = export_multi_scenario_method_rpdf_comparison_html(
         scenario_metrics=scenario_metrics,
         output_path=flow_path,
+        cell_by_instance=ck_map,
+        dim_values=dv,
     )
     if not ok:
         logger.info("Multi-scenario flow comparison HTML skipped (no traces)")
@@ -278,6 +296,7 @@ def write_post_run_subroutine_chart_artifacts(
             method_mean_scenarios,
             run_level_path,
             title=f"Method mean RPDf vs mean Time% — {layout._run_id}",
+            dim_values=dv,
         )
         if ok:
             logger.info(
@@ -285,13 +304,18 @@ def write_post_run_subroutine_chart_artifacts(
             )
 
     # --- CSR inner-flow comparison (coarse-scale child-clock trajectories) ---
-    _maybe_write_csr_inner_flow_comparison_html(layout, scenarios, baseline_df)
+    _maybe_write_csr_inner_flow_comparison_html(
+        layout, scenarios, baseline_df, cell_map=ck_map, dim_values=dv
+    )
 
 
 def _maybe_write_csr_inner_flow_comparison_html(
     layout: ArtifactLayout,
     scenarios: list[str],
     baseline_df: pd.DataFrame,
+    *,
+    cell_map: dict[str, tuple[str, str, str, str]] | None = None,
+    dim_values: dict[str, list[str]] | None = None,
 ) -> None:
     """Emit a run-level CSR inner-flow comparison HTML reusing the same
     ``export_multi_scenario_method_rpdf_comparison_html`` chart writer
@@ -329,6 +353,8 @@ def _maybe_write_csr_inner_flow_comparison_html(
         output_path=out_path,
         title="CSR inner-solve (coarse) RPDf by κ",
         x_label="Normalized inner-solve time",
+        cell_by_instance=cell_map,
+        dim_values=dim_values,
     )
     if ok:
         logger.info("CSR inner flow comparison HTML saved to %s", out_path)

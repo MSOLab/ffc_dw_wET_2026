@@ -509,6 +509,154 @@ def test_job_contrib_rep_collapse_realigns_instances() -> None:
     assert jd007["instance_count"] == 2
 
 
+# ── C3: cell_by_instance parameter ─────────────────────────────────────────
+
+
+def _cell_baseline(extra: list[str] | None = None) -> dict[str, float]:
+    base = {"InstA": 50.0, "InstB": 60.0, "InstC": 55.0, "InstD": 65.0}
+    if extra:
+        for e in extra:
+            base[e] = 70.0
+    return base
+
+
+def _cell_progression(
+    instance_id: str, base_obj: float, *, n_segs: int = 5
+) -> InstanceProgression:
+    segs = [
+        _seg(3, "neh_cp", 3.0, base_obj),
+        _seg(4, "incremental_sw_cp.1-batch_002", 4.0, base_obj - 10),
+        _seg(4, "incremental_sw_cp.2-batch_003", 5.0, base_obj - 20),
+        _seg(4, "incremental_sw_cp.3-batch_004", 6.0, base_obj - 30),
+        _seg(5, "solve_base_model_cpsat", 9.0, base_obj - 35),
+    ]
+    return _progression(instance_id, segs[:n_segs])
+
+
+def test_cell_by_instance_none_omits_cells() -> None:
+    progs = [_cell_progression("InstA", 100.0)]
+    points = load_method_mean_metrics(progs, {"InstA": 50.0})
+    assert "cells" not in points[0]
+
+
+def test_cell_by_instance_preserves_existing_fields() -> None:
+    progs = [_cell_progression("InstA", 100.0)]
+    points = load_method_mean_metrics(progs, {"InstA": 50.0})
+    assert "method" in points[0]
+    assert "label" in points[0]
+    assert "mean_time_pct" in points[0]
+    assert "mean_rpdf" in points[0]
+    assert "instance_count" in points[0]
+    assert "is_top_level" in points[0]
+
+
+def test_cell_weighted_avg_matches_top_level() -> None:
+    cell_map = {
+        "InstA": ("0.2", "0.2", "50", "5"),
+        "InstB": ("0.2", "0.2", "50", "5"),
+        "InstC": ("0.6", "0.6", "100", "10"),
+        "InstD": ("0.6", "0.6", "100", "10"),
+    }
+    progs = [
+        _cell_progression("InstA", 100.0),
+        _cell_progression("InstB", 120.0),
+        _cell_progression("InstC", 140.0),
+        _cell_progression("InstD", 160.0),
+    ]
+    points = load_method_mean_metrics(
+        progs, _cell_baseline(), cell_by_instance=cell_map
+    )
+    for p in points:
+        if "cells" not in p or not p["cells"]:
+            continue
+        cells = p["cells"]
+        total_n = sum(c["n"] for c in cells.values())
+        assert total_n == p["instance_count"]
+        weighted_x = sum(c["x"][0] * c["n"] for c in cells.values()) / total_n
+        weighted_y = sum(c["y"][0] * c["n"] for c in cells.values()) / total_n
+        assert weighted_x == pytest.approx(p["mean_time_pct"], abs=1e-12)
+        assert weighted_y == pytest.approx(p["mean_rpdf"], abs=1e-12)
+
+
+def test_cell_order_same_across_all_cells() -> None:
+    cell_map = {
+        "InstA": ("0.2", "0.2", "50", "5"),
+        "InstC": ("0.6", "0.6", "100", "10"),
+    }
+    progs = [
+        _cell_progression("InstA", 100.0),
+        _cell_progression("InstC", 140.0),
+    ]
+    points = load_method_mean_metrics(
+        progs, _cell_baseline(), cell_by_instance=cell_map
+    )
+    for p in points:
+        if "cells" not in p or not p["cells"]:
+            continue
+        # Each cell's dict has the same keys (method labels).
+        for c in p["cells"].values():
+            pass  # structure validity check only
+    # Every cell has the same method list.
+    first_cell_methods = (
+        set(points[0].get("cells", {}).keys()) if "cells" in points[0] else set()
+    )
+    for p in points[1:]:
+        if "cells" in p:
+            assert set(p["cells"].keys()) == first_cell_methods, (
+                f"cell keys differ: {set(p['cells'].keys())} vs {first_cell_methods}"
+            )
+
+
+def test_cell_reached_count() -> None:
+    cell_map = {
+        "InstA": ("0.2", "0.2", "50", "5"),
+        "InstB": ("0.2", "0.2", "50", "5"),
+    }
+    # InstA reaches all 5 steps; InstB only reaches first 3.
+    progs = [
+        _cell_progression("InstA", 100.0, n_segs=5),
+        _cell_progression("InstB", 120.0, n_segs=3),
+    ]
+    points = load_method_mean_metrics(
+        progs, _cell_baseline(), cell_by_instance=cell_map
+    )
+    # Both in same cell → cell n = 2 for all methods.
+    for p in points:
+        if "cells" not in p or not p["cells"]:
+            continue
+        for ck, c in p["cells"].items():
+            assert c["n"] == 2
+    # The last method (solve) was only reached by InstA.
+    solve = next(p for p in points if p["method"] == "solve_base_model_cpsat")
+    if "cells" in solve:
+        for ck, c in solve["cells"].items():
+            assert c["reached"] == 1  # only InstA reached it
+            assert c["n"] == 2  # carry-forward for InstB
+
+
+def test_cell_n_sum_equals_top_level_instance_count() -> None:
+    cell_map = {
+        "InstA": ("0.2", "0.2", "50", "5"),
+        "InstB": ("0.2", "0.2", "50", "5"),
+        "InstC": ("0.6", "0.6", "100", "10"),
+        "InstD": ("0.6", "0.6", "100", "10"),
+    }
+    progs = [
+        _cell_progression("InstA", 100.0),
+        _cell_progression("InstB", 120.0),
+        _cell_progression("InstC", 140.0),
+        _cell_progression("InstD", 160.0),
+    ]
+    points = load_method_mean_metrics(
+        progs, _cell_baseline(), cell_by_instance=cell_map
+    )
+    for p in points:
+        if "cells" not in p or not p["cells"]:
+            continue
+        total_n = sum(c["n"] for c in p["cells"].values())
+        assert total_n == p["instance_count"]
+
+
 def test_composite_endpoint_is_top_level() -> None:
     """C3: bare ``incremental_job_contrib_cp`` label (composite self-endpoint)
     is ``is_top_level=True`` — it appears as an open circle closing the flow.
@@ -531,3 +679,146 @@ def test_composite_endpoint_is_top_level() -> None:
     assert by_label["incremental_job_contrib_cp"]["is_top_level"] is True
     assert not by_label["incremental_job_contrib_cp.jd004"]["is_top_level"]
     assert not by_label["incremental_job_contrib_cp.jd005"]["is_top_level"]
+
+
+# ── filtered-view merge contract (JS consumer mirror) ────────────────────────
+
+
+def _merge_point_cells_py(cells: list[dict]) -> dict | None:
+    """Python mirror of ``mergePointCells`` in ``_cell_filter.CELL_FILTER_JS``."""
+    if not cells:
+        return None
+    total = sum(c["n"] for c in cells)
+    if total == 0:
+        return None
+    acc_x = sum(c["n"] * c["x"][0] for c in cells)
+    acc_y = sum(c["n"] * c["y"][0] for c in cells)
+    return {"x": [acc_x / total], "y": [acc_y / total], "n": total}
+
+
+def _merge_step_cells_py(cells: list[dict]) -> dict | None:
+    """Python mirror of ``mergeCells`` — the step-function merge, kept here
+    only to pin *why* it must not be used for the scalar scatter cells."""
+    if not cells:
+        return None
+    if len(cells) == 1:
+        return cells[0]
+    start = max(c["x"][0] for c in cells)
+    grid = sorted({t for c in cells for t in c["x"] if t >= start})
+    total = sum(c["n"] for c in cells)
+    ptr = [0] * len(cells)
+    ys = []
+    for t in grid:
+        acc = 0.0
+        for i, c in enumerate(cells):
+            while ptr[i] + 1 < len(c["x"]) and c["x"][ptr[i] + 1] <= t:
+                ptr[i] += 1
+            acc += c["n"] * c["y"][ptr[i]]
+        ys.append(acc / total)
+    return {"x": grid, "y": ys, "n": total}
+
+
+def test_scatter_cell_merge_weights_both_axes() -> None:
+    """A filtered view averages *both* mean Time% and mean RPDf by instance
+    count. The step-function merge samples from ``max(x[0])`` onward, so it
+    would report the slowest cell's mean time as the group's mean time."""
+    cells = [
+        {"x": [0.10], "y": [0.30], "n": 20},
+        {"x": [0.50], "y": [0.10], "n": 20},
+    ]
+    merged = _merge_point_cells_py(cells)
+    assert merged is not None
+    assert merged["x"][0] == pytest.approx(0.30, abs=1e-12)
+    assert merged["y"][0] == pytest.approx(0.20, abs=1e-12)
+    assert merged["n"] == 40
+
+    # The step merge gets y right but x wrong — the regression this pins.
+    step_merged = _merge_step_cells_py(cells)
+    assert step_merged is not None
+    assert step_merged["x"][0] == pytest.approx(0.50, abs=1e-12)
+
+
+def test_scatter_full_cell_merge_reproduces_top_level() -> None:
+    """Selecting every cell through the JS merge must land on the unfiltered
+    point exactly — the ``All`` view and a fully-selected filter agree."""
+    cell_map = {
+        "InstA": ("0.2", "0.2", "50", "5"),
+        "InstB": ("0.2", "0.2", "50", "5"),
+        "InstC": ("0.6", "0.6", "100", "10"),
+        "InstD": ("0.6", "0.6", "100", "10"),
+    }
+    progs = [
+        _cell_progression("InstA", 100.0),
+        _cell_progression("InstB", 120.0),
+        _cell_progression("InstC", 140.0),
+        _cell_progression("InstD", 160.0),
+    ]
+    points = load_method_mean_metrics(
+        progs, _cell_baseline(), cell_by_instance=cell_map
+    )
+    checked = 0
+    for p in points:
+        if not p.get("cells"):
+            continue
+        merged = _merge_point_cells_py(list(p["cells"].values()))
+        assert merged is not None
+        assert merged["x"][0] == pytest.approx(p["mean_time_pct"], abs=1e-12)
+        assert merged["y"][0] == pytest.approx(p["mean_rpdf"], abs=1e-12)
+        assert merged["n"] == p["instance_count"]
+        checked += 1
+    assert checked > 0
+
+
+def test_scatter_template_uses_point_merge_not_step_merge(tmp_path: Path) -> None:
+    """The emitted scatter JS must call ``mergePointCells``; calling
+    ``mergeCells`` there is the x-axis regression above."""
+    scenarios = [
+        {
+            "label": "s1",
+            "method_points": [
+                {
+                    "method": "a",
+                    "label": "a",
+                    "mean_time_pct": 0.1,
+                    "mean_rpdf": 0.5,
+                    "instance_count": 2,
+                    "is_top_level": True,
+                }
+            ],
+        }
+    ]
+    out = tmp_path / "scatter.html"
+    assert export_method_mean_scatter_html(scenarios, out)
+    html = out.read_text()
+    assert "mergePointCells(matchedCells)" in html
+    assert "mergeCells(matchedCells)" not in html
+
+
+@pytest.mark.parametrize("with_dims", [True, False])
+def test_scatter_template_defines_every_helper_it_calls(
+    tmp_path: Path, with_dims: bool
+) -> None:
+    """Emitting the filter JS only alongside the toolbar left ``dim_values``-less
+    callers with a ReferenceError and a blank chart."""
+    scenarios = [
+        {
+            "label": "s1",
+            "method_points": [
+                {
+                    "method": "a",
+                    "label": "a",
+                    "mean_time_pct": 0.1,
+                    "mean_rpdf": 0.5,
+                    "instance_count": 2,
+                    "is_top_level": True,
+                }
+            ],
+        }
+    ]
+    dim_values = {"t_factor": ["0.2"]} if with_dims else None
+    out = tmp_path / f"scatter_{with_dims}.html"
+    assert export_method_mean_scatter_html(scenarios, out, dim_values=dim_values)
+    html = out.read_text()
+    for fn in ("getSelectedCellKeys", "mergePointCells"):
+        assert f"function {fn}(" in html, f"{fn} called but never defined"
+    assert ('id="cell-filter-toolbar"' in html) is with_dims

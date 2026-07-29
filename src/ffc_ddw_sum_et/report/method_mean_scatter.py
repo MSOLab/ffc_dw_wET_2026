@@ -9,6 +9,7 @@ from typing import Any
 
 from ffc_ddw_sum_et._calc import rpd_f
 
+from ._cell_filter import CELL_FILTER_JS, cell_filter_toolbar_html
 from ._chart_constants import HOVER_PERCENT_DECIMALS, series_colors_json
 from .obj_log_loader import InstanceProgression, build_endpoint_df
 
@@ -82,6 +83,7 @@ def load_method_mean_metrics(
     baseline_obj_by_instance: dict[str, float],
     *,
     drop_non_improving_methods: bool = False,
+    cell_by_instance: dict[str, tuple[str, ...]] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-method mean ``(Time%, RPDf)`` points for the method-mean scatter chart.
 
@@ -230,6 +232,23 @@ def load_method_mean_metrics(
     prev_state_by_instance: dict[str, tuple[float, float, float]] = {}
     # Instances that entered the flow at least once (carry-forward eligible).
     active_instances: set[str] = set()
+
+    # Cell-level carry-forward state (when cell_by_instance is provided).
+    ins_cell_key: dict[str, str | None] = {}
+    cell_instance_ids: dict[str, set[str]] = {}
+    cell_prev_state: dict[str, dict[str, tuple[float, float, float]]] = {}
+    cell_active: dict[str, set[str]] = {}
+    if cell_by_instance is not None:
+        for ins_id in instance_data:
+            raw = cell_by_instance.get(ins_id)
+            if raw is not None:
+                ck = "|".join(raw)
+                ins_cell_key[ins_id] = ck
+                cell_instance_ids.setdefault(ck, set()).add(ins_id)
+        for ck in cell_instance_ids:
+            cell_prev_state[ck] = {}
+            cell_active[ck] = set()
+
     candidates: list[dict[str, Any]] = []
     for order_idx in sorted_order:
         base_name, full_name = step_labels[order_idx]
@@ -273,17 +292,54 @@ def load_method_mean_metrics(
                 if ps is not None:
                     time_pcts.append(ps[0])
                     rpdfs.append(ps[1])
-        candidates.append(
-            {
-                "method": base_name,
-                "label": full_name,
-                "improves": improves,
-                "mean_time_pct": sum(time_pcts) / len(time_pcts),
-                "mean_rpdf": sum(rpdfs) / len(rpdfs),
-                "instance_count": len(time_pcts),
-                "is_top_level": is_top_level,
-            }
-        )
+
+        # Cell-level aggregation (when cell_by_instance is provided).
+        cells_dict: dict[str, dict[str, Any]] = {}
+        if cell_instance_ids:
+            for ck, c_ins_ids in cell_instance_ids.items():
+                c_reached: list[tuple[str, float, float, float]] = []
+                for ins_id in c_ins_ids:
+                    c_found: tuple[float, float, float] | None = None
+                    for s_order, _, _, t_pct, r, obj in instance_data.get(ins_id, []):
+                        if s_order == order_idx:
+                            c_found = (t_pct, r, obj)
+                            break
+                    if c_found is not None:
+                        c_reached.append((ins_id,) + c_found)
+                        cell_active[ck].add(ins_id)
+                c_time_pcts: list[float] = []
+                c_rpdfs: list[float] = []
+                c_reached_ids = {ins_id for ins_id, _, _, _ in c_reached}
+                for ins_id, t_pct, r, obj in c_reached:
+                    c_time_pcts.append(t_pct)
+                    c_rpdfs.append(r)
+                    cell_prev_state[ck][ins_id] = (t_pct, r, obj)
+                for ins_id in cell_active[ck]:
+                    if ins_id not in c_reached_ids:
+                        c_ps = cell_prev_state[ck].get(ins_id)
+                        if c_ps is not None:
+                            c_time_pcts.append(c_ps[0])
+                            c_rpdfs.append(c_ps[1])
+                if c_time_pcts:
+                    cells_dict[ck] = {
+                        "x": [sum(c_time_pcts) / len(c_time_pcts)],
+                        "y": [sum(c_rpdfs) / len(c_rpdfs)],
+                        "n": len(c_time_pcts),
+                        "reached": len(c_reached),
+                    }
+
+        entry: dict[str, Any] = {
+            "method": base_name,
+            "label": full_name,
+            "improves": improves,
+            "mean_time_pct": sum(time_pcts) / len(time_pcts),
+            "mean_rpdf": sum(rpdfs) / len(rpdfs),
+            "instance_count": len(time_pcts),
+            "is_top_level": is_top_level,
+        }
+        if cells_dict:
+            entry["cells"] = cells_dict
+        candidates.append(entry)
 
     if drop_non_improving_methods and candidates:
         last_idx = len(candidates) - 1
@@ -322,7 +378,10 @@ def _y_axis_lower(values: list[float]) -> float:
     return min(0.0, min(values))
 
 
-def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_payload(
+    scenarios: list[dict[str, Any]],
+    dim_values: dict[str, list[str]] | None = None,
+) -> dict[str, Any]:
     traces: list[dict[str, Any]] = []
     all_x: list[float] = []
     all_y: list[float] = []
@@ -336,6 +395,9 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
         labels = [str(p.get("label", p["method"])) for p in method_points]
         counts = [int(p["instance_count"]) for p in method_points]
         top_levels = [bool(p.get("is_top_level", True)) for p in method_points]
+        cells_list: list[dict[str, Any]] = []
+        for p in method_points:
+            cells_list.append(p.get("cells") or {})
         traces.append(
             {
                 "scenario": str(scenario["label"]),
@@ -345,16 +407,27 @@ def _build_payload(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
                 "label": labels,
                 "instance_count": counts,
                 "is_top_level": top_levels,
+                "cells": cells_list,
             }
         )
         all_x.extend(xs)
         all_y.extend(ys)
-    return {
+        # Include cell values in axis range computation.
+        for p in method_points:
+            cells = p.get("cells")
+            if cells:
+                for c in cells.values():
+                    all_x.extend(c.get("x", []))
+                    all_y.extend(c.get("y", []))
+    result: dict[str, Any] = {
         "traces": traces,
         "x_max": _x_axis_upper(all_x),
         "y_min": _y_axis_lower(all_y),
         "y_max": _positive_axis_upper(all_y),
     }
+    if dim_values:
+        result["dim_values"] = dim_values
+    return result
 
 
 _HTML_TEMPLATE = Template("""<!doctype html>
@@ -375,6 +448,7 @@ _HTML_TEMPLATE = Template("""<!doctype html>
   <p>Per-method mean (Time%, RPDf) across instances. Methods without recorded obj_value are omitted.
   Marker shape marks the call level: open circle = top-level subroutine, open star-diamond = sub-step
   (CSR inner step, or one batch of a single call).</p>
+  $cell_filter_toolbar
   <div id="method-mean-scatter" style="width: 100%; height: 760px;"></div>
   <script>
     const payload = $payload_json;
@@ -382,45 +456,90 @@ _HTML_TEMPLATE = Template("""<!doctype html>
     const TOP_LEVEL_SYMBOL = "circle-open";
     const SUB_LEVEL_SYMBOL = "star-diamond-open";
 
-    const traces = payload.traces.map((trace, idx) => {
-      const seriesColor = SERIES_COLORS[idx % SERIES_COLORS.length];
-      const customdata = trace.method.map((name, i) => [trace.scenario, trace.label[i], trace.instance_count[i]]);
-      return {
-        type: "scatter",
-        mode: "lines+markers",
-        name: trace.scenario,
-        x: trace.x,
-        y: trace.y,
-        customdata: customdata,
-        line: { width: 2, color: seriesColor },
-        marker: {
-          size: 11,
-          color: seriesColor,
-          symbol: trace.is_top_level.map((top) => top ? TOP_LEVEL_SYMBOL : SUB_LEVEL_SYMBOL),
-          // Open symbols are stroke-only: Plotly draws them in `marker.color`
-          // and takes only the width from `marker.line`.
-          line: { width: 2 }
-        },
-        hovertemplate:
-          "scenario=%{customdata[0]}<br>" +
-          "method=%{customdata[1]}<br>" +
-          "instance_cnt=%{customdata[2]}<br>" +
-          "mean Time%=%{x:.$x_hover_decimals%}<br>" +
-          "mean RPDf=%{y:.$y_hover_decimals%}<extra></extra>"
+    $cell_filter_js
+
+    function applyFilters() {
+      const cellKey = getSelectedCellKeys();
+      const traces = payload.traces.map((trace, idx) => {
+        const seriesColor = SERIES_COLORS[idx % SERIES_COLORS.length];
+        let xs, ys, counts, labels, methods, topLevels;
+
+        const useAll = (cellKey === null || !trace.cells || trace.cells.length === 0
+                        || trace.cells.every(c => Object.keys(c).length === 0));
+
+        if (useAll) {
+          xs = trace.x; ys = trace.y; counts = trace.instance_count;
+          labels = trace.label; methods = trace.method; topLevels = trace.is_top_level;
+        } else {
+          const allCells = trace.cells;
+          const selectedKeys = cellKey.split("|");
+          const dims = ["t_factor","r_factor","job_cnt","stage_cnt"];
+          xs = []; ys = []; counts = []; labels = []; methods = []; topLevels = [];
+
+          for (let m = 0; m < allCells.length; m++) {
+            const cells = allCells[m] || {};
+            let matchedCells = [];
+            Object.entries(cells).forEach(([ck, c]) => {
+              const parts = ck.split("|");
+              const match = dims.every((d, i) => selectedKeys[i] === "All" || selectedKeys[i] === parts[i]);
+              if (match) matchedCells.push(c);
+            });
+            if (matchedCells.length === 0) continue;
+            // Each cell is a single (mean Time%, mean RPDf) point, so both
+            // axes recombine as plain weighted means — see mergePointCells.
+            const merged = mergePointCells(matchedCells);
+            if (!merged) continue;
+            const reachedSum = matchedCells.reduce((s, c) => s + (c.reached || 0), 0);
+            if (reachedSum === 0) continue;
+            xs.push(merged.x[0]);
+            ys.push(merged.y[0]);
+            counts.push(merged.n);
+            labels.push(trace.label[m]);
+            methods.push(trace.method[m]);
+            topLevels.push(trace.is_top_level[m]);
+          }
+        }
+
+        const customdata = methods.map((name, i) => [trace.scenario, labels[i], counts[i]]);
+        return {
+          type: "scatter",
+          mode: "lines+markers",
+          name: trace.scenario,
+          x: xs, y: ys,
+          customdata: customdata,
+          line: { width: 2, color: seriesColor },
+          marker: {
+            size: 11, color: seriesColor,
+            symbol: topLevels.map((top) => top ? TOP_LEVEL_SYMBOL : SUB_LEVEL_SYMBOL),
+            line: { width: 2 }
+          },
+          hovertemplate:
+            "scenario=%{customdata[0]}<br>" +
+            "method=%{customdata[1]}<br>" +
+            "instance_cnt=%{customdata[2]}<br>" +
+            "mean Time%=%{x:.$x_hover_decimals%}<br>" +
+            "mean RPDf=%{y:.$y_hover_decimals%}<extra></extra>"
+        };
+      });
+
+      const layout = {
+        title: { text: "$title" },
+        xaxis: { title: { text: "Mean normalized time" }, tickformat: ".$x_percent_decimals%", range: [0, payload.x_max] },
+        yaxis: { title: { text: "Mean RPDf" }, tickformat: ".$y_percent_decimals%", range: [payload.y_min, payload.y_max] },
+        template: "plotly_white",
+        hovermode: "closest",
+        legend: { orientation: "h" },
+        margin: { l: 70, r: 20, t: 70, b: 70 }
       };
+
+      Plotly.react("method-mean-scatter", traces, layout, { responsive: true });
+    }
+
+    applyFilters();
+
+    document.querySelectorAll("#cell-filter-toolbar select").forEach(el => {
+      el.addEventListener("change", applyFilters);
     });
-
-    const layout = {
-      title: { text: "$title" },
-      xaxis: { title: { text: "Mean normalized time" }, tickformat: ".$x_percent_decimals%", range: [0, payload.x_max] },
-      yaxis: { title: { text: "Mean RPDf" }, tickformat: ".$y_percent_decimals%", range: [payload.y_min, payload.y_max] },
-      template: "plotly_white",
-      hovermode: "closest",
-      legend: { orientation: "h" },
-      margin: { l: 70, r: 20, t: 70, b: 70 }
-    };
-
-    Plotly.newPlot("method-mean-scatter", traces, layout, { responsive: true });
   </script>
 </body>
 </html>
@@ -428,8 +547,19 @@ _HTML_TEMPLATE = Template("""<!doctype html>
 
 
 def _render_html(
-    payload: dict[str, Any], title: str, x_decimals: int, y_decimals: int
+    payload: dict[str, Any],
+    title: str,
+    x_decimals: int,
+    y_decimals: int,
+    *,
+    dim_values: dict[str, list[str]] | None = None,
 ) -> str:
+    # The JS helpers are always emitted: the render path calls them
+    # unconditionally, and ``getCellSelection`` already returns "All" when no
+    # toolbar exists. Emitting them only alongside the toolbar left callers
+    # that pass no ``dim_values`` (e.g. scripts/build_cross_run_flow_chart.py)
+    # with a ReferenceError and a blank chart.
+    toolbar = cell_filter_toolbar_html(dim_values) if dim_values else ""
     return _HTML_TEMPLATE.substitute(
         payload_json=json.dumps(payload, separators=(",", ":")),
         title=title,
@@ -438,6 +568,8 @@ def _render_html(
         x_hover_decimals=HOVER_PERCENT_DECIMALS,
         y_hover_decimals=HOVER_PERCENT_DECIMALS,
         series_colors_json=series_colors_json(),
+        cell_filter_toolbar=toolbar,
+        cell_filter_js=CELL_FILTER_JS,
     )
 
 
@@ -448,14 +580,21 @@ def export_method_mean_scatter_html(
     title: str = "Method mean RPDf vs mean Time%",
     x_percent_decimals: int = 1,
     y_percent_decimals: int = 1,
+    dim_values: dict[str, list[str]] | None = None,
 ) -> bool:
-    payload = _build_payload(scenarios)
+    payload = _build_payload(scenarios, dim_values=dim_values)
     if not payload["traces"]:
         return False
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        _render_html(payload, title, x_percent_decimals, y_percent_decimals),
+        _render_html(
+            payload,
+            title,
+            x_percent_decimals,
+            y_percent_decimals,
+            dim_values=dim_values,
+        ),
         encoding="utf-8",
     )
     logger.info("Method-mean scatter HTML saved to %s", output_path)
