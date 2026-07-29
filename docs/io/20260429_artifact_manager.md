@@ -73,11 +73,13 @@ output/
                 │   ├── <ins>_<step_idx>-<method>_step_log.yaml
                 │   ├── <ins>_mcf_lb_diagnostic.yaml
                 │   ├── <ins>_<phase_name>.yaml          # MCF-LB phase schedules
-                │   └── <ins>_last_stage_only_schedule.yaml
+                │   ├── <ins>_last_stage_only_schedule.yaml
+                │   └── <call_context>_incremental_job_contrib_cp_progress.json
                 │
                 │ ── report zone ──
                 └── report/
                     ├── <ins>_gantt.png
+                    ├── <call_context>_incremental_job_contrib_cp_progress.png
                     ├── <ins>_<phase_name>_gantt.png
                     └── <ins>_<phase_name>_mcf_preemptive_gantt.png
 ```
@@ -230,6 +232,16 @@ artifacts:
   - scope: scenario
     kind: csr_analysis
     file_template: "{scenario_name}_csr_analysis.csv"
+
+  # ---- instance ----
+  - scope: instance
+    zone: progress
+    kind: job_contrib_progress_json
+    file_template: "{call_context}_incremental_job_contrib_cp_progress.json"
+  - scope: instance
+    zone: report
+    kind: job_contrib_progress_plot_png
+    file_template: "{call_context}_incremental_job_contrib_cp_progress.png"
 
   # ---- run ----
   - scope: run
