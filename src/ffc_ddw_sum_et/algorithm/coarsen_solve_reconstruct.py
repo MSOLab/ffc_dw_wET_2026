@@ -276,8 +276,8 @@ def _build_dispatch_seed_schedule(
     against the **original** due window (preserved on the coarsened instance),
     so the seed is consistent with the CP model's objective function.
 
-    Idle insertion on the coarse grid always runs in ``_SEED_IDLE_MODE``
-    (see ``FFcSchedule.insert_idle_time``).
+    Idle insertion on the coarse grid uses the CSR path
+    (``tau > 1`` → :func:`_iit_csr_shift`).
     """
     if strategy not in {"job_wise", "mixed", "v3", "v4"}:
         raise ValueError(f"Unknown seed_dispatch strategy: {strategy!r}")
