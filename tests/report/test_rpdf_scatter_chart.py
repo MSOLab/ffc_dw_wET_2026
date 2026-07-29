@@ -262,3 +262,26 @@ def test_hover_format_injection_leaves_payload_untouched(tmp_path: Path) -> None
     assert ok
     html = out_path.read_text(encoding="utf-8")
     assert "step_HF_marker" in html, "payload label was rewritten by the injection"
+
+
+def test_mean_mode_marks_only_the_series_start_point(tmp_path: Path) -> None:
+    """C2-2: the mean-mode branch draws one open-circle marker at the series'
+    first sample. It exists so a mean series that collapsed to a single sample
+    (``mode="lines"`` draws nothing for one point) still has a reference dot —
+    marking every sample would bury the line under its own markers.
+    """
+    endpoint_df = _make_minimal_endpoint_df()
+    out_path = tmp_path / "test_scatter.html"
+    assert export_method_rpdf_scatter_html(endpoint_df, out_path)
+    html = out_path.read_text(encoding="utf-8")
+
+    start_marker = re.search(
+        r'\{ type: "scatter", mode: "markers", x: s\.x\.slice\(0, 1\),'
+        r" y: s\.y\.slice\(0, 1\),.*?showlegend: false",
+        html,
+        re.S,
+    )
+    assert start_marker is not None, "mean-mode start marker trace missing"
+    assert '"circle-open"' in start_marker.group(0), (
+        "start marker is not an open circle"
+    )

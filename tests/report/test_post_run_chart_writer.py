@@ -425,3 +425,138 @@ def test_mean_series_max_points_is_10000() -> None:
     from ffc_ddw_sum_et.report import multi_scenario_method_chart as mod
 
     assert mod._MEAN_SERIES_MAX_POINTS == 10000
+
+
+# ── back-fill removal + mean marker visibility ────────────────────────────
+
+
+def _gen_flow_chart_payload_with_endpoints(
+    tmp_path: Path,
+    instance_endpoints: dict[str, list[tuple[float, float, str]]],
+    *,
+    timelimit: float = 10.0,
+    scenario: str = "scenario_x",
+) -> dict:
+    """Build a flow-chart payload from per-instance endpoint lists.
+
+    Lets a test craft a single-sample scenario (one instance contributes one
+    late endpoint) to exercise the no-back-fill + open-marker contract.
+    """
+    run_id = "20260507T000000_000000"
+    rr = RunRoot(path=tmp_path / run_id, run_id=run_id)
+    layout = init_ffc_artifact_layout(rr)
+
+    instances = list(instance_endpoints)
+    for ins, endpoints in instance_endpoints.items():
+        _write_instance(layout, scenario, ins, timelimit=timelimit, endpoints=endpoints)
+    _write_summary_csv(
+        layout,
+        [
+            {
+                "scenarioName": scenario,
+                "instanceName": ins,
+                "bestObj": endpoints[-1][1] if endpoints else 0.0,
+            }
+            for ins, endpoints in instance_endpoints.items()
+        ],
+    )
+    match_csv, bks_csv, inst_csv = _write_baseline_files(tmp_path, instances)
+    write_post_run_subroutine_chart_artifacts(
+        layout=layout,
+        hybrid_match_csv=match_csv,
+        bks_table_csv=bks_csv,
+        instance_table_csv=inst_csv,
+    )
+    flow_path = layout.artifact_path("multi_scenario_subroutine_flow_comparison_html")
+    flow_html = flow_path.read_text(encoding="utf-8")
+    payload_match = re.search(r"const payload = (\{.*?\});", flow_html, re.S)
+    assert payload_match is not None, "failed to parse payload from flow HTML"
+    return json.loads(payload_match.group(1))
+
+
+def test_flow_chart_mean_series_starts_at_max_first_time(tmp_path: Path) -> None:
+    """C1 + C3: removing the t=0 back-fill restores the
+    ``max(first_times)`` start — the flow chart's first point marks
+    "the moment every instance has a valid schedule", not t=0.
+
+    Two instances: InstA first observes at t=0.1 (norm), InstB only at the
+    stop time t=1.0. The mean step series must start at 1.0, not 0.0.
+    """
+    payload = _gen_flow_chart_payload_with_endpoints(
+        tmp_path,
+        {
+            "InstA": [(1.0, 9000.0, "1-step_alpha"), (5.0, 8000.0, "2-step_beta")],
+            "InstB": [(10.0, 9500.0, "1-step_alpha")],  # single late sample
+        },
+    )
+    assert len(payload["traces"]) == 1
+    trace = payload["traces"][0]
+    # The start marker sits on the first mean sample = max(first_times) = 1.0.
+    assert trace["start_marker_x"] == [1.0], (
+        f"first mean sample should be max(first_times)=1.0, got "
+        f"{trace['start_marker_x']}"
+    )
+
+
+def test_flow_chart_marks_only_the_mean_series_start_point(tmp_path: Path) -> None:
+    """C2-1: each scenario trace carries a *single* open-circle marker at the
+    mean series' first sample — the moment every instance has a valid
+    schedule. Marking every sample instead would bury the line under
+    thousands of circles."""
+    payload = _gen_flow_chart_payload(tmp_path, ["InstA", "InstB"])
+    for trace in payload["traces"]:
+        assert len(trace["start_marker_x"]) == 1, (
+            f"expected one start marker, got {len(trace['start_marker_x'])}"
+        )
+        assert len(trace["start_marker_y"]) == 1
+        assert trace["start_marker_x"][0] == trace["step_x"][0]
+        assert trace["start_marker_y"][0] == trace["step_y"][0]
+
+    html = _flow_chart_html(tmp_path)
+    assert '"circle-open"' in html, "start marker symbol circle-open missing"
+    assert "trace.start_marker_x" in html, "start marker trace missing from template"
+
+
+def test_flow_chart_single_sample_scenario_keeps_start_marker(tmp_path: Path) -> None:
+    """C2-1 + C4: a single-sample scenario — where ``build_step_path``
+    collapses the line to one point and ``mode="lines"`` would draw nothing
+    — still emits its start marker, so the lone point stays referenceable."""
+    payload = _gen_flow_chart_payload_with_endpoints(
+        tmp_path,
+        {
+            "InstA": [(10.0, 9000.0, "1-step_alpha")],  # single late sample
+            "InstB": [(10.0, 9500.0, "1-step_alpha")],
+        },
+    )
+    assert len(payload["traces"]) == 1
+    trace = payload["traces"][0]
+    # Union grid collapses to a single sample at t=1.0 (norm_time).
+    assert len(trace["step_x"]) == 1, "fixture no longer collapses to one sample"
+    assert trace["start_marker_x"] == [1.0]
+    assert trace["start_marker_y"][0] is not None
+
+
+def test_flow_chart_guide_shape_lookup_matches_traces_per_scenario(
+    tmp_path: Path,
+) -> None:
+    """``buildVisibleGuideShapes`` finds each scenario's line trace by
+    striding over ``plotData``; the stride must equal the number of traces
+    emitted per scenario. Adding the start-marker trace made it 3, so a
+    hard-coded ``idx * 2`` would toggle the wrong scenario's vertical guides.
+    """
+    html = _flow_chart_html(tmp_path)
+
+    stride_match = re.search(r"TRACES_PER_SCENARIO\s*=\s*(\d+)", html)
+    assert stride_match is not None, "traces-per-scenario stride is not named"
+    assert re.search(r"plotData\?\.\[idx \* TRACES_PER_SCENARIO\]", html), (
+        "guide-shape lookup does not use the named stride"
+    )
+
+    flat_map = re.search(
+        r"payload\.traces\.flatMap\(\(trace, idx\) => \{.*?\n    \}\);", html, re.S
+    )
+    assert flat_map is not None, "per-scenario trace builder not found"
+    emitted = len(re.findall(r'type: "scatter"', flat_map.group(0)))
+    assert emitted == int(stride_match.group(1)), (
+        f"{emitted} traces per scenario but stride is {stride_match.group(1)}"
+    )

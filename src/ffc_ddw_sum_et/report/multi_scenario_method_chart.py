@@ -246,6 +246,14 @@ def _build_scenario_mean_series(
         "scenario": scenario_label,
         "step_x": step_x,
         "step_y": step_y,
+        # First mean sample = ``max(first_times)``: the moment every instance
+        # has a valid schedule. Drawn as a lone open circle so the eye can
+        # place the curve's start, and so a scenario whose union grid
+        # collapsed to one sample — where ``build_step_path`` yields a
+        # single point and Plotly ``mode="lines"`` draws nothing — still has
+        # a mark. Marking every sample instead buries the line.
+        "start_marker_x": mean_x[:1],
+        "start_marker_y": mean_y[:1],
         # Per-trace constant — referenced via Plotly's `%{meta[i]}`. Was
         # `step_customdata` (one identical 2-element array per step point);
         # at 10^5+ points that array alone dominated the HTML.
@@ -327,9 +335,14 @@ _HTML_TEMPLATE = Template("""<!doctype html>
     const SERIES_COLORS = $series_colors_json;
     const SYMBOL_MAP = $symbol_map_json;
 
+    // Traces emitted per scenario below: line, subroutine guide markers,
+    // series start marker. buildVisibleGuideShapes strides by this to find
+    // each scenario's line trace in the flat plot data.
+    const TRACES_PER_SCENARIO = 3;
+
     function buildVisibleGuideShapes(plotData) {
       return payload.traces.flatMap((trace, idx) => {
-        const lineTrace = plotData?.[idx * 2];
+        const lineTrace = plotData?.[idx * TRACES_PER_SCENARIO];
         const isVisible = lineTrace && lineTrace.visible !== "legendonly";
         if (!isVisible) return [];
         const seriesColor = SERIES_COLORS[idx % SERIES_COLORS.length];
@@ -369,6 +382,21 @@ _HTML_TEMPLATE = Template("""<!doctype html>
             "scenario=%{customdata[0]}<br>" +
             "subroutine=%{customdata[1]}<br>" +
             "avg end Time%=%{x:.$hover_decimals%}<extra></extra>",
+          showlegend: false },
+        // Mean series start point = max(first_times), i.e. the moment every
+        // instance has a valid schedule. Also the only mark left when the
+        // union grid collapses to one sample and ``mode="lines"`` draws
+        // nothing for the line trace.
+        { type: "scatter", mode: "markers",
+          name: trace.scenario, legendgroup: trace.scenario,
+          x: trace.start_marker_x, y: trace.start_marker_y,
+          meta: trace.meta,
+          marker: { size: 9, symbol: "circle-open", line: { width: 2 }, color: seriesColor },
+          hovertemplate:
+            "scenario=%{meta[0]}<br>" +
+            "instance_cnt=%{meta[1]}<br>" +
+            "all instances scheduled at Time%=%{x:.$hover_decimals%}<br>" +
+            "Mean RPDf=%{y:.$hover_decimals%}<extra></extra>",
           showlegend: false }
       ];
     });

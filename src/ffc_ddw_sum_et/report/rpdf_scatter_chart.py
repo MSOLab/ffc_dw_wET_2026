@@ -447,6 +447,22 @@ _HTML_TEMPLATE = """<!doctype html>
                "Time%=%{{x:{hover_fmt}}}<br>" +
                "RPDf=%{{y:{hover_fmt}}}<extra></extra>",
              showlegend: false }},
+          // Mean series start point = max(first_times), i.e. the moment every
+          // instance in the group has a valid schedule. Also the only mark
+          // left when the union grid collapses to one sample and
+          // ``mode="lines"`` draws nothing for the line trace.
+          {{ type: "scatter", mode: "markers", x: s.x.slice(0, 1), y: s.y.slice(0, 1),
+             customdata: s.customdata.slice(0, 1), name: traceName,
+             marker: {{ size: 9, symbol: "circle-open", line: {{ width: 2 }},
+               color: seriesColor }},
+             hovertemplate:
+               "series=%{{customdata[0]}}<br>" +
+               "T=%{{customdata[1]}}<br>" +
+               "R=%{{customdata[2]}}<br>" +
+               "instance_cnt=%{{customdata[3]}}<br>" +
+               "Time%=%{{x:{hover_fmt}}}<br>" +
+               "RPDf=%{{y:{hover_fmt}}}<extra></extra>",
+             showlegend: false }},
           {{ type: "scatter", mode: "markers",
              x: s.guide_marker_x || [],
              y: (s.guide_marker_x || []).map(() => 0),
