@@ -115,6 +115,7 @@ from .value_resolver import resolve_jd_count_target, resolve_value_expr
 
 __all__ = ["FFcDDWSubroutineController", "MCFLBDiagnostic", "NehCpJobPriority"]
 
+_OBJ_IMPROVEMENT_TOLERANCE = 1e-6
 
 # Maps unprefixed phase labels emitted by
 # ``build_full_sch_from_last_stage_only_sch`` (algorithm-side) onto the
@@ -3576,7 +3577,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     improved = (
                         obj_before is not None
                         and obj_after is not None
-                        and obj_before - obj_after > 1e-6
+                        and obj_before - obj_after > _OBJ_IMPROVEMENT_TOLERANCE
                     )
 
                     row_exit_reason: str

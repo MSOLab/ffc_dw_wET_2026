@@ -37,6 +37,8 @@ from .selection import select_jd_jobs
 
 __all__ = ["JobContribCpDispatcher"]
 
+_OBJ_IMPROVEMENT_TOLERANCE = 1e-6
+
 
 class JobContribCpDispatcher:
     """D&C: destroy top-contributing jobs, profile-fix the rest, CP-SAT re-inserts."""
@@ -85,22 +87,22 @@ class JobContribCpDispatcher:
                 option=option,
                 result=AlgResult(
                     schedule=incumbent,
-                    obj_value=0.0,
-                    obj_bound=0.0,
+                    obj_value=incumbent_obj,
+                    obj_bound=incumbent_obj,
                     metrics={
                         "jd_count_target": option.jd_count_target,
                         "jd_count_eff": 0,
                         "destroyed_op_count": 0,
                         "positive_contrib_job_count": 0,
-                        "incumbent_obj": 0.0,
+                        "incumbent_obj": incumbent_obj,
                         "selected_jobs": [],
                     },
                 ),
                 progress_log=(
                     ProgressLogEntry(
                         elapsed_sec=final_elapsed,
-                        obj_value=0.0,
-                        obj_bound=0.0,
+                        obj_value=incumbent_obj,
+                        obj_bound=incumbent_obj,
                     ),
                 ),
                 termination_reason=TerminationReason.COMPLETED,
@@ -334,7 +336,7 @@ class JobContribCpDispatcher:
         post_obj = float(sum_e + sum_t)
 
         cp_obj = float(solver.objective_value)
-        if post_obj > cp_obj + 1e-6:
+        if post_obj > cp_obj + _OBJ_IMPROVEMENT_TOLERANCE:
             logger.warning(
                 "JobContribCpDispatcher: post-process objective (%.3f) > "
                 "CP objective (%.3f); post_obj used for registration",

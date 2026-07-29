@@ -498,6 +498,36 @@ def test_saturated_by_positive_job_count(tmp_path: Path) -> None:
     )
 
 
+def test_budget_exhaustion_stops_loop(tmp_path: Path) -> None:
+    """When remaining time falls below the effective minimum, the loop exits
+    with ``exit_reason == "budget"`` and the composite registers its endpoint.
+    Uses ``min_remaining_sec`` to force a high threshold so the check fires
+    regardless of CP-SAT solve speed."""
+    controller = _make_controller(_make_instance(), working_dir=tmp_path)
+    controller.run_fam()
+    history_before = len(controller.solution_manager.history)
+
+    controller.incremental_job_contrib_cp(
+        jd_start=1,
+        jd_end="0.5n",
+        destroyed_op_tl_multiplier=0.005,
+        min_remaining_sec=9e9,
+    )
+
+    log_files = list(tmp_path.rglob("*_incremental_job_contrib_cp_log.yaml"))
+    assert log_files
+    log = load_yaml(log_files[0])
+    assert log["exit_reason"] == "budget", (
+        f"expected 'budget', got {log['exit_reason']!r}"
+    )
+    # Composite still registers its own endpoint.
+    assert len(controller.solution_manager.history) == history_before + 1
+    assert (
+        controller.solution_manager.history[-1].solution
+        is controller.solution_manager.get_incumbent()
+    )
+
+
 # ------------------------------------------------------------------ P1: select_jd_jobs
 
 
