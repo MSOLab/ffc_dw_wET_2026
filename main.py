@@ -349,7 +349,8 @@ def _reject_deprecated_step_kwargs(scenarios: list[dict[str, Any]]) -> None:
     """Fail-fast on removed step kwargs anywhere in a scenario's flow.
 
     Scans each step dict recursively so nested flows (``solve_flow`` under
-    ``coarsen_solve_reconstruct``) are covered too.
+    ``coarsen_solve_reconstruct``) and dict-valued kwargs (``params`` under
+    ``run_profile_fixed_ns``) are covered too.
     """
     offenders: list[str] = []
 
@@ -365,7 +366,7 @@ def _reject_deprecated_step_kwargs(scenarios: list[dict[str, Any]]) -> None:
             if key in steps:
                 offenders.append(f"{scenario_name}/{method}: {key!r} {reason}")
         for value in steps.values():
-            if isinstance(value, list):
+            if isinstance(value, (list, dict)):
                 scan(value, scenario_name)
 
     for i, sc in enumerate(scenarios):

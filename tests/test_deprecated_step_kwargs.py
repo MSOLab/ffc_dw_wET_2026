@@ -84,6 +84,25 @@ def test_nested_solve_flow_is_scanned() -> None:
         )
 
 
+def test_nested_dict_kwarg_is_scanned() -> None:
+    """A step kwarg can itself be a mapping (``run_profile_fixed_ns: params``);
+    a deprecated key inside it must be caught too."""
+    with pytest.raises(ValueError, match="idle_mode"):
+        _reject_deprecated_step_kwargs(
+            [
+                {
+                    "name": "alpha",
+                    "subroutine_flow": [
+                        {
+                            "method": "run_profile_fixed_ns",
+                            "params": {"idle_mode": "lookahead"},
+                        }
+                    ],
+                }
+            ]
+        )
+
+
 def test_error_names_scenario_and_method() -> None:
     """The message must be actionable: which scenario, which step."""
     with pytest.raises(ValueError, match="b30_csr") as excinfo:
