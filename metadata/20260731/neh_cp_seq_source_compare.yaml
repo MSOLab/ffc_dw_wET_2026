@@ -2,7 +2,7 @@ run_mode: FULL_RUN
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-ins_index: [60, 61, 63]
+# ins_index: [60, 61, 63]
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
 output_dir: output/20260731_neh_cp_seq_source_compare
@@ -41,7 +41,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -63,7 +63,7 @@ scenarios:
         r_adjust_coeff: 0.5
         proceed_r2_when_nonpositive_cmax: true
       - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
+        cp_tl: "0.0036nc"
         solver_thread_cnt: 8
         log_search_progress: false
         emit_phase_schedules: false
@@ -71,7 +71,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -93,7 +93,7 @@ scenarios:
         r_adjust_coeff: 0.5
         proceed_r2_when_nonpositive_cmax: true
       - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
+        cp_tl: "0.0036nc"
         solver_thread_cnt: 8
         log_search_progress: false
         emit_phase_schedules: false
@@ -101,7 +101,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -123,7 +123,7 @@ scenarios:
         r_adjust_coeff: 0.5
         proceed_r2_when_nonpositive_cmax: true
       - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
+        cp_tl: "0.0036nc"
         solver_thread_cnt: 8
         log_search_progress: false
         emit_phase_schedules: false
@@ -131,7 +131,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -150,7 +150,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -168,7 +168,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -186,7 +186,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -211,7 +211,7 @@ scenarios:
         r_adjust_coeff: 0.5
         proceed_r2_when_nonpositive_cmax: true
       - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
+        cp_tl: "0.0036nc"
         solver_thread_cnt: 8
         log_search_progress: false
         emit_phase_schedules: false
@@ -219,7 +219,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -243,7 +243,7 @@ scenarios:
         r_adjust_coeff: 0.5
         proceed_r2_when_nonpositive_cmax: true
       - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
+        cp_tl: "0.0036nc"
         solver_thread_cnt: 8
         log_search_progress: false
         emit_phase_schedules: false
@@ -251,7 +251,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
@@ -275,7 +275,7 @@ scenarios:
         r_adjust_coeff: 0.5
         proceed_r2_when_nonpositive_cmax: true
       - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
+        cp_tl: "0.0036nc"
         solver_thread_cnt: 8
         log_search_progress: false
         emit_phase_schedules: false
@@ -283,7 +283,7 @@ scenarios:
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
-        total_timelimit: "0.027nc"
+        total_timelimit: "0.0108nc"
         batch_tl_mode: "linear"
         apply_cumulative_tl: false
         pf_method: "PF1"
