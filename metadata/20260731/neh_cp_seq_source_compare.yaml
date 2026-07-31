@@ -12,7 +12,7 @@ draw_gantt: false
 draw_progress_plot: true
 painter_thread_cnt: 96
 
-# 13 scenarios comparing where NEH-CP's job insertion order comes from, and
+# 10 scenarios comparing where NEH-CP's job insertion order comes from, and
 # which seed produced the incumbent it is derived from.
 # Plan: plans/experiment/20260731/neh_cp_incumbent_sequence.md
 #
@@ -23,10 +23,15 @@ painter_thread_cnt: 96
 #   dv4_neh_cp_*_seq             dispatch-v4 only
 #   dv4_mcf_fmm_neh_cp_*_seq     dispatch-v4 -> MCF-LB -> FMM
 #
-# The last three families run the same 4 sequence modes (midpoint /
-# first_stage / bottleneck / completion) over a different seeding prefix.
+# The last three families run the same 3 sequence modes (midpoint /
+# first_stage / completion) over a different seeding prefix.
 # The NEH-CP step's own parameters are identical everywhere, so a difference
 # between scenarios is attributable to the seed, the sequence mode, or both.
+#
+# `bottleneck` was dropped after the 20260801T005425_870711 pilot showed it is
+# a structural alias of `first_stage` — the first stage's internal idle is
+# always 0, so the minimum-idle rule always selects it. See
+# plans/analysis/20260731/neh_cp_seq_source_pilot.md.
 scenarios:
   - name: neh_cp_baseline
     timelimit: "0.09nc"
@@ -104,36 +109,6 @@ scenarios:
         make_semi_active_after_cp: true
         minimize_makespan_lex: false
 
-  - name: neh_cp_bottleneck_seq
-    timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/neh_cp_bottleneck_seq
-    subroutine_flow:
-      - method: calc_mcf_lb_and_derive_full_sch
-        draw_pmtn_sch_heatmap: false
-        job_placement_priority: "end_time"
-        last_stage_only_placement_criteria: "dist"
-        makespan_delta_ref: "lastStageOnlyMakespan"
-        adjust_p: true
-        adjust_r: true
-        r_adjust_coeff: 0.5
-        proceed_r2_when_nonpositive_cmax: true
-      - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
-        solver_thread_cnt: 8
-        log_search_progress: false
-        emit_phase_schedules: false
-      - method: neh_cp_bottleneck_seq
-        job_priority: "due2-weight-pos"
-        solver_thread_cnt: 8
-        added_batch_size: 15
-        total_timelimit: "0.027nc"
-        batch_tl_mode: "linear"
-        apply_cumulative_tl: false
-        pf_method: "PF1"
-        skip_pf_below_obj: "makespan"
-        make_semi_active_after_cp: true
-        minimize_makespan_lex: false
-
   - name: neh_cp_completion_seq
     timelimit: "0.09nc"
     output_subdir: neh_cp_seq_source_compare/neh_cp_completion_seq
@@ -190,24 +165,6 @@ scenarios:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
       - method: neh_cp_first_stage_seq
-        job_priority: "due2-weight-pos"
-        solver_thread_cnt: 8
-        added_batch_size: 15
-        total_timelimit: "0.027nc"
-        batch_tl_mode: "linear"
-        apply_cumulative_tl: false
-        pf_method: "PF1"
-        skip_pf_below_obj: "makespan"
-        make_semi_active_after_cp: true
-        minimize_makespan_lex: false
-
-  - name: dv4_neh_cp_bottleneck_seq
-    timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_neh_cp_bottleneck_seq
-    subroutine_flow:
-      - method: initialize_by_dispatch_v4
-        reconstruct_mode: "active_but_last_semi"
-      - method: neh_cp_bottleneck_seq
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15
@@ -291,38 +248,6 @@ scenarios:
         log_search_progress: false
         emit_phase_schedules: false
       - method: neh_cp_first_stage_seq
-        job_priority: "due2-weight-pos"
-        solver_thread_cnt: 8
-        added_batch_size: 15
-        total_timelimit: "0.027nc"
-        batch_tl_mode: "linear"
-        apply_cumulative_tl: false
-        pf_method: "PF1"
-        skip_pf_below_obj: "makespan"
-        make_semi_active_after_cp: true
-        minimize_makespan_lex: false
-
-  - name: dv4_mcf_fmm_neh_cp_bottleneck_seq
-    timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_bottleneck_seq
-    subroutine_flow:
-      - method: initialize_by_dispatch_v4
-        reconstruct_mode: "active_but_last_semi"
-      - method: calc_mcf_lb_and_derive_full_sch
-        draw_pmtn_sch_heatmap: false
-        job_placement_priority: "end_time"
-        last_stage_only_placement_criteria: "dist"
-        makespan_delta_ref: "lastStageOnlyMakespan"
-        adjust_p: true
-        adjust_r: true
-        r_adjust_coeff: 0.5
-        proceed_r2_when_nonpositive_cmax: true
-      - method: run_flip_makespan_cp_from_incumbent
-        cp_tl: "0.009nc"
-        solver_thread_cnt: 8
-        log_search_progress: false
-        emit_phase_schedules: false
-      - method: neh_cp_bottleneck_seq
         job_priority: "due2-weight-pos"
         solver_thread_cnt: 8
         added_batch_size: 15

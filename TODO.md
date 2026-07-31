@@ -653,15 +653,27 @@ schedules). The remaining seven are deliberately deferred:
 6. **`solution/__init__.py` is empty**, so `schedule_sequence`'s symbols
    are imported by module path. Consistent with the package as it
    stands; revisit only if the package grows a public surface.
-7. **The `bottleneck` mode's premise is unvalidated on this problem.**
-   "Stage with least idle time" comes from a makespan objective; here
-   `insert_idle_time` deliberately inserts idle to hit due windows, so
-   the minimum-idle stage may not be the constraining one. This is an
-   experimental question, not a code defect — the
-   `metadata/20260731/neh_cp_seq_source_compare.yaml` run is what
-   answers it.
+7. ~~**The `bottleneck` mode's premise is unvalidated on this
+   problem.**~~ — **resolved 2026-08-01: the premise is false, and the
+   mode is degenerate.** `_find_bottleneck_stage` always returns the
+   *first* stage, so `neh_cp_bottleneck_seq` is an alias of
+   `neh_cp_first_stage_seq` differing only in its secondary sort key.
+   `get_stage_2_mc_2_idle_time_map(include_idle_before_first_op=False)`
+   discards idle before a machine's first operation, and the first stage
+   has no predecessor constraint, so a left-shifted (semi-active)
+   schedule leaves it with exactly **zero** internal idle while the E/T
+   `insert_idle_time` piles idle onto downstream stages. Minimum-idle
+   therefore selects stage 0 unconditionally. Measured in the
+   `20260801T005425_870711` pilot: stage-0 idle was 0 in all 9 final
+   schedules inspected, and the bottleneck/first_stage sequence distance
+   was 0.0000–0.0032 across all 36 derived orders (every other mode pair
+   sat at 0.02–0.13). The mode was dropped from
+   `metadata/20260731/neh_cp_seq_source_compare.yaml`; the
+   `neh_cp_bottleneck_seq` step method and the `"bottleneck"` literal in
+   `ScheduleSeqSource` were **left in place** — see "When to act".
+   Analysis: `plans/analysis/20260731/neh_cp_seq_source_pilot.md`.
 
-**Why:** none of the seven changes behaviour on any reachable path, and
+**Why:** none of items 1–6 changes behaviour on any reachable path, and
 items 1–3 touch code that the pending sequence-source experiment will
 report on — better to learn which modes survive before polishing all
 four. Splitting them out keeps the landing diff reviewable.
@@ -670,10 +682,19 @@ four. Splitting them out keeps the landing diff reviewable.
 `_run_neh_cp` is next edited (they are minutes of work in context).
 Item 4 when `get_ji_2_start_time_map` grows any logic beyond the
 comprehension. Items 5–6 when the docs or the `solution` package are
-next revised. Item 7 after
-`metadata/20260731/neh_cp_seq_source_compare.yaml` runs: if `bottleneck`
-loses to the other three, either redefine the bottleneck (e.g. maximum
-machine utilization rather than minimum idle) or drop the mode.
+next revised.
+
+Item 7 is closed as an experimental question; what remains is a code
+decision, deferred: **either delete `neh_cp_bottleneck_seq`,
+`"bottleneck"` from `ScheduleSeqSource`, `_find_bottleneck_stage`, and
+their tests, or redefine the bottleneck so it can pick a non-first
+stage** (e.g. maximum machine utilization, or minimum idle computed with
+`include_idle_before_first_op=True` so stage 0 is charged for its
+head-of-schedule slack). Deferred because the mode is dead weight rather
+than a hazard — nothing in `metadata/` calls it now, and its output is a
+valid (if redundant) order if something does. Act when the sequence-mode
+family is next touched, or when a redefinition is actually wanted;
+deleting it is the default if no redefinition is proposed by then.
 
 ## `sw_cp` dispatcher leaks restricted-model bound into global plot
 
