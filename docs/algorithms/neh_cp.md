@@ -22,22 +22,46 @@ primary is makespan and the secondary is sum C_i).
 
 ## Signature
 
+### `neh_cp` (job-priority-based ordering)
+
 ```python
 def run(
     self,
     job_priority: NehCpJobPriority = "weight-due-pos",
     solver_thread_cnt: int = 1,
-    added_batch_size: int = 1,
-    cp_tl: float | str | None = None,
-    apply_cumulative_tl: bool = False,
-    pf_method: PFMethod = "PF1",
-    skip_pf_below_obj: str | float | None = None,
-    make_semi_active_after_cp: bool = False,
-    minimize_makespan_lex: bool = False,
-    cp_tl_2nd_obj: float | str | None = None,
-    error_if_infeasible: bool = False,
+    ...
 ) -> SubroutineReport: ...
 ```
+
+### `neh_cp_midpoint_seq`, `neh_cp_first_stage_seq`, `neh_cp_bottleneck_seq`, `neh_cp_completion_seq` (incumbent-derived ordering)
+
+These four methods derive the job insertion sequence from the current
+incumbent schedule (via
+[`schedule_job_sequence`](../../src/ffc_ddw_sum_et/solution/schedule_sequence.py)).
+Each uses a different sort key (all ascending, tie-broken by the secondary
+key then by `job_priority` rank):
+
+| Method | `job_seq_source` | Primary key | Secondary key |
+| --- | --- | --- | --- |
+| `neh_cp_midpoint_seq` | `midpoint` | `(first_stage_start + last_stage_end) / 2` | first-stage start |
+| `neh_cp_first_stage_seq` | `first_stage` | first-stage start | last-stage end |
+| `neh_cp_bottleneck_seq` | `bottleneck` | bottleneck-stage start | bottleneck `(start+end) / 2` |
+| `neh_cp_completion_seq` | `completion` | last-stage end | first-stage start |
+
+**Fallback**: when no incumbent schedule is available,
+`job_priority` is used instead (a `WARNING` is logged).
+`job_priority` is always computed — it serves as tie-break rank
+and as fallback ordering.
+
+**Diversity diagnostics**: when an incumbent is present, all four
+sequence modes are computed and their pairwise distances (via
+`normalized_mean_rank_distance`) are emitted in a single `INFO` log line,
+along with distance to the `job_priority` sequence and the previous
+NEH-CP sequence (if any). The first five jobs of the chosen sequence are
+also logged (`head=`).
+
+All four methods accept the same parameters as `neh_cp` and delegate
+to the shared private core `_run_neh_cp`.
 
 | Parameter | Role |
 | --- | --- |
@@ -81,12 +105,21 @@ Let `n = instance.job_count`, `c = instance.stage_count`.
   resolve_cp_tl(cp_tl_2nd_obj ?? cp_tl, n, c)`; otherwise `None`.
 - **Horizon.** `horizon = sum(params.p.values())` over the full instance —
   used for **every** stage-1 model build. Stage 2 tightens it per batch.
-- **Job ordering.** `job_sequence = neh_cp_job_sequence(instance, job_priority)`
-  (module helper in `ffc_ddw_sum_et.algorithm.neh_cp.sequence`).
-  - `"weight-due-pos"`: `(max(w⁻, w⁺) desc, w⁻+w⁺ desc, d⁺−d⁻ asc,
-    position asc)`.
-  - `"due-weight-pos"`: `(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc,
-    position asc)`.
+- **Job ordering.** One of two paths:
+  1. **Priority-based** (`neh_cp`): `job_sequence = neh_cp_job_sequence(instance, job_priority)`
+     (module helper in `ffc_ddw_sum_et.algorithm.neh_cp.sequence`).
+     - `"weight-due-pos"`: `(max(w⁻, w⁺) desc, w⁻+w⁺ desc, d⁺−d⁻ asc,
+       position asc)`.
+     - `"due-weight-pos"`: `(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc,
+       position asc)`.
+  2. **Incumbent-derived** (`neh_cp_*_seq`):
+     `schedule_job_sequence(incumbent.schedule, source, tiebreak_rank=rank_map)`
+     where `rank_map` is derived from the `job_priority` sequence and serves
+     as the final tie-break. Falls back to path 1 when no incumbent is
+     registered (warning logged). The derived sequence is validated to be a
+     permutation of the instance's `job_id_list`; missing or extra jobs are
+     corrected by preserving the derived order and appending missing jobs in
+     `job_priority` order (warning logged).
 - **Batch shape.** `first_batch_size = max(added_batch_size,
   max_m_per_stage · 2)`. Batch 0 is `job_sequence[:first_batch_size]`;
   subsequent batches slice the tail in chunks of `added_batch_size`.
@@ -196,6 +229,7 @@ For each `(step, batch)`:
 10. **Per-step log.** Recompute `(se, st) =
     compute_weighted_earliness_tardiness(partial_sol, sub_instance)` and
     append to `sub_step_log`:
+
     ```yaml
     step: <int>
     elapsed_time: <sec-since-start_elapsed>
@@ -206,6 +240,7 @@ For each `(step, batch)`:
     makespan: <int, partial_sol.makespan>
     ran_2nd_obj: <bool>
     ```
+
     `sub_obj_lb` comes from the stage-1 CP-SAT solver
     (`solver.best_objective_bound`) when `status ∈ {OPTIMAL, FEASIBLE}`,
     else `0.0`. The stage-2 makespan solver's bound is **not** used here —
@@ -234,8 +269,13 @@ For each `(step, batch)`:
 
 - `SubroutineReport.obj_bound` is always `None` from this subroutine (no
   lower bound is computed here).
-- The dumped `_step_log.yaml` is a list of dicts, one per batch step, in the
-  shape above.
+- **Per-step log (`_step_log.yaml`):**
+  - For `neh_cp`: a **list** of dicts, one per batch step, in the shape
+    described under "Per-batch loop".
+  - For `neh_cp_*_seq` (incumbent-derived) methods: a **mapping** with keys
+    `job_sequence_source` (the mode name, or `"job_priority:<name>"` on
+    fallback), `job_sequence_fallback` (`bool`), `job_sequence` (the ordered
+    job-id list used), and `steps` (the list of per-batch dicts).
 
 ## Side effects
 
