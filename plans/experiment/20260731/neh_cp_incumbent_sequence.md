@@ -137,6 +137,18 @@ machine별 idle을 stage 단위로 합산해 **최소** stage. 동률이면 `sch
 permutation을 강제하므로(`dispatcher.py:658`) 유도 결과가 인스턴스의 job 집합과
 일치하지 않으면 컨트롤러 쪽에서 보정한다 (§2.3 4단계).
 
+> **구현 중 변경 (2026-07-31 리뷰)**: 위 "컨트롤러에서만 보정" 설계로는
+> **컨트롤러가 보정할 기회를 얻지 못한다.** `schedule.jobs`에는 있으나 op이 없는
+> job이 있으면 `start_map.get(...)`가 `None`을 돌려주고 `(fs_start + ls_end)`에서
+> `TypeError`로 죽어, §2.3 4단계에 도달하기 전에 끝난다. 그런 부분 스케줄은 실제로
+> 만들어진다 — `remove_jobs` / `remove_operations`(`ffc_schedule.py:1011`, `:993`)와
+> `deepcopy(job_subset=...)`(`:144`)가 모두 `self.jobs`는 그대로 두고 op만 걷어내며,
+> `job_contrib_cp/dispatcher.py:126`이 그렇게 쓴다. 따라서 보정을 **2단**으로 나눴다:
+> 추출기는 해당 모드가 필요로 하는 시각이 없는 job을 **건너뛰고**(결과가
+> `schedule.jobs`보다 짧을 수 있음), 완전 permutation이 필요한 호출자(= 컨트롤러)가
+> §2.3 4단계에서 채운다. 현재 flow의 incumbent는 항상 완전하므로 동작 변화는 없고,
+> 방어 경로가 비로소 도달 가능해진다.
+
 ### 2.2 tie-break을 `job_priority` 순위로
 
 `schedule_job_sequence(..., tiebreak_rank=rank_map)`의 `rank_map`은 컨트롤러가
@@ -268,6 +280,11 @@ steps:
   - `tiebreak_rank`가 동률을 실제로 갈라내는지 (동률 케이스 명시적 구성).
   - `tiebreak_rank=None`이면 `schedule.jobs` 순서로 갈리는지.
   - `bottleneck` 선정이 idle 합 최소 stage를 고르는지 (stage별 idle을 다르게 구성).
+    **두 stage가 서로 반대 순서로 job을 배치해야 한다** — 같은 순서면 어느 stage가
+    뽑혀도 단언이 성립해 병목 선정을 전혀 검증하지 못한다. 이긴 stage / 진 stage를
+    뒤바꾼 대칭 케이스 2개로 둔다.
+  - op이 없는 job이 섞인 부분 스케줄에서 4개 모드 모두 그 job을 건너뛰는지
+    (§2.1 "구현 중 변경").
   - `normalized_mean_rank_distance`: 동일 순서 → 0.0, 완전 역순 → 양수,
     공통 job ≤ 1 → 0.0.
 - 구현: §2.1대로.
@@ -278,18 +295,29 @@ steps:
 - 구현: `neh_cp` 본문 → `_run_neh_cp(job_seq_source=None, step_label="neh_cp", ...)`,
   `neh_cp`는 위임자로 축소. **이 단계에서 새 모드는 추가하지 않는다.**
 
+> **구현 중 변경**: 단계 3과 단계 4는 **한 커밋으로 합친다.** `neh_cp` 위임자 전환·
+> 새 스텝 4개·`_run_neh_cp` 시그니처가 하나의 연속된 추가 블록이라, 갈라내면 중간
+> 상태가 문법적으로 성립하지 않는다. 리팩터 자체가 20줄 남짓이라 분리 이득도 작다.
+> §5 커밋 계획도 이에 맞춰 갱신했다.
+
 ### 단계 4 — 새 스텝 메서드 4개 + fallback + 보정
 - 테스트: `tests/orchestration/test_neh_cp_incumbent_sequence.py`
   - incumbent가 있을 때 각 메서드가 `NehCpOption.custom_job_sequence`에 기대 순서를
     실어 dispatcher를 호출하는지 (`NehCpDispatcher.run`을 monkeypatch해 spec 캡처;
     `test_neh_cp_stopping.py`의 monkeypatch 스타일 참고).
+    **fixture는 3 stage 이상이어야 한다** — 2 stage에서는 병목이 첫 stage 아니면
+    마지막 stage라 `bottleneck` 순서가 `first_stage`/`completion`과 필연적으로
+    겹치고, 네 모드가 같은 순서를 내면 테스트가 모드 배선을 전혀 구분하지 못한다.
+    4개 기대 순서가 서로 다름을 단언하는 테스트를 함께 둬 fixture를 고정한다.
   - incumbent가 없을 때 `custom_job_sequence is None`이고 `warning`이 남는지
     (`caplog`).
   - 유도 결과에 job이 빠졌을 때 permutation으로 보정되는지 (스케줄에서 job 하나를
     뺀 케이스).
   - 4개 메서드가 routix flow validator를 통과하는지 — 각 메서드를 담은 최소
     `subroutine_flow`로 `SubroutineFlowValidator(...).validate(...)` 호출.
-  - `time_factor > 1` coarse 인스턴스에서도 정상 동작(순위 불변).
+  - ~~`time_factor > 1` coarse 인스턴스에서도 정상 동작(순위 불변)~~ — **미작성.**
+    순서 유도는 순위만 쓰므로 스케일 불변이라는 §2.5 논거로 생략했다. 필요해지면
+    추가할 것.
 - 구현: §2.3대로.
 
 ### 단계 5 — 다양성 진단 로깅 + `_step_log.yaml` 기록
@@ -321,26 +349,38 @@ steps:
 |---|---|
 | `src/ffc_ddw_sum_et/solution/ffc_schedule.py` | `get_ji_2_start_time_map()` 추가 |
 | `src/ffc_ddw_sum_et/solution/schedule_sequence.py` | **신규** — `ScheduleSeqSource`, `schedule_job_sequence`, `normalized_mean_rank_distance` |
-| `src/ffc_ddw_sum_et/solution/__init__.py` | 신규 심볼 re-export (기존 관례 확인 후) |
-| `src/ffc_ddw_sum_et/orchestration/controller.py` | `_run_neh_cp` 코어 추출, `neh_cp` 위임화, 새 스텝 4개, `_last_neh_job_sequence` 속성 |
+| `src/ffc_ddw_sum_et/orchestration/controller.py` | `_run_neh_cp` 코어 추출, `neh_cp` 위임화, 새 스텝 4개 |
+| `src/ffc_ddw_sum_et/orchestration/controller_core.py` | `_last_neh_job_sequence` 속성 |
 | `tests/solution/test_schedule_sequence.py` | **신규** |
+| `tests/solution/test_ffc_schedule.py` | `get_ji_2_start_time_map` 단언 추가 |
+| `TODO.md` | 리뷰에서 미뤄둔 항목 기록 (§6) |
 | `tests/orchestration/test_neh_cp_incumbent_sequence.py` | **신규** |
 | `docs/algorithms/neh_cp.md`, `README.md` | 문서 갱신 |
 | `metadata/20260731/neh_cp_seq_source_compare.yaml` | **신규**(선택) |
 
 **변경하지 않는 파일**: `algorithm/neh_cp/dispatcher.py`, `option.py`,
 `sequence.py`, `step_log.py` — `custom_job_sequence` 경로가 이미 충분하다.
+`solution/__init__.py`도 그대로 둔다 — 비어 있어 re-export 관례 자체가 없으므로
+`schedule_sequence`도 모듈 경로로 import 한다.
 
 ---
 
 ## 5. 커밋 계획 (Conventional Commits, 제목 ≤49자)
 
-1. `feat(ffc-schedule): add get_ji_2_start_time_map`
-2. `feat(schedule-sequence): derive job order from sch`
-3. `refactor(controller): extract _run_neh_cp core`
-4. `feat(controller): add incumbent-seq neh_cp steps`
-5. `feat(controller): log neh_cp sequence diversity`
-6. `docs(neh-cp): document incumbent sequence sources`
+계획서 자신이 첫 커밋이다 — `plans/experiment/`는 작업 *이전*에 쓰는 문서이므로,
+먼저 커밋해 두면 이후 커밋들이 "이 계획의 실행"임이 로그에서 드러난다.
+
+1. `docs(plan): add neh_cp incumbent sequence plan`
+2. `feat(ffc-schedule): add get_ji_2_start_time_map`
+3. `feat(solution): derive job order from a schedule`
+4. `feat(controller): add incumbent-seq neh_cp steps` — 단계 3+4+5를 합친다
+   (분리 불가 사유는 단계 3의 "구현 중 변경" 참고)
+5. `docs(neh-cp): document incumbent sequence sources`
+6. `feat(neh-cp): add seq source compare config`
+7. `docs(todo): defer neh_cp seq polish items`
+
+각 커밋 시점에 테스트가 green이므로 bisect가 가능하다. 6번은 4번이 추가하는
+스텝 이름을 참조하므로 그 뒤여야 한다.
 
 ---
 
@@ -353,3 +393,8 @@ steps:
   잠재적 후속 아이디어다. 지금은 범위 밖 — 필요해지면 `TODO.md`에 기록 후 착수.
 - 순서 저장/재사용(`save_..._as` / `job_seq_by_saved_sequence`)은 `neh_cp` 반복
   호출 flow가 생길 때 재검토.
+- 구현 후 리뷰(2026-07-31)에서 나온 10건 중 3건은 즉시 고쳤고(모드를 구분하지
+  못하던 컨트롤러 테스트, 병목 선정을 검증하지 못하던 테스트, 부분 스케줄
+  `TypeError`), 나머지 7건은 `TODO.md`의
+  "`neh_cp_*_seq` — deferred polish from the 2026-07-31 review" 항목에 사유·착수
+  조건과 함께 기록했다.
