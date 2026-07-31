@@ -612,6 +612,69 @@ current polish), or when the CSR reconstruct's dependence on
 `build_schedule_from_op_starts` for reassignment is folded back into
 `make_semi_active` so the two share one time-sorted assignment implementation.
 
+## `neh_cp_*_seq` — deferred polish from the 2026-07-31 review
+
+The incumbent-derived NEH-CP sequence work
+(`plans/experiment/20260731/neh_cp_incumbent_sequence.md`) landed with a
+review that raised ten items. Three were fixed at the time (controller
+tests that could not tell the four modes apart, a `bottleneck` test that
+did not verify stage selection, and an opaque `TypeError` on partial
+schedules). The remaining seven are deliberately deferred:
+
+1. **Unknown `source` degrades silently** —
+   `solution/schedule_sequence.py::schedule_job_sequence` has no `else`
+   branch, so an unrecognized `source` leaves `ts_tuples` empty and
+   returns `[]`. The controller's correction path then rebuilds the
+   `job_priority` order, hiding the mistake. `param_sort_job_sequence`
+   (`parameters/sorter.py`) raises `ValueError` on an unknown key —
+   match that. Only reachable by passing a value outside the
+   `ScheduleSeqSource` literal, hence deferred.
+2. **`normalized_mean_rank_distance` is undocumented and diverges from
+   the reference.** hybridflowshop divides by
+   `len(common) * (len(common) - 1)`; this divides by `n² / 2` (n =
+   reference length), which maps a full reversal to 1.0 — a better
+   normalization, but nothing says so. Also undocumented: jobs present
+   in `candidate` but absent from `reference` are dropped while `n`
+   stays full-length. The trailing `if n > 0` is dead code (the
+   `<= 1` early return guarantees `n >= 2`). No public function in the
+   module has a docstring except `schedule_job_sequence`.
+3. **`_ns_`-prefixed locals** in `controller._run_neh_cp`
+   (`_ns_used_seq`, `_ns_fallback`) follow no convention in this repo,
+   and a leading underscore on a local reads as "unused". Rename to
+   `used_sequence` / `sequence_fallback`.
+4. **`tests/solution/test_ffc_schedule.py`'s `get_ji_2_start_time_map`
+   assertion is a tautology** — it rebuilds the expected dict with the
+   same comprehension as the implementation, via the private
+   `_iter_operations()`, and checks only `new_schedule` instead of the
+   old-vs-new equality the surrounding assertions use. It cannot fail.
+5. **`docs/algorithms/neh_cp.md`'s `neh_cp` signature block was
+   collapsed to `...`**, dropping the previously listed parameters. The
+   parameter table below still documents them, so this is cosmetic.
+6. **`solution/__init__.py` is empty**, so `schedule_sequence`'s symbols
+   are imported by module path. Consistent with the package as it
+   stands; revisit only if the package grows a public surface.
+7. **The `bottleneck` mode's premise is unvalidated on this problem.**
+   "Stage with least idle time" comes from a makespan objective; here
+   `insert_idle_time` deliberately inserts idle to hit due windows, so
+   the minimum-idle stage may not be the constraining one. This is an
+   experimental question, not a code defect — the
+   `metadata/20260731/neh_cp_seq_source_compare.yaml` run is what
+   answers it.
+
+**Why:** none of the seven changes behaviour on any reachable path, and
+items 1–3 touch code that the pending sequence-source experiment will
+report on — better to learn which modes survive before polishing all
+four. Splitting them out keeps the landing diff reviewable.
+
+**When to act:** items 1–3 whenever `schedule_sequence.py` or
+`_run_neh_cp` is next edited (they are minutes of work in context).
+Item 4 when `get_ji_2_start_time_map` grows any logic beyond the
+comprehension. Items 5–6 when the docs or the `solution` package are
+next revised. Item 7 after
+`metadata/20260731/neh_cp_seq_source_compare.yaml` runs: if `bottleneck`
+loses to the other three, either redefine the bottleneck (e.g. maximum
+machine utilization rather than minimum idle) or drop the mode.
+
 ## `sw_cp` dispatcher leaks restricted-model bound into global plot
 
 `sw_cp/dispatcher.py:343` writes `obj_bound=float(vb.bound) + offset` into
