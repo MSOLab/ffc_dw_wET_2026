@@ -74,6 +74,7 @@ from ffc_ddw_sum_et.algorithm.neh_cp import (
     NehCpJobPriority,
     NehCpOption,
 )
+from ffc_ddw_sum_et.algorithm.neh_cp.sequence import neh_cp_job_sequence
 from ffc_ddw_sum_et.algorithm.pm_pmtn_sorter import PmPrmpSortKey
 from ffc_ddw_sum_et.algorithm.step_tl_resolver import BatchTlMode
 from ffc_ddw_sum_et.algorithm.sw_cp import (
@@ -103,6 +104,11 @@ from ffc_ddw_sum_et.solution.schedule_build import (
     reconstruct_active_except_last_coarse_schedule,
     reconstruct_coarse_schedule,
     reconstruct_raw_coarse_schedule,
+)
+from ffc_ddw_sum_et.solution.schedule_sequence import (
+    ScheduleSeqSource,
+    normalized_mean_rank_distance,
+    schedule_job_sequence,
 )
 
 from .controller_core import FFcDDWSubroutineControllerCore, MCFLBPhaseSchedule
@@ -2227,6 +2233,257 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
     ) -> SubroutineReport:
+        return self._run_neh_cp(
+            job_seq_source=None,
+            step_label="neh_cp",
+            job_priority=job_priority,
+            solver_thread_cnt=solver_thread_cnt,
+            added_batch_size=added_batch_size,
+            extra_batch_size_expr=extra_batch_size_expr,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            num_batches=num_batches,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            pf_method=pf_method,
+            skip_pf_below_obj=skip_pf_below_obj,
+            make_semi_active_after_cp=make_semi_active_after_cp,
+            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
+            minimize_makespan_lex=minimize_makespan_lex,
+            cp_tl_2nd_obj=cp_tl_2nd_obj,
+            error_if_infeasible=error_if_infeasible,
+        )
+
+    def neh_cp_midpoint_seq(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        solver_thread_cnt: int = 1,
+        added_batch_size: int = 1,
+        extra_batch_size_expr: str | None = None,
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        pf_method: PFMethod = "PF1",
+        skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        make_semi_active_after_cp_obj_threshold: int = -1,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
+        """NEH-CP with job sequence derived from incumbent via midpoint sort.
+
+        Sorts by ``(first_stage_start + last_stage_end) / 2`` ascending,
+        tie-broken by first-stage start then by ``job_priority`` rank.
+
+        Falls back to ``job_priority`` when no incumbent schedule is
+        available (warning logged). ``job_priority`` is always computed
+        for tie-break rank and fallback.
+        """
+        return self._run_neh_cp(
+            job_seq_source="midpoint",
+            step_label="neh_cp_midpoint_seq",
+            job_priority=job_priority,
+            solver_thread_cnt=solver_thread_cnt,
+            added_batch_size=added_batch_size,
+            extra_batch_size_expr=extra_batch_size_expr,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            num_batches=num_batches,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            pf_method=pf_method,
+            skip_pf_below_obj=skip_pf_below_obj,
+            make_semi_active_after_cp=make_semi_active_after_cp,
+            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
+            minimize_makespan_lex=minimize_makespan_lex,
+            cp_tl_2nd_obj=cp_tl_2nd_obj,
+            error_if_infeasible=error_if_infeasible,
+        )
+
+    def neh_cp_first_stage_seq(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        solver_thread_cnt: int = 1,
+        added_batch_size: int = 1,
+        extra_batch_size_expr: str | None = None,
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        pf_method: PFMethod = "PF1",
+        skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        make_semi_active_after_cp_obj_threshold: int = -1,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
+        """NEH-CP with job sequence derived from incumbent via first-stage start sort.
+
+        Sorts by first-stage start ascending, tie-broken by last-stage end
+        then by ``job_priority`` rank.
+
+        Falls back to ``job_priority`` when no incumbent schedule is
+        available (warning logged). ``job_priority`` is always computed
+        for tie-break rank and fallback.
+        """
+        return self._run_neh_cp(
+            job_seq_source="first_stage",
+            step_label="neh_cp_first_stage_seq",
+            job_priority=job_priority,
+            solver_thread_cnt=solver_thread_cnt,
+            added_batch_size=added_batch_size,
+            extra_batch_size_expr=extra_batch_size_expr,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            num_batches=num_batches,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            pf_method=pf_method,
+            skip_pf_below_obj=skip_pf_below_obj,
+            make_semi_active_after_cp=make_semi_active_after_cp,
+            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
+            minimize_makespan_lex=minimize_makespan_lex,
+            cp_tl_2nd_obj=cp_tl_2nd_obj,
+            error_if_infeasible=error_if_infeasible,
+        )
+
+    def neh_cp_bottleneck_seq(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        solver_thread_cnt: int = 1,
+        added_batch_size: int = 1,
+        extra_batch_size_expr: str | None = None,
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        pf_method: PFMethod = "PF1",
+        skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        make_semi_active_after_cp_obj_threshold: int = -1,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
+        """NEH-CP with job sequence derived from incumbent via bottleneck stage sort.
+
+        Bottleneck is the stage with minimum total idle time across its
+        machines. Jobs sorted by bottleneck-stage start ascending,
+        tie-broken by bottleneck ``(start+end)/2`` then by ``job_priority``
+        rank.
+
+        Falls back to ``job_priority`` when no incumbent schedule is
+        available (warning logged). ``job_priority`` is always computed
+        for tie-break rank and fallback.
+        """
+        return self._run_neh_cp(
+            job_seq_source="bottleneck",
+            step_label="neh_cp_bottleneck_seq",
+            job_priority=job_priority,
+            solver_thread_cnt=solver_thread_cnt,
+            added_batch_size=added_batch_size,
+            extra_batch_size_expr=extra_batch_size_expr,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            num_batches=num_batches,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            pf_method=pf_method,
+            skip_pf_below_obj=skip_pf_below_obj,
+            make_semi_active_after_cp=make_semi_active_after_cp,
+            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
+            minimize_makespan_lex=minimize_makespan_lex,
+            cp_tl_2nd_obj=cp_tl_2nd_obj,
+            error_if_infeasible=error_if_infeasible,
+        )
+
+    def neh_cp_completion_seq(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        solver_thread_cnt: int = 1,
+        added_batch_size: int = 1,
+        extra_batch_size_expr: str | None = None,
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        pf_method: PFMethod = "PF1",
+        skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        make_semi_active_after_cp_obj_threshold: int = -1,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
+        """NEH-CP with job sequence derived from incumbent via completion sort.
+
+        Sorts by last-stage end ascending, tie-broken by first-stage start
+        then by ``job_priority`` rank.
+
+        Falls back to ``job_priority`` when no incumbent schedule is
+        available (warning logged). ``job_priority`` is always computed
+        for tie-break rank and fallback.
+        """
+        return self._run_neh_cp(
+            job_seq_source="completion",
+            step_label="neh_cp_completion_seq",
+            job_priority=job_priority,
+            solver_thread_cnt=solver_thread_cnt,
+            added_batch_size=added_batch_size,
+            extra_batch_size_expr=extra_batch_size_expr,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            num_batches=num_batches,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            apply_cumulative_tl=apply_cumulative_tl,
+            pf_method=pf_method,
+            skip_pf_below_obj=skip_pf_below_obj,
+            make_semi_active_after_cp=make_semi_active_after_cp,
+            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
+            minimize_makespan_lex=minimize_makespan_lex,
+            cp_tl_2nd_obj=cp_tl_2nd_obj,
+            error_if_infeasible=error_if_infeasible,
+        )
+
+    def _run_neh_cp(
+        self,
+        *,
+        job_seq_source: ScheduleSeqSource | None,
+        step_label: str,
+        job_priority: NehCpJobPriority,
+        solver_thread_cnt: int = 1,
+        added_batch_size: int = 1,
+        extra_batch_size_expr: str | None = None,
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        num_batches: int | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        apply_cumulative_tl: bool = False,
+        pf_method: PFMethod = "PF1",
+        skip_pf_below_obj: str | float | None = None,
+        make_semi_active_after_cp: bool = False,
+        make_semi_active_after_cp_obj_threshold: int = -1,
+        minimize_makespan_lex: bool = False,
+        cp_tl_2nd_obj: float | str | None = None,
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
         """Step method: run :class:`NehCpDispatcher` and register its schedule.
 
         Resolves expression-grammar inputs (``cp_tl`` / ``total_timelimit`` /
@@ -2274,11 +2531,103 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         obj_lb = valid_lb if valid_lb > 0 else None
 
         self.logger.info(
-            "neh_cp: threading wall_clock_deadline=%.3fs (remaining=%.3fs), obj_lb=%s",
+            "%s: threading wall_clock_deadline=%.3fs (remaining=%.3fs), obj_lb=%s",
+            step_label,
             wall_clock_deadline_sec,
             remaining_sec,
             f"{obj_lb:.2f}" if obj_lb is not None else "None",
         )
+
+        priority_sequence = neh_cp_job_sequence(instance, job_priority)
+        rank_map = {job_id: idx for idx, job_id in enumerate(priority_sequence)}
+
+        custom_job_sequence: tuple[str, ...] | None = None
+        _ns_used_seq: list[str] | None = None
+        _ns_fallback = True
+        if job_seq_source is not None:
+            incumbent = self.solution_manager.get_incumbent()
+            if incumbent is None or incumbent.schedule is None:
+                self.logger.warning(
+                    "%s: no incumbent schedule (job_seq_source=%s); "
+                    "falling back to job_priority='%s'. "
+                    "Chain this step after a seeding subroutine such as "
+                    "calc_mcf_lb_and_derive_full_sch.",
+                    step_label,
+                    job_seq_source,
+                    job_priority,
+                )
+            else:
+                seq = schedule_job_sequence(
+                    incumbent.schedule,
+                    job_seq_source,
+                    tiebreak_rank=rank_map,
+                )
+                instance_jobs = set(instance.job_id_list)
+                seq_jobs = set(seq)
+                if seq_jobs != instance_jobs:
+                    self.logger.warning(
+                        "%s: derived sequence has %d jobs vs instance's %d; "
+                        "correcting.",
+                        step_label,
+                        len(seq),
+                        len(instance_jobs),
+                    )
+                    seen: set[str] = set()
+                    deduped: list[str] = []
+                    for j in seq:
+                        if j in instance_jobs and j not in seen:
+                            deduped.append(j)
+                            seen.add(j)
+                    missing = [
+                        j
+                        for j in priority_sequence
+                        if j not in seen and j in instance_jobs
+                    ]
+                    seq = deduped + missing
+                custom_job_sequence = tuple(seq) if seq else None
+                _ns_used_seq = list(seq)
+                _ns_fallback = False
+
+                all_sources: list[ScheduleSeqSource] = [
+                    "midpoint",
+                    "first_stage",
+                    "bottleneck",
+                    "completion",
+                ]
+                all_seqs: dict[str, list[str]] = {}
+                for src in all_sources:
+                    all_seqs[src] = schedule_job_sequence(
+                        incumbent.schedule,
+                        src,
+                        tiebreak_rank=rank_map,
+                    )
+
+                dist_to_priority = normalized_mean_rank_distance(
+                    priority_sequence, list(seq)
+                )
+                prev_str = "N/A"
+                if self._last_neh_job_sequence is not None:
+                    dist_prev = normalized_mean_rank_distance(
+                        self._last_neh_job_sequence, list(seq)
+                    )
+                    prev_str = f"{dist_prev:.4f}"
+                head = list(seq)[:5]
+
+                self.logger.info(
+                    "%s: seq source=%s dist_to_midpoint=%.4f "
+                    "dist_to_first_stage=%.4f dist_to_bottleneck=%.4f "
+                    "dist_to_completion=%.4f dist_to_job_priority=%.4f "
+                    "dist_to_prev_neh=%s head=%s",
+                    step_label,
+                    job_seq_source,
+                    normalized_mean_rank_distance(all_seqs["midpoint"], list(seq)),
+                    normalized_mean_rank_distance(all_seqs["first_stage"], list(seq)),
+                    normalized_mean_rank_distance(all_seqs["bottleneck"], list(seq)),
+                    normalized_mean_rank_distance(all_seqs["completion"], list(seq)),
+                    dist_to_priority,
+                    prev_str,
+                    head,
+                )
 
         option = NehCpOption(
             job_priority=job_priority,
@@ -2301,6 +2650,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             wall_clock_deadline_sec=wall_clock_deadline_sec,
             objective_lower_bound=obj_lb,
             time_factor=self.time_factor,
+            custom_job_sequence=custom_job_sequence,
         )
         spec = AlgSpec(
             instance=instance,
@@ -2317,8 +2667,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 else None
             )
             self.logger.info(
-                "neh_cp: dispatcher stopped early after batch %s; "
+                "%s: dispatcher stopped early after batch %s; "
                 "registering recovered schedule.",
+                step_label,
                 stopped_after,
             )
 
@@ -2349,10 +2700,31 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             if step_log:
                 log_path = self.try_get_file_path_for_subroutine("_step_log.yaml")
                 if log_path is not None:
-                    dump_yaml(
-                        [entry.as_dict() for entry in step_log],
-                        log_path,
-                    )
+                    if job_seq_source is None:
+                        dump_yaml(
+                            [entry.as_dict() for entry in step_log],
+                            log_path,
+                        )
+                    else:
+                        source_label = (
+                            job_seq_source
+                            if not _ns_fallback
+                            else f"job_priority:{job_priority}"
+                        )
+                        dump_yaml(
+                            {
+                                "job_sequence_source": source_label,
+                                "job_sequence_fallback": _ns_fallback,
+                                "job_sequence": custom_job_sequence
+                                if custom_job_sequence is not None
+                                else list(priority_sequence),
+                                "steps": [entry.as_dict() for entry in step_log],
+                            },
+                            log_path,
+                        )
+
+        if _ns_used_seq is not None:
+            self._last_neh_job_sequence = _ns_used_seq
 
         return report
 
