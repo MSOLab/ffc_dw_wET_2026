@@ -347,6 +347,14 @@ class FFcSchedule:
             for stage_id, mc_id, _, end_time, job_id in self._iter_operations()
         }
 
+    def get_ji_2_start_time_map(
+        self,
+    ) -> dict[tuple[JobIdType, StageIdType], int]:
+        return {
+            (job_id, stage_id): int(start_time)
+            for stage_id, _, start_time, _, job_id in self._iter_operations()
+        }
+
     def get_ji_2_end_time_map(self) -> dict[tuple[JobIdType, StageIdType], int]:
         return {
             (job_id, stage_id): int(end_time)
