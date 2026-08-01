@@ -2,10 +2,12 @@ run_mode: FULL_RUN
 
 benchmark_dir: benchmarks/PRA2017/large
 ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
-# ins_index: [60, 61, 63]
+ins_filter:
+  T: 0.6
+  R: 0.2
 bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
 
-output_dir: output/20260731_neh_cp_seq_source_compare
+output_dir: output/20260801_neh_cp_seq_full_compare
 
 instance_worker_cnt: 12
 draw_gantt: false
@@ -42,7 +44,7 @@ painter_thread_cnt: 96
 scenarios:
   - name: dv4_mcf_fmm_neh_cp_midpoint_seq_full
     timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_midpoint_seq
+    output_subdir: neh_cp_seq_full_compare/dv4_mcf_fmm_neh_cp_midpoint_seq
     subroutine_flow:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
@@ -89,7 +91,7 @@ scenarios:
 
   - name: dv4_mcf_fmm_neh_cp_first_stage_seq_full
     timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_first_stage_seq
+    output_subdir: neh_cp_seq_full_compare/dv4_mcf_fmm_neh_cp_first_stage_seq
     subroutine_flow:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
@@ -136,7 +138,7 @@ scenarios:
 
   - name: dv4_mcf_fmm_neh_cp_completion_seq_full
     timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_completion_seq
+    output_subdir: neh_cp_seq_full_compare/dv4_mcf_fmm_neh_cp_completion_seq
     subroutine_flow:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
@@ -183,7 +185,7 @@ scenarios:
 
   - name: dv4_mcf_fmm_neh_cp_completion_midpoint_seq_full
     timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_completion_midpoint_seq
+    output_subdir: neh_cp_seq_full_compare/dv4_mcf_fmm_neh_cp_completion_midpoint_seq
     subroutine_flow:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
@@ -241,7 +243,7 @@ scenarios:
 
   - name: dv4_mcf_fmm_neh_cp_completion_first_stage_seq_full
     timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_completion_first_stage_seq
+    output_subdir: neh_cp_seq_full_compare/dv4_mcf_fmm_neh_cp_completion_first_stage_seq
     subroutine_flow:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
@@ -299,7 +301,7 @@ scenarios:
 
   - name: dv4_mcf_fmm_neh_cp_midpoint_first_stage_seq_full
     timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_midpoint_first_stage_seq
+    output_subdir: neh_cp_seq_full_compare/dv4_mcf_fmm_neh_cp_midpoint_first_stage_seq
     subroutine_flow:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
@@ -357,7 +359,7 @@ scenarios:
 
   - name: dv4_mcf_fmm_neh_cp_comp_mid_fs_seq_full
     timelimit: "0.09nc"
-    output_subdir: neh_cp_seq_source_compare/dv4_mcf_fmm_neh_cp_comp_mid_fs_seq
+    output_subdir: neh_cp_seq_full_compare/dv4_mcf_fmm_neh_cp_comp_mid_fs_seq
     subroutine_flow:
       - method: initialize_by_dispatch_v4
         reconstruct_mode: "active_but_last_semi"
