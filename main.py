@@ -24,6 +24,7 @@ from ffc_ddw_sum_et.orchestration import (
     FFcDDWSingleInstanceRunner,
     FFcDDWSubroutineController,
     init_ffc_artifact_layout,
+    resolve_ins_index,
     restore_layout_from_run_dir,
 )
 
@@ -110,7 +111,15 @@ def main() -> None:
         bks_table_csv_path = Path(bks_table_csv_path)
     logger.info("Loading instances from %s", benchmark_dir)
     loader = BenchmarkLoader(benchmark_dir, ins_index_source=ins_index_source)
-    ins_index_filter = config.get("ins_index")
+    ins_index_filter = resolve_ins_index(config)
+    if config.get("ins_filter") is not None:
+        # Log the resolved count before loading: a gap against "Loaded N"
+        # below means the filter picked insIndex the benchmark dir lacks.
+        logger.info(
+            "ins_filter %s -> %d insIndex",
+            config["ins_filter"],
+            len(ins_index_filter),  # type: ignore[arg-type]
+        )
     instances = loader.load_all(ins_index=ins_index_filter)
     logger.info("Loaded %d instances", len(instances))
 
