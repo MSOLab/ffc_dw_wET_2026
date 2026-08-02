@@ -719,3 +719,48 @@ separate step/algorithm and the plan explicitly scoped it out.
 
 **When to act:** when targeting `sw_cp` specifically, or when the global
 LB contamination is observed on a `sw_cp`-containing run.
+
+## Shared `obj_log` step-boundary reader instead of six ad-hoc parsers
+
+`<instance>_obj_log.json` carries `obj_value.data` (timestamp → objective) and
+`obj_value.notes` (timestamp → `<step_idx>-<method>`). Six consumers re-derive
+step boundaries from that pair independently:
+
+| consumer | how it identifies a step | uses the value as |
+|---|---|---|
+| `scripts/20260801/analyze_neh_pass_chain.py` | step index (fixed 2026-08-02) | both, explicitly |
+| `scripts/20260801/analyze_neh_step_quality.py` | first `neh_cp` note | the step's own output |
+| `scripts/20260706/analyze_tl_policy.py` | `<step_idx>-<subroutine>` | UB curve |
+| `scripts/20260706/plot_ub_lb_vs_time.py` | annotation only | UB curve |
+| `scripts/20260726/analyze_csr_init_tl_curve.py` | `inner-NN-<idx>-<step>` regex | signed delta |
+| `src/ffc_ddw_sum_et/report/obj_log_loader.py` | returns raw dicts | caller's choice |
+
+**Two traps every one of them has to get right on its own.**
+
+1. **A step that never registered is simply absent.** Numbering passes by order
+   of appearance therefore slides pass k+1 into the `pass{k}` slot whenever the
+   flow ended early. Only `analyze_neh_pass_chain.py` ever ran a chain of
+   *repeated identical* steps, so only it was exposed, and it now keys on step
+   index (`assign_pass_columns`). Any future repeated-step flow re-opens this.
+2. **A note's value is that step's own output, not the running incumbent.** It
+   rises whenever a step lands worse than what the solution manager already
+   held (775 of 1440 instances in `20260801T183302_770739`). "What did this step
+   produce?" and "what did the next step inherit?" are different series and both
+   are legitimate — but nothing in the payload says which one a reader picked.
+
+**Change (if acted on):** give `report/obj_log_loader.py` a step-boundary API
+that returns, per registration, `(step_idx, method, t, own_obj,
+incumbent_after)` — the incumbent being the running `min` — and port the five
+script-side parsers onto it. `step_idx` comes from the note label, so
+position-by-appearance stops being expressible.
+
+**Why:** single source of truth for a schema that already has two silent
+failure modes and six hand-written readers. The loader module exists and
+already owns the "raise loudly on drift" policy, so it is the natural home.
+
+**When to act:** when a seventh consumer appears, when an experiment next
+chains repeated steps (trap 1 becomes live again), or when an analysis needs
+the own-output vs inherited-incumbent distinction and would otherwise
+re-implement it a seventh time. Not urgent: no committed analysis is known to
+be wrong from these traps — the 2026-08-02 fix was caught before its document
+was written.
