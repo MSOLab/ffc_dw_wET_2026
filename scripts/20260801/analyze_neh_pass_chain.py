@@ -108,58 +108,107 @@ def label(scenario: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def parse_obj_log(path: Path, passes: tuple[str, ...]) -> dict[str, float]:
+def parse_obj_log(path: Path, passes: tuple[str, ...]) -> dict[str, object]:
     """Objective at each step boundary, split around the NEH-CP chain.
 
     ``obj_value.notes`` maps a timestamp to ``<step_idx>-<method>``. A step that
-    never registered is simply absent (e.g. a base-CP step the scenario cap cut
-    off).
+    never registered is simply absent — a NEH pass registers nothing whenever it
+    fails to improve the incumbent, and a base-CP step registers nothing when the
+    scenario cap cut it off.
 
-    Passes are therefore numbered by the order they appear in the log, not by
-    their position in ``passes``: if pass k registered nothing, pass k+1 is
-    labelled ``pass{k}`` and the trajectory shifts by one. ``missing_passes``
-    counts the shortfall so block 1 can report it — check that column before
-    reading the per-pass trajectory. It is 0 across the run this script was
-    written for.
+    The chain's registrations are returned raw in ``neh_steps`` as
+    ``(step_idx, t, obj)``; ``assign_pass_columns`` turns them into
+    ``pass<k>_obj`` / ``pass<k>_seconds`` once the arm's first NEH step index is
+    known. Numbering here, by order of appearance, would be wrong: on an
+    instance where pass k registered nothing, pass k+1 would slide into the
+    ``pass{k}`` slot.
+
+    **A registered value is that step's own output, not the running
+    incumbent** — it rises whenever a pass lands worse than what the solution
+    manager already held. So there are two different NEH-level objectives and
+    they answer different questions:
+
+    - ``neh_obj`` — the *last* registration. "What did the final pass produce?"
+      Penalises a chain whose last pass was weak even though the flow discarded
+      that result.
+    - ``neh_best_obj`` — the running incumbent at the end of the NEH block,
+      i.e. ``min`` over the seed and every pass. **This is what the tail
+      actually inherits**, so it is the right metric for comparing chains.
+
+    ``seed_obj`` / ``seed_best_obj`` are the same distinction at the block's
+    entry.
     """
     payload = json.loads(path.read_text())
     data = {float(t): v for t, v in payload["obj_value"]["data"].items()}
     notes = sorted(
         (float(t), n) for t, n in payload["obj_value"].get("notes", {}).items()
     )
-    out: dict[str, float] = {
+    out: dict[str, object] = {
         "flow_best": min(data.values()) if data else np.nan,
         "seed_obj": np.nan,
+        "seed_best_obj": np.nan,
         "seed_t": np.nan,
         "neh_obj": np.nan,
+        "neh_best_obj": np.nan,
         "neh_end_t": np.nan,
         "neh_seconds": np.nan,
-        "missing_passes": 0,
+        "neh_registrations": 0,
+        "missing_passes": len(passes),
+        "neh_steps": (),
     }
-    neh_idx = [i for i, (_, lbl) in enumerate(notes) if "neh_cp" in lbl]
     for k in range(len(passes)):
         out[f"pass{k + 1}_obj"] = np.nan
         out[f"pass{k + 1}_seconds"] = np.nan
+    neh_idx = [i for i, (_, lbl) in enumerate(notes) if "neh_cp" in lbl]
     if not neh_idx:
-        out["missing_passes"] = len(passes)
         return out
     first = neh_idx[0]
     if first:
         out["seed_obj"] = data[notes[first - 1][0]]
         out["seed_t"] = notes[first - 1][0]
-    # notes[first:] are the chain's passes in order; a pass that registered
-    # nothing leaves the chain shorter than ``passes``.
+        out["seed_best_obj"] = min(
+            v for t, v in data.items() if t <= notes[first - 1][0]
+        )
     found = [notes[i] for i in neh_idx]
+    out["neh_best_obj"] = min(v for t, v in data.items() if t <= found[-1][0])
+    out["neh_steps"] = tuple(
+        (int(lbl.split("-", 1)[0]), t, data[t]) for t, lbl in found
+    )
+    out["neh_registrations"] = len(found)
     out["missing_passes"] = len(passes) - len(found)
-    prev_t = out["seed_t"] if first else 0.0
-    for k, (t, _) in enumerate(found):
-        out[f"pass{k + 1}_obj"] = data[t]
-        out[f"pass{k + 1}_seconds"] = t - prev_t
-        prev_t = t
     out["neh_obj"] = data[found[-1][0]]
     out["neh_end_t"] = found[-1][0]
     out["neh_seconds"] = found[-1][0] - (out["seed_t"] if first else 0.0)
     return out
+
+
+def assign_pass_columns(rows: list[dict[str, object]], n_passes: int) -> None:
+    """Fill ``pass<k>_obj`` / ``pass<k>_seconds`` by **true** pass position.
+
+    The NEH block occupies a contiguous run of step indices, so the smallest
+    NEH step index seen anywhere in the arm fixes the origin, and pass position
+    is ``step_idx - base + 1`` regardless of which passes stayed silent on a
+    given instance.
+
+    ``pass<k>_seconds`` is measured from the *previous registration* (the seed
+    for the first one), so on an instance where pass k-1 registered nothing,
+    ``pass<k>_seconds`` spans both passes. Read it with ``missing_passes``.
+
+    Mutates ``rows`` in place; ``rows`` must all belong to one arm.
+    """
+    steps = [s for r in rows for s in r["neh_steps"]]  # type: ignore[union-attr]
+    if not steps:
+        return
+    base = min(s[0] for s in steps)
+    for row in rows:
+        prev_t = row["seed_t"] if not pd.isna(row["seed_t"]) else 0.0
+        for step_idx, t, obj in row["neh_steps"]:  # type: ignore[union-attr]
+            k = step_idx - base + 1
+            if not 1 <= k <= n_passes:  # defensive: a flow we did not model
+                continue
+            row[f"pass{k}_obj"] = obj
+            row[f"pass{k}_seconds"] = t - prev_t
+            prev_t = t
 
 
 def parse_diag(path: Path) -> list[dict[str, object]]:
@@ -185,6 +234,7 @@ def collect(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         if scen_dir.name not in CHAINS:
             continue
         passes = CHAINS[scen_dir.name]
+        scen_rows: list[dict[str, object]] = []
         for ins_dir in sorted(p for p in scen_dir.iterdir() if p.is_dir()):
             log = next(ins_dir.glob("*_obj_log.json"), None)
             if log is None:
@@ -192,7 +242,7 @@ def collect(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
             row = parse_obj_log(log, passes)
             row["scenarioName"] = scen_dir.name
             row["instanceName"] = ins_dir.name
-            steps.append(row)
+            scen_rows.append(row)
             ctrl = next(ins_dir.glob("*_SubroutineController.log"), None)
             if ctrl is not None:
                 for rec in parse_diag(ctrl):
@@ -203,6 +253,10 @@ def collect(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
                             "instanceName": ins_dir.name,
                         }
                     )
+        assign_pass_columns(scen_rows, len(passes))
+        for row in scen_rows:
+            del row["neh_steps"]
+        steps.extend(scen_rows)
     return pd.DataFrame(steps), pd.DataFrame(diags)
 
 
