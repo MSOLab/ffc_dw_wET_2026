@@ -63,6 +63,30 @@ also logged (`head=`).
 All four methods accept the same parameters as `neh_cp` and delegate
 to the shared private core `_run_neh_cp`.
 
+### `seq_tiebreak` parameter (`neh_cp_midpoint_seq` only)
+
+`neh_cp_midpoint_seq` additionally accepts `seq_tiebreak:
+ScheduleSeqSource | None = None`. It overrides the secondary sort key
+within midpoint tie groups — where `m = (first_stage_start +
+last_stage_end) / 2` is equal, the default secondary key is first-stage
+start; `seq_tiebreak="completion"` uses last-stage end instead, which
+reverses the order within each tie group (because `ls = 2m − fs` is
+decreasing in `fs` for fixed `m`).
+
+Only `midpoint` is exposed because the other modes have no
+distinguishable tie-break keys:
+
+| Source | Default 2nd key | Alternative candidate | Why identical |
+| --- | --- | --- | --- |
+| `first_stage` | `ls` | `midpoint` = `(fs+ls)/2` | For fixed `fs`, `midpoint` is monotonic in `ls` — same order. |
+| `completion` | `fs` | `midpoint` = `(fs+ls)/2` | For fixed `ls`, `midpoint` is monotonic in `fs` — same order. |
+| `midpoint` | `fs` | `ls` | For fixed `m`, `ls = 2m − fs` is **decreasing** in `fs` — order reverses. |
+
+The same algebra is enforced by regression tests in
+`tests/solution/test_schedule_sequence.py`. The `bottleneck` mode does
+not participate: its secondary key (`bn_mid`) is not one of the
+standard source keys.
+
 | Parameter | Role |
 | --- | --- |
 | `job_priority` | See "Job ordering". |

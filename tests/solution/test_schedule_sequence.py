@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 
 
@@ -31,10 +33,14 @@ def test_schedule_sequence_importable() -> None:
     )
 
 
-def _run(schedule: FFcSchedule, source: str, tiebreak_rank=None):
+def _run(
+    schedule: FFcSchedule, source: str, *, tiebreak_source=None, tiebreak_rank=None
+):
     from ffc_ddw_sum_et.solution.schedule_sequence import schedule_job_sequence
 
-    return schedule_job_sequence(schedule, source, tiebreak_rank=tiebreak_rank)
+    return schedule_job_sequence(
+        schedule, source, tiebreak_source=tiebreak_source, tiebreak_rank=tiebreak_rank
+    )
 
 
 # ── midpoint mode ────────────────────────────────────────────────────────────
@@ -225,3 +231,93 @@ def test_normalized_distance_single_or_zero_common() -> None:
 
     assert normalized_mean_rank_distance(["j0"], ["j0"]) == 0.0
     assert normalized_mean_rank_distance([], []) == 0.0
+
+
+# ── tiebreak_source parameter ────────────────────────────────────────────────
+def test_midpoint_tiebreak_completion_reverses_ties() -> None:
+    """When midpoint ties exactly, completion tiebreak reverses the fs order."""
+    ops = [
+        ("s0", "m0", "j0", 0, 4),
+        ("s0", "m1", "j1", 2, 2),
+        ("s1", "m1", "j1", 2, 8),
+        ("s1", "m0", "j0", 4, 10),
+    ]
+    # j0: m=(0+10)/2=5, fs=0, ls=10
+    # j1: m=(2+8)/2=5,  fs=2, ls=8  → same midpoint!
+    # default (fs secondary): j0 (0) < j1 (2)  → j0, j1
+    # tiebreak="completion" (ls secondary): j1 (8) < j0 (10) → j1, j0
+    sch = _make_schedule(ops)
+    assert _run(sch, "midpoint") == ["j0", "j1"]
+    assert _run(sch, "midpoint", tiebreak_source="completion") == ["j1", "j0"]
+
+
+# ── alias regression: tiebreak that is algebraically identical to default ────
+def test_completion_tiebreak_midpoint_equals_default() -> None:
+    """completion with tiebreak_source="midpoint" ≡ completion default.
+    Rationale: when ls is fixed, midpoint = (fs+ls)/2 is monotonic in fs."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s0", "m0", "j1", 5, 8),
+        ("s0", "m0", "j2", 8, 11),
+        ("s0", "m0", "j3", 12, 14),
+        ("s1", "m0", "j1", 8, 10),
+        ("s1", "m1", "j0", 3, 10),
+        ("s1", "m1", "j3", 14, 20),
+        ("s1", "m0", "j2", 11, 18),
+    ]
+    sch = _make_schedule(ops)
+    # j0 and j1 share ls=10, so the secondary key actually decides here —
+    # without a real tie the equality below would hold vacuously.
+    end_map = sch.get_ji_2_end_time_map()
+    assert end_map[("j0", "s1")] == end_map[("j1", "s1")] == 10
+    default = _run(sch, "completion")
+    assert default == ["j0", "j1", "j2", "j3"]
+    assert _run(sch, "completion", tiebreak_source="midpoint") == default
+
+
+def test_first_stage_tiebreak_midpoint_equals_default() -> None:
+    """first_stage with tiebreak_source="midpoint" ≡ first_stage default.
+    Rationale: when fs is fixed, midpoint = (fs+ls)/2 is monotonic in ls."""
+    ops = [
+        ("s0", "m0", "j0", 2, 5),
+        ("s0", "m1", "j1", 2, 4),
+        ("s0", "m2", "j2", 4, 6),
+        ("s0", "m3", "j3", 6, 9),
+        ("s1", "m1", "j1", 4, 12),
+        ("s1", "m0", "j0", 5, 10),
+        ("s1", "m2", "j2", 6, 14),
+        ("s1", "m3", "j3", 9, 15),
+    ]
+    sch = _make_schedule(ops)
+    # j0 and j1 share fs=2, so the secondary key actually decides here —
+    # without a real tie the equality below would hold vacuously.
+    start_map = sch.get_ji_2_start_time_map()
+    assert start_map[("j0", "s0")] == start_map[("j1", "s0")] == 2
+    default = _run(sch, "first_stage")
+    assert default == ["j0", "j1", "j2", "j3"]
+    assert _run(sch, "first_stage", tiebreak_source="midpoint") == default
+
+
+# ── validation errors ─────────────────────────────────────────────────────────
+def test_bottleneck_tiebreak_raises_valueerror() -> None:
+    """bottleneck mode rejects any tiebreak_source."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s0", "m0", "j1", 3, 6),
+        ("s1", "m0", "j1", 6, 10),
+        ("s1", "m0", "j0", 10, 16),
+    ]
+    sch = _make_schedule(ops)
+    with pytest.raises(ValueError, match="bottleneck"):
+        _run(sch, "bottleneck", tiebreak_source="completion")
+
+
+def test_tiebreak_source_equals_source_raises_valueerror() -> None:
+    """tiebreak_source must differ from source."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s1", "m0", "j0", 3, 5),
+    ]
+    sch = _make_schedule(ops)
+    with pytest.raises(ValueError, match="must differ"):
+        _run(sch, "midpoint", tiebreak_source="midpoint")

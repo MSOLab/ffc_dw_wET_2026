@@ -230,3 +230,116 @@ def test_new_methods_pass_routix_flow_validator() -> None:
             controller_class=FFcDDWSubroutineController,
         )
         validator.validate(flow)
+
+
+# ── seq_tiebreak parameter ────────────────────────────────────────────────────
+def test_midpoint_seq_tiebreak_completion_passes_correct_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """neh_cp_midpoint_seq with seq_tiebreak='completion' reverses the m-tied
+    j2/j3 pair relative to the default."""
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[
+            {"method": "neh_cp_midpoint_seq", "seq_tiebreak": "completion"}
+        ],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    schedule = _make_incumbent_schedule(controller.instance)
+    controller.solution_manager.register(
+        controller._wrap_report(
+            SubroutineReport(elapsed_time=0.0, obj_value=100.0, obj_bound=None)
+        ),
+        FFcDDWSolution(schedule=schedule, obj_value=100.0),
+    )
+    option = _run_capturing_option(controller, monkeypatch)
+    assert option.custom_job_sequence == ("j1", "j0", "j3", "j2")
+
+
+def test_midpoint_seq_tiebreak_default_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """seq_tiebreak=None keeps the original order."""
+    option = _run_capturing_option(
+        _controller_with_incumbent("neh_cp_midpoint_seq"), monkeypatch
+    )
+    assert option.custom_job_sequence == _EXPECTED_SEQUENCE["neh_cp_midpoint_seq"]
+
+
+def test_seq_tiebreak_flow_passes_validator() -> None:
+    """subroutine_flow with seq_tiebreak passes routix validation."""
+    from routix.dynamic_data_object import DynamicDataObject
+    from routix.subroutine_flow_validator import SubroutineFlowValidator
+
+    flow = DynamicDataObject.from_obj(
+        [{"method": "neh_cp_midpoint_seq", "seq_tiebreak": "completion"}]
+    )
+    validator = SubroutineFlowValidator(
+        controller_class=FFcDDWSubroutineController,
+    )
+    validator.validate(flow)
+
+
+def test_falls_back_with_seq_tiebreak_when_no_incumbent(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """seq_tiebreak is irrelevant when no incumbent — falls back to job_priority."""
+    caplog.set_level(logging.WARNING)
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[
+            {"method": "neh_cp_midpoint_seq", "seq_tiebreak": "completion"}
+        ],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    option = _run_capturing_option(controller, monkeypatch)
+    assert option.custom_job_sequence is None
+    assert any("no incumbent schedule" in message for message in caplog.messages)
+
+
+def test_step_log_yaml_includes_tiebreak(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_step_log.yaml includes job_sequence_tiebreak when seq_tiebreak is set."""
+    from routix.io import load_yaml
+
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[
+            {"method": "neh_cp_midpoint_seq", "seq_tiebreak": "completion"}
+        ],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    schedule = _make_incumbent_schedule(controller.instance)
+    controller.solution_manager.register(
+        controller._wrap_report(
+            SubroutineReport(elapsed_time=0.0, obj_value=100.0, obj_bound=None)
+        ),
+        FFcDDWSolution(schedule=schedule, obj_value=100.0),
+    )
+    log_path = tmp_path / "_step_log.yaml"
+    monkeypatch.setattr(
+        controller, "try_get_file_path_for_subroutine", lambda *a, **k: log_path
+    )
+    controller.run()
+    assert log_path.exists()
+    data = load_yaml(log_path)
+    assert data["job_sequence_tiebreak"] == "completion"
+    assert data["job_sequence_fallback"] is False
+    assert data["job_sequence"] == ["j1", "j0", "j3", "j2"]
+
+
+def test_step_log_yaml_tiebreak_null_when_not_set(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_step_log.yaml has job_sequence_tiebreak=null when seq_tiebreak is not set."""
+    from routix.io import load_yaml
+
+    controller = _controller_with_incumbent("neh_cp_midpoint_seq")
+    log_path = tmp_path / "_step_log.yaml"
+    monkeypatch.setattr(
+        controller, "try_get_file_path_for_subroutine", lambda *a, **k: log_path
+    )
+    controller.run()
+    data = load_yaml(log_path)
+    assert data["job_sequence_tiebreak"] is None
