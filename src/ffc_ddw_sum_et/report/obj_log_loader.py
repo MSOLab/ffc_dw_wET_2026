@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -76,6 +77,89 @@ class InstanceProgression:
     timelimit_sec: float
     obj_value_calls: tuple[CallSegment, ...]
     obj_bound_calls: tuple[CallSegment, ...]
+
+
+@dataclass(frozen=True)
+class StepRegistration:
+    """One controller-step registration point from the obj_log.
+
+    Captures the *step's own output* (``own_obj``) and the *running
+    incumbent* at that point (``incumbent``) — they differ whenever a step
+    registers a result worse than the best seen so far.  Consumers that
+    previously read ``data[end_t]`` were reading ``own_obj``, not the value
+    the next step inherited.
+    """
+
+    step_idx: int  # 1-based, from the note label
+    method: str  # normalized subroutine name
+    raw_method: str  # original raw label  (``"<step_idx>-<subroutine_name>"``)
+    global_sec: float  # controller clock at registration
+    own_obj: float  # the value at this timestamp (= step's own output)
+    incumbent: (
+        float  # running min over all data points up to and including this timestamp
+    )
+
+
+def load_raw_obj_log(path: Path) -> dict[str, Any]:
+    """Load a raw ``<instance>_obj_log.json`` payload as a dict."""
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_step_registrations(
+    payload: dict[str, Any],
+) -> list[StepRegistration]:
+    """Parse step-registration boundaries from an obj_log payload.
+
+    Returns one ``StepRegistration`` per ``obj_value.notes`` entry, sorted by
+    timestamp.  Each carries both the *step's own output* and the *running
+    incumbent* — they differ whenever a step registers a result worse than
+    the current best.
+
+    ``payload`` is a raw ``json.load(...)`` dict of the full obj_log file.
+    """
+    obj_value = payload.get("obj_value")
+    if not isinstance(obj_value, dict):
+        return []
+    raw_data = obj_value.get("data", {})
+    raw_notes = obj_value.get("notes", {})
+    if not isinstance(raw_data, dict) or not isinstance(raw_notes, dict):
+        return []
+
+    data: dict[float, float] = {float(k): float(v) for k, v in raw_data.items()}
+    sorted_data = sorted(data.items())
+
+    incumbents: list[tuple[float, float]] = []
+    best = float("inf")
+    for t, v in sorted_data:
+        if v < best:
+            best = v
+        incumbents.append((t, best))
+
+    registrations: list[StepRegistration] = []
+    sorted_notes = sorted(
+        ((float(k), str(v)) for k, v in raw_notes.items()), key=lambda x: x[0]
+    )
+    for end_t, label in sorted_notes:
+        step_idx, raw_name = _parse_step_label(label)
+        method = _normalize_subroutine_name(raw_name)
+        own_obj = data.get(end_t, float("nan"))
+
+        i = bisect_right(incumbents, end_t, key=lambda x: x[0]) - 1
+        incumbent = incumbents[i][1] if i >= 0 else float("nan")
+
+        registrations.append(
+            StepRegistration(
+                step_idx=step_idx,
+                method=method,
+                raw_method=label,
+                global_sec=end_t,
+                own_obj=own_obj,
+                incumbent=incumbent,
+            )
+        )
+
+    return registrations
 
 
 def _parse_step_label(label: str) -> tuple[int, str]:

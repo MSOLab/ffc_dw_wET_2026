@@ -30,7 +30,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from itertools import combinations
 from pathlib import Path
@@ -39,6 +38,10 @@ import numpy as np
 import pandas as pd
 
 from ffc_ddw_sum_et._calc import rpd_f
+from ffc_ddw_sum_et.report.obj_log_loader import (
+    build_step_registrations,
+    load_raw_obj_log,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helper
 from analyze_neh_cp_seq_full import oracle_table  # noqa: E402  -- shared oracle
@@ -61,24 +64,27 @@ def scenario_name(prefix: str, mode: str) -> str:
 
 
 def parse_obj_log(path: Path) -> dict[str, float]:
-    """Objective at the end of each step, plus the flow-wide best."""
-    payload = json.loads(path.read_text())
-    data = {float(t): v for t, v in payload["obj_value"]["data"].items()}
-    notes = {float(t): n for t, n in payload["obj_value"].get("notes", {}).items()}
-    steps = sorted(notes.items())
+    """Objective at the end of each step, plus the flow-wide best.
+
+    Uses ``build_step_registrations`` so the step index comes from the note
+    label (not position-by-appearance) and both ``own_obj`` and ``incumbent``
+    are available directly — no manual running-min computation.
+    """
+    payload = load_raw_obj_log(path)
+    regs = build_step_registrations(payload)
     neh_obj = seed_obj = neh_seconds = np.nan
-    for idx, (t, label) in enumerate(steps):
-        if "neh_cp" in label:
-            neh_obj = data[t]
-            neh_seconds = t - steps[idx - 1][0] if idx else t
-            if idx:
-                seed_obj = data[steps[idx - 1][0]]
+    for i, r in enumerate(regs):
+        if "neh_cp" in r.method:
+            neh_obj = r.own_obj
+            neh_seconds = r.global_sec - regs[i - 1].global_sec if i else r.global_sec
+            if i:
+                seed_obj = regs[i - 1].own_obj
             break
     return {
         "seed_obj": seed_obj,
         "neh_obj": neh_obj,
         "neh_seconds": neh_seconds,
-        "flow_best": min(data.values()) if data else np.nan,
+        "flow_best": regs[-1].incumbent if regs else np.nan,
     }
 
 

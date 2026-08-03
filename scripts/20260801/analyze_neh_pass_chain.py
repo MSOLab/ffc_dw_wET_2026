@@ -45,7 +45,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from itertools import combinations
@@ -55,6 +54,10 @@ import numpy as np
 import pandas as pd
 
 from ffc_ddw_sum_et._calc import rpd_f
+from ffc_ddw_sum_et.report.obj_log_loader import (
+    build_step_registrations,
+    load_raw_obj_log,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
 sys.path.insert(
@@ -111,40 +114,26 @@ def label(scenario: str) -> str:
 def parse_obj_log(path: Path, passes: tuple[str, ...]) -> dict[str, object]:
     """Objective at each step boundary, split around the NEH-CP chain.
 
-    ``obj_value.notes`` maps a timestamp to ``<step_idx>-<method>``. A step that
-    never registered is simply absent — a NEH pass registers nothing whenever it
-    fails to improve the incumbent, and a base-CP step registers nothing when the
-    scenario cap cut it off.
-
-    The chain's registrations are returned raw in ``neh_steps`` as
-    ``(step_idx, t, obj)``; ``assign_pass_columns`` turns them into
-    ``pass<k>_obj`` / ``pass<k>_seconds`` once the arm's first NEH step index is
-    known. Numbering here, by order of appearance, would be wrong: on an
-    instance where pass k registered nothing, pass k+1 would slide into the
-    ``pass{k}`` slot.
+    Delegates step-boundary parsing to ``build_step_registrations`` so the
+    step index comes from the note label, not from position-by-appearance,
+    and both ``own_obj`` and ``incumbent`` are available directly — no
+    manual running-min computation.
 
     **A registered value is that step's own output, not the running
     incumbent** — it rises whenever a pass lands worse than what the solution
-    manager already held. So there are two different NEH-level objectives and
-    they answer different questions:
+    manager already held.
 
     - ``neh_obj`` — the *last* registration. "What did the final pass produce?"
-      Penalises a chain whose last pass was weak even though the flow discarded
-      that result.
     - ``neh_best_obj`` — the running incumbent at the end of the NEH block,
-      i.e. ``min`` over the seed and every pass. **This is what the tail
+      i.e. the best over the seed and every pass. **This is what the tail
       actually inherits**, so it is the right metric for comparing chains.
-
-    ``seed_obj`` / ``seed_best_obj`` are the same distinction at the block's
-    entry.
+    - ``seed_obj`` / ``seed_best_obj`` — same distinction at the block's entry.
     """
-    payload = json.loads(path.read_text())
-    data = {float(t): v for t, v in payload["obj_value"]["data"].items()}
-    notes = sorted(
-        (float(t), n) for t, n in payload["obj_value"].get("notes", {}).items()
-    )
+    payload = load_raw_obj_log(path)
+    regs = build_step_registrations(payload)
+    neh_ix = [i for i, r in enumerate(regs) if "neh_cp" in r.method]
     out: dict[str, object] = {
-        "flow_best": min(data.values()) if data else np.nan,
+        "flow_best": regs[-1].incumbent if regs else np.nan,
         "seed_obj": np.nan,
         "seed_best_obj": np.nan,
         "seed_t": np.nan,
@@ -159,26 +148,24 @@ def parse_obj_log(path: Path, passes: tuple[str, ...]) -> dict[str, object]:
     for k in range(len(passes)):
         out[f"pass{k + 1}_obj"] = np.nan
         out[f"pass{k + 1}_seconds"] = np.nan
-    neh_idx = [i for i, (_, lbl) in enumerate(notes) if "neh_cp" in lbl]
-    if not neh_idx:
+    if not neh_ix:
         return out
-    first = neh_idx[0]
+    first, last = neh_ix[0], neh_ix[-1]
     if first:
-        out["seed_obj"] = data[notes[first - 1][0]]
-        out["seed_t"] = notes[first - 1][0]
-        out["seed_best_obj"] = min(
-            v for t, v in data.items() if t <= notes[first - 1][0]
-        )
-    found = [notes[i] for i in neh_idx]
-    out["neh_best_obj"] = min(v for t, v in data.items() if t <= found[-1][0])
+        out["seed_obj"] = regs[first - 1].own_obj
+        out["seed_t"] = regs[first - 1].global_sec
+        out["seed_best_obj"] = regs[first - 1].incumbent
+    out["neh_best_obj"] = regs[last].incumbent
     out["neh_steps"] = tuple(
-        (int(lbl.split("-", 1)[0]), t, data[t]) for t, lbl in found
+        (regs[i].step_idx, regs[i].global_sec, regs[i].own_obj) for i in neh_ix
     )
-    out["neh_registrations"] = len(found)
-    out["missing_passes"] = len(passes) - len(found)
-    out["neh_obj"] = data[found[-1][0]]
-    out["neh_end_t"] = found[-1][0]
-    out["neh_seconds"] = found[-1][0] - (out["seed_t"] if first else 0.0)
+    out["neh_registrations"] = len(neh_ix)
+    out["missing_passes"] = len(passes) - len(neh_ix)
+    out["neh_obj"] = regs[last].own_obj
+    out["neh_end_t"] = regs[last].global_sec
+    out["neh_seconds"] = out["neh_end_t"] - (
+        out["seed_t"] if np.isfinite(out["seed_t"]) else 0.0
+    )
     return out
 
 

@@ -19,6 +19,7 @@ from ffc_ddw_sum_et.report.obj_log_loader import (
     _normalize_subroutine_name,
     build_endpoint_df,
     build_raw_progression_df,
+    build_step_registrations,
     load_instance_progression,
 )
 
@@ -268,3 +269,48 @@ def test_rep_collapse_preserves_prefixed_name(tmp_path: Path) -> None:
     assert calls[1].prefixed_subroutine_name == (
         "2-incremental_job_contrib_cp.4-jd006_r002"
     )
+
+
+def test_step_registrations_separate_own_output_from_incumbent() -> None:
+    """Trap 2: a note's value is the step's *own* output, not the incumbent.
+
+    ``step_b`` registers 120 after ``step_a`` already reached 90, so the two
+    series diverge at that registration.
+    """
+    payload = {
+        "obj_value": {
+            "name": "obj_value",
+            "data": {"0.5": 100.0, "1.0": 90.0, "2.0": 120.0, "3.0": 80.0},
+            "notes": {"1.0": "1-step_a", "2.0": "2-step_b", "3.0": "3-step_c"},
+        }
+    }
+    regs = build_step_registrations(payload)
+
+    assert [r.step_idx for r in regs] == [1, 2, 3]
+    assert [r.method for r in regs] == ["step_a", "step_b", "step_c"]
+    assert [r.own_obj for r in regs] == [90.0, 120.0, 80.0]
+    # The incumbent never rises, even though step_b's own output did.
+    assert [r.incumbent for r in regs] == [90.0, 90.0, 80.0]
+
+
+def test_step_registrations_key_on_label_not_position() -> None:
+    """Trap 1: a step that never registered is absent, so position lies.
+
+    Step 2 is missing; the registration that follows must stay step 3 rather
+    than sliding into the second slot.
+    """
+    payload = {
+        "obj_value": {
+            "name": "obj_value",
+            "data": {"1.0": 100.0, "3.0": 80.0},
+            "notes": {"1.0": "1-step_a", "3.0": "3-step_c"},
+        }
+    }
+    regs = build_step_registrations(payload)
+
+    assert [r.step_idx for r in regs] == [1, 3]
+
+
+def test_step_registrations_empty_without_obj_value() -> None:
+    assert build_step_registrations({}) == []
+    assert build_step_registrations({"obj_value": {"data": {}, "notes": {}}}) == []
