@@ -7,6 +7,14 @@ Analysis, weekly-review, and report-support scripts.
 > They are excluded from the standing catalog below; each file's docstring
 > states its purpose and its retirement condition.
 
+> **Reading `<instance>_obj_log.json`:** use
+> `report.obj_log_loader.build_step_registrations` for step boundaries rather
+> than parsing `obj_value.notes` by hand — see
+> [`docs/artifacts/obj_log.md`](../docs/artifacts/obj_log.md) for the schema and
+> the three traps (absent steps, own-output vs incumbent, dropped note-less
+> series). Parsing the raw payload is a valid choice for plotting or per-point
+> inner-step labels; state why in the script's docstring when you do.
+
 ## 1. Batch Size Analysis
 
 Statistically analyze and visualize the effect of batch size on RPDf.
