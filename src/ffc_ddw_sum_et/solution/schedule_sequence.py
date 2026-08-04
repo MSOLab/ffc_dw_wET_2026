@@ -26,6 +26,8 @@ _DEFAULT_TIEBREAK: dict[str, ScheduleSeqSource] = {
     "completion": "first_stage",
 }
 
+_VALID_SOURCES: frozenset[str] = frozenset({"midpoint", "first_stage", "completion"})
+
 
 def schedule_job_sequence(
     schedule: FFcSchedule,
@@ -71,6 +73,11 @@ def schedule_job_sequence(
     permutation (notably the ``neh_cp_*_seq`` steps) append the skipped
     jobs themselves.
     """
+    if source not in _VALID_SOURCES:
+        raise ValueError(
+            f"Unknown source '{source}'; expected one of {sorted(_VALID_SOURCES)}"
+        )
+
     num_stages = len(schedule.stages)
     if not (-num_stages <= end_stage_index <= -1):
         raise ValueError(
@@ -120,7 +127,16 @@ def normalized_mean_rank_distance(
     reference_sequence: Sequence[str],
     candidate_sequence: Sequence[str],
 ) -> float:
-    if len(reference_sequence) <= 1:
+    """Normalized mean absolute rank distance between two sequences.
+
+    Normalization divisor is ``n² / 2`` where ``n = len(reference)``,
+    so a full reversal yields 1.0 and an identical sequence yields 0.0.
+    Jobs present in ``candidate`` but absent from ``reference`` are
+    dropped; ``n`` is always the ``reference`` length so the divisor is
+    fixed regardless of how many candidate jobs match.
+    """
+    n = len(reference_sequence)
+    if n <= 1:
         return 0.0
     ref_rank = {job: i for i, job in enumerate(reference_sequence)}
     total = 0.0
@@ -128,5 +144,4 @@ def normalized_mean_rank_distance(
         ref_i = ref_rank.get(job)
         if ref_i is not None:
             total += abs(i - ref_i)
-    n = len(reference_sequence)
-    return (2.0 * total) / (n * n) if n > 0 else 0.0
+    return (2.0 * total) / (n * n)

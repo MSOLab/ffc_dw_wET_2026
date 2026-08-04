@@ -282,6 +282,18 @@ def test_tiebreak_source_equals_source_raises_valueerror() -> None:
         _run(sch, "midpoint", tiebreak_source="midpoint")
 
 
+# ── unknown source → ValueError (TODO item 1) ────────────────────────────────
+def test_unknown_source_raises_valueerror() -> None:
+    """An unrecognized source raises ValueError instead of returning []."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s1", "m0", "j0", 3, 5),
+    ]
+    sch = _make_schedule(ops)
+    with pytest.raises(ValueError, match="Unknown source"):
+        _run(sch, "nonexistent")  # type: ignore[arg-type]
+
+
 # ── end_stage_index ───────────────────────────────────────────────────────────
 def test_completion_end_stage_minus2_uses_last1_end() -> None:
     """end_stage_index=-2 sorts by the (last-1) stage end time, not the last."""

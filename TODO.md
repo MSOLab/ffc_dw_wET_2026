@@ -678,9 +678,9 @@ items 1–3 touch code that the pending sequence-source experiment will
 report on — better to learn which modes survive before polishing all
 four. Splitting them out keeps the landing diff reviewable.
 
-**Status (2026-08-04):** Item 7 resolved — `neh_cp_bottleneck_seq`,
-`"bottleneck"` from `ScheduleSeqSource`, `_find_bottleneck_stage`, and their
-tests deleted.
+**Status (2026-08-04):** items 1–3 resolved in `20260804_neh_cp_last1_stage_seq`.
+Item 7 resolved — `neh_cp_bottleneck_seq`, `"bottleneck"` from
+`ScheduleSeqSource`, `_find_bottleneck_stage`, and their tests deleted.
 
 **When to act:** items 1–3 whenever `schedule_sequence.py` or
 `_run_neh_cp` is next edited (they are minutes of work in context).

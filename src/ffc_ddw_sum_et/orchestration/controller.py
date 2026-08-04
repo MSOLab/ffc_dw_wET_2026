@@ -2497,8 +2497,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         rank_map = {job_id: idx for idx, job_id in enumerate(priority_sequence)}
 
         custom_job_sequence: tuple[str, ...] | None = None
-        _ns_used_seq: list[str] | None = None
-        _ns_fallback = True
+        used_sequence: list[str] | None = None
+        sequence_fallback = True
         if job_seq_source is not None:
             incumbent = self.solution_manager.get_incumbent()
             if incumbent is None or incumbent.schedule is None:
@@ -2541,8 +2541,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     ]
                     seq = deduped + missing
                 custom_job_sequence = tuple(seq) if seq else None
-                _ns_used_seq = list(seq)
-                _ns_fallback = False
+                used_sequence = list(seq)
+                sequence_fallback = False
 
                 all_sources: list[ScheduleSeqSource] = [
                     "midpoint",
@@ -2663,16 +2663,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     else:
                         source_label = (
                             job_seq_source
-                            if not _ns_fallback
+                            if not sequence_fallback
                             else f"job_priority:{job_priority}"
                         )
                         dump_yaml(
                             {
                                 "job_sequence_source": source_label,
                                 "job_sequence_tiebreak": seq_tiebreak
-                                if not _ns_fallback and seq_tiebreak is not None
+                                if not sequence_fallback and seq_tiebreak is not None
                                 else None,
-                                "job_sequence_fallback": _ns_fallback,
+                                "job_sequence_fallback": sequence_fallback,
                                 "job_sequence": custom_job_sequence
                                 if custom_job_sequence is not None
                                 else list(priority_sequence),
@@ -2681,8 +2681,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                             log_path,
                         )
 
-        if _ns_used_seq is not None:
-            self._last_neh_job_sequence = _ns_used_seq
+        if used_sequence is not None:
+            self._last_neh_job_sequence = used_sequence
 
         return report
 
