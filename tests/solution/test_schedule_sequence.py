@@ -119,43 +119,6 @@ def test_completion_tiebreak_by_first_start() -> None:
     assert result == ["j0", "j1"]
 
 
-# ── bottleneck mode ──────────────────────────────────────────────────────────
-# Both cases below stagger the two stages into *opposite* job orders, so the
-# assertion only holds for the stage that actually wins the idle-time contest.
-def test_bottleneck_mode_picks_first_stage_when_it_has_least_idle() -> None:
-    """Bottleneck = stage with minimum total idle time (here s0, idle 0)."""
-    ops = [
-        # s0 runs back-to-back → idle 0
-        ("s0", "m0", "j0", 0, 3),
-        ("s0", "m0", "j1", 3, 6),
-        ("s0", "m0", "j2", 6, 9),
-        # s1 runs in the reverse order with gaps 2 and 4 → idle 6
-        ("s1", "m0", "j2", 10, 12),
-        ("s1", "m0", "j1", 14, 16),
-        ("s1", "m0", "j0", 20, 23),
-    ]
-    sch = _make_schedule(ops)
-    assert _run(sch, "bottleneck") == ["j0", "j1", "j2"]  # s0's order
-    assert _run(sch, "completion") == ["j2", "j1", "j0"]  # s1's order
-
-
-def test_bottleneck_mode_picks_last_stage_when_it_has_least_idle() -> None:
-    """Mirror image: s1 now has idle 0, so bottleneck order flips."""
-    ops = [
-        # s0 with gaps 2 and 4 → idle 6
-        ("s0", "m0", "j0", 0, 3),
-        ("s0", "m0", "j1", 5, 8),
-        ("s0", "m0", "j2", 12, 15),
-        # s1 runs back-to-back in the reverse order → idle 0
-        ("s1", "m0", "j2", 15, 18),
-        ("s1", "m0", "j1", 18, 21),
-        ("s1", "m0", "j0", 21, 24),
-    ]
-    sch = _make_schedule(ops)
-    assert _run(sch, "bottleneck") == ["j2", "j1", "j0"]  # s1's order
-    assert _run(sch, "first_stage") == ["j0", "j1", "j2"]  # s0's order
-
-
 # ── partial schedules ────────────────────────────────────────────────────────
 def test_jobs_without_operations_are_skipped() -> None:
     """A job listed in ``schedule.jobs`` but carrying no operation is dropped
@@ -173,7 +136,7 @@ def test_jobs_without_operations_are_skipped() -> None:
     ]:
         sch.add_ops_times_2_mc(stage, mc, job, start, end)
 
-    for source in ("midpoint", "first_stage", "bottleneck", "completion"):
+    for source in ("midpoint", "first_stage", "completion"):
         assert _run(sch, source) == ["j0", "j1"]
 
 
@@ -299,19 +262,6 @@ def test_first_stage_tiebreak_midpoint_equals_default() -> None:
 
 
 # ── validation errors ─────────────────────────────────────────────────────────
-def test_bottleneck_tiebreak_raises_valueerror() -> None:
-    """bottleneck mode rejects any tiebreak_source."""
-    ops = [
-        ("s0", "m0", "j0", 0, 3),
-        ("s0", "m0", "j1", 3, 6),
-        ("s1", "m0", "j1", 6, 10),
-        ("s1", "m0", "j0", 10, 16),
-    ]
-    sch = _make_schedule(ops)
-    with pytest.raises(ValueError, match="bottleneck"):
-        _run(sch, "bottleneck", tiebreak_source="completion")
-
-
 def test_tiebreak_source_equals_source_raises_valueerror() -> None:
     """tiebreak_source must differ from source."""
     ops = [

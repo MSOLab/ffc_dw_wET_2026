@@ -33,9 +33,9 @@ def run(
 ) -> SubroutineReport: ...
 ```
 
-### `neh_cp_midpoint_seq`, `neh_cp_first_stage_seq`, `neh_cp_bottleneck_seq`, `neh_cp_completion_seq` (incumbent-derived ordering)
+### `neh_cp_midpoint_seq`, `neh_cp_first_stage_seq`, `neh_cp_completion_seq` (incumbent-derived ordering)
 
-These four methods derive the job insertion sequence from the current
+These three methods derive the job insertion sequence from the current
 incumbent schedule (via
 [`schedule_job_sequence`](../../src/ffc_ddw_sum_et/solution/schedule_sequence.py)).
 Each uses a different sort key (all ascending, tie-broken by the secondary
@@ -45,7 +45,6 @@ key then by `job_priority` rank):
 | --- | --- | --- | --- |
 | `neh_cp_midpoint_seq` | `midpoint` | `(first_stage_start + last_stage_end) / 2` | first-stage start |
 | `neh_cp_first_stage_seq` | `first_stage` | first-stage start | last-stage end |
-| `neh_cp_bottleneck_seq` | `bottleneck` | bottleneck-stage start | bottleneck `(start+end) / 2` |
 | `neh_cp_completion_seq` | `completion` | last-stage end | first-stage start |
 
 **Fallback**: when no incumbent schedule is available,
@@ -53,14 +52,14 @@ key then by `job_priority` rank):
 `job_priority` is always computed — it serves as tie-break rank
 and as fallback ordering.
 
-**Diversity diagnostics**: when an incumbent is present, all four
+**Diversity diagnostics**: when an incumbent is present, all three
 sequence modes are computed and their pairwise distances (via
 `normalized_mean_rank_distance`) are emitted in a single `INFO` log line,
 along with distance to the `job_priority` sequence and the previous
 NEH-CP sequence (if any). The first five jobs of the chosen sequence are
 also logged (`head=`).
 
-All four methods accept the same parameters as `neh_cp` and delegate
+All three methods accept the same parameters as `neh_cp` and delegate
 to the shared private core `_run_neh_cp`.
 
 ### `seq_tiebreak` parameter (`neh_cp_midpoint_seq` only)
@@ -83,9 +82,7 @@ distinguishable tie-break keys:
 | `midpoint` | `fs` | `ls` | For fixed `m`, `ls = 2m − fs` is **decreasing** in `fs` — order reverses. |
 
 The same algebra is enforced by regression tests in
-`tests/solution/test_schedule_sequence.py`. The `bottleneck` mode does
-not participate: its secondary key (`bn_mid`) is not one of the
-standard source keys.
+`tests/solution/test_schedule_sequence.py`.
 
 | Parameter | Role |
 | --- | --- |

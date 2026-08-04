@@ -459,6 +459,8 @@ T=0.6의 반대 부호 효과를 상쇄해 실효과를 지운 전례가 있다.
   CLAUDE.md가 **TODO 항목의 자율 실행을 금지**하므로 여기서는 실행하지 않고
   결정만 요청한다: `neh_cp_bottleneck_seq` / `ScheduleSeqSource`의 `"bottleneck"` /
   `_find_bottleneck_stage` / 관련 테스트를 삭제할 것인가?
+  → **결정: 삭제 (사용자 승인, 2026-08-04).** 이 계획의 구현에 포함됐다.
+  `README.md` 스텝 표 행과 `analyze_neh_cp_seq_pilot.py`의 block 1도 함께 정리했다.
   (형제 문서 `job_batch_cp.md`는 이 판단을 선반영해 `bottleneck` 변형을 **만들지
   않는다** — 죽은 모드의 별칭을 새로 늘리지 않기 위해서다.)
 - **`end_stage_index=-3` 이하**: 코드는 이미 지원하지만 arm으로 만들지 않는다.

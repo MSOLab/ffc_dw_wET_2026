@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Literal, Mapping, Sequence
 
-from .ffc_schedule import FFcSchedule, StageIdType
+from .ffc_schedule import FFcSchedule
 
 __all__ = [
     "ScheduleSeqSource",
@@ -12,7 +12,7 @@ __all__ = [
     "normalized_mean_rank_distance",
 ]
 
-ScheduleSeqSource = Literal["midpoint", "first_stage", "bottleneck", "completion"]
+ScheduleSeqSource = Literal["midpoint", "first_stage", "completion"]
 
 _KEY_FN: dict[str, Callable[[float, float], float]] = {
     "midpoint": lambda fs, ls: (fs + ls) / 2.0,
@@ -51,10 +51,6 @@ def schedule_job_sequence(
     pins all three cases; the experiment that rests on this algebra is
     ``plans/experiment/20260803/neh_cp_midpoint_tiebreak.md``.
 
-    ``bottleneck`` takes no ``tiebreak_source`` (``ValueError``): its
-    secondary key is the bottleneck stage's own midpoint, which is not
-    one of the standard source keys.
-
     Jobs whose operations the ``source`` needs are missing from
     ``schedule`` are **skipped**, so the result may be shorter than
     ``schedule.jobs``. ``FFcSchedule.remove_jobs`` /
@@ -65,8 +61,6 @@ def schedule_job_sequence(
     jobs themselves.
     """
     if tiebreak_source is not None:
-        if source == "bottleneck":
-            raise ValueError("tiebreak_source is not supported for source='bottleneck'")
         if tiebreak_source == source:
             raise ValueError(f"tiebreak_source must differ from source ({source})")
 
@@ -88,25 +82,11 @@ def schedule_job_sequence(
     first_stage = schedule.stages[0]
     last_stage = schedule.stages[-1]
 
-    if source == "bottleneck":
-        bottleneck = _find_bottleneck_stage(schedule)
-    else:
-        bottleneck = first_stage
-
     ts_tuples: list[tuple] = []
     for job_id in jobs:
         fs_start = start_map.get((job_id, first_stage), None)
         ls_end = end_map.get((job_id, last_stage), None)
-        bn_start = start_map.get((job_id, bottleneck), None)
-        bn_end = end_map.get((job_id, bottleneck), None)
         rank = idx_map.get(job_id, fallback_idx)
-
-        if source == "bottleneck":
-            if bn_start is None or bn_end is None:
-                continue
-            bn_mid = (bn_start + bn_end) / 2.0
-            ts_tuples.append((bn_start, bn_mid, rank, job_id))
-            continue
 
         if fs_start is None or ls_end is None:
             continue
@@ -116,18 +96,6 @@ def schedule_job_sequence(
 
     ts_tuples.sort(key=lambda t: t[:-1])
     return [t[-1] for t in ts_tuples]
-
-
-def _find_bottleneck_stage(schedule: FFcSchedule) -> StageIdType:
-    stage_2_mc_2_idle_time_map = schedule.get_stage_2_mc_2_idle_time_map()
-    stage_2_total_idle = {
-        stage_id: sum(mc_idle.values())
-        for stage_id, mc_idle in stage_2_mc_2_idle_time_map.items()
-    }
-    return min(
-        stage_2_total_idle,
-        key=lambda s: (stage_2_total_idle[s], schedule.stage_2_index[s]),
-    )
 
 
 def normalized_mean_rank_distance(

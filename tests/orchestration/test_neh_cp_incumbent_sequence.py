@@ -19,14 +19,13 @@ from ffc_ddw_sum_et.parameters.ffc_ddw_params import FFcDDWParameters
 from ffc_ddw_sum_et.solution.ffc_schedule import FFcSchedule
 
 # Staggered incumbent used by every test below. Three stages are the minimum
-# that lets all four modes disagree: with two stages the bottleneck is either
-# the first or the last stage, so its order necessarily coincides with
-# `first_stage` or `completion`.
+# that lets all three modes disagree: with two stages first_stage and
+# completion are still distinguishable but harder to separate from midpoint.
 #
 #   stage | operations (start, end)                              | idle
 #   ------+------------------------------------------------------+-----
 #   i0    | j0(0,2)   j1(4,6)   j2(8,10)  j3(12,14)               |  6
-#   i1    | j3(14,16) j2(16,18) j1(18,20) j0(20,22)               |  0  ← bottleneck
+#   i1    | j3(14,16) j2(16,18) j1(18,20) j0(20,22)               |  0
 #   i2    | j1(22,24) j3(25,27) j2(29,31) j0(33,35)               |  5
 #
 # midpoint  = (i0 start + i2 end)/2 → j1 14.0, j0 17.5, j2 19.5, j3 19.5
@@ -49,7 +48,6 @@ _INCUMBENT_OPS: list[tuple[str, str, int, int]] = [
 _EXPECTED_SEQUENCE: dict[str, tuple[str, ...]] = {
     "neh_cp_midpoint_seq": ("j1", "j0", "j2", "j3"),
     "neh_cp_first_stage_seq": ("j0", "j1", "j2", "j3"),
-    "neh_cp_bottleneck_seq": ("j3", "j2", "j1", "j0"),
     "neh_cp_completion_seq": ("j1", "j3", "j2", "j0"),
 }
 
@@ -195,7 +193,7 @@ def test_diversity_diagnostic_logged_when_incumbent_exists(
     diag_lines = [
         message
         for message in caplog.messages
-        if "dist_to_midpoint=" in message and "dist_to_bottleneck=" in message
+        if "dist_to_midpoint=" in message and "dist_to_first_stage=" in message
     ]
     assert len(diag_lines) == 1
 
@@ -204,7 +202,7 @@ def test_diversity_diagnostic_logged_when_incumbent_exists(
 def test_step_log_yaml_mapping_format(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    controller = _controller_with_incumbent("neh_cp_bottleneck_seq")
+    controller = _controller_with_incumbent("neh_cp_completion_seq")
     log_path = tmp_path / "_step_log.yaml"
     monkeypatch.setattr(
         controller, "try_get_file_path_for_subroutine", lambda *a, **k: log_path
@@ -214,9 +212,9 @@ def test_step_log_yaml_mapping_format(
 
     assert log_path.exists()
     data = load_yaml(log_path)
-    assert data["job_sequence_source"] == "bottleneck"
+    assert data["job_sequence_source"] == "completion"
     assert data["job_sequence_fallback"] is False
-    assert data["job_sequence"] == list(_EXPECTED_SEQUENCE["neh_cp_bottleneck_seq"])
+    assert data["job_sequence"] == list(_EXPECTED_SEQUENCE["neh_cp_completion_seq"])
     assert isinstance(data["steps"], list)
 
 

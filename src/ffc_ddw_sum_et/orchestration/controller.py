@@ -2364,59 +2364,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             error_if_infeasible=error_if_infeasible,
         )
 
-    def neh_cp_bottleneck_seq(
-        self,
-        job_priority: NehCpJobPriority = "weight-due-pos",
-        solver_thread_cnt: int = 1,
-        added_batch_size: int = 1,
-        extra_batch_size_expr: str | None = None,
-        cp_tl: float | str | None = None,
-        total_timelimit: float | str | None = None,
-        num_batches: int | None = None,
-        batch_tl_mode: BatchTlMode = "constant",
-        batch_tl_offset_seconds: float = 0.01,
-        apply_cumulative_tl: bool = False,
-        pf_method: PFMethod = "PF1",
-        skip_pf_below_obj: str | float | None = None,
-        make_semi_active_after_cp: bool = False,
-        make_semi_active_after_cp_obj_threshold: int = -1,
-        minimize_makespan_lex: bool = False,
-        cp_tl_2nd_obj: float | str | None = None,
-        error_if_infeasible: bool = False,
-    ) -> SubroutineReport:
-        """NEH-CP with job sequence derived from incumbent via bottleneck stage sort.
-
-        Bottleneck is the stage with minimum total idle time across its
-        machines. Jobs sorted by bottleneck-stage start ascending,
-        tie-broken by bottleneck ``(start+end)/2`` then by ``job_priority``
-        rank.
-
-        Falls back to ``job_priority`` when no incumbent schedule is
-        available (warning logged). ``job_priority`` is always computed
-        for tie-break rank and fallback.
-        """
-        return self._run_neh_cp(
-            job_seq_source="bottleneck",
-            step_label="neh_cp_bottleneck_seq",
-            job_priority=job_priority,
-            solver_thread_cnt=solver_thread_cnt,
-            added_batch_size=added_batch_size,
-            extra_batch_size_expr=extra_batch_size_expr,
-            cp_tl=cp_tl,
-            total_timelimit=total_timelimit,
-            num_batches=num_batches,
-            batch_tl_mode=batch_tl_mode,
-            batch_tl_offset_seconds=batch_tl_offset_seconds,
-            apply_cumulative_tl=apply_cumulative_tl,
-            pf_method=pf_method,
-            skip_pf_below_obj=skip_pf_below_obj,
-            make_semi_active_after_cp=make_semi_active_after_cp,
-            make_semi_active_after_cp_obj_threshold=make_semi_active_after_cp_obj_threshold,
-            minimize_makespan_lex=minimize_makespan_lex,
-            cp_tl_2nd_obj=cp_tl_2nd_obj,
-            error_if_infeasible=error_if_infeasible,
-        )
-
     def neh_cp_completion_seq(
         self,
         job_priority: NehCpJobPriority = "weight-due-pos",
@@ -2600,7 +2547,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                 all_sources: list[ScheduleSeqSource] = [
                     "midpoint",
                     "first_stage",
-                    "bottleneck",
                     "completion",
                 ]
                 all_seqs: dict[str, list[str]] = {}
@@ -2624,7 +2570,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
                 self.logger.info(
                     "%s: seq source=%s tiebreak=%s dist_to_midpoint=%.4f "
-                    "dist_to_first_stage=%.4f dist_to_bottleneck=%.4f "
+                    "dist_to_first_stage=%.4f "
                     "dist_to_completion=%.4f dist_to_job_priority=%.4f "
                     "dist_to_prev_neh=%s head=%s",
                     step_label,
@@ -2632,7 +2578,6 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     seq_tiebreak if seq_tiebreak is not None else "default",
                     normalized_mean_rank_distance(all_seqs["midpoint"], list(seq)),
                     normalized_mean_rank_distance(all_seqs["first_stage"], list(seq)),
-                    normalized_mean_rank_distance(all_seqs["bottleneck"], list(seq)),
                     normalized_mean_rank_distance(all_seqs["completion"], list(seq)),
                     dist_to_priority,
                     prev_str,

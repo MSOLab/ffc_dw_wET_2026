@@ -32,7 +32,6 @@ Reference: Pan, Ruiz, Alfaro-Fernández (2017). *Computers and Operations Resear
 | `neh_cp` | NEH heuristic + CP-SAT refinement |
 | `neh_cp_midpoint_seq` | NEH-CP with incumbent-derived midpoint job order |
 | `neh_cp_first_stage_seq` | NEH-CP with incumbent-derived first-stage-start job order |
-| `neh_cp_bottleneck_seq` | NEH-CP with incumbent-derived bottleneck-stage job order |
 | `neh_cp_completion_seq` | NEH-CP with incumbent-derived completion job order |
 | `run_flip_makespan_cp_from_incumbent` | Makespan-flipping CP-SAT for last stage |
 | `incremental_sw_cp` | Sliding-window CP with coarsened grid |
