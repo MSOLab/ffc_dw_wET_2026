@@ -28,7 +28,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260803/neh_cp_midpoint_tiebreak.yaml")
+CONFIG_PATH = Path("metadata/20260804/neh_cp_last1_stage_seq.yaml")
 
 
 def _parse_args() -> argparse.Namespace:

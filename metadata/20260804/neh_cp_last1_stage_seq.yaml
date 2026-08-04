@@ -1,0 +1,100 @@
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+output_dir: output/20260804_neh_cp_last1_stage_seq
+
+instance_worker_cnt: 12
+draw_gantt: false
+draw_progress_plot: true
+painter_thread_cnt: 96
+
+# 2 arm, flow is dispatch_v4 -> MCF-LB -> FMM -> NEH-CP (no ISW-CP / base CP
+# tail).  The question is whether moving the sort axis from the last stage's
+# end to the (last-1) stage's end improves NEH-CP's own output.
+#
+# Treatments only: completion3 / midpoint3 (seq_end_stage: -2).  The three
+# controls the plan specifies (completion_seq / midpoint2_seq / midpoint_seq)
+# were dropped to save wall time -- every one of them already has a full 1440
+# grid from an earlier run:
+#   completion_seq  output/20260731_neh_cp_seq_source_compare/20260801T012922_726471
+#                   output/20260731_neh_cp_seq_source_compare/20260801T102120_801587
+#   midpoint2_seq   output/20260803_neh_cp_midpoint_tiebreak/20260804T001517_995533
+#   midpoint_seq    the same three runs above
+# Both contrasts are therefore CROSS-RUN, not in-run paired.  Plan section 6.1
+# warns that run-to-run drift is +-0.45 pp on the 1440 mean while the expected
+# effects are ~2 pp (completion3) and ~1.3 pp (midpoint3), so the analysis must
+# quote that band alongside every number.
+#
+# Plan: plans/experiment/20260804/neh_cp_last1_stage_seq.md
+scenarios:
+  # ── arm 1: treatment A — completion with (last-1) end ──────────────────────
+  - name: dv4_mcf_fmm_neh_cp_completion3_seq
+    timelimit: "0.09nc"
+    output_subdir: neh_cp_last1_stage_seq/dv4_mcf_fmm_neh_cp_completion3_seq
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0036nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp_completion_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0108nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+        seq_end_stage: -2
+
+  # ── arm 2: treatment B — midpoint with (last-1) end + completion tiebreak ──
+  - name: dv4_mcf_fmm_neh_cp_midpoint3_seq
+    timelimit: "0.09nc"
+    output_subdir: neh_cp_last1_stage_seq/dv4_mcf_fmm_neh_cp_midpoint3_seq
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0036nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0108nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
