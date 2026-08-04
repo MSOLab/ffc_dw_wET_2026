@@ -464,6 +464,160 @@ class TestDispatcherBasics:
             assert ts == sorted(ts), "cp_progress t must be monotonic non-decreasing"
 
 
+class TestExplicitDestroySet:
+    """``destroy_job_ids`` bypasses contribution-based selection entirely."""
+
+    def _seeded(self) -> tuple[FFcDDWParameters, FFcSchedule]:
+        instance = _make_small_instance()
+        seed = _build_schedule(
+            instance,
+            [("j0", 5, 8), ("j1", 8, 10), ("j2", 10, 11), ("j3", 11, 13)],
+        )
+        return instance, _apply_postprocess(seed, instance)
+
+    def test_destroys_exactly_the_given_jobs(self) -> None:
+        instance, seed = self._seeded()
+
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    destroy_job_ids=("j3", "j1"),
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        assert record.result is not None
+        assert record.result.metrics is not None
+        assert set(record.result.metrics["selected_jobs"]) == {"j1", "j3"}
+        assert record.result.metrics["jd_count_eff"] == 2
+        assert record.result.metrics["destroy_selection"] == "explicit"
+
+    def test_zero_contrib_jobs_are_still_destroyed(self) -> None:
+        """The proof that ``select_jd_jobs`` was not consulted.
+
+        On this fixture every job contributes 0, so contribution-based
+        selection would return an empty set and take the ``jd_count_eff == 0``
+        early exit. An explicit set must solve anyway.
+        """
+        instance = _make_zero_contrib_instance()
+        seed = _apply_postprocess(
+            _build_schedule(
+                instance,
+                [("j0", 2, 5), ("j1", 5, 7), ("j2", 7, 8), ("j3", 8, 10)],
+            ),
+            instance,
+        )
+        contrib = compute_job_2_obj_contrib_map(seed, instance)
+        assert all(v == 0 for v in contrib.values()), (
+            f"fixture must have zero contribution everywhere, got {contrib}"
+        )
+
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    destroy_job_ids=("j0", "j2"),
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        assert record.result is not None
+        assert record.result.metrics is not None
+        assert record.result.metrics["jd_count_eff"] == 2
+        assert set(record.result.metrics["selected_jobs"]) == {"j0", "j2"}
+        assert record.result.metrics["destroy_selection"] == "explicit"
+
+    def test_unknown_job_raises(self) -> None:
+        instance, seed = self._seeded()
+
+        with pytest.raises(ValueError, match="not in instance"):
+            JobContribCpDispatcher().run(
+                AlgSpec(
+                    instance=instance,
+                    option=JobContribCpOption(
+                        destroy_job_ids=("j0", "nope"),
+                        cp_tl_seconds=5.0,
+                        solver_thread_cnt=1,
+                    ),
+                    ref_solution=seed,
+                )
+            )
+
+    def test_contribution_path_labels_itself(self) -> None:
+        instance, seed = self._seeded()
+
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    jd_count_target=1,
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        assert record.result is not None
+        assert record.result.metrics is not None
+        assert record.result.metrics["destroy_selection"] == "contribution"
+
+    def test_setup_seconds_is_reported_and_bounded(self) -> None:
+        """``setup_seconds`` measures model construction only, so it must be
+        non-negative and no larger than the whole run."""
+        instance, seed = self._seeded()
+
+        wall_start = time.monotonic()
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    destroy_job_ids=("j1",),
+                    cp_tl_seconds=5.0,
+                    solver_thread_cnt=1,
+                ),
+                ref_solution=seed,
+            )
+        )
+        wall_elapsed = time.monotonic() - wall_start
+
+        assert record.result is not None
+        assert record.result.metrics is not None
+        setup_seconds = record.result.metrics["setup_seconds"]
+        assert 0.0 <= setup_seconds <= wall_elapsed
+
+    def test_fallback_record_keeps_the_selection_label(self) -> None:
+        """A run that bails out to the incumbent must still say which rule
+        picked the destroy set — otherwise the metric is unreadable exactly
+        on the runs worth diagnosing."""
+        instance, seed = self._seeded()
+
+        record = JobContribCpDispatcher().run(
+            AlgSpec(
+                instance=instance,
+                option=JobContribCpOption(
+                    destroy_job_ids=("j1",),
+                    cp_tl_seconds=0.0,
+                    solver_thread_cnt=1,
+                ),
+                ref_solution=seed,
+            )
+        )
+
+        assert record.result is not None
+        assert record.result.metrics is not None
+        assert record.result.metrics.get("fallback") == "incumbent"
+        assert record.result.metrics["destroy_selection"] == "explicit"
+        assert record.result.metrics["setup_seconds"] >= 0.0
+
+
 class TestProfileFixBridging:
     """P3: profile fix bridging — A->X->B with X removed produces A->B arc."""
 

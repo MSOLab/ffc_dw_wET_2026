@@ -101,3 +101,37 @@ class TestJobContribCpOption:
 
         opt = JobContribCpOption(jd_count_target=1, solver_log_path_getter=my_getter)
         assert opt.solver_log_path_getter is my_getter
+
+
+class TestDestroySetXor:
+    """Exactly one of jd_count_target / destroy_job_ids selects the destroy set.
+
+    Reading the option alone must answer "what decides which jobs are
+    destroyed?", so neither "both" nor "neither" is allowed.
+    """
+
+    def test_neither_raises(self) -> None:
+        with pytest.raises(ValueError, match="Exactly one"):
+            JobContribCpOption()
+
+    def test_both_raises(self) -> None:
+        with pytest.raises(ValueError, match="Exactly one"):
+            JobContribCpOption(jd_count_target=1, destroy_job_ids=("j0",))
+
+    def test_jd_count_target_alone_is_accepted(self) -> None:
+        opt = JobContribCpOption(jd_count_target=2)
+        assert opt.jd_count_target == 2
+        assert opt.destroy_job_ids is None
+
+    def test_destroy_job_ids_alone_is_accepted(self) -> None:
+        opt = JobContribCpOption(destroy_job_ids=("j0", "j2"))
+        assert opt.destroy_job_ids == ("j0", "j2")
+        assert opt.jd_count_target is None
+
+    def test_empty_destroy_job_ids_raises(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            JobContribCpOption(destroy_job_ids=())
+
+    def test_duplicate_destroy_job_ids_raises(self) -> None:
+        with pytest.raises(ValueError, match="duplicates"):
+            JobContribCpOption(destroy_job_ids=("j0", "j1", "j0"))

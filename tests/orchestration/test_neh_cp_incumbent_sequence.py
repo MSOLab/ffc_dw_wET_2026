@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import pandas as pd
 import pytest
@@ -198,6 +199,49 @@ def test_diversity_diagnostic_logged_when_incumbent_exists(
     assert len(diag_lines) == 1
 
 
+def test_diagnostic_line_still_matches_the_analysis_script_regex(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``scripts/20260801/analyze_neh_pass_chain.py`` parses this line.
+
+    It requires ``dist_to_job_priority=`` and ``dist_to_prev_neh=`` to be
+    adjacent and in that order, so reformatting the log silently breaks every
+    pass-chain analysis. Kept in sync with that script's ``DIAG_RE``.
+    """
+    diag_re = re.compile(
+        r"(?P<step>neh_cp_\w+?_seq): seq source=(?P<mode>\w+) .*?"
+        r"dist_to_job_priority=(?P<job_priority>[\d.]+) "
+        r"dist_to_prev_neh=(?P<prev_neh>[\d.]+|N/A)"
+    )
+
+    caplog.set_level(logging.INFO)
+    _controller_with_incumbent("neh_cp_midpoint_seq").run()
+
+    matches = [m for msg in caplog.messages if (m := diag_re.search(msg))]
+    assert len(matches) == 1, "the pass-chain regex no longer matches the diag line"
+    assert matches[0].group("step") == "neh_cp_midpoint_seq"
+    assert matches[0].group("mode") == "midpoint"
+
+
+def test_job_batch_cp_diagnostic_is_excluded_from_the_neh_regex(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The shared sequence helper logs the same format for job_batch_cp.
+
+    That is deliberate, and so is the fact that ``neh_cp_\\w+?_seq`` does not
+    match it — the pass-chain analysis must keep counting NEH passes only.
+    """
+    diag_re = re.compile(r"(?P<step>neh_cp_\w+?_seq): seq source=")
+
+    caplog.set_level(logging.INFO)
+    _controller_with_incumbent("job_batch_cp_midpoint_seq").run()
+
+    diag_lines = [m for m in caplog.messages if "dist_to_job_priority=" in m]
+    assert len(diag_lines) == 1, "job_batch_cp must log the same diagnostic"
+    assert diag_lines[0].startswith("job_batch_cp_midpoint_seq: seq source=midpoint ")
+    assert not any(diag_re.search(m) for m in caplog.messages)
+
+
 # ── _step_log.yaml mapping format for new methods ────────────────────────────
 def test_step_log_yaml_mapping_format(
     tmp_path, monkeypatch: pytest.MonkeyPatch
@@ -216,6 +260,49 @@ def test_step_log_yaml_mapping_format(
     assert data["job_sequence_fallback"] is False
     assert data["job_sequence"] == list(_EXPECTED_SEQUENCE["neh_cp_completion_seq"])
     assert isinstance(data["steps"], list)
+
+
+def test_step_log_yaml_keeps_mapping_format_on_fallback(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``*_seq`` step that fell back still writes the mapping.
+
+    The plain-list format belongs to plain ``neh_cp`` only; branching on the
+    *outcome* instead of the request would drop ``job_sequence_fallback``
+    exactly on the runs where it is the thing worth reading.
+    """
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[{"method": "neh_cp_midpoint_seq"}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    log_path = tmp_path / "_step_log.yaml"
+    monkeypatch.setattr(
+        controller, "try_get_file_path_for_subroutine", lambda *a, **k: log_path
+    )
+
+    controller.run()
+
+    data = load_yaml(log_path)
+    assert isinstance(data, dict), "fallback must not degrade to the plain-list format"
+    assert data["job_sequence_fallback"] is True
+    assert data["job_sequence_source"] == "job_priority:weight-due-pos"
+    assert data["job_sequence_tiebreak"] is None
+    assert data["job_sequence_end_stage"] is None
+
+
+def test_plain_neh_cp_step_log_stays_a_list(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = _controller_with_incumbent("neh_cp")
+    log_path = tmp_path / "_step_log.yaml"
+    monkeypatch.setattr(
+        controller, "try_get_file_path_for_subroutine", lambda *a, **k: log_path
+    )
+
+    controller.run()
+
+    assert isinstance(load_yaml(log_path), list)
 
 
 def test_new_methods_pass_routix_flow_validator() -> None:

@@ -606,3 +606,106 @@ import 해서 쓴다.
   결과가 "국소성이 중요하다"로 나오면 그쪽과의 합류를 검토한다.
 - **`bottleneck` 모드 삭제**: 형제 문서 §8의 열린 결정. 이 계획은 새 별칭을 만들지
   않는 것으로 선반영했다.
+
+---
+
+## 10. 구현 결과 (2026-08-05)
+
+§3 단계 1–4 구현 완료. 단계 5(문서)와 §5 파일럿 config는 **미착수** — §10.5 참조.
+
+검증: `uv run ruff check` clean, `uv run pytest -q` → **981 passed**
+(구현 전 912 → 신규 69).
+
+### 10.1 계획대로 들어간 것
+
+| 계획 | 구현 |
+|---|---|
+| §2.2 명시적 destroy 집합 | `JobContribCpOption.destroy_job_ids`, `jd_count_target`과 XOR 검증 |
+| §2.2 metric | `destroy_selection: "explicit" \| "contribution"`, `setup_seconds` (solve 직전 경과) |
+| §2.3 신규 패키지 | `algorithm/job_batch_cp/{__init__,option,dispatcher,step_log}.py` |
+| §2.3 재사용 | `JobBatchCpDispatcher`가 배치마다 `JobContribCpOption`을 만들어 `JobContribCpDispatcher().run()` 호출 (조합, 하위 dispatcher 무수정) |
+| §2.4 수락 규칙 | 엄격 부등호 (`obj_after < obj_before - 1e-6`), 거부 시 `accepted=False`만 기록 |
+| §2.5 스텝 4개 | `job_batch_cp` / `_midpoint_seq` / `_first_stage_seq` / `_completion_seq`, 공통 코어 `_run_job_batch_cp`, `bottleneck` 없음 |
+| §2.5 파라미터 노출 | `seq_tiebreak`는 midpoint만, `seq_end_stage`는 midpoint·completion만, `apply_cumulative_tl` 미노출 |
+| §2.5 incumbent 부재 | `RuntimeError` (neh_cp의 fallback과 다른 정책) |
+| §2.6 순서 유도 공유 | `_resolve_job_sequence` + `_ResolvedJobSequence`로 추출, `require_incumbent` 플래그 하나가 두 스텝의 유일한 정책 차이 |
+| §2.7-3 | `log_search_progress=False` 고정, 미노출 |
+| §2.8 산출물 | `_step_log.yaml` 매핑 (`job_sequence_*` + `batch_size` / `batch_count` / `steps`) |
+| 스텝 계약 | `_register` 정확히 1회, `elapsed` 측정 직후 register, step-log 덤프는 register **이후** |
+
+### 10.2 계획과 다르게 결정한 것
+
+1. **`num_batches`의 이중 역할.** dispatcher에서 `batch_size = ceil(n / num_batches)`로
+   쓰이는 동시에, `resolve_per_step_tl`의 TL 분모로도 넘어간다. 두 값은 대체로
+   일치하지만 `n=10, num_batches=3`처럼 어긋날 수 있다(size=4 → 실제 3배치, 분모는 3).
+   현재 실험 arm은 `batch_size`만 쓰므로 그대로 두었다.
+2. **`jd_count_eff == 0` 조기 반환에는 `setup_seconds`를 싣지 않았다.** 그 경로엔
+   solve가 없어 "모델 구축 비용"이라는 의미가 성립하지 않는다. §7.4의 합산은
+   `.get()`으로 읽으면 된다.
+3. **`_metrics.yaml`은 존재하지 않는다** (§2.2의 서술은 부정확). 컨트롤러는
+   `AlgResult.metrics`를 yaml로 덤프하지 않는다. `destroy_selection`은 `main.log`의
+   `job_contrib_cp: destroy_selection=...` 라인과 `job_batch_cp`의 step log로 읽는다.
+
+### 10.3 리뷰에서 고친 것 (초안 → 현재)
+
+초안 구현에는 다음이 있었고, 전부 회귀 테스트와 함께 고쳤다.
+
+1. **`_run_neh_cp` 행동 변경 — §2.6 위반.** step-log 덤프 분기가
+   `if job_seq_source is None:` → `if resolved.sequence is None:`로 바뀌어 있었다.
+   `resolved.sequence`는 **fallback에서도 `None`**이라, `neh_cp_*_seq`를 incumbent
+   없이 돌리면 매핑 대신 평평한 리스트가 나가 `job_sequence_fallback` 키가 통째로
+   사라졌다. 요청(`job_seq_source`) 기준 분기로 되돌렸다.
+   회귀 테스트: `test_step_log_yaml_keeps_mapping_format_on_fallback`,
+   `test_plain_neh_cp_step_log_stays_a_list`.
+2. **progress_log 오프셋이 배치 *끝* 기준이었다.** `elapsed_since_loop`를 하위
+   dispatcher 반환 **후에** 재서 그 값으로 하위 진행점을 밀었다. §2.3-6의
+   "(배치 시작 − 루프 시작)"이 아니고 `neh_cp`
+   (`neh_cp/dispatcher.py:289`, `value_recorder.time_started - start_elapsed`)와도
+   달라, 진행점이 run 자신의 종료 항목보다 뒤로 밀려 **로그가 비단조**가 됐다.
+   §7.1의 `build_step_registrations` 분석면이 이 로그를 직접 파싱하므로 실험 결론에
+   영향이 갔을 값이다. `batch_start_offset`으로 교체.
+   회귀 테스트: `test_entries_are_monotonic_in_the_loop_frame` (되돌리면 실패 확인함).
+3. **`except RuntimeError: continue`가 배치 예외를 삼켰다.** MODEL_INVALID와
+   `error_if_infeasible=True`가 던지는 버그 신호까지 함께 삼켜, 깨진 모델이
+   "개선 없는 incumbent"로 위장됐다. 제거하고 전파시킨다.
+   회귀 테스트: `test_sub_dispatcher_error_propagates`.
+4. **하위 spec에 `stop_predicate=None`을 넘겼다.** §2.3-6대로 `spec.stop_predicate`를
+   전달한다 (현재 하위 dispatcher가 읽지 않더라도 배선은 계획대로).
+   회귀 테스트: `test_stop_predicate_is_forwarded_to_the_sub_dispatcher`.
+5. **`makespan` 추출이 `metrics is not None` 안에 중첩**돼 있어, metrics가 없고
+   schedule만 있는 기록에서 makespan이 갱신되지 않았다. 분리.
+6. **`_incumbent_fallback_record`에 `destroy_selection` / `setup_seconds`가 없었다.**
+   UNKNOWN·INFEASIBLE·budget-exhausted로 빠지면 §2.2가 노린 관측이 사라진다 —
+   정작 진단이 필요한 run에서. 세 호출부 모두에 실었다.
+   회귀 테스트: `test_fallback_record_keeps_the_selection_label`.
+   같은 diff에서 지워졌던 `# int(): FFcSchedule.makespan can be a numpy scalar` 주석도
+   복구했다.
+
+### 10.4 테스트 (신규 69개)
+
+| 파일 | 덮는 것 |
+|---|---|
+| `tests/algorithm/job_contrib_cp/test_option.py` | XOR 6케이스 (둘 다 없음 / 둘 다 / 각각 단독 / 빈 튜플 / 중복) |
+| `tests/algorithm/job_contrib_cp/test_dispatcher.py` | 지정 job만 destroy, **기여도 0인 job도 destroy**(= `select_jd_jobs` 미경유의 증거), 인스턴스 밖 job → `ValueError`, `destroy_selection` 양쪽 라벨, `setup_seconds` 범위, fallback 기록의 라벨 보존 |
+| `tests/algorithm/job_batch_cp/test_option.py` | 검증 규칙 8케이스 |
+| `tests/algorithm/job_batch_cp/test_dispatcher.py` | 전제조건(ref_solution/타입/permutation 3종), 분할 `[3,3,3,1]`·`num_batches=2 → [5,5]`, 배치가 **job_sequence 순서**를 따름, **커버리지 불변식**(합집합=전 job, 중복 0), 수락 규칙 3종(악화/동률 거부·개선 수락) + 다음 배치에 갱신된 incumbent 전달, progress 단조성·종료 항목, 데드라인(만료/중도)·stop_predicate·예외 전파, step log 필드, **실 CP sweep 1개**(obj ≤ seed) |
+| `tests/orchestration/test_job_batch_cp_step.py` | 네 메서드 순서 배선(3-stage fixture, 네 순서 pairwise distinct), `seq_tiebreak`/`seq_end_stage`가 실제로 순서를 바꿈, incumbent 부재 → `RuntimeError` ×4, `batch_size` 표현식 4케이스, `_register` 1회 + elapsed가 dispatcher 소요 포함, routix 검증, `_step_log.yaml` 형태 2종, 컨트롤러 경계에서의 단조성 |
+| `tests/orchestration/test_neh_cp_incumbent_sequence.py` | (§3 단계 3) `DIAG_RE` 매치 유지, `job_batch_cp`의 같은 형식 진단 라인이 **그 정규식에 걸리지 않음**, fallback step-log 매핑 유지, 평 `neh_cp`는 리스트 유지 |
+
+기존 `test_neh_cp_incumbent_sequence.py` / `test_neh_cp_stopping.py` /
+`test_controller.py`는 **수정 없이** 통과 — §2.6 리팩터의 합격 기준.
+
+### 10.5 남은 작업
+
+- **§3 단계 5 (문서)**: `docs/algorithms/job_batch_cp.md`, `README.md:27` 스텝 표 4행,
+  `job_contrib_cp`/`sw_cp` 문서와의 상호 참조, `TODO.md`에 destroy-repair 코어 추출
+  (§2.1 대안 / §9) 기록 — **전부 미착수**.
+- **§5 파일럿 config** `metadata/20260804/job_batch_cp_pilot.yaml` — 미작성.
+  §5의 판정 기준 4개(setup 비중 > 0.35, 데드라인 미완주율, `accepted=False` 비율,
+  NEH 앵커 대비)는 그대로 유효하다.
+- **§6 본 실험 config**: `metadata/20260804/job_batch_cp_compare.yaml`이 작성돼
+  있으나 §6.1과 **arm 구성이 다르다** — 2 arm(`completion3_seq`, `midpoint3_seq`,
+  둘 다 `seq_end_stage: -2`, `batch_size: 15`)이고 §6.1의 arm 2(`job_priority`)와
+  arm 4(**동일-run NEH 앵커**)가 없다. 앵커가 없으면 §7.2의 주 대비(arm1 − arm4)를
+  같은 run 안에서 낼 수 없고 교차 run 노이즈 ±0.45 %p를 떠안는다. 파일럿 판정 후
+  arm 구성을 확정할 것.

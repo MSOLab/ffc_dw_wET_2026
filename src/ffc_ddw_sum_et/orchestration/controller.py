@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Literal, Sequence
 
@@ -41,6 +42,10 @@ from ffc_ddw_sum_et.algorithm.fam import FAMDispatcher, FAMOption
 from ffc_ddw_sum_et.algorithm.flip_makespan_cp import (
     FlipMakespanCpDispatcher,
     FlipMakespanCpOption,
+)
+from ffc_ddw_sum_et.algorithm.job_batch_cp import (
+    JobBatchCpDispatcher,
+    JobBatchCpOption,
 )
 from ffc_ddw_sum_et.algorithm.job_contrib_cp import (
     JobContribCpDispatcher,
@@ -153,6 +158,22 @@ def _best_valid_lb(bounds: Iterable[float | None]) -> float | None:
     """
     valid = [float(b) for b in bounds if b is not None]
     return max(valid) if valid else None
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedJobSequence:
+    """Result of ``_resolve_job_sequence``.
+
+    ``sequence`` is the resolved custom job sequence, or ``None`` when
+    ``job_seq_source is None`` (meaning "proceed with job_priority rule").
+    """
+
+    sequence: tuple[str, ...] | None
+    priority_sequence: tuple[str, ...]
+    source_label: str
+    is_fallback: bool
+    end_stage: int | None
+    tiebreak: str | None
 
 
 class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
@@ -2432,6 +2453,148 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             seq_end_stage=seq_end_stage,
         )
 
+    def _resolve_job_sequence(
+        self,
+        *,
+        step_label: str,
+        job_seq_source: ScheduleSeqSource | None,
+        job_priority: NehCpJobPriority,
+        seq_tiebreak: ScheduleSeqSource | None,
+        seq_end_stage: int,
+        require_incumbent: bool,
+    ) -> _ResolvedJobSequence:
+        priority_sequence = neh_cp_job_sequence(self.instance, job_priority)
+        rank_map = {job_id: idx for idx, job_id in enumerate(priority_sequence)}
+
+        if job_seq_source is None:
+            return _ResolvedJobSequence(
+                sequence=None,
+                priority_sequence=tuple(priority_sequence),
+                source_label=f"job_priority:{job_priority}",
+                is_fallback=False,
+                end_stage=None,
+                tiebreak=None,
+            )
+
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            if require_incumbent:
+                raise RuntimeError(
+                    f"{step_label} requires an incumbent schedule; chain it "
+                    "after a seeding subroutine such as "
+                    "calc_mcf_lb_and_derive_full_sch."
+                )
+            self.logger.warning(
+                "%s: no incumbent schedule (job_seq_source=%s); "
+                "falling back to job_priority='%s'. "
+                "Chain this step after a seeding subroutine such as "
+                "calc_mcf_lb_and_derive_full_sch.",
+                step_label,
+                job_seq_source,
+                job_priority,
+            )
+            return _ResolvedJobSequence(
+                sequence=None,
+                priority_sequence=tuple(priority_sequence),
+                source_label=f"job_priority:{job_priority}",
+                is_fallback=True,
+                end_stage=None,
+                tiebreak=None,
+            )
+
+        seq = schedule_job_sequence(
+            incumbent.schedule,
+            job_seq_source,
+            tiebreak_source=seq_tiebreak,
+            tiebreak_rank=rank_map,
+            end_stage_index=seq_end_stage,
+        )
+
+        instance_jobs = set(self.instance.job_id_list)
+        seq_jobs = set(seq)
+        if seq_jobs != instance_jobs:
+            self.logger.warning(
+                "%s: derived sequence has %d jobs vs instance's %d; correcting.",
+                step_label,
+                len(seq),
+                len(instance_jobs),
+            )
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for j in seq:
+                if j in instance_jobs and j not in seen:
+                    deduped.append(j)
+                    seen.add(j)
+            missing = [
+                j for j in priority_sequence if j not in seen and j in instance_jobs
+            ]
+            seq = deduped + missing
+
+        used_sequence = list(seq)
+
+        all_sources: list[ScheduleSeqSource] = [
+            "midpoint",
+            "first_stage",
+            "completion",
+        ]
+        all_seqs: dict[str, list[str]] = {}
+        for src in all_sources:
+            all_seqs[src] = schedule_job_sequence(
+                incumbent.schedule,
+                src,
+                tiebreak_rank=rank_map,
+            )
+
+        dist_to_priority = normalized_mean_rank_distance(priority_sequence, list(seq))
+        prev_str = "N/A"
+        if self._last_neh_job_sequence is not None:
+            dist_prev = normalized_mean_rank_distance(
+                self._last_neh_job_sequence, list(seq)
+            )
+            prev_str = f"{dist_prev:.4f}"
+        head = list(seq)[:5]
+
+        same_src_dist_str = ""
+        if seq_end_stage != -1:
+            same_src_seq = schedule_job_sequence(
+                incumbent.schedule,
+                job_seq_source,
+                tiebreak_source=seq_tiebreak,
+                tiebreak_rank=rank_map,
+                end_stage_index=-1,
+            )
+            same_src_dist = normalized_mean_rank_distance(same_src_seq, list(seq))
+            same_src_dist_str = f" dist_to_same_source_last_stage={same_src_dist:.4f}"
+
+        self.logger.info(
+            "%s: seq source=%s tiebreak=%s end_stage=%d dist_to_midpoint=%.4f "
+            "dist_to_first_stage=%.4f "
+            "dist_to_completion=%.4f dist_to_job_priority=%.4f "
+            "dist_to_prev_neh=%s head=%s%s",
+            step_label,
+            job_seq_source,
+            seq_tiebreak if seq_tiebreak is not None else "default",
+            seq_end_stage,
+            normalized_mean_rank_distance(all_seqs["midpoint"], list(seq)),
+            normalized_mean_rank_distance(all_seqs["first_stage"], list(seq)),
+            normalized_mean_rank_distance(all_seqs["completion"], list(seq)),
+            dist_to_priority,
+            prev_str,
+            head,
+            same_src_dist_str,
+        )
+
+        self._last_neh_job_sequence = used_sequence
+
+        return _ResolvedJobSequence(
+            sequence=tuple(seq),
+            priority_sequence=tuple(priority_sequence),
+            source_label=str(job_seq_source),
+            is_fallback=False,
+            end_stage=seq_end_stage,
+            tiebreak=seq_tiebreak if seq_tiebreak is not None else None,
+        )
+
     def _run_neh_cp(
         self,
         *,
@@ -2523,115 +2686,17 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             f"{obj_lb:.2f}" if obj_lb is not None else "None",
         )
 
-        priority_sequence = neh_cp_job_sequence(instance, job_priority)
-        rank_map = {job_id: idx for idx, job_id in enumerate(priority_sequence)}
-
-        custom_job_sequence: tuple[str, ...] | None = None
-        used_sequence: list[str] | None = None
-        sequence_fallback = True
-        if job_seq_source is not None:
-            incumbent = self.solution_manager.get_incumbent()
-            if incumbent is None or incumbent.schedule is None:
-                self.logger.warning(
-                    "%s: no incumbent schedule (job_seq_source=%s); "
-                    "falling back to job_priority='%s'. "
-                    "Chain this step after a seeding subroutine such as "
-                    "calc_mcf_lb_and_derive_full_sch.",
-                    step_label,
-                    job_seq_source,
-                    job_priority,
-                )
-            else:
-                seq = schedule_job_sequence(
-                    incumbent.schedule,
-                    job_seq_source,
-                    tiebreak_source=seq_tiebreak,
-                    tiebreak_rank=rank_map,
-                    end_stage_index=end_stage_index,
-                )
-                instance_jobs = set(instance.job_id_list)
-                seq_jobs = set(seq)
-                if seq_jobs != instance_jobs:
-                    self.logger.warning(
-                        "%s: derived sequence has %d jobs vs instance's %d; "
-                        "correcting.",
-                        step_label,
-                        len(seq),
-                        len(instance_jobs),
-                    )
-                    seen: set[str] = set()
-                    deduped: list[str] = []
-                    for j in seq:
-                        if j in instance_jobs and j not in seen:
-                            deduped.append(j)
-                            seen.add(j)
-                    missing = [
-                        j
-                        for j in priority_sequence
-                        if j not in seen and j in instance_jobs
-                    ]
-                    seq = deduped + missing
-                custom_job_sequence = tuple(seq) if seq else None
-                used_sequence = list(seq)
-                sequence_fallback = False
-
-                all_sources: list[ScheduleSeqSource] = [
-                    "midpoint",
-                    "first_stage",
-                    "completion",
-                ]
-                all_seqs: dict[str, list[str]] = {}
-                for src in all_sources:
-                    all_seqs[src] = schedule_job_sequence(
-                        incumbent.schedule,
-                        src,
-                        tiebreak_rank=rank_map,
-                    )
-
-                dist_to_priority = normalized_mean_rank_distance(
-                    priority_sequence, list(seq)
-                )
-                prev_str = "N/A"
-                if self._last_neh_job_sequence is not None:
-                    dist_prev = normalized_mean_rank_distance(
-                        self._last_neh_job_sequence, list(seq)
-                    )
-                    prev_str = f"{dist_prev:.4f}"
-                head = list(seq)[:5]
-
-                same_src_dist_str = ""
-                if end_stage_index != -1:
-                    same_src_seq = schedule_job_sequence(
-                        incumbent.schedule,
-                        job_seq_source,
-                        tiebreak_source=seq_tiebreak,
-                        tiebreak_rank=rank_map,
-                        end_stage_index=-1,
-                    )
-                    same_src_dist = normalized_mean_rank_distance(
-                        same_src_seq, list(seq)
-                    )
-                    same_src_dist_str = (
-                        f" dist_to_same_source_last_stage={same_src_dist:.4f}"
-                    )
-
-                self.logger.info(
-                    "%s: seq source=%s tiebreak=%s end_stage=%d dist_to_midpoint=%.4f "
-                    "dist_to_first_stage=%.4f "
-                    "dist_to_completion=%.4f dist_to_job_priority=%.4f "
-                    "dist_to_prev_neh=%s head=%s%s",
-                    step_label,
-                    job_seq_source,
-                    seq_tiebreak if seq_tiebreak is not None else "default",
-                    end_stage_index,
-                    normalized_mean_rank_distance(all_seqs["midpoint"], list(seq)),
-                    normalized_mean_rank_distance(all_seqs["first_stage"], list(seq)),
-                    normalized_mean_rank_distance(all_seqs["completion"], list(seq)),
-                    dist_to_priority,
-                    prev_str,
-                    head,
-                    same_src_dist_str,
-                )
+        resolved = self._resolve_job_sequence(
+            step_label=step_label,
+            job_seq_source=job_seq_source,
+            job_priority=job_priority,
+            seq_tiebreak=seq_tiebreak,
+            seq_end_stage=end_stage_index,
+            require_incumbent=False,
+        )
+        priority_sequence = list(resolved.priority_sequence)
+        custom_job_sequence = resolved.sequence or None
+        sequence_fallback = resolved.is_fallback
 
         option = NehCpOption(
             job_priority=job_priority,
@@ -2704,37 +2769,318 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             if step_log:
                 log_path = self.try_get_file_path_for_subroutine("_step_log.yaml")
                 if log_path is not None:
+                    # Branch on the *request*, not on the outcome: a step that
+                    # asked for an incumbent-derived order still writes the
+                    # mapping (with job_sequence_fallback: true) when no
+                    # incumbent was there to derive it from.
                     if job_seq_source is None:
                         dump_yaml(
                             [entry.as_dict() for entry in step_log],
                             log_path,
                         )
                     else:
-                        source_label = (
-                            job_seq_source
-                            if not sequence_fallback
-                            else f"job_priority:{job_priority}"
-                        )
                         dump_yaml(
                             {
-                                "job_sequence_source": source_label,
-                                "job_sequence_tiebreak": seq_tiebreak
-                                if not sequence_fallback and seq_tiebreak is not None
-                                else None,
-                                "job_sequence_end_stage": end_stage_index
+                                "job_sequence_source": resolved.source_label,
+                                "job_sequence_tiebreak": resolved.tiebreak,
+                                "job_sequence_end_stage": resolved.end_stage
                                 if not sequence_fallback
                                 else None,
                                 "job_sequence_fallback": sequence_fallback,
                                 "job_sequence": custom_job_sequence
                                 if custom_job_sequence is not None
-                                else list(priority_sequence),
+                                else priority_sequence,
                                 "steps": [entry.as_dict() for entry in step_log],
                             },
                             log_path,
                         )
 
-        if used_sequence is not None:
-            self._last_neh_job_sequence = used_sequence
+        return report
+
+    def job_batch_cp(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        batch_size: int | str = 1,
+        num_batches: int | None = None,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
+        return self._run_job_batch_cp(
+            job_seq_source=None,
+            step_label="job_batch_cp",
+            job_priority=job_priority,
+            batch_size=batch_size,
+            num_batches=num_batches,
+            pf_method=pf_method,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            solver_thread_cnt=solver_thread_cnt,
+            horizon_multiplier=horizon_multiplier,
+            error_if_infeasible=error_if_infeasible,
+        )
+
+    def job_batch_cp_midpoint_seq(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        batch_size: int | str = 1,
+        num_batches: int | None = None,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+        seq_tiebreak: ScheduleSeqSource | None = None,
+        seq_end_stage: int = -1,
+    ) -> SubroutineReport:
+        """Job-batch CP with job sequence from incumbent via midpoint sort."""
+        return self._run_job_batch_cp(
+            job_seq_source="midpoint",
+            step_label="job_batch_cp_midpoint_seq",
+            job_priority=job_priority,
+            batch_size=batch_size,
+            num_batches=num_batches,
+            pf_method=pf_method,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            solver_thread_cnt=solver_thread_cnt,
+            horizon_multiplier=horizon_multiplier,
+            error_if_infeasible=error_if_infeasible,
+            seq_tiebreak=seq_tiebreak,
+            seq_end_stage=seq_end_stage,
+        )
+
+    def job_batch_cp_first_stage_seq(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        batch_size: int | str = 1,
+        num_batches: int | None = None,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+    ) -> SubroutineReport:
+        """Job-batch CP with job sequence from incumbent via first-stage start sort."""
+        return self._run_job_batch_cp(
+            job_seq_source="first_stage",
+            step_label="job_batch_cp_first_stage_seq",
+            job_priority=job_priority,
+            batch_size=batch_size,
+            num_batches=num_batches,
+            pf_method=pf_method,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            solver_thread_cnt=solver_thread_cnt,
+            horizon_multiplier=horizon_multiplier,
+            error_if_infeasible=error_if_infeasible,
+        )
+
+    def job_batch_cp_completion_seq(
+        self,
+        job_priority: NehCpJobPriority = "weight-due-pos",
+        batch_size: int | str = 1,
+        num_batches: int | None = None,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+        seq_end_stage: int = -1,
+    ) -> SubroutineReport:
+        """Job-batch CP with job sequence from incumbent via completion sort."""
+        return self._run_job_batch_cp(
+            job_seq_source="completion",
+            step_label="job_batch_cp_completion_seq",
+            job_priority=job_priority,
+            batch_size=batch_size,
+            num_batches=num_batches,
+            pf_method=pf_method,
+            cp_tl=cp_tl,
+            total_timelimit=total_timelimit,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            solver_thread_cnt=solver_thread_cnt,
+            horizon_multiplier=horizon_multiplier,
+            error_if_infeasible=error_if_infeasible,
+            seq_end_stage=seq_end_stage,
+        )
+
+    def _run_job_batch_cp(
+        self,
+        *,
+        job_seq_source: ScheduleSeqSource | None,
+        step_label: str,
+        job_priority: NehCpJobPriority,
+        batch_size: int | str = 1,
+        num_batches: int | None = None,
+        pf_method: PFMethod = "PF1",
+        cp_tl: float | str | None = None,
+        total_timelimit: float | str | None = None,
+        batch_tl_mode: BatchTlMode = "constant",
+        batch_tl_offset_seconds: float = 0.01,
+        solver_thread_cnt: int = 1,
+        horizon_multiplier: float = 1.25,
+        error_if_infeasible: bool = False,
+        seq_tiebreak: ScheduleSeqSource | None = None,
+        seq_end_stage: int = -1,
+    ) -> SubroutineReport:
+        start_elapsed = time.monotonic()
+        if self.is_stopping_condition():
+            return self._make_stop_report(start_elapsed)
+
+        incumbent = self.solution_manager.get_incumbent()
+        if incumbent is None or incumbent.schedule is None:
+            raise RuntimeError(
+                f"{step_label} requires an incumbent schedule; chain it after a "
+                "seeding subroutine such as calc_mcf_lb_and_derive_full_sch."
+            )
+
+        instance = self.instance
+        n = instance.job_count
+        c = instance.stage_count
+        m = instance.last_stage_mc_count
+
+        end_stage_index = seq_end_stage
+        if abs(end_stage_index) > c:
+            self.logger.warning(
+                "%s: seq_end_stage=%d out of range for %d-stage instance; "
+                "clamping to -%d.",
+                step_label,
+                seq_end_stage,
+                c,
+                c,
+            )
+            end_stage_index = -c
+
+        cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
+        total_timelimit_seconds = (
+            resolve_value_expr(total_timelimit, n, c, m)
+            if total_timelimit is not None
+            else None
+        )
+        batch_size_resolved = max(
+            1, int(math.ceil(resolve_value_expr(batch_size, n, c, m)))
+        )
+        self.logger.info(
+            "%s: batch_size=%r -> %d (n=%d, c=%d, m=%d)",
+            step_label,
+            batch_size,
+            batch_size_resolved,
+            n,
+            c,
+            m,
+        )
+
+        remaining_sec = self.timer.get_remaining_sec(self.stopping_criteria.timelimit)
+        wall_clock_deadline_sec = time.monotonic() + remaining_sec
+        self.logger.info(
+            "%s: threading wall_clock_deadline=%.3fs (remaining=%.3fs)",
+            step_label,
+            wall_clock_deadline_sec,
+            remaining_sec,
+        )
+
+        resolved = self._resolve_job_sequence(
+            step_label=step_label,
+            job_seq_source=job_seq_source,
+            job_priority=job_priority,
+            seq_tiebreak=seq_tiebreak,
+            seq_end_stage=end_stage_index,
+            require_incumbent=True,
+        )
+        job_sequence = (
+            resolved.sequence
+            if resolved.sequence is not None
+            else resolved.priority_sequence
+        )
+
+        option = JobBatchCpOption(
+            job_sequence=job_sequence,
+            batch_size=batch_size_resolved,
+            num_batches=num_batches,
+            pf_method=pf_method,
+            cp_tl_seconds=cp_tl_seconds,
+            total_timelimit_seconds=total_timelimit_seconds,
+            batch_tl_mode=batch_tl_mode,
+            batch_tl_offset_seconds=batch_tl_offset_seconds,
+            horizon_multiplier=horizon_multiplier,
+            wall_clock_deadline_sec=wall_clock_deadline_sec,
+            solver_thread_cnt=solver_thread_cnt,
+            time_factor=self.time_factor,
+            error_if_infeasible=error_if_infeasible,
+        )
+        spec = AlgSpec(
+            instance=instance,
+            option=option,
+            ref_solution=incumbent.schedule,
+            logger=self.logger,
+            stop_predicate=self.is_stopping_condition,
+        )
+        record = JobBatchCpDispatcher().run(spec)
+
+        elapsed = time.monotonic() - start_elapsed
+        result = record.result
+        obj_value = (
+            float(result.obj_value)
+            if result is not None and result.obj_value is not None
+            else None
+        )
+        report = SubroutineReport(
+            elapsed_time=elapsed,
+            obj_value=obj_value,
+            obj_bound=None,
+        )
+        progress_log = record.progress_log or ()
+        if result is not None and result.schedule is not None:
+            self._register(
+                report,
+                FFcDDWSolution(schedule=result.schedule, obj_value=obj_value),
+                progress_log=progress_log,
+            )
+        else:
+            self._register(report, None, progress_log=progress_log)
+
+        if result is not None and result.metrics is not None:
+            step_log = result.metrics.get("step_log")
+            if step_log:
+                log_path = self.try_get_file_path_for_subroutine("_step_log.yaml")
+                if log_path is not None:
+                    dump_yaml(
+                        {
+                            "job_sequence_source": resolved.source_label,
+                            "job_sequence_tiebreak": resolved.tiebreak,
+                            "job_sequence_end_stage": resolved.end_stage
+                            if not resolved.is_fallback
+                            else None,
+                            "job_sequence_fallback": resolved.is_fallback,
+                            "job_sequence": list(job_sequence),
+                            "batch_size": batch_size_resolved,
+                            "batch_count": result.metrics.get("batch_count"),
+                            "steps": [entry.as_dict() for entry in step_log],
+                        },
+                        log_path,
+                    )
 
         return report
 
