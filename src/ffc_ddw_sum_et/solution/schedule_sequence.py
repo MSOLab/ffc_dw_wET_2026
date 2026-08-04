@@ -33,6 +33,7 @@ def schedule_job_sequence(
     *,
     tiebreak_source: ScheduleSeqSource | None = None,
     tiebreak_rank: Mapping[str, int] | None = None,
+    end_stage_index: int = -1,
 ) -> list[str]:
     """Order ``schedule``'s jobs by a schedule-derived sort key.
 
@@ -51,6 +52,16 @@ def schedule_job_sequence(
     pins all three cases; the experiment that rests on this algebra is
     ``plans/experiment/20260803/neh_cp_midpoint_tiebreak.md``.
 
+    ``end_stage_index`` selects which stage's end time is used as ``ls``
+    in the primary and secondary keys. It is a negative index into
+    ``schedule.stages``: ``-1`` (default) = last stage, ``-2`` = second
+    to last, etc. ``-1`` is byte-identical to the previous behaviour.
+    ``midpoint``'s and ``completion``'s tie-break degeneracy argument
+    does **not** carry over to a different ``end_stage_index``: the
+    (last-1)-stage end ``ls'`` is not monotonic in the last-stage end
+    ``ls`` because ``insert_idle_time`` inserts per-job varying idle only
+    on the last stage, so ``ls'`` and ``ls`` can rank jobs differently.
+
     Jobs whose operations the ``source`` needs are missing from
     ``schedule`` are **skipped**, so the result may be shorter than
     ``schedule.jobs``. ``FFcSchedule.remove_jobs`` /
@@ -60,6 +71,13 @@ def schedule_job_sequence(
     permutation (notably the ``neh_cp_*_seq`` steps) append the skipped
     jobs themselves.
     """
+    num_stages = len(schedule.stages)
+    if not (-num_stages <= end_stage_index <= -1):
+        raise ValueError(
+            f"end_stage_index={end_stage_index} out of range "
+            f"[-{num_stages}, -1] for a {num_stages}-stage schedule"
+        )
+
     if tiebreak_source is not None:
         if tiebreak_source == source:
             raise ValueError(f"tiebreak_source must differ from source ({source})")
@@ -80,12 +98,12 @@ def schedule_job_sequence(
     )
     fallback_idx = len(jobs)
     first_stage = schedule.stages[0]
-    last_stage = schedule.stages[-1]
+    end_stage = schedule.stages[end_stage_index]
 
     ts_tuples: list[tuple] = []
     for job_id in jobs:
         fs_start = start_map.get((job_id, first_stage), None)
-        ls_end = end_map.get((job_id, last_stage), None)
+        ls_end = end_map.get((job_id, end_stage), None)
         rank = idx_map.get(job_id, fallback_idx)
 
         if fs_start is None or ls_end is None:

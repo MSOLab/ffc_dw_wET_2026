@@ -34,12 +34,21 @@ def test_schedule_sequence_importable() -> None:
 
 
 def _run(
-    schedule: FFcSchedule, source: str, *, tiebreak_source=None, tiebreak_rank=None
+    schedule: FFcSchedule,
+    source: str,
+    *,
+    tiebreak_source=None,
+    tiebreak_rank=None,
+    end_stage_index=-1,
 ):
     from ffc_ddw_sum_et.solution.schedule_sequence import schedule_job_sequence
 
     return schedule_job_sequence(
-        schedule, source, tiebreak_source=tiebreak_source, tiebreak_rank=tiebreak_rank
+        schedule,
+        source,
+        tiebreak_source=tiebreak_source,
+        tiebreak_rank=tiebreak_rank,
+        end_stage_index=end_stage_index,
     )
 
 
@@ -271,3 +280,128 @@ def test_tiebreak_source_equals_source_raises_valueerror() -> None:
     sch = _make_schedule(ops)
     with pytest.raises(ValueError, match="must differ"):
         _run(sch, "midpoint", tiebreak_source="midpoint")
+
+
+# ── end_stage_index ───────────────────────────────────────────────────────────
+def test_completion_end_stage_minus2_uses_last1_end() -> None:
+    """end_stage_index=-2 sorts by the (last-1) stage end time, not the last."""
+    ops = [
+        ("s0", "m0", "j0", 0, 2),
+        ("s0", "m0", "j1", 4, 6),
+        ("s0", "m0", "j2", 8, 10),
+        ("s1", "m0", "j2", 10, 12),
+        ("s1", "m0", "j1", 12, 14),
+        ("s1", "m0", "j0", 14, 16),
+        ("s2", "m0", "j0", 16, 18),
+        ("s2", "m0", "j1", 18, 20),
+        ("s2", "m0", "j2", 20, 22),
+    ]
+    sch = _make_schedule(ops)
+    assert _run(sch, "completion", end_stage_index=-2) == ["j2", "j1", "j0"]
+    assert _run(sch, "completion", end_stage_index=-1) == ["j0", "j1", "j2"]
+
+
+def test_midpoint_end_stage_minus2_tiebreak_completion() -> None:
+    """midpoint with end_stage_index=-2 and tiebreak_source='completion'
+    reverses tie groups (same algebra as with end_stage_index=-1)."""
+    ops = [
+        ("s0", "m0", "j0", 0, 2),
+        ("s0", "m0", "j1", 2, 4),
+        ("s1", "m0", "j1", 4, 8),
+        ("s1", "m0", "j0", 8, 10),
+        ("s2", "m0", "j0", 10, 12),
+        ("s2", "m0", "j1", 12, 14),
+    ]
+    sch = _make_schedule(ops)
+    assert _run(sch, "midpoint", end_stage_index=-2) == ["j0", "j1"]
+    assert _run(sch, "midpoint", end_stage_index=-2, tiebreak_source="completion") == [
+        "j1",
+        "j0",
+    ]
+
+
+def test_end_stage_index_minus1_is_default() -> None:
+    """end_stage_index=-1 is byte-identical to the old default."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s0", "m0", "j1", 5, 8),
+        ("s1", "m0", "j1", 8, 10),
+        ("s1", "m1", "j0", 3, 10),
+    ]
+    sch = _make_schedule(ops)
+    assert _run(sch, "completion", end_stage_index=-1) == _run(sch, "completion")
+
+
+def test_end_stage_index_zero_raises_valueerror() -> None:
+    """end_stage_index=0 (non-negative) raises ValueError."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s1", "m0", "j0", 3, 5),
+    ]
+    sch = _make_schedule(ops)
+    with pytest.raises(ValueError, match="out of range"):
+        _run(sch, "completion", end_stage_index=0)
+
+
+def test_end_stage_index_positive_raises_valueerror() -> None:
+    """end_stage_index=1 raises ValueError."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s1", "m0", "j0", 3, 5),
+    ]
+    sch = _make_schedule(ops)
+    with pytest.raises(ValueError, match="out of range"):
+        _run(sch, "completion", end_stage_index=1)
+
+
+def test_end_stage_index_below_range_raises_valueerror() -> None:
+    """end_stage_index=-(c+1) raises ValueError."""
+    ops = [
+        ("s0", "m0", "j0", 0, 3),
+        ("s1", "m0", "j0", 3, 5),
+    ]
+    sch = _make_schedule(ops)
+    assert len(sch.stages) == 2
+    with pytest.raises(ValueError, match="out of range"):
+        _run(sch, "completion", end_stage_index=-3)
+
+
+def test_end_stage_minus2_skips_jobs_without_ops() -> None:
+    """A job with no op on the (last-1) stage is skipped."""
+    sch = FFcSchedule(
+        jobs=["j0", "j1"],
+        stages=["s0", "s1", "s2"],
+        machines_per_stage={"s0": ["m0"], "s1": ["m0"], "s2": ["m0"]},
+    )
+    sch.add_ops_times_2_mc("s0", "m0", "j0", 0, 2)
+    sch.add_ops_times_2_mc("s0", "m0", "j1", 2, 4)
+    sch.add_ops_times_2_mc("s1", "m0", "j0", 2, 5)
+    sch.add_ops_times_2_mc("s2", "m0", "j0", 5, 7)
+    sch.add_ops_times_2_mc("s2", "m0", "j1", 7, 9)
+    assert _run(sch, "completion", end_stage_index=-2) == ["j0"]
+
+
+def test_non_alias_completion_end_stage_minus2_vs_minus1() -> None:
+    """completion with end_stage_index=-2 is not an alias of end_stage_index=-1.
+    Builds a schedule where ls' and ls rank jobs differently, pinning the
+    algebraic result that ls' is not monotonic in ls once idle time varies
+    per job on the last stage.
+    """
+    ops = [
+        ("s0", "m0", "j0", 0, 2),
+        ("s0", "m0", "j1", 4, 6),
+        ("s0", "m0", "j2", 8, 10),
+        ("s1", "m0", "j2", 10, 12),
+        ("s1", "m0", "j1", 12, 14),
+        ("s1", "m0", "j0", 14, 16),
+        ("s2", "m0", "j1", 16, 20),
+        ("s2", "m0", "j0", 20, 25),
+        ("s2", "m0", "j2", 25, 30),
+    ]
+    sch = _make_schedule(ops)
+    seq_minus2 = _run(sch, "completion", end_stage_index=-2)
+    seq_minus1 = _run(sch, "completion", end_stage_index=-1)
+    assert seq_minus2 != seq_minus1, (
+        f"completion(end=-2)={seq_minus2} must differ from "
+        f"completion(end=-1)={seq_minus1}"
+    )
