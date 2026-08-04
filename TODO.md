@@ -723,3 +723,107 @@ separate step/algorithm and the plan explicitly scoped it out.
 
 **When to act:** when targeting `sw_cp` specifically, or when the global
 LB contamination is observed on a `sw_cp`-containing run.
+
+## `job_batch_cp` — §3 step 5 documentation not written
+
+`plans/experiment/20260804/job_batch_cp.md` §3 steps 1–4 landed (dispatcher,
+option, four controller steps, 69 tests) but step 5 did not. Missing:
+
+- `docs/algorithms/job_batch_cp.md` (new) — the three-step comparison table
+  from §1, why the job order means something different here than in `neh_cp`
+  (it decides batch *membership*, not position), the parameter table, the
+  `_step_log.yaml` shape, and §2.7's four known limitations.
+- Four rows in `README.md`'s step table for `job_batch_cp` /
+  `job_batch_cp_midpoint_seq` / `_first_stage_seq` / `_completion_seq`.
+- Cross-references from `docs/algorithms/pw_cp.md` and the `job_contrib_cp`
+  docs naming this as the neighbouring step.
+
+The plan document itself carries §10 (implementation record), so the design
+reasoning is not lost — what is missing is the discoverable, per-algorithm
+reference that every other step has.
+
+**Why:** the step is not yet reachable from any committed scenario config that
+has been run, so nobody can currently hit it without reading the plan. Writing
+`docs/algorithms/job_batch_cp.md` before the pilot fixes the parameter table
+against a `batch_size` that the pilot is meant to *choose* (§5), so part of the
+content would be rewritten immediately.
+
+**When to act:** as soon as the §5 pilot has fixed `batch_size` — that is the
+last parameter the doc would have to guess at. Do not let a 1440 run land
+before the doc; a step with published results and no reference page is what
+this repo's `docs/algorithms/` convention exists to prevent.
+
+## Extract the destroy-repair core shared by `job_contrib_cp` and `job_batch_cp`
+
+`JobContribCpDispatcher.run` does the whole destroy-repair cycle: pick a
+destroy set, profile-fix the rest, hint the full incumbent, solve, post-process
+(`make_semi_active` + `insert_idle_time`), evaluate. `JobBatchCpDispatcher`
+needs every one of those steps and differs **only in who chooses the destroy
+set**. Today it reuses them by composition — it builds a `JobContribCpOption`
+per batch and calls `JobContribCpDispatcher().run(...)` — which is why
+`JobContribCpOption` grew the `destroy_job_ids` field and its XOR validation
+against `jd_count_target` (plan §2.1–§2.2).
+
+**Change (if acted on):** extract the cycle into a pure function taking an
+explicit destroy set, and have both dispatchers call it. `JobContribCpOption`
+then loses `destroy_job_ids` and goes back to a required `jd_count_target`,
+and the XOR branch in `job_contrib_cp/dispatcher.py` disappears.
+
+**Why deferred:** splitting a 200-line, experiment-load-bearing file that
+several pending runs depend on buys little while there are exactly two
+selection rules — composition already gives the reuse. The XOR option is the
+cost paid for not splitting it, and it is cheap and validated.
+
+**When to act:** when a **third** destroy-set selection rule appears. Two rules
+share a file happily; three make the option's "exactly one of these fields"
+contract the wrong shape.
+
+## `job_batch_cp_compare.yaml` arms do not match the plan's §6.1
+
+`metadata/20260804/job_batch_cp_compare.yaml` defines 2 scenarios
+(`dv4_mcf_fmm_job_batch_cp_completion3_seq`,
+`dv4_mcf_fmm_job_batch_cp_midpoint3_seq`, both `seq_end_stage: -2`,
+`batch_size: 15`). `plans/experiment/20260804/job_batch_cp.md` §6.1 specifies 4:
+the two missing ones are the `job_priority` arm (§1.2's time-locality contrast)
+and — more importantly — a **same-run `neh_cp_midpoint_seq` anchor**.
+
+Without the anchor, the experiment's primary contrast (§7.2 arm1 − arm4,
+"rebuild vs sweep-repair") has to be taken across runs, which carries ±0.45 %p
+of noise (`plans/analysis/20260801/neh_cp_seq_replicate.md`) — the same order as
+the effect being measured. The config also hardcodes `batch_size: 15`, a value
+§5 says the pilot is supposed to determine.
+
+**Why:** recorded rather than fixed because the arm set is an experiment-design
+decision, and the pilot has not run yet — the right arm count depends on what
+the pilot says about `batch_size` and about the per-batch model-rebuild cost
+(§5 criterion 1).
+
+**When to act:** before launching the 1440 run. Either add the NEH anchor (and
+ideally the `job_priority` arm) so §7.2 is answerable within one run, or amend
+the plan's §6.1 and §7.2 to state explicitly that the anchor comes from a prior
+run and to carry the cross-run noise into the conclusion.
+
+## `JobBatchCpOption.num_batches` carries two meanings
+
+`num_batches` does two jobs in `algorithm/job_batch_cp/dispatcher.py`: it sets
+the batch size (`batch_size = ceil(n / num_batches)`) and it is passed to
+`resolve_per_step_tl` as the time-limit divisor. The two agree only when `n`
+divides evenly — at `n = 10, num_batches = 3` the sweep runs 3 batches of
+`ceil(10/3) = 4, 4, 2` and the TL divisor is also 3, but at `n = 10,
+num_batches = 4` it runs 4 batches of `3, 3, 3, 1` against a divisor of 4 while
+the last batch is a third the size of the others. The per-batch budget is then
+uniform over non-uniform batches.
+
+**Change (if acted on):** either derive the TL divisor from the realized
+`len(batches)` rather than from `num_batches`, or drop `num_batches` entirely
+and let callers pass `batch_size` (possibly as a `"0.05n"` expression, which
+`resolve_jd_count_target` syntax already supports on the controller side).
+
+**Why deferred:** no committed config uses `num_batches` — every planned arm
+sets `batch_size`. The divergence is real but unreached, and `batch_tl_mode:
+"linear"` (what the arms actually use) already makes the per-batch budget
+deliberately non-uniform, so "uniform TL over non-uniform batches" is not the
+invariant being protected.
+
+**When to act:** the first time a scenario config sets `num_batches`, or if the
+`batch_tl_mode: "constant"` path is used with it.
