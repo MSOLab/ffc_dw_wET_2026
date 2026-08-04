@@ -341,3 +341,224 @@ def test_step_log_yaml_tiebreak_null_when_not_set(
     controller.run()
     data = load_yaml(log_path)
     assert data["job_sequence_tiebreak"] is None
+
+
+# ── seq_end_stage parameter ──────────────────────────────────────────────────
+# Fixture where midpoint3 differs from midpoint(-1) and first_stage.
+# i1 is back-to-back (idle 0) so i1 order = bottleneck order;
+# midpoint(-2) with tiebreak="completion" gives [j1,j0,j3,j2].
+_MIDPOINT3_OPS: list[tuple[str, str, int, int]] = [
+    ("i0", "j0", 0, 2),
+    ("i0", "j1", 2, 4),
+    ("i0", "j2", 6, 8),
+    ("i0", "j3", 8, 10),
+    ("i1", "j1", 4, 8),
+    ("i1", "j0", 8, 10),
+    ("i1", "j3", 10, 12),
+    ("i1", "j2", 12, 14),
+    ("i2", "j0", 10, 12),
+    ("i2", "j1", 12, 14),
+    ("i2", "j3", 14, 16),
+    ("i2", "j2", 16, 18),
+]
+
+_MIDPOINT3_EXPECTED: tuple[str, ...] = ("j1", "j0", "j3", "j2")
+
+
+def _build_midpoint3_incumbent(controller: FFcDDWSubroutineController) -> None:
+    sch = FFcSchedule(
+        jobs=controller.instance.job_id_list,
+        stages=controller.instance.stage_id_list,
+        machines_per_stage=controller.instance.stage_2_machines_map,
+    )
+    for stage_id, job_id, start, end in _MIDPOINT3_OPS:
+        mc_id = controller.instance.stage_2_machines_map[stage_id][0]
+        sch.add_ops_times_2_mc(stage_id, mc_id, job_id, start, end)
+    controller.solution_manager.register(
+        controller._wrap_report(
+            SubroutineReport(elapsed_time=0.0, obj_value=100.0, obj_bound=None)
+        ),
+        FFcDDWSolution(schedule=sch, obj_value=100.0),
+    )
+
+
+def test_completion_seq_with_end_stage_minus2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """neh_cp_completion_seq with seq_end_stage=-2 sorts by (last-1) end."""
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[{"method": "neh_cp_completion_seq", "seq_end_stage": -2}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    schedule = _make_incumbent_schedule(controller.instance)
+    controller.solution_manager.register(
+        controller._wrap_report(
+            SubroutineReport(elapsed_time=0.0, obj_value=100.0, obj_bound=None)
+        ),
+        FFcDDWSolution(schedule=schedule, obj_value=100.0),
+    )
+    option = _run_capturing_option(controller, monkeypatch)
+    assert option.custom_job_sequence == ("j3", "j2", "j1", "j0")
+
+
+def test_midpoint3_seq_differs_from_midpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """midpoint with seq_end_stage=-2 and seq_tiebreak='completion' produces a
+    different order from midpoint(-1)."""
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(name="midpoint3_test"),
+        subroutine_flow=[
+            {
+                "method": "neh_cp_midpoint_seq",
+                "seq_end_stage": -2,
+                "seq_tiebreak": "completion",
+            }
+        ],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    _build_midpoint3_incumbent(controller)
+    option = _run_capturing_option(controller, monkeypatch)
+    assert option.custom_job_sequence == _MIDPOINT3_EXPECTED
+    assert option.custom_job_sequence != _EXPECTED_SEQUENCE["neh_cp_midpoint_seq"]
+
+
+def test_seq_end_stage_minus1_is_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """seq_end_stage=-1 produces the same order as omitting it."""
+    option = _run_capturing_option(
+        _controller_with_incumbent("neh_cp_completion_seq"), monkeypatch
+    )
+    assert option.custom_job_sequence == _EXPECTED_SEQUENCE["neh_cp_completion_seq"]
+
+
+def test_seq_end_stage_clamp_and_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """abs(seq_end_stage) > c is clamped to -c with a warning."""
+    caplog.set_level(logging.WARNING)
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[{"method": "neh_cp_midpoint_seq", "seq_end_stage": -99}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    schedule = _make_incumbent_schedule(controller.instance)
+    controller.solution_manager.register(
+        controller._wrap_report(
+            SubroutineReport(elapsed_time=0.0, obj_value=100.0, obj_bound=None)
+        ),
+        FFcDDWSolution(schedule=schedule, obj_value=100.0),
+    )
+    captured: dict[str, NehCpOption] = {}
+    original_run = NehCpDispatcher.run
+
+    def capture(self_disp, spec):
+        captured["option"] = spec.option
+        return original_run(self_disp, spec)
+
+    monkeypatch.setattr(NehCpDispatcher, "run", capture)
+    controller.run()
+    assert any("clamping" in message for message in caplog.messages)
+
+
+def test_seq_end_stage_fallback_when_no_incumbent(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """seq_end_stage is ignored when no incumbent — falls back to job_priority."""
+    caplog.set_level(logging.WARNING)
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[{"method": "neh_cp_completion_seq", "seq_end_stage": -2}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    option = _run_capturing_option(controller, monkeypatch)
+    assert option.custom_job_sequence is None
+    assert any("no incumbent schedule" in message for message in caplog.messages)
+
+
+def test_seq_end_stage_flow_passes_validator() -> None:
+    """subroutine_flow with seq_end_stage passes routix validation."""
+    from routix.dynamic_data_object import DynamicDataObject
+    from routix.subroutine_flow_validator import SubroutineFlowValidator
+
+    for method in ("neh_cp_midpoint_seq", "neh_cp_completion_seq"):
+        flow = DynamicDataObject.from_obj([{"method": method, "seq_end_stage": -2}])
+        validator = SubroutineFlowValidator(
+            controller_class=FFcDDWSubroutineController,
+        )
+        validator.validate(flow)
+
+
+def test_diag_log_format_still_matches_regex(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    r"""The diagnostic log line still matches DIAG_RE in analyze_neh_pass_chain.py.
+
+    Regex (from scripts/20260801/analyze_neh_pass_chain.py:94):
+        r"(?P<step>neh_cp_\w+?_seq): seq source=(?P<mode>\w+) .*?"
+        r"dist_to_job_priority=(?P<job_priority>[\d.]+) "
+        r"dist_to_prev_neh=(?P<prev_neh>[\d.]+|N/A)"
+    """
+    import re
+
+    DIAG_RE = re.compile(
+        r"(?P<step>neh_cp_\w+?_seq): seq source=(?P<mode>\w+) .*?"
+        r"dist_to_job_priority=(?P<job_priority>[\d.]+) "
+        r"dist_to_prev_neh=(?P<prev_neh>[\d.]+|N/A)"
+    )
+    caplog.set_level(logging.INFO)
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[
+            {
+                "method": "neh_cp_midpoint_seq",
+                "seq_end_stage": -2,
+                "seq_tiebreak": "completion",
+            }
+        ],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    schedule = _make_incumbent_schedule(controller.instance)
+    controller.solution_manager.register(
+        controller._wrap_report(
+            SubroutineReport(elapsed_time=0.0, obj_value=100.0, obj_bound=None)
+        ),
+        FFcDDWSolution(schedule=schedule, obj_value=100.0),
+    )
+    controller.run()
+
+    match = DIAG_RE.search("\n".join(caplog.messages))
+    assert match is not None, (
+        "DIAG_RE did not match any log line.\nMessages:\n" + "\n".join(caplog.messages)
+    )
+    assert match.group("step") == "neh_cp_midpoint_seq"
+    assert match.group("mode") == "midpoint"
+
+
+def test_step_log_yaml_includes_end_stage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_step_log.yaml includes job_sequence_end_stage when set."""
+    controller = FFcDDWSubroutineController(
+        instance=_make_instance(),
+        subroutine_flow=[{"method": "neh_cp_completion_seq", "seq_end_stage": -2}],
+        stopping_criteria=StoppingCriteria({"timelimit": 60.0}),
+    )
+    schedule = _make_incumbent_schedule(controller.instance)
+    controller.solution_manager.register(
+        controller._wrap_report(
+            SubroutineReport(elapsed_time=0.0, obj_value=100.0, obj_bound=None)
+        ),
+        FFcDDWSolution(schedule=schedule, obj_value=100.0),
+    )
+    log_path = tmp_path / "_step_log.yaml"
+    monkeypatch.setattr(
+        controller, "try_get_file_path_for_subroutine", lambda *a, **k: log_path
+    )
+    controller.run()
+    assert log_path.exists()
+    data = load_yaml(log_path)
+    assert data["job_sequence_end_stage"] == -2
+    assert data["job_sequence_fallback"] is False

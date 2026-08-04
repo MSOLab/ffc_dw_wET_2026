@@ -2275,16 +2275,24 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
         seq_tiebreak: ScheduleSeqSource | None = None,
+        seq_end_stage: int = -1,
     ) -> SubroutineReport:
         """NEH-CP with job sequence derived from incumbent via midpoint sort.
 
-        Sorts by ``(first_stage_start + last_stage_end) / 2`` ascending,
-        tie-broken by first-stage start then by ``job_priority`` rank.
+        Sorts by ``(first_stage_start + end_stage_end) / 2`` ascending,
+        tie-broken by the end stage's end time then by ``job_priority`` rank.
 
         ``seq_tiebreak`` overrides the secondary sort key within midpoint
         tie groups. ``"completion"`` reverses the tie-group order relative
         to the default (first-stage start). Only meaningful for
         ``midpoint`` — other modes have no distinguishable tie-break keys.
+
+        ``seq_end_stage`` selects which stage provides the ``end_stage_end``
+        for the sort key. Negative index into ``schedule.stages``: ``-1``
+        (default) = last stage, ``-2`` = second to last. Only the last
+        stage receives due-window-driven idle insertion, so moving the axis
+        to ``-2`` isolates the upstream schedule structure from the due-date
+        adjustment.
 
         Falls back to ``job_priority`` when no incumbent schedule is
         available (warning logged). ``job_priority`` is always computed
@@ -2311,6 +2319,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             cp_tl_2nd_obj=cp_tl_2nd_obj,
             error_if_infeasible=error_if_infeasible,
             seq_tiebreak=seq_tiebreak,
+            seq_end_stage=seq_end_stage,
         )
 
     def neh_cp_first_stage_seq(
@@ -2383,11 +2392,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         minimize_makespan_lex: bool = False,
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
+        seq_end_stage: int = -1,
     ) -> SubroutineReport:
         """NEH-CP with job sequence derived from incumbent via completion sort.
 
-        Sorts by last-stage end ascending, tie-broken by first-stage start
+        Sorts by end-stage end ascending, tie-broken by first-stage start
         then by ``job_priority`` rank.
+
+        ``seq_end_stage`` selects which stage provides the sort key. Negative
+        index into ``schedule.stages``: ``-1`` (default) = last stage,
+        ``-2`` = second to last. Only the last stage receives due-window-driven
+        idle insertion, so moving the axis to ``-2`` isolates the upstream
+        schedule structure from the due-date adjustment.
 
         Falls back to ``job_priority`` when no incumbent schedule is
         available (warning logged). ``job_priority`` is always computed
@@ -2413,6 +2429,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             minimize_makespan_lex=minimize_makespan_lex,
             cp_tl_2nd_obj=cp_tl_2nd_obj,
             error_if_infeasible=error_if_infeasible,
+            seq_end_stage=seq_end_stage,
         )
 
     def _run_neh_cp(
@@ -2438,6 +2455,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         cp_tl_2nd_obj: float | str | None = None,
         error_if_infeasible: bool = False,
         seq_tiebreak: ScheduleSeqSource | None = None,
+        seq_end_stage: int = -1,
     ) -> SubroutineReport:
         """Step method: run :class:`NehCpDispatcher` and register its schedule.
 
@@ -2455,6 +2473,18 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         n = instance.job_count
         c = instance.stage_count
         m = instance.last_stage_mc_count
+
+        end_stage_index = seq_end_stage
+        if abs(end_stage_index) > c:
+            self.logger.warning(
+                "%s: seq_end_stage=%d out of range for %d-stage instance; "
+                "clamping to -%d.",
+                step_label,
+                seq_end_stage,
+                c,
+                c,
+            )
+            end_stage_index = -c
 
         cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
         total_timelimit_seconds = (
@@ -2517,6 +2547,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     job_seq_source,
                     tiebreak_source=seq_tiebreak,
                     tiebreak_rank=rank_map,
+                    end_stage_index=end_stage_index,
                 )
                 instance_jobs = set(instance.job_id_list)
                 seq_jobs = set(seq)
@@ -2568,20 +2599,38 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                     prev_str = f"{dist_prev:.4f}"
                 head = list(seq)[:5]
 
+                same_src_dist_str = ""
+                if end_stage_index != -1:
+                    same_src_seq = schedule_job_sequence(
+                        incumbent.schedule,
+                        job_seq_source,
+                        tiebreak_source=seq_tiebreak,
+                        tiebreak_rank=rank_map,
+                        end_stage_index=-1,
+                    )
+                    same_src_dist = normalized_mean_rank_distance(
+                        same_src_seq, list(seq)
+                    )
+                    same_src_dist_str = (
+                        f" dist_to_same_source_last_stage={same_src_dist:.4f}"
+                    )
+
                 self.logger.info(
-                    "%s: seq source=%s tiebreak=%s dist_to_midpoint=%.4f "
+                    "%s: seq source=%s tiebreak=%s end_stage=%d dist_to_midpoint=%.4f "
                     "dist_to_first_stage=%.4f "
                     "dist_to_completion=%.4f dist_to_job_priority=%.4f "
-                    "dist_to_prev_neh=%s head=%s",
+                    "dist_to_prev_neh=%s head=%s%s",
                     step_label,
                     job_seq_source,
                     seq_tiebreak if seq_tiebreak is not None else "default",
+                    end_stage_index,
                     normalized_mean_rank_distance(all_seqs["midpoint"], list(seq)),
                     normalized_mean_rank_distance(all_seqs["first_stage"], list(seq)),
                     normalized_mean_rank_distance(all_seqs["completion"], list(seq)),
                     dist_to_priority,
                     prev_str,
                     head,
+                    same_src_dist_str,
                 )
 
         option = NehCpOption(
@@ -2671,6 +2720,9 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                                 "job_sequence_source": source_label,
                                 "job_sequence_tiebreak": seq_tiebreak
                                 if not sequence_fallback and seq_tiebreak is not None
+                                else None,
+                                "job_sequence_end_stage": end_stage_index
+                                if not sequence_fallback
                                 else None,
                                 "job_sequence_fallback": sequence_fallback,
                                 "job_sequence": custom_job_sequence
