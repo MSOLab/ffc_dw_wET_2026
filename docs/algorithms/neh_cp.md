@@ -43,9 +43,14 @@ key then by `job_priority` rank):
 
 | Method | `job_seq_source` | Primary key | Secondary key |
 | --- | --- | --- | --- |
-| `neh_cp_midpoint_seq` | `midpoint` | `(first_stage_start + last_stage_end) / 2` | first-stage start |
+| `neh_cp_midpoint_seq` | `midpoint` | `(first_stage_start + end_stage_end) / 2` | end stage end |
 | `neh_cp_first_stage_seq` | `first_stage` | first-stage start | last-stage end |
-| `neh_cp_completion_seq` | `completion` | last-stage end | first-stage start |
+| `neh_cp_completion_seq` | `completion` | end stage end | first-stage start |
+
+`end_stage_end` defaults to the **last** stage's end time
+(`seq_end_stage=-1`). The `seq_end_stage` parameter (available on
+`neh_cp_midpoint_seq` and `neh_cp_completion_seq`) selects a different
+stage — see "`seq_end_stage` parameter" below.
 
 **Fallback**: when no incumbent schedule is available,
 `job_priority` is used instead (a `WARNING` is logged).
@@ -83,6 +88,49 @@ distinguishable tie-break keys:
 
 The same algebra is enforced by regression tests in
 `tests/solution/test_schedule_sequence.py`.
+
+### `seq_end_stage` parameter (`neh_cp_midpoint_seq`, `neh_cp_completion_seq`)
+
+`neh_cp_midpoint_seq` and `neh_cp_completion_seq` additionally accept
+`seq_end_stage: int = -1`. It selects which stage provides the end time
+(`ls`) for the sort key.
+
+The sort key tables use `end_stage_end` (the end time of the stage at
+`schedule.stages[seq_end_stage]`) in place of `last_stage_end`:
+
+| Mode `(/param)` | Primary key | Notes |
+| --- | --- | --- |
+| `completion3` | `end_stage_end` (`ls'`) | `neh_cp_completion_seq`, `seq_end_stage: -2` |
+| `midpoint3` | `(first_stage_start + end_stage_end) / 2` (`m'`) | `neh_cp_midpoint_seq`, `seq_end_stage: -2`, `seq_tiebreak: completion` |
+
+`seq_end_stage` is a negative index into `schedule.stages`: `-1`
+(default) = last stage (byte-identical to the previous behaviour),
+`-2` = second to last. It is validated by `schedule_job_sequence`
+(`schedule_sequence.py`): values outside
+`[-len(stages), -1]` raise `ValueError`. In the controller, a value
+whose absolute value exceeds the instance's stage count is clamped to
+`-c` with a `WARNING` log.
+
+**Motivation.** The post-processing pipeline applies
+`make_semi_active` (left-shift) to every stage, but
+`insert_idle_time` uses due windows to shift ops only on the **last
+stage** — so `ls` carries both schedule structure and due-date
+adjustment while `ls'` isolates the upstream schedule structure.
+Moving the axis to `(last-1)` tests whether the sort key should see
+the schedule as it is before the due-window adjustment.
+
+The tie-break degeneracy argument for `end_stage_index=-1` does **not**
+carry over: `ls'` is not monotonic in `ls` (the last-stage idle
+insertion varies per job), so `completion3` / `midpoint3` produce
+distinct orders from their `-1` counterparts.
+Verification: `tests/solution/test_schedule_sequence.py`
+(`test_non_alias_completion_end_stage_minus2_vs_minus1`).
+
+`first_stage` is deliberately **not** exposed (see §8 of
+`plans/experiment/20260804/neh_cp_last1_stage_seq.md`): it is
+consistently the worst-performing mode across the 1440-instance
+grid, and a `seq_end_stage` knob on it would add unused config
+surface.
 
 | Parameter | Role |
 | --- | --- |
