@@ -24,8 +24,10 @@ painter_thread_cnt: 96
 # 3 scenarios on the 160-instance (T, R) = (0.6, 0.2) slice. The design is
 # 2 tail refiners x 2 time budgets = 4 cells; the fourth (ISW-CP @ 0.09nc) is NOT
 # re-run because it already exists byte-identically as `dv4_mcf_fmm_comp_x1_base`
-# in output/20260801_neh_cp_budget_allocation/20260801T183302_770739. It is
-# merged back in at report time -- see MERGING below.
+# in output/20260801_neh_cp_budget_allocation/20260801T183302_770739, and a
+# near-duplicate of it exists as `dv4_c5init_f40` in
+# output/20260728_dispatch_v4_init_tl/20260728T202801_339672. Both are merged
+# back in at report time, giving 5 scenarios -- see MERGING below.
 #
 # This is a SCREENING run, not the verdict. A one-cell smoke test of the
 # jbc_t090 arm (n=100, c=10, T=0.4, R=0.2, 6 instances) already had ISW-CP ahead
@@ -59,35 +61,66 @@ painter_thread_cnt: 96
 #
 # MERGING (this run alone does not answer Q1)
 #
+# Five scenarios: the three below plus TWO borrowed observations of the same
+# ISW-CP @ 0.09nc cell.
+#
 #   uv run python scripts/build_merged_run_dir.py \
 #       --dest output/20260805_merge_job_batch_cp_vs_isw_cp \
 #       --intersect-instances \
 #       output/20260801_neh_cp_budget_allocation/20260801T183302_770739/dv4_mcf_fmm_comp_x1_base=dv4_mcf_fmm_neh_isw_t090 \
+#       output/20260728_dispatch_v4_init_tl/20260728T202801_339672/dv4_c5init_f40=dv4_mcf_fmm_neh_isw_t090_jp \
 #       <this run>/dv4_mcf_fmm_neh_jbc_t090 \
 #       <this run>/dv4_mcf_fmm_neh_isw_t030 \
 #       <this run>/dv4_mcf_fmm_neh_jbc_t030
 #
 # `--intersect-instances` is REQUIRED here and was not in the full-grid version
-# of this plan: the borrowed scenario owns all 1440 instances while the three
+# of this plan: both borrowed scenarios own all 1440 instances while the three
 # scenarios below own 160, and the script aborts on a mismatch. Without it the
-# run-level chart writers would average the borrowed arm over 1440 instances and
-# the new arms over 160, with nothing in the output saying so.
+# run-level chart writers would average the borrowed arms over 1440 instances
+# and the new arms over 160, with nothing in the output saying so. Verified: the
+# 160 target instances are all present in both source scenario dirs, and all
+# 1440 instance dirs there carry `_instance_result.yaml`, `_solution.json` and
+# `_obj_log.json`, so the subroutine-flow comparison chart works for them too.
 #
 # Then a POST_PROCESS_ONLY config over the printed dir (pattern:
 # metadata/20260804/merge_neh_cp_last1_stage_seq.yaml; keep draw_gantt and
 # draw_progress_plot false -- those painters write through the symlinks into the
-# source run).
+# source runs). Each label needs one `scenarios` entry whose `subroutine_flow`
+# is copied from ITS OWN source config -- the `_jp` arm's step 4 is `neh_cp`,
+# not `neh_cp_completion_seq`.
+#
+# WHY THE SECOND BORROWED ARM (`_jp`) IS WORTH A SYMLINK
+#
+# `dv4_c5init_f40` runs the SAME cap and the same FMM / NEH budgets
+# (0.09nc / 0.0036nc / 0.0108nc) and a byte-identical `incremental_sw_cp` block;
+# it differs from `dv4_mcf_fmm_comp_x1_base` in exactly one thing, the NEH
+# insertion order (`neh_cp` on the instance's job_priority rule vs
+# `neh_cp_completion_seq` derived from the incumbent) -- hence the `_jp` suffix.
+# On THIS slice the two land 0.04 pp apart (0.1464 vs 0.1460 mean RPDf), so
+# together they bound "cross-run noise + NEH-order effect" empirically instead
+# of by the estimate below, and they bracket the ISW-CP @ 0.09nc cell that Q1
+# compares against. Cost is one symlink; no extra solve time.
+#
+# CAVEAT: that agreement is SLICE-SPECIFIC. Over the full 1440 grid the same two
+# scenarios sit 1.86 pp apart (-0.1267 vs -0.1081). Do not carry a conclusion
+# reached here to the full grid on the strength of the 0.04 pp seen on
+# (T, R) = (0.6, 0.2).
 #
 # COST OF NOT RE-RUNNING THE FOURTH CELL. Q1 (isw_t090 vs jbc_t090) is a
 # CROSS-RUN contrast. The replicate band measured in
 # plans/analysis/20260801/neh_cp_seq_replicate.md is +-0.451 pp, but that was
-# measured over 1440 instances; on 160 the standard error is ~3x wider, so
-# budget roughly +-1.4 pp on the mean. The per-arm t090 -> t030 degradation for
-# ISW-CP is cross-run too (borrowed t090, in-run t030), while the same
-# degradation for JBC is in-run. Only Q2's within-level contrast
-# (isw_t030 vs jbc_t030) is fully paired inside one run. The smoke test's ~10 pp
-# gap is far outside that band, so a repeat of that result is readable here;
-# anything under ~1.5 pp is not, and would need the ISW t090 arm re-run
+# measured over 1440 instances; on 160 the standard error is ~3x wider, so the
+# a-priori budget is roughly +-1.4 pp on the mean. The two borrowed arms make
+# this checkable rather than assumed: |isw_t090 - isw_t090_jp| is a DIRECT
+# reading of that band on this exact slice (0.04 pp in the source runs). Use it
+# as the yardstick for Q1 and ignore the +-1.4 pp estimate if it disagrees.
+#
+# The per-arm t090 -> t030 degradation for ISW-CP is cross-run too (borrowed
+# t090, in-run t030), while the same degradation for JBC is in-run. Only Q2's
+# within-level contrast (isw_t030 vs jbc_t030) is fully paired inside one run.
+# The smoke test's ~10 pp gap is far outside any of these bands, so a repeat of
+# that result is readable here; a Q1 gap of the same order as
+# |isw_t090 - isw_t090_jp| is not, and would need the ISW t090 arm re-run
 # alongside on this same slice.
 #
 # WHY THE `job_batch_cp` TAIL IS THE STEP REPEATED 8 TIMES WITH A GROWING BATCH
