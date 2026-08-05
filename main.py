@@ -28,7 +28,7 @@ from ffc_ddw_sum_et.orchestration import (
     restore_layout_from_run_dir,
 )
 
-CONFIG_PATH = Path("metadata/20260805/job_batch_cp_vs_isw_cp.yaml")
+CONFIG_PATH = Path("metadata/20260805/jbc_vs_isw_f40_budget.yaml")
 
 
 def _parse_args() -> argparse.Namespace:

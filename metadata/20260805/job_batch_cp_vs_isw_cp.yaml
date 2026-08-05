@@ -165,19 +165,53 @@ painter_thread_cnt: 96
 # truncated the same way: on the probe instance it reached only
 # unfixed_batch_count 2, 3, 4 of the requested 2..8.
 #
-# WHERE THE "IDENTICAL PARAMETERS" PREMISE GENUINELY BREAKS (read before tuning)
+# WHY kappa = 0.010 AND NOT ISW-CP's 0.005 (read before tuning)
 #
-# kappa=0.010 here is NOT ISW-CP's kappa=0.005, and it cannot be, because the
-# two multiply different counts. `sw_cp` time-fixes everything outside the
-# window and its profile-fixed bands, so ntf is a strict subset of the model:
-# 173-234 of 1000 ops on the probe instance. `job_contrib_cp` -- which
-# `job_batch_cp` drives per batch -- time-fixes NOTHING (`pf_schedule` is the
-# incumbent minus the destroy set; every remaining op keeps only its chain
-# order, start times free), so its ntf is always the full n*c. Matching on ntf
-# would mean 0.005*1000 = 5 s per batch, ~35 s per pass, i.e. 2 passes in the
-# tail and no sweep at all. kappa is therefore matched on the DESTROY SET
-# instead and calibrated so the 8-pass sweep fills the tail. Do not read
-# 0.010 vs 0.005 as "JBC was given twice the time".
+# 1. THE TWO MULTIPLIERS MULTIPLY DIFFERENT COUNTS.
+#
+#    `sw_cp` time-fixes everything outside the window and its profile-fixed
+#    bands (dummy bars), so its `non_time_fixed_op_count` is a strict subset of
+#    the model. `job_contrib_cp` -- which `job_batch_cp` drives per batch --
+#    time-fixes NOTHING: `pf_schedule` is the incumbent minus the destroy set,
+#    and every remaining op keeps only its chain order with start times free.
+#    Its non-time-fixed count is therefore ALWAYS the full n*c, and the only
+#    quantity that tracks the neighbourhood is the destroy set, |batch| * c.
+#
+# 2. SO 0.010 IS NOT "TWICE THE TIME" -- BY THE ISW-CP YARDSTICK IT IS LESS.
+#
+#    Measured on Instance_100_10_3_0,6_0,2_10_Rep0 (n*c = 1000 ops), ISW-CP from
+#    20260801T183302_770739/dv4_mcf_fmm_comp_x1_base and JBC from this config:
+#
+#      ISW-CP window : ntf 172.7  -> TL 0.864 s   (unfixed 111.5, pf 61.2)
+#      JBC batch B=15: destroyed 150 -> TL 1.50 s (non-time-fixed: 1000)
+#
+#    per op that is FREE IN TIME : ISW 0.0050 s vs JBC 0.0015 s  (JBC 3.3x less)
+#    per op that is FREE IN ORDER: ISW 0.0056-0.0077 s vs JBC 0.0100 s
+#
+#    The sign of the comparison flips with the normaliser, which is exactly why
+#    neither multiplier can be copied across. Matching on ntf would give
+#    0.005 * 1000 = 5 s per batch, ~35 s per pass, i.e. 2 passes in the tail and
+#    no batch-size sweep at all.
+#
+# 3. 0.010 WAS CALIBRATED TO FILL THE TAIL, NOT COPIED.
+#
+#    A pass costs `sum_batches kappa*|batch|*c` = kappa*n*c regardless of
+#    batch_size, so pass count = tail / (kappa * 1.03) and is instance-
+#    independent:  kappa 0.005 -> 14.7 passes;  kappa 0.010 -> 7.3 passes.
+#    8 passes are provisioned against the ~0.0733nc tail, a deliberate
+#    over-fill. Confirmed by the run: 7.56 passes mean, 84 % batch acceptance,
+#    `solve_base_model_cpsat` never reached.
+#
+# 4. UNTESTED ALTERNATIVE: kappa = 0.005 with the sweep run TWICE (16 passes) --
+#    same batch sizes, same total tail budget, half the TL per solve, twice the
+#    passes. "Shallow and many" vs "deep and few" is not answered by this run.
+#    Tested by `dv4_mcf_fmm_neh_jbc_k0005` in
+#    metadata/20260805/jbc_vs_isw_f40_budget.yaml.
+#
+#    Note the result that makes kappa an unlikely explanation for the outcome:
+#    jbc_t090 (84.4 s) still lost to isw_t030 (28.2 s) by 1.13 pp, 107/160.
+#    kappa scales a pass's total CP time, and 3x the effective time did not
+#    close the gap, so retuning it is not expected to close 4.08 pp either.
 #
 # HOW THE t030 LEVEL IS DERIVED (Q2)
 #
