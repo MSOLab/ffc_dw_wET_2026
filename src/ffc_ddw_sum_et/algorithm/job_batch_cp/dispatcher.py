@@ -117,6 +117,14 @@ class JobBatchCpDispatcher:
                 stopped_early = True
                 break
 
+            # "proportional" is delegated: resolve_per_step_tl returns None for
+            # it by contract, and the sub-dispatcher derives
+            # ``destroyed_op_tl_multiplier * |batch| * c`` itself — which is
+            # what makes the limit track a growing batch_size across passes and
+            # gives the short trailing batch proportionally less. Passing a
+            # constant ``cp_tl_seconds`` alongside would win the sub-dispatcher's
+            # min() and defeat that, so the two are mutually exclusive here.
+            proportional = option.batch_tl_mode == "proportional"
             sub_cp_tl: float | None = None
             if per_batch_tl is not None:
                 sub_cp_tl = per_batch_tl[step_idx]
@@ -127,8 +135,9 @@ class JobBatchCpDispatcher:
                 destroy_job_ids=tuple(batch),
                 pf_method=option.pf_method,
                 horizon_multiplier=option.horizon_multiplier,
-                cp_tl_seconds=sub_cp_tl,
-                cp_tl_mode="constant",
+                cp_tl_seconds=None if proportional else sub_cp_tl,
+                cp_tl_mode="proportional" if proportional else "constant",
+                destroyed_op_tl_multiplier=option.destroyed_op_tl_multiplier,
                 wall_clock_deadline_sec=option.wall_clock_deadline_sec,
                 solver_thread_cnt=option.solver_thread_cnt,
                 time_factor=option.time_factor,
@@ -158,10 +167,15 @@ class JobBatchCpDispatcher:
             cpsat_status: str | None = None
             setup_seconds: float | None = None
             makespan: int = int(current.makespan)
+            # In proportional mode the sweep has no limit of its own to log;
+            # the sub-dispatcher reports the one it derived and applied.
+            tl_for_log: float | None = sub_cp_tl
             if rec.result is not None:
                 if rec.result.metrics is not None:
                     cpsat_status = rec.result.metrics.get("cpsat_status")
                     setup_seconds = rec.result.metrics.get("setup_seconds")
+                    if tl_for_log is None:
+                        tl_for_log = rec.result.metrics.get("cp_tl_seconds")
                 if rec.result.schedule is not None:
                     makespan = int(rec.result.schedule.makespan)
 
@@ -177,7 +191,7 @@ class JobBatchCpDispatcher:
                 batch_size=len(batch),
                 batch_head=batch[0],
                 elapsed_time=elapsed_since_loop,
-                TL=sub_cp_tl,
+                TL=tl_for_log,
                 elapsed_portion=(
                     elapsed_since_loop / option.total_timelimit_seconds
                     if option.total_timelimit_seconds is not None

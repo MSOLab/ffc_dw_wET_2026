@@ -540,3 +540,89 @@ class TestRealCpSweep:
         assert record.result.metrics["batch_count"] == 3
         assert record.result.metrics["completed_batches"] == 3
         assert _seed_obj(record.result.schedule, instance) == record.result.obj_value
+
+
+def _capture_sub_options(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    reported_cp_tl: float | None = None,
+) -> list:
+    """Replace the sub-dispatcher with one capturing the whole sub-option."""
+    seen: list = []
+
+    def fake_run(self_disp, spec: AlgSpec) -> AlgRecord:
+        seen.append(spec.option)
+        rec = _fake_record(spec, obj_value=_seed_obj(spec.ref_solution, spec.instance))
+        if reported_cp_tl is not None:
+            rec.result.metrics["cp_tl_seconds"] = reported_cp_tl
+        return rec
+
+    monkeypatch.setattr(JobContribCpDispatcher, "run", fake_run)
+    return seen
+
+
+class TestProportionalBatchTl:
+    """``batch_tl_mode="proportional"`` delegates the per-batch limit.
+
+    ``resolve_per_step_tl`` returns ``None`` for this mode by contract — the
+    dispatcher owns it. Here that means handing the sub-dispatcher its own
+    proportional mode, so the limit tracks the destroy set (``|batch| x c``)
+    and the short trailing batch gets proportionally less.
+    """
+
+    def test_sub_option_gets_proportional_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        instance = _make_instance(10)
+        seen = _capture_sub_options(monkeypatch)
+
+        _run(
+            instance,
+            _make_seed(instance),
+            batch_size=3,
+            batch_tl_mode="proportional",
+            destroyed_op_tl_multiplier=0.005,
+        )
+
+        assert [o.cp_tl_mode for o in seen] == ["proportional"] * 4
+        assert all(o.destroyed_op_tl_multiplier == 0.005 for o in seen)
+        # The sub-dispatcher derives the limit; a constant one must not leak in
+        # and win the min() against it.
+        assert all(o.cp_tl_seconds is None for o in seen)
+
+    def test_constant_mode_still_passes_a_resolved_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        instance = _make_instance(10)
+        seen = _capture_sub_options(monkeypatch)
+
+        _run(
+            instance,
+            _make_seed(instance),
+            batch_size=5,
+            batch_tl_mode="constant",
+            total_timelimit_seconds=4.0,
+        )
+
+        assert [o.cp_tl_mode for o in seen] == ["constant"] * 2
+        assert [o.cp_tl_seconds for o in seen] == [2.0, 2.0]
+        assert all(o.destroyed_op_tl_multiplier is None for o in seen)
+
+    def test_step_log_records_the_effective_tl(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In proportional mode the sweep has no limit of its own to log, so
+        the step log must fall back to what the sub-dispatcher applied."""
+        instance = _make_instance(6)
+        _capture_sub_options(monkeypatch, reported_cp_tl=0.03)
+
+        record = _run(
+            instance,
+            _make_seed(instance),
+            batch_size=3,
+            batch_tl_mode="proportional",
+            destroyed_op_tl_multiplier=0.005,
+        )
+
+        step_log = record.result.metrics["step_log"]
+        assert [e.TL for e in step_log] == [0.03, 0.03]

@@ -299,3 +299,49 @@ def test_sweep_never_worsens_the_registered_incumbent() -> None:
 
     assert controller.solution_manager.best_obj_value <= before
     assert controller.solution_manager.get_incumbent() is not None
+
+
+# ── proportional per-batch TL ────────────────────────────────────────────────
+@pytest.mark.parametrize("method", sorted(_EXPECTED_SEQUENCE))
+def test_destroyed_op_tl_multiplier_reaches_the_option(
+    method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All four surfaces expose the ISW-CP-style proportional limit."""
+    option = _run_capturing_option(
+        _make_controller(
+            method,
+            batch_size=2,
+            batch_tl_mode="proportional",
+            destroyed_op_tl_multiplier=0.005,
+        ),
+        monkeypatch,
+    )
+    assert option.batch_tl_mode == "proportional"
+    assert option.destroyed_op_tl_multiplier == 0.005
+
+
+def test_proportional_without_multiplier_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _make_controller(
+        "job_batch_cp_midpoint_seq", batch_size=2, batch_tl_mode="proportional"
+    )
+    with pytest.raises(ValueError, match="destroyed_op_tl_multiplier"):
+        controller.run()
+
+
+def test_proportional_flow_passes_routix_flow_validator() -> None:
+    from routix.dynamic_data_object import DynamicDataObject
+    from routix.subroutine_flow_validator import SubroutineFlowValidator
+
+    flow = DynamicDataObject.from_obj(
+        [
+            {
+                "method": "job_batch_cp_midpoint_seq",
+                "batch_size": 15,
+                "batch_tl_mode": "proportional",
+                "destroyed_op_tl_multiplier": 0.005,
+            }
+        ]
+    )
+    SubroutineFlowValidator(controller_class=FFcDDWSubroutineController).validate(flow)

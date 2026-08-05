@@ -47,3 +47,32 @@ class TestJobBatchCpOption:
         for method in ("PF0", "PF1", "PF2", "MPF23"):
             opt = JobBatchCpOption(job_sequence=("j0",), pf_method=method)
             assert opt.pf_method == method
+
+
+class TestProportionalBatchTl:
+    """``batch_tl_mode="proportional"`` needs its own multiplier.
+
+    Without the XOR-style check the mode silently degrades to "no per-batch
+    limit at all" (``resolve_per_step_tl`` returns ``None`` for it), which lets
+    the first batch consume the whole pass.
+    """
+
+    def test_proportional_without_multiplier_raises(self) -> None:
+        with pytest.raises(ValueError, match="destroyed_op_tl_multiplier"):
+            JobBatchCpOption(job_sequence=("j0",), batch_tl_mode="proportional")
+
+    def test_proportional_with_multiplier_accepted(self) -> None:
+        opt = JobBatchCpOption(
+            job_sequence=("j0",),
+            batch_tl_mode="proportional",
+            destroyed_op_tl_multiplier=0.005,
+        )
+        assert opt.batch_tl_mode == "proportional"
+        assert opt.destroyed_op_tl_multiplier == 0.005
+
+    def test_non_positive_multiplier_raises(self) -> None:
+        with pytest.raises(ValueError, match="destroyed_op_tl_multiplier"):
+            JobBatchCpOption(job_sequence=("j0",), destroyed_op_tl_multiplier=0.0)
+
+    def test_multiplier_defaults_to_none(self) -> None:
+        assert JobBatchCpOption(job_sequence=("j0",)).destroyed_op_tl_multiplier is None
