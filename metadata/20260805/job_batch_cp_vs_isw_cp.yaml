@@ -1,0 +1,481 @@
+run_mode: FULL_RUN
+
+benchmark_dir: benchmarks/PRA2017/large
+ins_index_source: benchmarks/PRA2017/pra2017_hybrid_match.csv
+bks_table_csv_path: benchmarks/PRA2017/pra2017_bks_table.csv
+
+# 160 instances: the (T, R) = (0.6, 0.2) slice, 20 per (n, c) cell across
+# n in {50, 100, 150, 200} x c in {5, 10}. Same slice the job_batch_cp pilot
+# used (plans/experiment/20260804/job_batch_cp.md §5) because T=0.6 is where the
+# objective scale is not saturated and the cap actually binds. Mean nc is 937.5,
+# identical to the full grid's, so per-scenario cost is exactly 1/9 of a
+# 1440-instance run.
+ins_filter:
+  T: 0.6
+  R: 0.2
+
+output_dir: output/20260805_job_batch_cp_vs_isw_cp
+
+instance_worker_cnt: 12
+draw_gantt: false
+draw_progress_plot: true
+painter_thread_cnt: 96
+
+# 3 scenarios on the 160-instance (T, R) = (0.6, 0.2) slice. The design is
+# 2 tail refiners x 2 time budgets = 4 cells; the fourth (ISW-CP @ 0.09nc) is NOT
+# re-run because it already exists byte-identically as `dv4_mcf_fmm_comp_x1_base`
+# in output/20260801_neh_cp_budget_allocation/20260801T183302_770739. It is
+# merged back in at report time -- see MERGING below.
+#
+# This is a SCREENING run, not the verdict. A one-cell smoke test of the
+# jbc_t090 arm (n=100, c=10, T=0.4, R=0.2, 6 instances) already had ISW-CP ahead
+# on 6 of 6 with a mean objective gap of +9.8 % against `job_batch_cp`. The slice
+# below is the cheap way to see whether that holds across (n, c) and whether it
+# survives the t030 budget cut, before committing to the full grid.
+#
+# THE QUESTION THIS RUN EXISTS TO ANSWER
+#
+# 20260804_job_batch_cp_compare/20260805T003756_458961 settled that
+# `job_batch_cp` cannot replace `neh_cp` in place (mean RPDf 0.187 vs 0.128 for
+# the matching `neh_cp` arms of 20260804_neh_cp_last1_stage_seq/20260804T213652_830716,
+# both flows ending at the step under test and using only ~18 % of the cap).
+# The open question is the OTHER in-place swap: `job_batch_cp` and
+# `incremental_sw_cp` are both destroy-repair refiners over a complete
+# incumbent, so the honest head-to-head is at the TAIL position of the
+# 20260801 flow, not at the NEH position.
+#
+#   Q1 (isw_t090 vs jbc_t090)  At the tail of the same flow and under the same
+#                              cap, does sweeping ordered JOB batches beat
+#                              sliding a time WINDOW over operations?
+#   Q2 (t090 vs t030 per arm)  Which of the two degrades more gracefully when
+#                              the total budget is cut to a third?
+#
+# FLOW: dispatch_v4 -> MCF-LB -> FMM -> neh_cp_completion_seq -> <TAIL> -> base CP
+#
+# The prefix is copied verbatim from
+# output/20260801_neh_cp_budget_allocation/20260801T183302_770739/neh_cp_budget_allocation.yaml
+# scenario `dv4_mcf_fmm_comp_x1_base` (the cheap default there), so the ISW-CP
+# @ 0.09nc cell of the design IS that scenario and is borrowed rather than re-run.
+#
+# MERGING (this run alone does not answer Q1)
+#
+#   uv run python scripts/build_merged_run_dir.py \
+#       --dest output/20260805_merge_job_batch_cp_vs_isw_cp \
+#       --intersect-instances \
+#       output/20260801_neh_cp_budget_allocation/20260801T183302_770739/dv4_mcf_fmm_comp_x1_base=dv4_mcf_fmm_neh_isw_t090 \
+#       <this run>/dv4_mcf_fmm_neh_jbc_t090 \
+#       <this run>/dv4_mcf_fmm_neh_isw_t030 \
+#       <this run>/dv4_mcf_fmm_neh_jbc_t030
+#
+# `--intersect-instances` is REQUIRED here and was not in the full-grid version
+# of this plan: the borrowed scenario owns all 1440 instances while the three
+# scenarios below own 160, and the script aborts on a mismatch. Without it the
+# run-level chart writers would average the borrowed arm over 1440 instances and
+# the new arms over 160, with nothing in the output saying so.
+#
+# Then a POST_PROCESS_ONLY config over the printed dir (pattern:
+# metadata/20260804/merge_neh_cp_last1_stage_seq.yaml; keep draw_gantt and
+# draw_progress_plot false -- those painters write through the symlinks into the
+# source run).
+#
+# COST OF NOT RE-RUNNING THE FOURTH CELL. Q1 (isw_t090 vs jbc_t090) is a
+# CROSS-RUN contrast. The replicate band measured in
+# plans/analysis/20260801/neh_cp_seq_replicate.md is +-0.451 pp, but that was
+# measured over 1440 instances; on 160 the standard error is ~3x wider, so
+# budget roughly +-1.4 pp on the mean. The per-arm t090 -> t030 degradation for
+# ISW-CP is cross-run too (borrowed t090, in-run t030), while the same
+# degradation for JBC is in-run. Only Q2's within-level contrast
+# (isw_t030 vs jbc_t030) is fully paired inside one run. The smoke test's ~10 pp
+# gap is far outside that band, so a repeat of that result is readable here;
+# anything under ~1.5 pp is not, and would need the ISW t090 arm re-run
+# alongside on this same slice.
+#
+# WHY THE `job_batch_cp` TAIL IS THE STEP REPEATED 8 TIMES WITH A GROWING BATCH
+#
+# `incremental_sw_cp` is a composite: it iterates `sw_cp` over
+# unfixed_batch_count = 2..8, WIDENING the unfixed window each iteration, and
+# keeps going until the wall-clock cap. One `job_batch_cp` call is a SINGLE pass
+# at one batch size. The tail here mirrors that shape: 8 passes with
+# `batch_size` stepping 15 -> 50 by 5, each re-deriving the job sequence from
+# the improved incumbent.
+#
+# The repetition is written out in the flow rather than wrapped in a new
+# `incremental_job_batch_cp` composite, per the recorded decision in
+# plans/experiment/20260804/job_batch_cp.md §2.7-4: passes belong in the config
+# so the budget allocation is visible. Passes that no longer fit are skipped for
+# free -- `_run_job_batch_cp` preflights `is_stopping_condition()` and returns a
+# stop report (controller.py:2949).
+#
+# PER-BATCH TL IS PROPORTIONAL TO THE DESTROY SET (new, 2026-08-05)
+#
+# `batch_tl_mode: "proportional"` + `destroyed_op_tl_multiplier` give each batch
+# `kappa * |batch| * c` seconds, the `job_batch_cp` counterpart of ISW-CP's
+# `non_time_fixed_op_time_limit_multiplier * ntf`. It is what makes a growing
+# `batch_size` coherent: a bigger destroy set is a harder CP model and now buys
+# proportionally more solver time, and the short trailing batch gets
+# proportionally less. Verified end-to-end: TL == kappa * |batch| * c exactly.
+#
+# A useful consequence -- one pass costs `sum_batches kappa*|batch|*c` =
+# `kappa * n * c` REGARDLESS of batch_size. All 8 passes cost the same, so the
+# sweep varies neighbourhood size at constant budget, and pass cost scales with
+# nc exactly as the cap does, making the pass count instance-independent:
+# tail 0.0733nc / (kappa=0.010) ~= 7.3 passes of the 8 provisioned.
+#
+# So the 8 passes deliberately OVER-fill the tail (measured ~0.0733nc on
+# Instance_100_10_3_0,4_0,2_10_Rep0 in the 20260801 run = cap 0.09nc - prefix
+# 0.0058nc - FMM 0.0036nc - NEH 0.0108nc). Over-filling is the point: it keeps
+# `solve_base_model_cpsat` unreachable in BOTH arms (it was never reached in any
+# of the 1120 runs of the 20260801 predecessor either), so the arms are compared
+# at equal ELAPSED time and the terminal step never contaminates one arm only.
+# The last passes -- the largest batch sizes -- are therefore the ones clipped on
+# some instances. That is the faithful analogue of ISW-CP, whose own sweep is
+# truncated the same way: on the probe instance it reached only
+# unfixed_batch_count 2, 3, 4 of the requested 2..8.
+#
+# WHERE THE "IDENTICAL PARAMETERS" PREMISE GENUINELY BREAKS (read before tuning)
+#
+# kappa=0.010 here is NOT ISW-CP's kappa=0.005, and it cannot be, because the
+# two multiply different counts. `sw_cp` time-fixes everything outside the
+# window and its profile-fixed bands, so ntf is a strict subset of the model:
+# 173-234 of 1000 ops on the probe instance. `job_contrib_cp` -- which
+# `job_batch_cp` drives per batch -- time-fixes NOTHING (`pf_schedule` is the
+# incumbent minus the destroy set; every remaining op keeps only its chain
+# order, start times free), so its ntf is always the full n*c. Matching on ntf
+# would mean 0.005*1000 = 5 s per batch, ~35 s per pass, i.e. 2 passes in the
+# tail and no sweep at all. kappa is therefore matched on the DESTROY SET
+# instead and calibrated so the 8-pass sweep fills the tail. Do not read
+# 0.010 vs 0.005 as "JBC was given twice the time".
+#
+# HOW THE t030 LEVEL IS DERIVED (Q2)
+#
+# Only the cap and the two SEEDING budgets are scaled by 1/3:
+#   timelimit  0.09nc  -> 0.03nc
+#   FMM cp_tl  0.0036nc -> 0.0012nc
+#   NEH total  0.0108nc -> 0.0036nc
+# Every parameter of the step under test is left ALONE (ISW keeps
+# non_time_fixed_op_time_limit_multiplier: 0.005, JBC keeps kappa: 0.010 and the
+# same 15..50 batch-size sweep). Both arms therefore degrade by the SAME
+# mechanism -- fewer passes/sweeps, identical per-solve time -- instead of one
+# losing passes while the other only shrinks its per-solve TL. Scaling the
+# seeding budgets too is what keeps the tail's share of the cap comparable
+# across levels (~81 % at t090, ~76 % at t030); leaving FMM+NEH at full size
+# would have left the tail only 0.0132nc, i.e. the run would mostly measure
+# `neh_cp` again.
+#
+# Expected tail at t030: 0.03 - 0.0024 - 0.0012 - 0.0036 ~= 0.0228nc, so ~2 of
+# the 8 JBC passes (batch_size 15 and 20 only) and roughly 1 ISW sweep. The
+# 8 passes are written out at BOTH levels so the two JBC scenarios differ only
+# in the three scaled numbers; the sweep is simply truncated earlier at t030,
+# which is exactly what happens to ISW-CP's unfixed_batch_count sweep.
+#
+# WHY `midpoint` IS THE JBC SEQUENCE MODE
+#
+# Per plan §1.2, slicing by `midpoint` makes the batches "jobs that overlap in
+# time on the incumbent", i.e. `job_batch_cp` becomes a JOB-level sliding window
+# -- the direct structural analogue of `sw_cp`'s operation-level time windows.
+# That is the comparison Q1 wants. The mode choice is also nearly free:
+# midpoint and completion scored 0.1870 vs 0.1873 mean RPDf in
+# 20260804_job_batch_cp_compare, i.e. indistinguishable. `seq_tiebreak:
+# completion` + `seq_end_stage: -2` reproduce that run's arm 2 exactly.
+#
+# READING CAVEATS
+#
+# - `batch_tl_mode: "proportional"` on `job_batch_cp` USED to be a silent trap
+#   (`resolve_per_step_tl` returns None for it, so every batch ran with no CP
+#   limit and batch 0 ate the whole pass). As of 2026-08-05 the mode is
+#   implemented and `destroyed_op_tl_multiplier` is required with it, so the
+#   trap now raises at option construction instead.
+# - Model-rebuild cost per batch (plan §2.7-1) turned out negligible:
+#   `setup_seconds` was 0.02-0.03 s per batch on the n=100, c=10 probe, ~1.5 %
+#   of the step. Do not attribute a JBC loss at t030 to setup overhead without
+#   re-reading `setup_seconds` from the step logs.
+# - `job_batch_cp` is monotone on the incumbent (plan §1.3), so its step_obj can
+#   never fall below seed_obj; `neh_cp` sits in front of it in both arms, so the
+#   flow-level number is NOT contaminated by that asymmetry here -- but per-step
+#   slicing still needs `report.obj_log_loader.build_step_registrations`. Read
+#   docs/artifacts/obj_log.md before parsing `_obj_log.json`.
+# - T and R are FIXED by `ins_filter`, so the only decomposition axes left are
+#   n and c (20 instances per cell, 8 cells). Read the `pra2017-instance-params`
+#   skill before interpreting them. Prior expectation: with proportional TL a
+#   pass costs kappa*n*c regardless of batch_size, so JBC's per-pass budget now
+#   scales with the instance -- the n=200 disadvantage predicted in
+#   plans/experiment/20260804/job_batch_cp.md §7.3 should be WEAKER than it was
+#   under the fixed `total_timelimit`. That is a real prediction to check.
+# - Nothing in this slice hits the degenerate cases: the (T=0.2, R=1.0)
+#   instances where the seed already reaches objective 0 are all filtered out,
+#   so every instance exercises the full flow.
+# - 20 instances per (n, c) cell is thin. Treat cell-level means as directional
+#   and reserve conclusions for the pooled 160 unless a cell effect is large.
+#
+# Budget: mean cap is 84.4 s at 0.09nc on this slice (mean nc = 937.5) and
+# 28.1 s at 0.03nc, so ~17 min for the t090 scenario and ~6 min per t030
+# scenario at 12 workers => **~30 min total** plus reporting. 96 cores assumed
+# idle (12 x 8 solver threads). The smoke run confirmed the t090 arm consumes
+# the cap exactly (90.0 s of 90.0 s, `solve_base_model_cpsat` never reached).
+scenarios:
+  # ── Q1 arm B: job_batch_cp tail, full budget ────────────────────────────────
+  # (arm A -- ISW-CP @ 0.09nc -- is borrowed from 20260801, see MERGING above)
+  - name: dv4_mcf_fmm_neh_jbc_t090
+    timelimit: "0.09nc"
+    output_subdir: job_batch_cp_vs_isw_cp/dv4_mcf_fmm_neh_jbc_t090
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0036nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp_completion_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0108nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+      # 8 passes deliberately over-fill the ~0.0733nc tail; the surplus passes
+      # are skipped by the stopping-condition preflight.
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 15
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 20
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 25
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 30
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 35
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 40
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 45
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 50
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: solve_base_model_cpsat
+        solver_thread_cnt: 8
+
+  # ── Q2 arm A: ISW-CP tail, budget cut to a third ────────────────────────────
+  - name: dv4_mcf_fmm_neh_isw_t030
+    timelimit: "0.03nc"
+    output_subdir: job_batch_cp_vs_isw_cp/dv4_mcf_fmm_neh_isw_t030
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0012nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp_completion_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0036nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+      - method: incremental_sw_cp
+        solver_thread_cnt: 8
+        batch_size: "m"
+        step_size: 1
+        unfixed_batch_count_min: 2
+        unfixed_batch_count_max: 8
+        increment_unfixed_batch_count_flag: "always"
+        left_profile_fixed_batch_count: 2
+        right_profile_fixed_batch_count: 2
+        enable_promotion_profile_fixed: true
+        pf_method: "PF1"
+        batch_tl_mode: "proportional"
+        non_time_fixed_op_time_limit_multiplier: 0.005
+      - method: solve_base_model_cpsat
+        solver_thread_cnt: 8
+
+  # ── Q2 arm B: job_batch_cp tail, budget cut to a third ──────────────────────
+  - name: dv4_mcf_fmm_neh_jbc_t030
+    timelimit: "0.03nc"
+    output_subdir: job_batch_cp_vs_isw_cp/dv4_mcf_fmm_neh_jbc_t030
+    subroutine_flow:
+      - method: initialize_by_dispatch_v4
+        reconstruct_mode: "active_but_last_semi"
+      - method: calc_mcf_lb_and_derive_full_sch
+        draw_pmtn_sch_heatmap: false
+        job_placement_priority: "end_time"
+        last_stage_only_placement_criteria: "dist"
+        makespan_delta_ref: "lastStageOnlyMakespan"
+        adjust_p: true
+        adjust_r: true
+        r_adjust_coeff: 0.5
+        proceed_r2_when_nonpositive_cmax: true
+      - method: run_flip_makespan_cp_from_incumbent
+        cp_tl: "0.0012nc"
+        solver_thread_cnt: 8
+        log_search_progress: false
+        emit_phase_schedules: false
+      - method: neh_cp_completion_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        added_batch_size: 15
+        total_timelimit: "0.0036nc"
+        batch_tl_mode: "linear"
+        apply_cumulative_tl: false
+        pf_method: "PF1"
+        skip_pf_below_obj: "makespan"
+        make_semi_active_after_cp: true
+        minimize_makespan_lex: false
+      # Same 8 passes as the t090 arm; only ~2 fit in the ~0.0228nc tail, the
+      # rest are skipped by the stopping-condition preflight.
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 15
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 20
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 25
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 30
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 35
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 40
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 45
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: job_batch_cp_midpoint_seq
+        job_priority: "due2-weight-pos"
+        solver_thread_cnt: 8
+        batch_size: 50
+        batch_tl_mode: "proportional"
+        destroyed_op_tl_multiplier: 0.010
+        pf_method: "PF1"
+        seq_tiebreak: "completion"
+        seq_end_stage: -2
+      - method: solve_base_model_cpsat
+        solver_thread_cnt: 8
