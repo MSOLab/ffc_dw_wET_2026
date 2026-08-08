@@ -155,6 +155,7 @@ class FFcDDWSubroutineControllerCore(
         self.total_elapsed_time: float = 0.0  # TODO: apply to routix
         self._optimality_logged: bool = False
         self._last_neh_job_sequence: list[str] | None = None
+        self._last_jbc_job_sequence: list[str] | None = None
 
     def is_stopping_condition(self, **kwargs: Any) -> bool:
         """Stop when the timelimit is exceeded or optimality is proven."""

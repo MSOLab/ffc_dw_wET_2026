@@ -2453,6 +2453,21 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             seq_end_stage=seq_end_stage,
         )
 
+    def _clamp_seq_end_stage(
+        self, seq_end_stage: int, stage_count: int, step_label: str
+    ) -> int:
+        if abs(seq_end_stage) > stage_count:
+            self.logger.warning(
+                "%s: seq_end_stage=%d out of range for %d-stage instance; "
+                "clamping to -%d.",
+                step_label,
+                seq_end_stage,
+                stage_count,
+                stage_count,
+            )
+            return -stage_count
+        return seq_end_stage
+
     def _resolve_job_sequence(
         self,
         *,
@@ -2546,11 +2561,15 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             )
 
         dist_to_priority = normalized_mean_rank_distance(priority_sequence, list(seq))
+
+        is_neh = step_label.startswith("neh_cp")
+        last_seq = (
+            self._last_neh_job_sequence if is_neh else self._last_jbc_job_sequence
+        )
+        prev_label = "prev_neh" if is_neh else "prev_jbc"
         prev_str = "N/A"
-        if self._last_neh_job_sequence is not None:
-            dist_prev = normalized_mean_rank_distance(
-                self._last_neh_job_sequence, list(seq)
-            )
+        if last_seq is not None:
+            dist_prev = normalized_mean_rank_distance(last_seq, list(seq))
             prev_str = f"{dist_prev:.4f}"
         head = list(seq)[:5]
 
@@ -2570,7 +2589,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             "%s: seq source=%s tiebreak=%s end_stage=%d dist_to_midpoint=%.4f "
             "dist_to_first_stage=%.4f "
             "dist_to_completion=%.4f dist_to_job_priority=%.4f "
-            "dist_to_prev_neh=%s head=%s%s",
+            "dist_to_%s=%s head=%s%s",
             step_label,
             job_seq_source,
             seq_tiebreak if seq_tiebreak is not None else "default",
@@ -2579,12 +2598,16 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
             normalized_mean_rank_distance(all_seqs["first_stage"], list(seq)),
             normalized_mean_rank_distance(all_seqs["completion"], list(seq)),
             dist_to_priority,
+            prev_label,
             prev_str,
             head,
             same_src_dist_str,
         )
 
-        self._last_neh_job_sequence = used_sequence
+        if is_neh:
+            self._last_neh_job_sequence = used_sequence
+        else:
+            self._last_jbc_job_sequence = used_sequence
 
         return _ResolvedJobSequence(
             sequence=tuple(seq),
@@ -2637,17 +2660,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         c = instance.stage_count
         m = instance.last_stage_mc_count
 
-        end_stage_index = seq_end_stage
-        if abs(end_stage_index) > c:
-            self.logger.warning(
-                "%s: seq_end_stage=%d out of range for %d-stage instance; "
-                "clamping to -%d.",
-                step_label,
-                seq_end_stage,
-                c,
-                c,
-            )
-            end_stage_index = -c
+        end_stage_index = self._clamp_seq_end_stage(seq_end_stage, c, step_label)
 
         cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
         total_timelimit_seconds = (
@@ -2970,17 +2983,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         c = instance.stage_count
         m = instance.last_stage_mc_count
 
-        end_stage_index = seq_end_stage
-        if abs(end_stage_index) > c:
-            self.logger.warning(
-                "%s: seq_end_stage=%d out of range for %d-stage instance; "
-                "clamping to -%d.",
-                step_label,
-                seq_end_stage,
-                c,
-                c,
-            )
-            end_stage_index = -c
+        end_stage_index = self._clamp_seq_end_stage(seq_end_stage, c, step_label)
 
         cp_tl_seconds = resolve_value_expr(cp_tl, n, c, m)
         total_timelimit_seconds = (
