@@ -343,8 +343,11 @@ For each `(step, batch)`:
     described under "Per-batch loop".
   - For `neh_cp_*_seq` (incumbent-derived) methods: a **mapping** with keys
     `job_sequence_source` (the mode name, or `"job_priority:<name>"` on
-    fallback), `job_sequence_fallback` (`bool`), `job_sequence` (the ordered
-    job-id list used), and `steps` (the list of per-batch dicts).
+    fallback), `job_sequence_tiebreak` (the `seq_tiebreak` mode, `null` when
+    the mode's default secondary key was used), `job_sequence_end_stage` (the
+    resolved `seq_end_stage`, `null` on fallback), `job_sequence_fallback`
+    (`bool`), `job_sequence` (the ordered job-id list used), and `steps` (the
+    list of per-batch dicts).
 
 ## Side effects
 

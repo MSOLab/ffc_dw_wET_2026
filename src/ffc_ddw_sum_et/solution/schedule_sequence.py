@@ -7,12 +7,22 @@ from typing import Callable, Literal, Mapping, Sequence
 from .ffc_schedule import FFcSchedule
 
 __all__ = [
+    "SCHEDULE_SEQ_SOURCES",
     "ScheduleSeqSource",
     "schedule_job_sequence",
     "normalized_mean_rank_distance",
 ]
 
 ScheduleSeqSource = Literal["midpoint", "first_stage", "completion"]
+
+#: Every value of ``ScheduleSeqSource``, in the module's canonical order.
+#: Callers that need to enumerate the modes (the controller's sequence
+#: diagnostics) read this instead of repeating the literal list.
+SCHEDULE_SEQ_SOURCES: tuple[ScheduleSeqSource, ...] = (
+    "midpoint",
+    "first_stage",
+    "completion",
+)
 
 _KEY_FN: dict[str, Callable[[float, float], float]] = {
     "midpoint": lambda fs, ls: (fs + ls) / 2.0,
@@ -26,7 +36,7 @@ _DEFAULT_TIEBREAK: dict[str, ScheduleSeqSource] = {
     "completion": "first_stage",
 }
 
-_VALID_SOURCES: frozenset[str] = frozenset({"midpoint", "first_stage", "completion"})
+_VALID_SOURCES: frozenset[str] = frozenset(SCHEDULE_SEQ_SOURCES)
 
 
 def schedule_job_sequence(
@@ -39,10 +49,13 @@ def schedule_job_sequence(
 ) -> list[str]:
     """Order ``schedule``'s jobs by a schedule-derived sort key.
 
-    The sort key is ``(primary, secondary, rank, job_id)``, where
-    ``primary`` is ``source``'s key and ``secondary`` is
-    ``tiebreak_source``'s. ``tiebreak_source=None`` selects the default
-    partner in ``_DEFAULT_TIEBREAK``, reproducing the original behavior.
+    The sort key is ``(primary, secondary, rank)``, where ``primary`` is
+    ``source``'s key and ``secondary`` is ``tiebreak_source``'s.
+    ``tiebreak_source=None`` selects the default partner in
+    ``_DEFAULT_TIEBREAK``, reproducing the original behavior. ``rank``
+    settles the rest: both of its sources (``tiebreak_rank``, else the
+    schedule's own job order) assign a distinct rank per job, so the sort
+    is total and ``job_id`` is never needed to break a tie.
 
     Only ``source="midpoint"`` has a tie-break choice that changes the
     order. For a fixed ``ls`` the midpoint is monotonic in ``fs`` and for

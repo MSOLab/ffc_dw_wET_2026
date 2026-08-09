@@ -305,6 +305,47 @@ class TestAcceptanceRule:
         step_log = record.result.metrics["step_log"]
         assert [e.accepted for e in step_log] == [True]
 
+    def test_better_obj_without_a_schedule_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An objective with no schedule attached must not move the baseline.
+
+        Taking it would leave ``current_obj`` describing a solution the sweep
+        never holds, so the following batch — a genuine improvement over the
+        real incumbent — would be compared against an unreachable baseline and
+        rejected.
+        """
+        instance = _make_instance(4)
+        seed = _make_seed(instance)
+        seed_obj = _seed_obj(seed, instance)
+        improved = seed.deepcopy()
+        calls: list[int] = []
+
+        def fake_run(self_disp, spec: AlgSpec) -> AlgRecord:
+            calls.append(1)
+            if len(calls) == 1:
+                # Schedule-less: a phantom -50 the sweep cannot adopt.
+                return AlgRecord(
+                    work_status=WorkStatus.FEASIBLE,
+                    instance_id=spec.instance.name,
+                    algorithm_id="job_contrib_cp",
+                    option=spec.option,
+                    result=AlgResult(schedule=None, obj_value=seed_obj - 50.0),
+                    progress_log=(),
+                    termination_reason=TerminationReason.COMPLETED,
+                )
+            return _fake_record(spec, obj_value=seed_obj - 10.0, schedule=improved)
+
+        monkeypatch.setattr(JobContribCpDispatcher, "run", fake_run)
+        record = _run(instance, seed, batch_size=2)
+
+        assert record.result is not None
+        step_log = record.result.metrics["step_log"]
+        assert [e.accepted for e in step_log] == [False, True]
+        # Batch 2 is judged against the seed, not against the phantom -50.
+        assert step_log[1].obj_before == seed_obj
+        assert record.result.schedule is improved
+
     def test_current_incumbent_is_fed_to_the_next_batch(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

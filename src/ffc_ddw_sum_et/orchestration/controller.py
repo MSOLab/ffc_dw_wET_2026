@@ -111,6 +111,7 @@ from ffc_ddw_sum_et.solution.schedule_build import (
     reconstruct_raw_coarse_schedule,
 )
 from ffc_ddw_sum_et.solution.schedule_sequence import (
+    SCHEDULE_SEQ_SOURCES,
     ScheduleSeqSource,
     normalized_mean_rank_distance,
     schedule_job_sequence,
@@ -2547,13 +2548,8 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
 
         used_sequence = list(seq)
 
-        all_sources: list[ScheduleSeqSource] = [
-            "midpoint",
-            "first_stage",
-            "completion",
-        ]
         all_seqs: dict[str, list[str]] = {}
-        for src in all_sources:
+        for src in SCHEDULE_SEQ_SOURCES:
             all_seqs[src] = schedule_job_sequence(
                 incumbent.schedule,
                 src,
@@ -3088,7 +3084,10 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
                             else None,
                             "job_sequence_fallback": resolved.is_fallback,
                             "job_sequence": list(job_sequence),
-                            "batch_size": batch_size_resolved,
+                            # Both from the dispatcher: it owns the final
+                            # batch shape and overrides ``batch_size_resolved``
+                            # whenever ``num_batches`` is set.
+                            "batch_size": result.metrics.get("batch_size"),
                             "batch_count": result.metrics.get("batch_count"),
                             "steps": [entry.as_dict() for entry in step_log],
                         },

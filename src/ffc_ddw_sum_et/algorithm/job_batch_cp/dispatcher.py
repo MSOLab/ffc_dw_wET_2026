@@ -164,6 +164,7 @@ class JobBatchCpDispatcher:
                 if rec.result is not None and rec.result.obj_value is not None
                 else current_obj
             )
+            candidate = rec.result.schedule if rec.result is not None else None
             cpsat_status: str | None = None
             setup_seconds: float | None = None
             makespan: int = int(current.makespan)
@@ -176,14 +177,21 @@ class JobBatchCpDispatcher:
                     setup_seconds = rec.result.metrics.get("setup_seconds")
                     if tl_for_log is None:
                         tl_for_log = rec.result.metrics.get("cp_tl_seconds")
-                if rec.result.schedule is not None:
-                    makespan = int(rec.result.schedule.makespan)
+                if candidate is not None:
+                    makespan = int(candidate.makespan)
 
-            accepted = batch_obj_after_raw < current_obj - _OBJ_IMPROVEMENT_TOLERANCE
+            # A schedule is required to accept: taking the objective without the
+            # schedule it belongs to would leave ``current_obj`` describing a
+            # solution the sweep never holds, and every later batch would be
+            # compared against a baseline the incumbent cannot match.
             obj_before = current_obj
-            if accepted:
-                if rec.result is not None and rec.result.schedule is not None:
-                    current = rec.result.schedule
+            accepted = False
+            if (
+                candidate is not None
+                and batch_obj_after_raw < current_obj - _OBJ_IMPROVEMENT_TOLERANCE
+            ):
+                accepted = True
+                current = candidate
                 current_obj = batch_obj_after_raw
 
             entry = JobBatchCpStepEntry(

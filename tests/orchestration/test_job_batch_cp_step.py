@@ -270,6 +270,29 @@ def test_step_log_yaml_shape(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert [s["batch_head"] for s in data["steps"]] == ["j1", "j3"]
 
 
+def test_step_log_batch_size_is_the_one_the_dispatcher_used(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``num_batches`` overrides ``batch_size`` inside the dispatcher, so the
+    log must read the realized size back from it rather than report the
+    controller's pre-resolved value."""
+    controller = _make_controller(
+        "job_batch_cp_midpoint_seq", batch_size=1, num_batches=3
+    )
+    log_path = tmp_path / "_step_log.yaml"
+    monkeypatch.setattr(
+        controller, "try_get_file_path_for_subroutine", lambda *a, **k: log_path
+    )
+
+    controller.run()
+
+    data = load_yaml(log_path)
+    # 4 jobs / 3 batches -> ceil(4/3) = 2 per batch, so 2 batches, not 3.
+    assert data["batch_size"] == 2
+    assert data["batch_count"] == 2
+    assert [s["batch_size"] for s in data["steps"]] == [2, 2]
+
+
 def test_plain_step_records_the_job_priority_source(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
