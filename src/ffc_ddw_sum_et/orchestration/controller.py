@@ -2302,7 +2302,7 @@ class FFcDDWSubroutineController(FFcDDWSubroutineControllerCore):
         """NEH-CP with job sequence derived from incumbent via midpoint sort.
 
         Sorts by ``(first_stage_start + end_stage_end) / 2`` ascending,
-        tie-broken by the end stage's end time then by ``job_priority`` rank.
+        tie-broken by the first-stage start then by ``job_priority`` rank.
 
         ``seq_tiebreak`` overrides the secondary sort key within midpoint
         tie groups. ``"completion"`` reverses the tie-group order relative

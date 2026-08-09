@@ -43,7 +43,7 @@ key then by `job_priority` rank):
 
 | Method | `job_seq_source` | Primary key | Secondary key |
 | --- | --- | --- | --- |
-| `neh_cp_midpoint_seq` | `midpoint` | `(first_stage_start + end_stage_end) / 2` | end stage end |
+| `neh_cp_midpoint_seq` | `midpoint` | `(first_stage_start + end_stage_end) / 2` | first-stage start |
 | `neh_cp_first_stage_seq` | `first_stage` | first-stage start | last-stage end |
 | `neh_cp_completion_seq` | `completion` | end stage end | first-stage start |
 
