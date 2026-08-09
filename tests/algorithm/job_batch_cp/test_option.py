@@ -76,3 +76,28 @@ class TestProportionalBatchTl:
 
     def test_multiplier_defaults_to_none(self) -> None:
         assert JobBatchCpOption(job_sequence=("j0",)).destroyed_op_tl_multiplier is None
+
+
+class TestTimeLimitValidation:
+    """Time limits must be strictly positive when set — a 0/negative value
+    silently degrades every batch to the incumbent fallback."""
+
+    @pytest.mark.parametrize("field", ["cp_tl_seconds", "total_timelimit_seconds"])
+    @pytest.mark.parametrize("value", [0, -1, -0.5])
+    def test_non_positive_time_limit_raises(self, field: str, value: float) -> None:
+        with pytest.raises(ValueError, match="must be > 0"):
+            JobBatchCpOption(job_sequence=("j0",), **{field: value})
+
+    def test_none_time_limits_accepted(self) -> None:
+        opt = JobBatchCpOption(job_sequence=("j0",))
+        assert opt.cp_tl_seconds is None
+        assert opt.total_timelimit_seconds is None
+
+    def test_positive_time_limits_accepted(self) -> None:
+        opt = JobBatchCpOption(
+            job_sequence=("j0",),
+            cp_tl_seconds=0.5,
+            total_timelimit_seconds=4.0,
+        )
+        assert opt.cp_tl_seconds == 0.5
+        assert opt.total_timelimit_seconds == 4.0

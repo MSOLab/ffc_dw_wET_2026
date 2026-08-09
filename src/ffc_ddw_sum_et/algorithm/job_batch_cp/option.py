@@ -60,6 +60,16 @@ class JobBatchCpOption(AlgOption):
                     "destroyed_op_tl_multiplier must be > 0, "
                     f"got {self.destroyed_op_tl_multiplier}"
                 )
+        if self.cp_tl_seconds is not None and self.cp_tl_seconds <= 0:
+            raise ValueError(f"cp_tl_seconds must be > 0, got {self.cp_tl_seconds}")
+        if (
+            self.total_timelimit_seconds is not None
+            and self.total_timelimit_seconds <= 0
+        ):
+            raise ValueError(
+                f"total_timelimit_seconds must be > 0, "
+                f"got {self.total_timelimit_seconds}"
+            )
         if (
             self.batch_tl_mode == "proportional"
             and self.destroyed_op_tl_multiplier is None

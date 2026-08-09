@@ -637,7 +637,7 @@ class TestProportionalBatchTl:
         instance = _make_instance(10)
         seen = _capture_sub_options(monkeypatch)
 
-        _run(
+        record = _run(
             instance,
             _make_seed(instance),
             batch_size=5,
@@ -648,6 +648,11 @@ class TestProportionalBatchTl:
         assert [o.cp_tl_mode for o in seen] == ["constant"] * 2
         assert [o.cp_tl_seconds for o in seen] == [2.0, 2.0]
         assert all(o.destroyed_op_tl_multiplier is None for o in seen)
+
+        step_log = record.result.metrics["step_log"]
+        portions = [e.elapsed_portion for e in step_log]
+        assert all(p is not None for p in portions)
+        assert portions[0] <= portions[1]
 
     def test_step_log_records_the_effective_tl(
         self, monkeypatch: pytest.MonkeyPatch
