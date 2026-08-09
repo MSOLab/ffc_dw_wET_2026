@@ -59,19 +59,34 @@ class JobContribCpDispatcher:
 
         start = time.monotonic()
 
-        selected = select_jd_jobs(
-            incumbent,
-            instance,
-            option.jd_count_target,
-            time_factor=option.time_factor,
-        )
-        jd_count_eff = len(selected)
-
         job_2_contrib = compute_job_2_obj_contrib_map(
             incumbent, instance, time_factor=option.time_factor
         )
         incumbent_obj = float(sum(job_2_contrib.values()))
         positive_jobs = [j for j, v in job_2_contrib.items() if v > 0]
+
+        instance_job_set = set(instance.job_id_list)
+        destroy_selection: str
+        if option.destroy_job_ids is not None:
+            destroy_selection = "explicit"
+            selected = []
+            for j in option.destroy_job_ids:
+                if j not in instance_job_set:
+                    raise ValueError(
+                        f"destroy_job_ids contains job '{j}' not in instance "
+                        f"(instance has {len(instance_job_set)} jobs)"
+                    )
+                selected.append(j)
+            jd_count_eff = len(selected)
+        else:
+            destroy_selection = "contribution"
+            selected = select_jd_jobs(
+                incumbent,
+                instance,
+                option.jd_count_target,
+                time_factor=option.time_factor,
+            )
+            jd_count_eff = len(selected)
 
         if jd_count_eff == 0:
             logger.info(
@@ -96,6 +111,7 @@ class JobContribCpDispatcher:
                         "positive_contrib_job_count": 0,
                         "incumbent_obj": incumbent_obj,
                         "selected_jobs": [],
+                        "destroy_selection": destroy_selection,
                     },
                 ),
                 progress_log=(
@@ -110,9 +126,10 @@ class JobContribCpDispatcher:
 
         jd_eff_contrib_sum = sum(job_2_contrib[j] for j in selected)
         logger.info(
-            "job_contrib_cp: jd_count_target=%d, jd_count_eff=%d "
-            "(positive-contrib jobs=%d, n=%d, incumbent obj=%.1f, "
+            "job_contrib_cp: destroy_selection=%s, jd_count_target=%s, "
+            "jd_count_eff=%d (positive-contrib jobs=%d, n=%d, incumbent obj=%.1f, "
             "jd eff contrib sum=%d)",
+            destroy_selection,
             option.jd_count_target,
             jd_count_eff,
             len(positive_jobs),
@@ -203,6 +220,8 @@ class JobContribCpDispatcher:
                 positive_count=len(positive_jobs),
                 cpsat_status=f"budget_exhausted_before_solve:{binding}",
                 selected=selected,
+                destroy_selection=destroy_selection,
+                setup_seconds=now - start,
             )
 
         solver_cfg = CpsatSolverOptions(
@@ -235,6 +254,7 @@ class JobContribCpDispatcher:
             solver.log_callback = search_log_lines.append
 
         recorder = ObjectiveValueRecorder()
+        setup_seconds = time.monotonic() - start
         status = solver.solve(mdl, solution_callback=recorder)
         status_name = solver.status_name(status)
 
@@ -282,6 +302,8 @@ class JobContribCpDispatcher:
                     positive_count=len(positive_jobs),
                     cpsat_status=status_name,
                     selected=selected,
+                    destroy_selection=destroy_selection,
+                    setup_seconds=setup_seconds,
                 )
             # INFEASIBLE
             if option.error_if_infeasible:
@@ -309,6 +331,8 @@ class JobContribCpDispatcher:
                 positive_count=len(positive_jobs),
                 cpsat_status=status_name,
                 selected=selected,
+                destroy_selection=destroy_selection,
+                setup_seconds=setup_seconds,
             )
 
         j_i_2_start = {
@@ -408,6 +432,8 @@ class JobContribCpDispatcher:
                     "sum_tardiness": float(sum_t),
                     "selected_jobs": [str(j) for j in selected],
                     "cp_progress": cp_progress,
+                    "destroy_selection": destroy_selection,
+                    "setup_seconds": setup_seconds,
                     # int(): FFcSchedule.makespan can be a numpy scalar, which
                     # the controller's dump_yaml cannot represent.
                     "makespan": int(schedule.makespan),
@@ -433,6 +459,8 @@ class JobContribCpDispatcher:
         positive_count: int,
         cpsat_status: str,
         selected: list[str],
+        destroy_selection: str,
+        setup_seconds: float | None,
     ) -> AlgRecord:
         return AlgRecord(
             work_status=WorkStatus.FEASIBLE,
@@ -452,6 +480,8 @@ class JobContribCpDispatcher:
                     "cpsat_status": cpsat_status,
                     "fallback": "incumbent",
                     "selected_jobs": [str(j) for j in selected],
+                    "destroy_selection": destroy_selection,
+                    "setup_seconds": setup_seconds,
                 },
             ),
             progress_log=(),

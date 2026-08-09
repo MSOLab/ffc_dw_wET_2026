@@ -7,6 +7,14 @@ Analysis, weekly-review, and report-support scripts.
 > They are excluded from the standing catalog below; each file's docstring
 > states its purpose and its retirement condition.
 
+> **Reading `<instance>_obj_log.json`:** use
+> `report.obj_log_loader.build_step_registrations` for step boundaries rather
+> than parsing `obj_value.notes` by hand — see
+> [`docs/artifacts/obj_log.md`](../docs/artifacts/obj_log.md) for the schema and
+> the three traps (absent steps, own-output vs incumbent, dropped note-less
+> series). Parsing the raw payload is a valid choice for plotting or per-point
+> inner-step labels; state why in the script's docstring when you do.
+
 ## 1. Batch Size Analysis
 
 Statistically analyze and visualize the effect of batch size on RPDf.
@@ -742,6 +750,49 @@ uv run python scripts/20260729/analyze_init_budget_curve.py \
 > baseline — but within one run f10 < f20 < f40 monotonically, so the knee is at
 > **≥ 16 %** and the "saved time is worth more in the tail" hypothesis does not
 > hold over 4–16 %. Losses are local to T=0.6·R≥0.6 and mid/large c=5 cells.
+
+---
+
+### 20260804/summarize_seq_merge.py
+
+Per-scenario means and **paired** contrasts over any merged run's
+`<ts>_rpdf_comparison.csv`. Written for the NEH-CP job-insertion-order merges,
+but it assumes nothing beyond that CSV's schema, so it fits any run whose
+scenarios share one instance grid.
+
+The run-level reporter draws per-scenario dashboards but never differences two
+named scenarios. That matters here because the arms share the grid: the paired
+SE is roughly half the SE of a difference of independent means, which is what
+separates a real ~0.9 %p sequence effect from the ±0.451 %p run-to-run band
+(`plans/analysis/20260801/neh_cp_seq_replicate.md`).
+
+Prints (1) per-scenario mean RPDf / elapsed / time% with the three T columns,
+(2) each `--contrast a b` as Δmean, SE, σ and win/tie/loss — pooled, per T and
+per c, and (3) the (n, c) cell table. **T slices are not optional**: pooled means
+have cancelled opposite-signed effects before
+(`plans/analysis/20260802/neh_cp_budget_allocation.md` action 4). Scenario labels
+may be abbreviated to any unique suffix.
+
+```bash
+uv run python scripts/20260804/summarize_seq_merge.py \
+    output/20260804_merge_neh_cp_last1_stage_seq/20260804T233244_618881 \
+    --contrast completion3_seq completion_seq \
+    --contrast midpoint3_seq midpoint2_seq \
+    --contrast midpoint_seq midpoint_seq_rep
+```
+
+> Every number is flow-level `bestObj` = `min(seed, NEH)`, so arms whose NEH step
+> did not beat the seed report identical values — the tie counts run to about a
+> third of the grid and every effect size is a **diluted lower bound**. A verdict
+> on the NEH step itself needs the step-level plane
+> (`docs/artifacts/obj_log.md`), not this script.
+>
+> Conclusion it produced
+> (`plans/analysis/20260804/neh_cp_last1_stage_seq_merge.md`): moving the sort
+> axis to the `(last-1)` stage (`seq_end_stage: -2`) gains −0.909 %p (2.6 σ) in
+> the `completion` family — about 2× the replicate band, sign-consistent across
+> every T and c slice — while the same change in the `midpoint` family
+> (−0.329 %p, 1.2 σ) stays inside the band.
 
 ---
 

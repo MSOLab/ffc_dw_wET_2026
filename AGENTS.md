@@ -77,9 +77,11 @@ tolerance). Notes:
   step's* status, not a global proof; prefer the `obj_value == obj_bound`
   comparison for a global optimality judgment.
 - The same UB/LB pair is also emitted per progress point in
-  `<instance>_obj_log.json` (`obj_value.data` / `obj_bound.data`) — see the
-  SW-CP TL-policy note in `plans/experiment/20260705/sw_cp_tl_policy_investigation.md` for the
-  loader caveat (the structured loader drops LB points that carry no note).
+  `<instance>_obj_log.json` (`obj_value.data` / `obj_bound.data`). Read
+  `docs/artifacts/obj_log.md` before parsing it — it owns the schema, which
+  reader to use, and the three traps (including the loader caveat that drops LB
+  points carrying no note, first hit in
+  `plans/experiment/20260705/sw_cp_tl_policy_investigation.md`).
 
 ### PRA2017 instance parameters (generation grid & mapping source)
 

@@ -22,22 +22,115 @@ primary is makespan and the secondary is sum C_i).
 
 ## Signature
 
+### `neh_cp` (job-priority-based ordering)
+
 ```python
 def run(
     self,
     job_priority: NehCpJobPriority = "weight-due-pos",
     solver_thread_cnt: int = 1,
-    added_batch_size: int = 1,
-    cp_tl: float | str | None = None,
-    apply_cumulative_tl: bool = False,
-    pf_method: PFMethod = "PF1",
-    skip_pf_below_obj: str | float | None = None,
-    make_semi_active_after_cp: bool = False,
-    minimize_makespan_lex: bool = False,
-    cp_tl_2nd_obj: float | str | None = None,
-    error_if_infeasible: bool = False,
+    ...
 ) -> SubroutineReport: ...
 ```
+
+### `neh_cp_midpoint_seq`, `neh_cp_first_stage_seq`, `neh_cp_completion_seq` (incumbent-derived ordering)
+
+These three methods derive the job insertion sequence from the current
+incumbent schedule (via
+[`schedule_job_sequence`](../../src/ffc_ddw_sum_et/solution/schedule_sequence.py)).
+Each uses a different sort key (all ascending, tie-broken by the secondary
+key then by `job_priority` rank):
+
+| Method | `job_seq_source` | Primary key | Secondary key |
+| --- | --- | --- | --- |
+| `neh_cp_midpoint_seq` | `midpoint` | `(first_stage_start + end_stage_end) / 2` | first-stage start |
+| `neh_cp_first_stage_seq` | `first_stage` | first-stage start | last-stage end |
+| `neh_cp_completion_seq` | `completion` | end stage end | first-stage start |
+
+`end_stage_end` defaults to the **last** stage's end time
+(`seq_end_stage=-1`). The `seq_end_stage` parameter (available on
+`neh_cp_midpoint_seq` and `neh_cp_completion_seq`) selects a different
+stage — see "`seq_end_stage` parameter" below.
+
+**Fallback**: when no incumbent schedule is available,
+`job_priority` is used instead (a `WARNING` is logged).
+`job_priority` is always computed — it serves as tie-break rank
+and as fallback ordering.
+
+**Diversity diagnostics**: when an incumbent is present, all three
+sequence modes are computed and their pairwise distances (via
+`normalized_mean_rank_distance`) are emitted in a single `INFO` log line,
+along with distance to the `job_priority` sequence and the previous
+NEH-CP sequence (if any). The first five jobs of the chosen sequence are
+also logged (`head=`).
+
+All three methods accept the same parameters as `neh_cp` and delegate
+to the shared private core `_run_neh_cp`.
+
+### `seq_tiebreak` parameter (`neh_cp_midpoint_seq` only)
+
+`neh_cp_midpoint_seq` additionally accepts `seq_tiebreak:
+ScheduleSeqSource | None = None`. It overrides the secondary sort key
+within midpoint tie groups — where `m = (first_stage_start +
+last_stage_end) / 2` is equal, the default secondary key is first-stage
+start; `seq_tiebreak="completion"` uses last-stage end instead, which
+reverses the order within each tie group (because `ls = 2m − fs` is
+decreasing in `fs` for fixed `m`).
+
+Only `midpoint` is exposed because the other modes have no
+distinguishable tie-break keys:
+
+| Source | Default 2nd key | Alternative candidate | Why identical |
+| --- | --- | --- | --- |
+| `first_stage` | `ls` | `midpoint` = `(fs+ls)/2` | For fixed `fs`, `midpoint` is monotonic in `ls` — same order. |
+| `completion` | `fs` | `midpoint` = `(fs+ls)/2` | For fixed `ls`, `midpoint` is monotonic in `fs` — same order. |
+| `midpoint` | `fs` | `ls` | For fixed `m`, `ls = 2m − fs` is **decreasing** in `fs` — order reverses. |
+
+The same algebra is enforced by regression tests in
+`tests/solution/test_schedule_sequence.py`.
+
+### `seq_end_stage` parameter (`neh_cp_midpoint_seq`, `neh_cp_completion_seq`)
+
+`neh_cp_midpoint_seq` and `neh_cp_completion_seq` additionally accept
+`seq_end_stage: int = -1`. It selects which stage provides the end time
+(`ls`) for the sort key.
+
+The sort key tables use `end_stage_end` (the end time of the stage at
+`schedule.stages[seq_end_stage]`) in place of `last_stage_end`:
+
+| Mode `(/param)` | Primary key | Notes |
+| --- | --- | --- |
+| `completion3` | `end_stage_end` (`ls'`) | `neh_cp_completion_seq`, `seq_end_stage: -2` |
+| `midpoint3` | `(first_stage_start + end_stage_end) / 2` (`m'`) | `neh_cp_midpoint_seq`, `seq_end_stage: -2`, `seq_tiebreak: completion` |
+
+`seq_end_stage` is a negative index into `schedule.stages`: `-1`
+(default) = last stage (byte-identical to the previous behaviour),
+`-2` = second to last. It is validated by `schedule_job_sequence`
+(`schedule_sequence.py`): values outside
+`[-len(stages), -1]` raise `ValueError`. In the controller, a value
+whose absolute value exceeds the instance's stage count is clamped to
+`-c` with a `WARNING` log.
+
+**Motivation.** The post-processing pipeline applies
+`make_semi_active` (left-shift) to every stage, but
+`insert_idle_time` uses due windows to shift ops only on the **last
+stage** — so `ls` carries both schedule structure and due-date
+adjustment while `ls'` isolates the upstream schedule structure.
+Moving the axis to `(last-1)` tests whether the sort key should see
+the schedule as it is before the due-window adjustment.
+
+The tie-break degeneracy argument for `end_stage_index=-1` does **not**
+carry over: `ls'` is not monotonic in `ls` (the last-stage idle
+insertion varies per job), so `completion3` / `midpoint3` produce
+distinct orders from their `-1` counterparts.
+Verification: `tests/solution/test_schedule_sequence.py`
+(`test_non_alias_completion_end_stage_minus2_vs_minus1`).
+
+`first_stage` is deliberately **not** exposed (see §8 of
+`plans/experiment/20260804/neh_cp_last1_stage_seq.md`): it is
+consistently the worst-performing mode across the 1440-instance
+grid, and a `seq_end_stage` knob on it would add unused config
+surface.
 
 | Parameter | Role |
 | --- | --- |
@@ -81,12 +174,21 @@ Let `n = instance.job_count`, `c = instance.stage_count`.
   resolve_cp_tl(cp_tl_2nd_obj ?? cp_tl, n, c)`; otherwise `None`.
 - **Horizon.** `horizon = sum(params.p.values())` over the full instance —
   used for **every** stage-1 model build. Stage 2 tightens it per batch.
-- **Job ordering.** `job_sequence = neh_cp_job_sequence(instance, job_priority)`
-  (module helper in `ffc_ddw_sum_et.algorithm.neh_cp.sequence`).
-  - `"weight-due-pos"`: `(max(w⁻, w⁺) desc, w⁻+w⁺ desc, d⁺−d⁻ asc,
-    position asc)`.
-  - `"due-weight-pos"`: `(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc,
-    position asc)`.
+- **Job ordering.** One of two paths:
+  1. **Priority-based** (`neh_cp`): `job_sequence = neh_cp_job_sequence(instance, job_priority)`
+     (module helper in `ffc_ddw_sum_et.algorithm.neh_cp.sequence`).
+     - `"weight-due-pos"`: `(max(w⁻, w⁺) desc, w⁻+w⁺ desc, d⁺−d⁻ asc,
+       position asc)`.
+     - `"due-weight-pos"`: `(max(0, d⁺−p_last) asc, d⁺ asc, d⁻ asc, w⁻+w⁺ desc,
+       position asc)`.
+  2. **Incumbent-derived** (`neh_cp_*_seq`):
+     `schedule_job_sequence(incumbent.schedule, source, tiebreak_rank=rank_map)`
+     where `rank_map` is derived from the `job_priority` sequence and serves
+     as the final tie-break. Falls back to path 1 when no incumbent is
+     registered (warning logged). The derived sequence is validated to be a
+     permutation of the instance's `job_id_list`; missing or extra jobs are
+     corrected by preserving the derived order and appending missing jobs in
+     `job_priority` order (warning logged).
 - **Batch shape.** `first_batch_size = max(added_batch_size,
   max_m_per_stage · 2)`. Batch 0 is `job_sequence[:first_batch_size]`;
   subsequent batches slice the tail in chunks of `added_batch_size`.
@@ -196,6 +298,7 @@ For each `(step, batch)`:
 10. **Per-step log.** Recompute `(se, st) =
     compute_weighted_earliness_tardiness(partial_sol, sub_instance)` and
     append to `sub_step_log`:
+
     ```yaml
     step: <int>
     elapsed_time: <sec-since-start_elapsed>
@@ -206,6 +309,7 @@ For each `(step, batch)`:
     makespan: <int, partial_sol.makespan>
     ran_2nd_obj: <bool>
     ```
+
     `sub_obj_lb` comes from the stage-1 CP-SAT solver
     (`solver.best_objective_bound`) when `status ∈ {OPTIMAL, FEASIBLE}`,
     else `0.0`. The stage-2 makespan solver's bound is **not** used here —
@@ -234,8 +338,16 @@ For each `(step, batch)`:
 
 - `SubroutineReport.obj_bound` is always `None` from this subroutine (no
   lower bound is computed here).
-- The dumped `_step_log.yaml` is a list of dicts, one per batch step, in the
-  shape above.
+- **Per-step log (`_step_log.yaml`):**
+  - For `neh_cp`: a **list** of dicts, one per batch step, in the shape
+    described under "Per-batch loop".
+  - For `neh_cp_*_seq` (incumbent-derived) methods: a **mapping** with keys
+    `job_sequence_source` (the mode name, or `"job_priority:<name>"` on
+    fallback), `job_sequence_tiebreak` (the `seq_tiebreak` mode, `null` when
+    the mode's default secondary key was used), `job_sequence_end_stage` (the
+    resolved `seq_end_stage`, `null` on fallback), `job_sequence_fallback`
+    (`bool`), `job_sequence` (the ordered job-id list used), and `steps` (the
+    list of per-batch dicts).
 
 ## Side effects
 

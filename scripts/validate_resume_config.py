@@ -41,6 +41,7 @@ from ffc_ddw_sum_et.orchestration import (  # noqa: E402
     SUBROUTINE_FLOW_CACHE_FN,
     BenchmarkLoader,
     FFcDDWSubroutineController,
+    resolve_ins_index,
 )
 
 
@@ -92,7 +93,7 @@ def _check_artifacts(config: dict, resume_dir: Path) -> list[str]:
         Path(config["benchmark_dir"]),
         ins_index_source=Path(ins_index_source) if ins_index_source else None,
     )
-    instances = loader.load_all(ins_index=config.get("ins_index"))
+    instances = loader.load_all(ins_index=resolve_ins_index(config))
     print(f"  instances to run: {len(instances)}")
     missing = []
     for instance in instances:

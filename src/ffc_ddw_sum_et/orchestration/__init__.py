@@ -9,6 +9,7 @@ from .benchmark_loader import BenchmarkLoader
 from .controller import FFcDDWSubroutineController
 from .ffcddw_multi_instance_runner import FFcDDWMultiInstanceRunner
 from .ffcddw_single_instance_runner import FFcDDWSingleInstanceRunner, InstanceResult
+from .ins_filter import resolve_ins_index
 from .reporting import (
     SUBROUTINE_FLOW_CACHE_FN,
     FFcDDWMultiScenarioRunner,
@@ -33,5 +34,6 @@ __all__ = [
     "SUBROUTINE_FLOW_CACHE_FN",
     "ScenarioResult",
     "init_ffc_artifact_layout",
+    "resolve_ins_index",
     "restore_layout_from_run_dir",
 ]
