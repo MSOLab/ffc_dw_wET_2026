@@ -616,89 +616,30 @@ current polish), or when the CSR reconstruct's dependence on
 
 The incumbent-derived NEH-CP sequence work
 (`plans/experiment/20260731/neh_cp_incumbent_sequence.md`) landed with a
-review that raised ten items. Three were fixed at the time (controller
-tests that could not tell the four modes apart, a `bottleneck` test that
-did not verify stage selection, and an opaque `TypeError` on partial
-schedules). The remaining seven are deliberately deferred:
+review that raised ten items. Three were fixed at the time; four more were
+resolved later; two remain deferred:
 
-1. **Unknown `source` degrades silently** —
-   `solution/schedule_sequence.py::schedule_job_sequence` has no `else`
-   branch, so an unrecognized `source` leaves `ts_tuples` empty and
-   returns `[]`. The controller's correction path then rebuilds the
-   `job_priority` order, hiding the mistake. `param_sort_job_sequence`
-   (`parameters/sorter.py`) raises `ValueError` on an unknown key —
-   match that. Only reachable by passing a value outside the
-   `ScheduleSeqSource` literal, hence deferred.
-2. **`normalized_mean_rank_distance` is undocumented and diverges from
-   the reference.** hybridflowshop divides by
-   `len(common) * (len(common) - 1)`; this divides by `n² / 2` (n =
-   reference length), which maps a full reversal to 1.0 — a better
-   normalization, but nothing says so. Also undocumented: jobs present
-   in `candidate` but absent from `reference` are dropped while `n`
-   stays full-length. The trailing `if n > 0` is dead code (the
-   `<= 1` early return guarantees `n >= 2`). No public function in the
-   module has a docstring except `schedule_job_sequence`.
-3. **`_ns_`-prefixed locals** in `controller._run_neh_cp`
-   (`_ns_used_seq`, `_ns_fallback`) follow no convention in this repo,
-   and a leading underscore on a local reads as "unused". Rename to
-   `used_sequence` / `sequence_fallback`.
-4. **`tests/solution/test_ffc_schedule.py`'s `get_ji_2_start_time_map`
-   assertion is a tautology** — it rebuilds the expected dict with the
-   same comprehension as the implementation, via the private
-   `_iter_operations()`, and checks only `new_schedule` instead of the
-   old-vs-new equality the surrounding assertions use. It cannot fail.
+- ~~Items 1–3: unknown source silent fallback, undocumented
+  `normalized_mean_rank_distance`, `_ns_` locals~~ — resolved in
+  `20260804_neh_cp_last1_stage_seq`.
+- ~~Item 4: tautological `get_ji_2_start_time_map` assertion~~ — removed
+  in `20260804_job_batch_cp` (told `_iter_operations()` the same story as
+  the implementation; could not fail, and `HybridFlowshopLiteSchedule`
+  rejected the fix).
+- ~~Item 7: `bottleneck` mode~~ — resolved 2026-08-01
+  (`neh_cp_bottleneck_seq`, `"bottleneck"` from `ScheduleSeqSource`,
+  `_find_bottleneck_stage`, and tests deleted; analysis:
+  `plans/analysis/20260731/neh_cp_seq_source_pilot.md`).
+
 5. **`docs/algorithms/neh_cp.md`'s `neh_cp` signature block was
    collapsed to `...`**, dropping the previously listed parameters. The
    parameter table below still documents them, so this is cosmetic.
 6. **`solution/__init__.py` is empty**, so `schedule_sequence`'s symbols
    are imported by module path. Consistent with the package as it
    stands; revisit only if the package grows a public surface.
-7. ~~**The `bottleneck` mode's premise is unvalidated on this
-   problem.**~~ — **resolved 2026-08-01: the premise is false, and the
-   mode is degenerate.** `_find_bottleneck_stage` always returns the
-   *first* stage, so `neh_cp_bottleneck_seq` is an alias of
-   `neh_cp_first_stage_seq` differing only in its secondary sort key.
-   `get_stage_2_mc_2_idle_time_map(include_idle_before_first_op=False)`
-   discards idle before a machine's first operation, and the first stage
-   has no predecessor constraint, so a left-shifted (semi-active)
-   schedule leaves it with exactly **zero** internal idle while the E/T
-   `insert_idle_time` piles idle onto downstream stages. Minimum-idle
-   therefore selects stage 0 unconditionally. Measured in the
-   `20260801T005425_870711` pilot: stage-0 idle was 0 in all 9 final
-   schedules inspected, and the bottleneck/first_stage sequence distance
-   was 0.0000–0.0032 across all 36 derived orders (every other mode pair
-   sat at 0.02–0.13). The mode was dropped from
-   `metadata/20260731/neh_cp_seq_source_compare.yaml`; the
-   `neh_cp_bottleneck_seq` step method and the `"bottleneck"` literal in
-   `ScheduleSeqSource` were **left in place** — see "When to act".
-   Analysis: `plans/analysis/20260731/neh_cp_seq_source_pilot.md`.
 
-**Why:** none of items 1–6 changes behaviour on any reachable path, and
-items 1–3 touch code that the pending sequence-source experiment will
-report on — better to learn which modes survive before polishing all
-four. Splitting them out keeps the landing diff reviewable.
-
-**Status (2026-08-04):** items 1–3 resolved in `20260804_neh_cp_last1_stage_seq`.
-Item 7 resolved — `neh_cp_bottleneck_seq`, `"bottleneck"` from
-`ScheduleSeqSource`, `_find_bottleneck_stage`, and their tests deleted.
-
-**When to act:** items 1–3 whenever `schedule_sequence.py` or
-`_run_neh_cp` is next edited (they are minutes of work in context).
-Item 4 when `get_ji_2_start_time_map` grows any logic beyond the
-comprehension. Items 5–6 when the docs or the `solution` package are
+**When to act:** items 5–6 when the docs or the `solution` package are
 next revised.
-
-Item 7 is closed as an experimental question; what remains is a code
-decision, deferred: **either delete `neh_cp_bottleneck_seq`,
-`"bottleneck"` from `ScheduleSeqSource`, `_find_bottleneck_stage`, and
-their tests, or redefine the bottleneck so it can pick a non-first
-stage** (e.g. maximum machine utilization, or minimum idle computed with
-`include_idle_before_first_op=True` so stage 0 is charged for its
-head-of-schedule slack). Deferred because the mode is dead weight rather
-than a hazard — nothing in `metadata/` calls it now, and its output is a
-valid (if redundant) order if something does. Act when the sequence-mode
-family is next touched, or when a redefinition is actually wanted;
-deleting it is the default if no redefinition is proposed by then.
 
 ## `sw_cp` dispatcher leaks restricted-model bound into global plot
 
