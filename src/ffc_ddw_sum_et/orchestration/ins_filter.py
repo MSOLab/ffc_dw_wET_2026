@@ -132,11 +132,17 @@ def _match_rows(
         reader = csv.DictReader(f)
         _check_header(path, reader.fieldnames, criteria)
         for line in reader:
-            row = {column: float(line[column]) for column in criteria}
+            try:
+                row = {column: float(line[column]) for column in criteria}
+                ins_index = int(line[_INDEX_COLUMN])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Malformed value in {path} (line {reader.line_num}): {exc}"
+                ) from None
             for column, value in row.items():
                 observed[column].add(value)
             if all(row[column] in wanted for column, wanted in criteria.items()):
-                matched.append(int(line[_INDEX_COLUMN]))
+                matched.append(ins_index)
 
     return sorted(matched), observed
 

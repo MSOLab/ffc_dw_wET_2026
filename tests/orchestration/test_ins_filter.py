@@ -179,6 +179,23 @@ def test_non_float_filter_value_raises_on_empty_csv(tmp_path: Path) -> None:
         resolve_ins_index(_config(csv_path, T="hard"))
 
 
+def test_malformed_csv_cell_raises_with_context(tmp_path: Path) -> None:
+    """A non-numeric cell in a filtered column fails with a message naming
+    the file and line instead of a bare conversion error."""
+    csv_path = _write_bks_csv(
+        tmp_path / "bks.csv", [_row(0, T="0.2"), _row(1, T="oops")]
+    )
+    with pytest.raises(ValueError, match=r"Malformed value in .*bks\.csv \(line 3\)"):
+        resolve_ins_index(_config(csv_path, T=0.2))
+
+
+def test_malformed_ins_index_raises_with_context(tmp_path: Path) -> None:
+    """A non-integer insIndex cell fails with the same contextual error."""
+    csv_path = _write_bks_csv(tmp_path / "bks.csv", [_row(0, insIndex="one")])
+    with pytest.raises(ValueError, match=r"Malformed value in .*bks\.csv \(line 2\)"):
+        resolve_ins_index(_config(csv_path, T=0.2))
+
+
 # --- integration: the contract pinned to the real benchmark table ---
 
 BKS_TABLE = Path("benchmarks/PRA2017/pra2017_bks_table.csv")
