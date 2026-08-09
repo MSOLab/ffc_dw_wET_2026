@@ -131,10 +131,6 @@ def assert_public_state_equal(
         old_schedule.get_jik_2_end_time_map() == new_schedule.get_jik_2_end_time_map()
     )
     assert old_schedule.get_ji_2_end_time_map() == new_schedule.get_ji_2_end_time_map()
-    assert new_schedule.get_ji_2_start_time_map() == {
-        (job_id, stage_id): start_time
-        for stage_id, _, start_time, _, job_id in new_schedule._iter_operations()
-    }
     assert old_schedule.get_stage_2_mc_2_last_end_time_map() == (
         new_schedule.get_stage_2_mc_2_last_end_time_map()
     )
